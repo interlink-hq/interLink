@@ -10,7 +10,7 @@ import (
 	"strings"
 
 	exec "github.com/alexellis/go-execute/pkg/v1"
-	commonIL "github.com/intertwin-eu/interlink/pkg/common"
+	commonIL "github.com/cloud-pg/interlink/pkg/common"
 	v1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 )
@@ -165,7 +165,7 @@ func StatusHandler(w http.ResponseWriter, r *http.Request) {
 	w.Write(bodyBytes)
 }
 
-func GenericCallHandler(w http.ResponseWriter, r *http.Request) {
+func SetKubeCFGHandler(w http.ResponseWriter, r *http.Request) {
 	bodyBytes, err := ioutil.ReadAll(r.Body)
 	if err != nil {
 		log.Fatal(err)
@@ -174,11 +174,8 @@ func GenericCallHandler(w http.ResponseWriter, r *http.Request) {
 	var req commonIL.GenericRequestType
 	json.Unmarshal(bodyBytes, &req)
 
-	switch req.Kind {
-	case "kubeconfig":
-		os.Setenv("KUBECONFIG", req.Body)
-		fmt.Println(os.Getenv("KUBECONFIG"))
-	}
+	os.Setenv("KUBECONFIG", req.Body)
+	fmt.Println(os.Getenv("KUBECONFIG"))
 
 	w.Write([]byte("200"))
 }

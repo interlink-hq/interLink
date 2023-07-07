@@ -8,6 +8,10 @@ spec:
   restartPolicy: OnFailure 
   containers:
   - image: /cvmfs/unpacked.cern.ch/registry.hub.docker.com/cmssw/el8:x86_64
+    volumeMounts:
+    - name: foo
+      mountPath: "/etc/foo"
+      readOnly: true
     command:
       - $HOME/script.sh
     imagePullPolicy: Always
@@ -20,3 +24,7 @@ spec:
   tolerations:
   - key: virtual-kubelet.io/provider
     operator: Exists
+  volumes:
+  - name: foo
+    secret:
+        secretName: mysecret

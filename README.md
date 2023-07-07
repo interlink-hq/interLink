@@ -7,22 +7,6 @@ Everything is thought to be modular and it's divided in different layers. These 
 
 ![drawing](imgs/InterLink.svg)
 
-This repository includes:
-
-- License information
-- Copyright and author information
-- Code of conduct and contribution guidelines
-- Templates for PR and issues
-- Code owners file for automatic assignment of PR reviewers
-- [GitHub actions](https://github.com/features/actions) workflows for linting
-  and checking links
-
-Content is based on:
-
-- [Contributor Covenant](http://contributor-covenant.org)
-- [Semantic Versioning](https://semver.org/)
-- [Chef Cookbook Contributing Guide](https://github.com/chef-cookbooks/community_cookbook_documentation/blob/master/CONTRIBUTING.MD)
-
 ## :information_source: Components
 
 - Virtual kubelet:
@@ -40,6 +24,7 @@ Basically, that's the name we refer to each plug-in talking with the InterLink l
 - An already set up KNoC environment
 - Docker
 - Sbatch, Scancel and Squeue (Slurm environment) for the Slurm sidecar
+- Kubectl on working node
 
 ## Quick references:
 - [Quick Start](#fast_forward-quick-start)
@@ -153,12 +138,7 @@ With the above command, you will have a running Virtual Kubelet, waiting for Pod
 Note: remember to run VK, InterLink and a Sidecar before registering any Pod, otherwise you will get HTTPS errors, since there will be a missing reply from at least one component.
 
 #### InterLink / Sidecars
-
-__You can find instructions on how to get started with installation script (itwinctl) [here](./docs/README.md).__
-
-InterLink and Sidecars do not want any argument since any customization is performed through the InterLink config file or by setting the relative Environment Variables. Simply run the InterLink executable and a Sidecar one. Once at least one Pod will be registered, the InterLink will begin communicating with the VK on port 3000 and with Sidecars on ports 4000/4001 (4000 for Docker, 4001 for Slurm. Clearly, default port can be modified using the InterLink config file) through REST APIs.
-
-
+InterLink and Sidecars do not want any argument (for the moment, at least), since any customization is performed through the InterLink config file or by setting the relative Environment Variables. Simply run the InterLink executable and a Sidecar one. Once at least one Pod will be registered, the InterLink will begin communicating with the VK on port 3000 and with Sidecars on ports 4000/4001 (4000 for Docker, 4001 for Slurm. Clearly, default port can be modified using the InterLink config file) through REST APIs.
 
 ### :closed_lock_with_key: Authentication
 InterLink supports OAuth2 proxy authentication, allowing you to set up an authorized group (or managing single-user access) to access services. In order to use it, set the InterLinkPort field to 8080 and run InterLink executable by executing the docs/itwinctl.sh script. The provided script will run InterLink and Slurm sidecar binaries, but you can easily edit it to run another sidecar.
@@ -176,6 +156,8 @@ Detailed explanation of the InterLink config file key values.
 - ScancelPath -> path to your Slurm's scancel binary 
 - VKTokenFile -> path to a file containing your token fot OAuth2 proxy authentication.
 - CommandPrefix -> here you can specify a prefix for the programmatically generated script (for the slurm plugin). Basically, if you want to run anything before the script itself, put it here.
+- ExportPodData -> a boolean value needed to instruct InterLink if you wish to export ConfigMaps or Secrets.
+- DataRootFolder -> The folder where the exported data will be saved. Additional subfolders will be created for each pod and volume.
 - Tsocks -> true or false values only. Enables or Disables the use of tsocks library to allow proxy networking. Only implemented for the Slurm sidecar at the moment.
 - TsocksPath -> path to your tsocks library.
 - TsocksLoginNode -> specify an existing node to ssh to. It will be your "window to the external world"
@@ -192,28 +174,6 @@ Here's the complete list of every customizable environment variable. When specif
 - $SBATCHPATH -> path to your Slurm's sbatch binary. Overwrites SbatchPath.
 - $SCANCELPATH -> path to your Slurm's scancel binary. Overwrites ScancelPath.
 - $VKTOKENFILE -> path to a file containing your token fot OAuth2 proxy authentication. Overwrites VKTokenFile.
-- $CUSTOMKUBECONF -> path to a custom kubeconfig to be used as a service agent
+- $CUSTOMKUBECONF -> path to a custom kubeconfig to be used as a service agent. It's needed to import ConfigMaps and Secrets.
 - $TSOCKS -> true or false, to use tsocks library allowing proxy networking. Working on Slurm sidecar at the moment. Overwrites Tsocks.
 - $TSOCKSPATH -> path to your tsocks library. Overwrites TsocksPath.
-
-## GitHub repository management rules
-
-All changes should go through Pull Requests.
-
-### Merge management
-
-- Only squash should be enforced in the repository settings.
-- Update commit message for the squashed commits as needed.
-
-### Protection on main branch
-
-To be configured on the repository settings.
-
-- Require pull request reviews before merging
-  - Dismiss stale pull request approvals when new commits are pushed
-  - Require review from Code Owners
-- Require status checks to pass before merging
-  - GitHub actions if available
-  - Other checks as available and relevant
-  - Require branches to be up to date before merging
-- Include administrators

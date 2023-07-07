@@ -1,6 +1,7 @@
 package slurm
 
 import (
+	"encoding/base64"
 	"fmt"
 	"log"
 	"os"
@@ -11,7 +12,7 @@ import (
 	"strings"
 
 	exec2 "github.com/alexellis/go-execute/pkg/v1"
-	commonIL "github.com/intertwin-eu/interlink/pkg/common"
+	commonIL "github.com/cloud-pg/interlink/pkg/common"
 	v1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	v1listers "k8s.io/client-go/listers/core/v1"
@@ -197,78 +198,107 @@ func prepareContainerData(container v1.Container, pod *v1.Pod) {
 	if commonIL.InterLinkConfigInst.ExportPodData {
 		for _, mountSpec := range container.VolumeMounts {
 			var podVolumeSpec *v1.VolumeSource
-			podVolumeSpec = nil
+			/*????*/
+			indexer := cache.NewIndexer(cache.MetaNamespaceKeyFunc, cache.Indexers{cache.NamespaceIndex: cache.MetaNamespaceIndexFunc})
 
 			for _, vol := range pod.Spec.Volumes {
 				if vol.Name == mountSpec.Name {
 					podVolumeSpec = &vol.VolumeSource
 				}
-			}
+				if podVolumeSpec != nil && podVolumeSpec.ConfigMap != nil {
+					cmvs := podVolumeSpec.ConfigMap
+					//mode := podVolumeSpec.ConfigMap.DefaultMode
+					podConfigMapDir := filepath.Join(commonIL.InterLinkConfigInst.DataRootFolder, pod.Namespace+"-"+string(pod.UID)+"/", mountSpec.Name)
+					cfgMapLister := v1listers.NewConfigMapLister(indexer)
+					configMap, err := v1listers.ConfigMapLister.ConfigMaps(cfgMapLister, pod.Namespace).Get(cmvs.Name)
+					//kubectl describe configmap cmvs.Name -n pod.Namespace
 
-			/*????*/
-			indexer := cache.NewIndexer(cache.MetaNamespaceKeyFunc, cache.Indexers{cache.NamespaceIndex: cache.MetaNamespaceIndexFunc})
-
-			if podVolumeSpec.ConfigMap != nil {
-				cmvs := podVolumeSpec.ConfigMap
-				//mode := podVolumeSpec.ConfigMap.DefaultMode
-				podConfigMapDir := filepath.Join(".knoc/", pod.Namespace+"-"+string(pod.UID)+"/", mountSpec.Name)
-				cfgMapLister := v1listers.NewConfigMapLister(indexer)
-				configMap, err := v1listers.ConfigMapLister.ConfigMaps(cfgMapLister, pod.Namespace).Get(cmvs.Name)
-				//kubectl describe configmap cmvs.Name -n pod.Namespace
-
-				if configMap == nil {
-					continue
-				}
-				cmd := exec.Command("mkdir", "-p "+podConfigMapDir)
-				err = cmd.Run()
-				if err != nil {
-					log.Panicln(err)
-				}
-				log.Printf("%v", "create dir for configmaps "+podConfigMapDir)
-
-				for k, v := range configMap.Data {
-					// TODO: Ensure that these files are deleted in failure cases
-					fullPath := filepath.Join(podConfigMapDir, k)
-					os.WriteFile(fullPath, []byte(v), 0644)
-					if err != nil {
-						fmt.Printf("Could not write configmap file %s", fullPath)
+					if configMap == nil {
+						continue
 					}
-				}
-			} else if podVolumeSpec.Secret != nil {
-				svs := podVolumeSpec.Secret
-				//mode := podVolumeSpec.Secret.DefaultMode
-				podSecretDir := filepath.Join(".knoc/", pod.Namespace+"-"+string(pod.UID)+"/", mountSpec.Name)
-
-				secretLister := v1listers.NewSecretLister(indexer)
-				secret, err := v1listers.SecretLister.Secrets(secretLister, pod.Namespace).Get(svs.SecretName)
-
-				if secret == nil {
-					continue
-				}
-
-				cmd := exec.Command("mkdir", "-p "+podSecretDir)
-				err = cmd.Run()
-				if err != nil {
-					log.Panicln(err)
-				}
-				log.Printf("%v", "create dir for configmaps "+podSecretDir)
-
-				for k, v := range secret.Data {
-					// TODO: Ensure that these files are deleted in failure cases
-					fullPath := filepath.Join(podSecretDir, k)
-					os.WriteFile(fullPath, []byte(v), 0644)
+					cmd := exec.Command("mkdir", "-p "+podConfigMapDir)
+					err = cmd.Run()
 					if err != nil {
-						fmt.Printf("Could not write configmap file %s", fullPath)
+						log.Panicln(err)
 					}
-				}
-			} else if podVolumeSpec.EmptyDir != nil {
-				// pod-global directory
-				edPath := filepath.Join(".knoc/", pod.Namespace+"-"+string(pod.UID)+"/"+mountSpec.Name)
-				// mounted for every container
-				cmd := exec.Command("mkdir", "-p "+edPath)
-				err := cmd.Run()
-				if err != nil {
-					log.Panicln(err)
+					log.Printf("%v", "create dir for configmaps "+podConfigMapDir)
+
+					for k, v := range configMap.Data {
+						// TODO: Ensure that these files are deleted in failure cases
+						fullPath := filepath.Join(podConfigMapDir, k)
+						os.WriteFile(fullPath, []byte(v), 0644)
+						if err != nil {
+							fmt.Printf("Could not write configmap file %s", fullPath)
+						}
+					}
+				} else if podVolumeSpec != nil && podVolumeSpec.Secret != nil {
+					secrets := make(map[string][]byte)
+					svs := podVolumeSpec.Secret
+					mode := podVolumeSpec.Secret.DefaultMode
+					fmt.Println(mode)
+					podSecretDir := filepath.Join(commonIL.InterLinkConfigInst.DataRootFolder, pod.Namespace+"-"+string(pod.UID)+"/", mountSpec.Name)
+
+					cmd := []string{"get secret " + svs.SecretName + " -o jsonpath='{.data}' -n " + pod.Namespace}
+					shell := exec2.ExecTask{
+						Command: "kubectl",
+						Args:    cmd,
+						Shell:   true,
+					}
+
+					execReturn, _ := shell.Execute()
+					execReturn.Stdout = strings.ReplaceAll(execReturn.Stdout, "\"", "")
+					execReturn.Stdout = strings.ReplaceAll(execReturn.Stdout, "{", "")
+					execReturn.Stdout = strings.ReplaceAll(execReturn.Stdout, "}", "")
+					returnedSecretsArray := strings.Split(execReturn.Stdout, ",")
+					if returnedSecretsArray != nil {
+						for _, element := range returnedSecretsArray {
+							parts := strings.Split(element, ":")
+							key := parts[0]
+							value, _ := base64.StdEncoding.DecodeString(parts[1])
+							secrets[key] = value
+						}
+					}
+
+					if secrets == nil {
+						continue
+					}
+
+					cmd = []string{"-p " + podSecretDir}
+					shell = exec2.ExecTask{
+						Command: "mkdir",
+						Args:    cmd,
+						Shell:   true,
+					}
+
+					execReturn, err := shell.Execute()
+					if err != nil {
+						log.Panicln(err)
+					}
+					log.Printf("%v", "create dir for secrets "+podSecretDir)
+
+					for k, v := range secrets {
+						// TODO: Ensure that these files are deleted in failure cases
+						fullPath := filepath.Join(podSecretDir, k)
+						os.WriteFile(fullPath, []byte(v), 0644)
+						if err != nil {
+							fmt.Printf("Could not write secrets file %s", fullPath)
+						}
+					}
+				} else if podVolumeSpec != nil && podVolumeSpec.EmptyDir != nil {
+					// pod-global directory
+					edPath := filepath.Join(commonIL.InterLinkConfigInst.DataRootFolder, pod.Namespace+"-"+string(pod.UID)+"/"+mountSpec.Name)
+					// mounted for every container
+					cmd := []string{"-p " + edPath}
+					shell := exec2.ExecTask{
+						Command: "mkdir",
+						Args:    cmd,
+						Shell:   true,
+					}
+
+					_, err := shell.Execute()
+					if err != nil {
+						log.Panicln(err)
+					}
 				}
 			}
 		}

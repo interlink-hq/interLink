@@ -4,8 +4,8 @@ import (
 	"log"
 	"net/http"
 
-	commonIL "github.com/intertwin-eu/interlink/pkg/common"
-	slurm "github.com/intertwin-eu/interlink/pkg/sidecars/slurm"
+	commonIL "github.com/cloud-pg/interlink/pkg/common"
+	slurm "github.com/cloud-pg/interlink/pkg/sidecars/slurm"
 )
 
 func main() {
@@ -16,7 +16,7 @@ func main() {
 	mutex.HandleFunc("/status", slurm.StatusHandler)
 	mutex.HandleFunc("/submit", slurm.SubmitHandler)
 	mutex.HandleFunc("/stop", slurm.StopHandler)
-	mutex.HandleFunc("/genericCall", slurm.GenericCallHandler)
+	mutex.HandleFunc("/setKubeCFG", slurm.SetKubeCFGHandler)
 
 	err := http.ListenAndServe(":"+commonIL.InterLinkConfigInst.Sidecarport, mutex)
 	if err != nil {

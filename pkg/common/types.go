@@ -29,7 +29,6 @@ type Request struct {
 }
 
 type GenericRequestType struct {
-	Kind string `json:"kind"`
 	Body string `json:"body"`
 }
 
@@ -44,6 +43,7 @@ type InterLinkConfig struct {
 	Sidecarservice string `yaml:"SidecarService"`
 	Commandprefix  string `yaml:"CommandPrefix"`
 	ExportPodData  bool   `yaml:"ExportPodData"`
+	DataRootFolder string `yaml:"DataRootFolder"`
 	Tsocks         bool   `yaml:"Tsocks"`
 	Tsockspath     string `yaml:"TsocksPath"`
 	Tsocksconfig   string `yaml:"TsocksConfig"`

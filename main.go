@@ -19,7 +19,7 @@ import (
 	"context"
 	"strings"
 
-	"github.com/intertwin-eu/interlink/pkg/virtualkubelet"
+	"github.com/cloud-pg/interlink/pkg/virtualkubelet"
 	"github.com/sirupsen/logrus"
 	cli "github.com/virtual-kubelet/node-cli"
 	logruscli "github.com/virtual-kubelet/node-cli/logrus"

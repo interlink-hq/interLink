@@ -7,7 +7,7 @@ import (
 	"log"
 	"net/http"
 
-	commonIL "github.com/intertwin-eu/interlink/pkg/common"
+	commonIL "github.com/cloud-pg/interlink/pkg/common"
 )
 
 func CreateHandler(w http.ResponseWriter, r *http.Request) {

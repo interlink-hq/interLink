@@ -8,10 +8,10 @@ import (
 	"net/http"
 	"time"
 
-	commonIL "github.com/intertwin-eu/interlink/pkg/common"
+	commonIL "github.com/cloud-pg/interlink/pkg/common"
 )
 
-func GenericCallHandler(w http.ResponseWriter, r *http.Request) {
+func SetKubeCFGHandler(w http.ResponseWriter, r *http.Request) {
 	bodyBytes, err := ioutil.ReadAll(r.Body)
 	if err != nil {
 		log.Fatal(err)
@@ -22,7 +22,7 @@ func GenericCallHandler(w http.ResponseWriter, r *http.Request) {
 	var returnValue []byte
 
 	for {
-		req, err = http.NewRequest(http.MethodPost, commonIL.InterLinkConfigInst.Sidecarurl+":"+commonIL.InterLinkConfigInst.Sidecarport+"/genericCall", reader)
+		req, err = http.NewRequest(http.MethodPost, commonIL.InterLinkConfigInst.Sidecarurl+":"+commonIL.InterLinkConfigInst.Sidecarport+"/setKubeCFG", reader)
 
 		if err != nil {
 			log.Fatal(err)

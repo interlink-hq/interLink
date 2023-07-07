@@ -12,7 +12,7 @@ import (
 
 	common "github.com/CARV-ICS-FORTH/knoc/common"
 	exec "github.com/alexellis/go-execute/pkg/v1"
-	commonIL "github.com/intertwin-eu/interlink/pkg/common"
+	commonIL "github.com/cloud-pg/interlink/pkg/common"
 
 	"github.com/containerd/containerd/log"
 	v1 "k8s.io/api/core/v1"

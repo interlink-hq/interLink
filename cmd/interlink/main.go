@@ -5,8 +5,8 @@ import (
 	"log"
 	"net/http"
 
-	commonIL "github.com/intertwin-eu/interlink/pkg/common"
-	"github.com/intertwin-eu/interlink/pkg/interlink"
+	commonIL "github.com/cloud-pg/interlink/pkg/common"
+	"github.com/cloud-pg/interlink/pkg/interlink"
 )
 
 var Url string
@@ -19,7 +19,7 @@ func main() {
 	mutex.HandleFunc("/status", interlink.StatusHandler)
 	mutex.HandleFunc("/create", interlink.CreateHandler)
 	mutex.HandleFunc("/delete", interlink.DeleteHandler)
-	mutex.HandleFunc("/genericCall", interlink.GenericCallHandler)
+	mutex.HandleFunc("/setKubeCFG", interlink.SetKubeCFGHandler)
 
 	fmt.Println(commonIL.InterLinkConfigInst)
 

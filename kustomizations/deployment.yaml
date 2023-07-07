@@ -100,4 +100,3 @@ spec:
           name: test-vk-config
       - name: token
         emptyDir: {}
-
