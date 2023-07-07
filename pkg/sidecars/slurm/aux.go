@@ -15,8 +15,6 @@ import (
 	commonIL "github.com/cloud-pg/interlink/pkg/common"
 	v1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
-	v1listers "k8s.io/client-go/listers/core/v1"
-	"k8s.io/client-go/tools/cache"
 )
 
 type JidStruct struct {
@@ -198,32 +196,56 @@ func prepareContainerData(container v1.Container, pod *v1.Pod) {
 	if commonIL.InterLinkConfigInst.ExportPodData {
 		for _, mountSpec := range container.VolumeMounts {
 			var podVolumeSpec *v1.VolumeSource
-			/*????*/
-			indexer := cache.NewIndexer(cache.MetaNamespaceKeyFunc, cache.Indexers{cache.NamespaceIndex: cache.MetaNamespaceIndexFunc})
 
 			for _, vol := range pod.Spec.Volumes {
 				if vol.Name == mountSpec.Name {
 					podVolumeSpec = &vol.VolumeSource
 				}
 				if podVolumeSpec != nil && podVolumeSpec.ConfigMap != nil {
+					configMaps := make(map[string]string)
 					cmvs := podVolumeSpec.ConfigMap
 					//mode := podVolumeSpec.ConfigMap.DefaultMode
 					podConfigMapDir := filepath.Join(commonIL.InterLinkConfigInst.DataRootFolder, pod.Namespace+"-"+string(pod.UID)+"/", mountSpec.Name)
-					cfgMapLister := v1listers.NewConfigMapLister(indexer)
-					configMap, err := v1listers.ConfigMapLister.ConfigMaps(cfgMapLister, pod.Namespace).Get(cmvs.Name)
-					//kubectl describe configmap cmvs.Name -n pod.Namespace
 
-					if configMap == nil {
+					cmd := []string{"get configmap " + cmvs.Name + " -o template --template='{{.data}}' -n " + pod.Namespace}
+					shell := exec2.ExecTask{
+						Command: "kubectl",
+						Args:    cmd,
+						Shell:   true,
+					}
+
+					execReturn, _ := shell.Execute()
+					execReturn.Stdout = strings.ReplaceAll(execReturn.Stdout, "map[", "")
+					execReturn.Stdout = strings.ReplaceAll(execReturn.Stdout, "]", "")
+					returnedConfigMapsArray := strings.Split(execReturn.Stdout, " ")
+					if returnedConfigMapsArray != nil {
+						for _, element := range returnedConfigMapsArray {
+							parts := strings.Split(element, ":")
+							key := parts[0]
+							value := parts[1]
+							configMaps[key] = value
+						}
+					}
+
+					if configMaps == nil {
 						continue
 					}
-					cmd := exec.Command("mkdir", "-p "+podConfigMapDir)
-					err = cmd.Run()
+
+					cmd = []string{"-p " + podConfigMapDir}
+					shell = exec2.ExecTask{
+						Command: "mkdir",
+						Args:    cmd,
+						Shell:   true,
+					}
+
+					execReturn, err := shell.Execute()
 					if err != nil {
 						log.Panicln(err)
 					}
+
 					log.Printf("%v", "create dir for configmaps "+podConfigMapDir)
 
-					for k, v := range configMap.Data {
+					for k, v := range configMaps {
 						// TODO: Ensure that these files are deleted in failure cases
 						fullPath := filepath.Join(podConfigMapDir, k)
 						os.WriteFile(fullPath, []byte(v), 0644)
@@ -279,7 +301,7 @@ func prepareContainerData(container v1.Container, pod *v1.Pod) {
 					for k, v := range secrets {
 						// TODO: Ensure that these files are deleted in failure cases
 						fullPath := filepath.Join(podSecretDir, k)
-						os.WriteFile(fullPath, []byte(v), 0644)
+						os.WriteFile(fullPath, v, 0644)
 						if err != nil {
 							fmt.Printf("Could not write secrets file %s", fullPath)
 						}

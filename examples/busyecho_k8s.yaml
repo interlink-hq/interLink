@@ -26,5 +26,5 @@ spec:
     operator: Exists
   volumes:
   - name: foo
-    secret:
-        secretName: mysecret
+    configMap:
+      name: my-configmap
