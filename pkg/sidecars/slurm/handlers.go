@@ -44,11 +44,9 @@ func SubmitHandler(w http.ResponseWriter, r *http.Request) {
 			log.Print("create_container")
 			commstr1 := []string{"singularity", "exec"}
 
-			prepareContainerData(container, pod) //get ConfigMaps and Secrets
-
 			envs := prepare_envs(container)
 			image := ""
-			mounts := prepare_mounts(container)
+			mounts := prepare_mounts(container, pod)
 			if strings.HasPrefix(container.Image, "/") {
 				if image_uri, ok := metadata.Annotations["slurm-job.knoc.io/image-root"]; ok {
 					log.Print(image_uri)

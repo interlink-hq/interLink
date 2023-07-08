@@ -28,3 +28,6 @@ spec:
   - name: foo
     configMap:
       name: my-configmap
+  - name: foo2
+    secret:
+      secretName: mysecret
