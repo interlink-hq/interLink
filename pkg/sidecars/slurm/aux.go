@@ -56,7 +56,8 @@ func prepare_mounts(container v1.Container, pod *v1.Pod) []string {
 	for _, mount_var := range container.VolumeMounts {
 
 		var podVolumeSpec *v1.VolumeSource
-		var path string
+		path := ""
+		log.Print(path)
 
 		for _, vol := range pod.Spec.Volumes {
 
@@ -83,9 +84,10 @@ func prepare_mounts(container v1.Container, pod *v1.Pod) []string {
 				mount_data += path
 
 			} else {
-				path = filepath.Join(commonIL.InterLinkConfigInst.DataRootFolder, pod.Namespace+"-"+string(pod.UID)+"/", mount_var.Name)
+				/* path = filepath.Join(commonIL.InterLinkConfigInst.DataRootFolder, pod.Namespace+"-"+string(pod.UID)+"/", mount_var.Name)
 				path = (".knoc/" + strings.Join(pod_name, "-") + "/" + mount_var.Name + ":" + mount_var.MountPath + ",")
-				mount_data += path
+				mount_data += path */
+				log.Println("To be implemented")
 			}
 		}
 	}
@@ -256,6 +258,7 @@ func mountConfigMaps(container v1.Container, pod *v1.Pod) []string { //returns a
 					}
 
 					execReturn, _ := shell.Execute()
+					fmt.Println(execReturn)
 					execReturn.Stdout = strings.ReplaceAll(execReturn.Stdout, "map[", "")
 					execReturn.Stdout = strings.ReplaceAll(execReturn.Stdout, "]", "")
 					returnedConfigMapsArray := make([]string, 0)
