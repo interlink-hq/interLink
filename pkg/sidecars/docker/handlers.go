@@ -150,6 +150,7 @@ func DeleteHandler(w http.ResponseWriter, r *http.Request) {
 }
 
 func SetKubeCFGHandler(w http.ResponseWriter, r *http.Request) {
+	path := ".kube/"
 	bodyBytes, err := ioutil.ReadAll(r.Body)
 	if err != nil {
 		log.Fatal(err)
@@ -158,7 +159,20 @@ func SetKubeCFGHandler(w http.ResponseWriter, r *http.Request) {
 	var req commonIL.GenericRequestType
 	json.Unmarshal(bodyBytes, &req)
 
-	os.Setenv("KUBECONFIG", req.Body)
+	err = os.MkdirAll(path, os.ModePerm)
+	if err != nil {
+		log.Println(err)
+	}
+	config, err := os.Create(path + "config")
+	if err != nil {
+		log.Println(err)
+	}
+	_, err = config.Write([]byte(req.Body))
+	if err != nil {
+		log.Println(err)
+	}
+	defer config.Close()
+	os.Setenv("KUBECONFIG", path+"config")
 	fmt.Println(os.Getenv("KUBECONFIG"))
 
 	w.Write([]byte("200"))
