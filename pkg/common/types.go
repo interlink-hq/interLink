@@ -44,9 +44,20 @@ type InterLinkConfig struct {
 	Commandprefix  string `yaml:"CommandPrefix"`
 	ExportPodData  bool   `yaml:"ExportPodData"`
 	DataRootFolder string `yaml:"DataRootFolder"`
+	ServiceAccount string `yaml:"ServiceAccount"`
+	Namespace      string `yaml:"Namespace"`
 	Tsocks         bool   `yaml:"Tsocks"`
 	Tsockspath     string `yaml:"TsocksPath"`
 	Tsocksconfig   string `yaml:"TsocksConfig"`
 	Tsockslogin    string `yaml:"TsocksLoginNode"`
 	set            bool
+}
+
+type ServiceAccount struct {
+	Name        string
+	Token       string
+	CA          string
+	URL         string
+	ClusterName string
+	Config      string
 }

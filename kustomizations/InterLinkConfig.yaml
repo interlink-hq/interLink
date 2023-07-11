@@ -8,6 +8,8 @@ ScancelPath: "/usr/bin/scancel"
 CommandPrefix: ""
 ExportPodData: true
 DataRootFolder: ".knoc"
+ServiceAccount: "knoc"
+Namespace: "vk"
 Tsocks: false
 TsocksPath: "$WORK/tsocks-1.8beta5+ds1/libtsocks.so"
 TsocksLoginNode: "login01"

@@ -158,6 +158,8 @@ Detailed explanation of the InterLink config file key values.
 - CommandPrefix -> here you can specify a prefix for the programmatically generated script (for the slurm plugin). Basically, if you want to run anything before the script itself, put it here.
 - ExportPodData -> a boolean value needed to instruct InterLink if you wish to export ConfigMaps or Secrets.
 - DataRootFolder -> The folder where the exported data will be saved. Additional subfolders will be created for each pod and volume.
+- ServiceAccount -> The service account for your Kubernetes cluster. You are allowed to customize what any user can do and plugins will use the specified service account to retrieve the appropriate kubeconfig to be used.
+- Namespace -> Namespace to be used to set up the virtual kubelet and the sidecars. It will be used to generate a service account kubeconfig.
 - Tsocks -> true or false values only. Enables or Disables the use of tsocks library to allow proxy networking. Only implemented for the Slurm sidecar at the moment.
 - TsocksPath -> path to your tsocks library.
 - TsocksLoginNode -> specify an existing node to ssh to. It will be your "window to the external world"
@@ -165,15 +167,15 @@ Detailed explanation of the InterLink config file key values.
 ### :information_source: Environment Variables list
 Here's the complete list of every customizable environment variable. When specified, it overwrites the listed key within the InterLink config file.
 - $VK_CONFIG_PATH -> VK config file path
-- $INTERLINKURL -> the URL to allow the Virtual Kubelet to contact the InterLink module. Do not specify a port here. Overwrites InterlinkURL.
-- $INTERLINKPORT -> the InterLink listening port. InterLink and VK will communicate over this port. Overwrites InterlinkPort.
+- $INTERLINKURL -> the URL to allow the Virtual Kubelet to contact the InterLink module. Do not specify a port here. Overrides InterlinkURL.
+- $INTERLINKPORT -> the InterLink listening port. InterLink and VK will communicate over this port. Overrides InterlinkPort.
 - $INTERLINKCONFIGPATH -> your InterLink config file path. Default is ./kustomizations/InterLinkConfig.yaml
-- $SIDECARURL -> the URL to allow InterLink to communicate with the Sidecar module (docker, slurm, etc). Do not specify port here. Overwrites SidecarURL.
+- $SIDECARURL -> the URL to allow InterLink to communicate with the Sidecar module (docker, slurm, etc). Do not specify port here. Overrides SidecarURL.
 - $SIDECARPORT -> the Sidecar listening port. Docker default is 4000, Slurm default is 4001.
-- $SIDECARSERVICE -> can be "docker" or "slurm" only (for the moment). If SIDECARPORT is not set, will set Sidecar Port in the code to default settings. Overwrites SidecarService.
-- $SBATCHPATH -> path to your Slurm's sbatch binary. Overwrites SbatchPath.
-- $SCANCELPATH -> path to your Slurm's scancel binary. Overwrites ScancelPath.
-- $VKTOKENFILE -> path to a file containing your token fot OAuth2 proxy authentication. Overwrites VKTokenFile.
-- $CUSTOMKUBECONF -> path to a custom kubeconfig to be used as a service agent. It's needed to import ConfigMaps and Secrets.
-- $TSOCKS -> true or false, to use tsocks library allowing proxy networking. Working on Slurm sidecar at the moment. Overwrites Tsocks.
-- $TSOCKSPATH -> path to your tsocks library. Overwrites TsocksPath.
+- $SIDECARSERVICE -> can be "docker" or "slurm" only (for the moment). If SIDECARPORT is not set, will set Sidecar Port in the code to default settings. Overrides SidecarService.
+- $SBATCHPATH -> path to your Slurm's sbatch binary. Overrides SbatchPath.
+- $SCANCELPATH -> path to your Slurm's scancel binary. Overrides ScancelPath.
+- $VKTOKENFILE -> path to a file containing your token fot OAuth2 proxy authentication. Overrides VKTokenFile.
+- SERVICEACCOUNT -> The service account for your Kubernetes cluster. You are allowed to customize what any user can do and plugins will use the specified service account to retrieve the appropriate kubeconfig to be used. Overrides ServiceAccount
+- $TSOCKS -> true or false, to use tsocks library allowing proxy networking. Working on Slurm sidecar at the moment. Overrides Tsocks.
+- $TSOCKSPATH -> path to your tsocks library. Overrides TsocksPath.
