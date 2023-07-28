@@ -141,8 +141,8 @@ func NewProviderConfig(config VirtualKubeletConfig, nodeName, operatingSystem st
 }
 
 // NewProvider creates a new Provider, which implements the PodNotifier interface
-func NewProvider(providerConfig, nodeName, operatingSystem string, internalIP string, daemonEndpointPort int32) (*VirtualKubeletProvider, error) {
-	config, err := loadConfig(providerConfig, nodeName)
+func NewProvider(providerConfig, nodeName, operatingSystem string, internalIP string, daemonEndpointPort int32, ctx context.Context) (*VirtualKubeletProvider, error) {
+	config, err := loadConfig(providerConfig, nodeName, ctx)
 	if err != nil {
 		return nil, err
 	}
@@ -150,10 +150,14 @@ func NewProvider(providerConfig, nodeName, operatingSystem string, internalIP st
 }
 
 // loadConfig loads the given json configuration files and yaml to communicate with InterLink.
-func loadConfig(providerConfig, nodeName string) (config VirtualKubeletConfig, err error) {
+func loadConfig(providerConfig, nodeName string, ctx context.Context) (config VirtualKubeletConfig, err error) {
 
 	commonIL.NewInterLinkConfig()
-	commonIL.NewServiceAccount()
+	err = commonIL.NewServiceAccount()
+
+	if err != nil {
+		log.G(ctx).Fatal(err)
+	}
 
 	data, err := ioutil.ReadFile(providerConfig)
 	if err != nil {

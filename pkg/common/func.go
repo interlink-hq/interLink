@@ -3,6 +3,7 @@ package common
 import (
 	"bytes"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io/ioutil"
 	"log"
@@ -124,7 +125,7 @@ func NewInterLinkConfig() {
 	}
 }
 
-func NewServiceAccount() {
+func NewServiceAccount() error {
 
 	var sa string
 	var script string
@@ -133,8 +134,14 @@ func NewServiceAccount() {
 	err := os.MkdirAll(path, os.ModePerm)
 	if err != nil {
 		log.Println(err)
+		return err
 	}
 	f, err := os.Create(path + "getSAConfig.sh")
+	if err != nil {
+		log.Println(err)
+		return err
+	}
+
 	defer f.Close()
 
 	script = "SERVICE_ACCOUNT_NAME=" + InterLinkConfigInst.ServiceAccount + "\n" +
@@ -156,7 +163,12 @@ func NewServiceAccount() {
 		"rm ${KUBECONFIG_FILE}.full.tmp\n" +
 		"rm ${KUBECONFIG_FILE}.tmp"
 
-	f.Write([]byte(script))
+	_, err = f.Write([]byte(script))
+
+	if err != nil {
+		log.Println(err)
+		return err
+	}
 
 	cmd := []string{path + "getSAConfig.sh"}
 	shell := exec.ExecTask{
@@ -167,49 +179,48 @@ func NewServiceAccount() {
 	execResult, _ := shell.Execute()
 	if execResult.Stderr != "" {
 		log.Println(execResult.Stderr)
+		return errors.New(execResult.Stderr)
 	}
+
 	temp, err := os.ReadFile(path + "kubeconfig-sa")
 	if err != nil {
 		log.Println(err)
+		return err
 	}
+
 	sa = string(temp)
 	os.Remove(path + "getSAConfig.sh")
 	os.Remove(path + "kubeconfig-sa")
 
 	for {
-		returnedVal := SendKubeConfig(sa)
-		if returnedVal == "200" {
-			break
-		} else {
-			fmt.Println(returnedVal)
+
+		var returnValue, _ = json.Marshal("Error")
+		request := GenericRequestType{Body: sa}
+
+		bodyBytes, err := json.Marshal(request)
+		reader := bytes.NewReader(bodyBytes)
+		req, err := http.NewRequest(http.MethodPost, InterLinkConfigInst.Interlinkurl+":"+InterLinkConfigInst.Interlinkport+"/setKubeCFG", reader)
+
+		if err != nil {
+			log.Println(err)
 		}
-	}
-}
 
-func SendKubeConfig(body string) string {
-	var returnValue, _ = json.Marshal("Error")
-	request := GenericRequestType{Body: body}
-
-	bodyBytes, err := json.Marshal(request)
-	reader := bytes.NewReader(bodyBytes)
-	req, err := http.NewRequest(http.MethodPost, InterLinkConfigInst.Interlinkurl+":"+InterLinkConfigInst.Interlinkport+"/setKubeCFG", reader)
-
-	if err != nil {
-		log.Println(err)
-	}
-
-	token, err := os.ReadFile(InterLinkConfigInst.VKTokenFile) // just pass the file name
-	req.Header.Add("Authorization", "Bearer "+string(token))
-	resp, err := http.DefaultClient.Do(req)
-	if err != nil {
-		log.Println(err)
-		time.Sleep(5 * time.Second)
-	} else {
-		returnValue, _ = ioutil.ReadAll(resp.Body)
+		token, err := os.ReadFile(InterLinkConfigInst.VKTokenFile) // just pass the file name
+		req.Header.Add("Authorization", "Bearer "+string(token))
+		resp, err := http.DefaultClient.Do(req)
+		if err != nil {
+			log.Println(err)
+			time.Sleep(5 * time.Second)
+		} else {
+			returnValue, _ = ioutil.ReadAll(resp.Body)
+		}
 
 		if string(returnValue) == "200" {
-			return "200"
+			break
+		} else {
+			fmt.Println(string(returnValue))
 		}
 	}
-	return "400"
+
+	return nil
 }

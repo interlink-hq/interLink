@@ -146,7 +146,7 @@ func main() {
 
 	localClient := kubernetes.NewForConfigOrDie(kubecfg)
 
-	nodeProvider, err := virtualkubelet.NewProvider(cfg.ConfigPath, cfg.NodeName, cfg.OperatingSystem, cfg.InternalIP, cfg.DaemonPort)
+	nodeProvider, err := virtualkubelet.NewProvider(cfg.ConfigPath, cfg.NodeName, cfg.OperatingSystem, cfg.InternalIP, cfg.DaemonPort, ctx)
 	if err != nil {
 		log.G(ctx).Fatal(err)
 	}
