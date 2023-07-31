@@ -139,7 +139,6 @@ func StatusHandler(w http.ResponseWriter, r *http.Request) {
 	for _, pod := range req.Pods {
 		var flag = false
 		for _, jid := range JID {
-			resp.PodName = append(resp.PodName, commonIL.PodName{Name: string(pod.Name)})
 
 			cmd := []string{"-c", "squeue --me | grep " + jid.JID}
 			shell := exec.ExecTask{
@@ -158,9 +157,9 @@ func StatusHandler(w http.ResponseWriter, r *http.Request) {
 		}
 
 		if flag {
-			resp.PodStatus = append(resp.PodStatus, commonIL.PodStatus{PodStatus: commonIL.RUNNING})
+			resp.PodStatus = append(resp.PodStatus, commonIL.PodStatus{PodName: string(pod.Name), PodStatus: commonIL.RUNNING})
 		} else {
-			resp.PodStatus = append(resp.PodStatus, commonIL.PodStatus{PodStatus: commonIL.STOP})
+			resp.PodStatus = append(resp.PodStatus, commonIL.PodStatus{PodName: string(pod.Name), PodStatus: commonIL.STOP})
 		}
 	}
 	resp.ReturnVal = "Status"

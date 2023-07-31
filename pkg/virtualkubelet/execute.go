@@ -41,11 +41,9 @@ func createRequest(pod commonIL.Request, token string) ([]byte, error) {
 	}
 
 	returnValue, _ = ioutil.ReadAll(resp.Body)
-	var response commonIL.PodStatus
-	err = json.Unmarshal(returnValue, &response)
-	if err != nil {
-		log.L.Error(err)
-		return nil, err
+
+	if string(returnValue) != "200" {
+		log.G(context.Background()).Error("Unexpeceted code received: " + string(returnValue))
 	}
 
 	return returnValue, nil
@@ -86,7 +84,6 @@ func deleteRequest(pod commonIL.Request, token string) ([]byte, error) {
 
 func statusRequest(podsList commonIL.Request, token string) ([]byte, error) {
 	var returnValue []byte
-	var response []commonIL.StatusResponse
 
 	bodyBytes, err := json.Marshal(podsList)
 	if err != nil {
@@ -100,7 +97,7 @@ func statusRequest(podsList commonIL.Request, token string) ([]byte, error) {
 		return nil, err
 	}
 
-	log.L.Println(string(bodyBytes))
+	//log.L.Println(string(bodyBytes))
 
 	req.Header.Add("Authorization", "Bearer "+token)
 
@@ -111,7 +108,6 @@ func statusRequest(podsList commonIL.Request, token string) ([]byte, error) {
 	}
 
 	returnValue, _ = ioutil.ReadAll(resp.Body)
-	err = json.Unmarshal(returnValue, &response)
 	if err != nil {
 		log.L.Error(err)
 		return nil, err
@@ -182,7 +178,7 @@ func checkPodsStatus(p *VirtualKubeletProvider, ctx context.Context, token strin
 	for podIndex, podStatus := range ret.PodStatus {
 		if podStatus.PodStatus == 1 {
 			NoReq++
-			cmd := []string{"delete pod " + ret.PodName[podIndex].Name + " -n vk"}
+			cmd := []string{"delete pod " + ret.PodStatus[podIndex].PodName + " -n vk"}
 			shell := exec.ExecTask{
 				Command: "kubectl",
 				Args:    cmd,
@@ -191,8 +187,8 @@ func checkPodsStatus(p *VirtualKubeletProvider, ctx context.Context, token strin
 
 			execReturn, _ := shell.Execute()
 			if execReturn.Stderr != "" {
-				log.G(ctx).Error(fmt.Errorf("Could not delete pod " + ret.PodName[podIndex].Name))
-				return fmt.Errorf("Could not delete pod " + ret.PodName[podIndex].Name)
+				log.G(ctx).Error(fmt.Errorf("Could not delete pod " + ret.PodStatus[podIndex].PodName))
+				return fmt.Errorf("Could not delete pod " + ret.PodStatus[podIndex].PodName)
 			}
 		}
 	}

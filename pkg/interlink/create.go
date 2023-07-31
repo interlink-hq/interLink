@@ -2,6 +2,7 @@ package interlink
 
 import (
 	"bytes"
+	"encoding/json"
 	"fmt"
 	"io/ioutil"
 	"log"
@@ -17,8 +18,30 @@ func CreateHandler(w http.ResponseWriter, r *http.Request) {
 		log.Fatal(err)
 	}
 
-	var req *http.Request
-	reader := bytes.NewReader(bodyBytes)
+	var req *http.Request //request to forward to sidecar
+	//reader := bytes.NewReader(bodyBytes)
+	var reader *bytes.Reader
+
+	var req2 commonIL.Request //request for interlink
+	json.Unmarshal(bodyBytes, &req2)
+
+	var retrieved_data []*commonIL.RetrievedPodData
+	for _, pod := range req2.Pods {
+		data := commonIL.RetrievedPodData{}
+		if commonIL.InterLinkConfigInst.ExportPodData {
+			data, err := getData(pod)
+			if err != nil {
+				w.Write([]byte("500"))
+				return
+			}
+			log.Print(data)
+		}
+		data.Pod = pod
+		retrieved_data = append(retrieved_data, &data)
+	}
+
+	bodybytes, _ := json.Marshal(retrieved_data)
+	reader = bytes.NewReader(bodybytes)
 
 	switch commonIL.InterLinkConfigInst.Sidecarservice {
 	case "docker":
