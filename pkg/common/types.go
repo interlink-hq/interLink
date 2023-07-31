@@ -1,6 +1,8 @@
 package common
 
 import (
+	"io/fs"
+
 	v1 "k8s.io/api/core/v1"
 )
 
@@ -30,6 +32,14 @@ type RetrievedContainer struct {
 type RetrievedPodData struct {
 	Pod        v1.Pod               `json:"pod"`
 	Containers []RetrievedContainer `json:"container"`
+}
+
+type ConfigMapSecret struct {
+	Key   string      `json:"Key"`
+	Value string      `json:"Value"`
+	Path  string      `json:"Path"`
+	Kind  string      `json:"Kind"`
+	Mode  fs.FileMode `json:"Mode"`
 }
 
 type InterLinkConfig struct {
