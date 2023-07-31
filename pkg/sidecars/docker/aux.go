@@ -10,11 +10,8 @@ import (
 	"github.com/containerd/containerd/log"
 	commonIL "github.com/intertwin-eu/interlink/pkg/common"
 	v1 "k8s.io/api/core/v1"
-	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
-	"k8s.io/client-go/kubernetes"
 )
 
-var Clientset *kubernetes.Clientset
 var Ctx context.Context
 
 func prepare_mounts(container v1.Container, data commonIL.RetrievedPodData) string {
@@ -102,7 +99,10 @@ func mountConfigMaps(container v1.Container, pod *v1.Pod, cfgMap *v1.ConfigMap) 
 						os.WriteFile(fullPath, []byte(v), mode)
 						if err != nil {
 							log.G(Ctx).Errorf("Could not write ConfigMap file %s", fullPath)
-							os.Remove(fullPath)
+							err = os.Remove(fullPath)
+							if err != nil {
+								log.G(Ctx).Error("Unable to remove file " + fullPath)
+							}
 						} else {
 							log.G(Ctx).Debug("--- Written ConfigMap file " + fullPath)
 						}
@@ -114,7 +114,7 @@ func mountConfigMaps(container v1.Container, pod *v1.Pod, cfgMap *v1.ConfigMap) 
 	return configMapNamePaths
 }
 
-func mountSecrets(container v1.Container, pod *v1.Pod) []string { //returns an array containing mount paths for secrets
+func mountSecrets(container v1.Container, pod *v1.Pod, secret *v1.Secret) []string { //returns an array containing mount paths for secrets
 	secrets := make(map[string][]byte)
 	var secretNamePaths []string
 
@@ -140,28 +140,15 @@ func mountSecrets(container v1.Container, pod *v1.Pod) []string { //returns an a
 					podVolumeSpec = &vol.VolumeSource
 				}
 				if podVolumeSpec != nil && podVolumeSpec.Secret != nil {
-					log.G(Ctx).Info("-- Retrieving Secret " + podVolumeSpec.Secret.SecretName)
-					svs := podVolumeSpec.Secret
 					mode := os.FileMode(*podVolumeSpec.Secret.DefaultMode)
 					podSecretDir := filepath.Join(commonIL.InterLinkConfigInst.DataRootFolder, pod.Namespace+"-"+string(pod.UID)+"/", "secrets/", vol.Name)
 
-					secret, err := Clientset.CoreV1().Secrets(pod.Namespace).Get(svs.SecretName, metav1.GetOptions{})
-
-					if err != nil {
-						log.G(Ctx).Error(err)
-					}
-
 					if secret.Data != nil {
 						for key := range secret.Data {
-							secrets[key] = secret.Data[key]
 							path := filepath.Join(podSecretDir, key)
 							path += (":" + mountSpec.MountPath + "/" + key + " ")
 							secretNamePaths = append(secretNamePaths, path)
 						}
-					}
-
-					if secrets == nil {
-						continue
 					}
 
 					cmd = []string{"-p " + podSecretDir}
@@ -188,9 +175,12 @@ func mountSecrets(container v1.Container, pod *v1.Pod) []string { //returns an a
 						os.WriteFile(fullPath, v, mode)
 						if err != nil {
 							log.G(Ctx).Errorf("Could not write Secret file %s", fullPath)
-							os.Remove(fullPath)
+							err = os.Remove(fullPath)
+							if err != nil {
+								log.G(Ctx).Error("Unable to remove file " + fullPath)
+							}
 						} else {
-							log.G(Ctx).Debug("--- Written ConfigMap file " + fullPath)
+							log.G(Ctx).Debug("--- Written Secret file " + fullPath)
 						}
 					}
 				}
