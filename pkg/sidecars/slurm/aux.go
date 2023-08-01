@@ -80,7 +80,7 @@ func prepare_mounts(container v1.Container, pod *v1.Pod) []string {
 			if podVolumeSpec != nil && podVolumeSpec.ConfigMap != nil {
 				configMapsPaths, envs := mountConfigMaps(container, pod)
 				for i, path := range configMapsPaths {
-					if strings.Compare(os.Getenv("SHARED_FS"), "true") != 0 {
+					if os.Getenv("SHARED_FS") == "true" {
 						dirs := strings.Split(path, ":")
 						splitDirs := strings.Split(dirs[0], "/")
 						dir := filepath.Join(splitDirs[:len(splitDirs)-1]...)
@@ -92,7 +92,7 @@ func prepare_mounts(container v1.Container, pod *v1.Pod) []string {
 			} else if podVolumeSpec != nil && podVolumeSpec.Secret != nil {
 				secretsPaths, envs := mountSecrets(container, pod)
 				for i, path := range secretsPaths {
-					if strings.Compare(os.Getenv("SHARED_FS"), "true") != 0 {
+					if os.Getenv("SHARED_FS") == "true" {
 						dirs := strings.Split(path, ":")
 						splitDirs := strings.Split(dirs[0], "/")
 						dir := filepath.Join(splitDirs[:len(splitDirs)-1]...)

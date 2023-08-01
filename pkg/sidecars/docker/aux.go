@@ -36,6 +36,24 @@ func prepare_mounts(container v1.Container, data commonIL.RetrievedPodData) stri
 		}
 	}
 
+	for _, secret := range data.Secrets {
+		if container.Name == data.ContainerName {
+			mountSecrets(container, data.Pod, secret)
+		}
+	}
+
+	for _, secret := range data.Secrets {
+		if container.Name == data.ContainerName {
+			mountSecrets(container, data.Pod, secret)
+		}
+	}
+
+	for _, emptyDir := range data.EmptyDirs {
+		if container.Name == data.ContainerName {
+			mountEmptyDir(container, data.Pod, emptyDir)
+		}
+	}
+
 	if last := len(mount_data) - 1; last >= 0 && mount_data[last] == ',' {
 		mount_data = mount_data[:last]
 	}
@@ -190,7 +208,7 @@ func mountSecrets(container v1.Container, pod *v1.Pod, secret *v1.Secret) []stri
 	return secretNamePaths
 }
 
-func mountEmptyDir(container v1.Container, pod *v1.Pod) string {
+func mountEmptyDir(container v1.Container, pod *v1.Pod, emptyDir string) string {
 	var edPath string
 
 	if commonIL.InterLinkConfigInst.ExportPodData {

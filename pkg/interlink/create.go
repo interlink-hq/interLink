@@ -27,21 +27,26 @@ func CreateHandler(w http.ResponseWriter, r *http.Request) {
 
 	var retrieved_data []*commonIL.RetrievedPodData
 	for _, pod := range req2.Pods {
-		data := commonIL.RetrievedPodData{}
+		data := []*commonIL.RetrievedPodData{}
 		if commonIL.InterLinkConfigInst.ExportPodData {
-			data, err := getData(pod)
+			data, err = getData(pod)
 			if err != nil {
 				w.Write([]byte("500"))
 				return
 			}
 			log.Print(data)
 		}
-		data.Pod = pod
-		retrieved_data = append(retrieved_data, &data)
+
+		if data == nil {
+			data = append(data, &commonIL.RetrievedPodData{Pod: pod})
+		}
+
+		retrieved_data = append(retrieved_data, data...)
 	}
 
-	bodybytes, _ := json.Marshal(retrieved_data)
+	bodybytes, err := json.Marshal(retrieved_data)
 	reader = bytes.NewReader(bodybytes)
+	fmt.Println(string(bodyBytes))
 
 	switch commonIL.InterLinkConfigInst.Sidecarservice {
 	case "docker":

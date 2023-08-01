@@ -39,11 +39,11 @@ type ConfigMapSecret struct {
 }
 
 type RetrievedPodData struct {
-	Pod           *v1.Pod
-	ContainerName string `json:"ContainerName"`
-	ConfigMaps    []*v1.ConfigMap
-	Secrets       []*v1.Secret
-	EmptyDirs     []string `json:"EmptyDirs"`
+	Pod           *v1.Pod         `json:"pod"`
+	ContainerName string          `json:"containerName"`
+	ConfigMaps    []*v1.ConfigMap `json:"configMaps"`
+	Secrets       []*v1.Secret    `json:"secrets"`
+	EmptyDirs     []string        `json:"emptyDirs"`
 }
 
 type InterLinkConfig struct {

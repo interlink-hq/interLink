@@ -9,8 +9,8 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 )
 
-func getData(pod *v1.Pod) (*commonIL.RetrievedPodData, error) {
-	var retrieved_data *commonIL.RetrievedPodData
+func getData(pod *v1.Pod) ([]*commonIL.RetrievedPodData, error) {
+	var retrieved_data []*commonIL.RetrievedPodData
 	for _, container := range pod.Spec.Containers {
 		log.G(Ctx).Info("- Retrieving Secrets and ConfigMaps for the Docker Sidecar. Container: " + container.Name)
 
@@ -21,7 +21,8 @@ func getData(pod *v1.Pod) (*commonIL.RetrievedPodData, error) {
 		}
 
 		if data != nil {
-			data.ContainerName = container.Name
+			data.Pod = pod
+			retrieved_data = append(retrieved_data, data)
 		}
 	}
 
@@ -58,6 +59,7 @@ func retrieve_data(container v1.Container, pod *v1.Pod) (*commonIL.RetrievedPodD
 					if retrieved_data == nil {
 						retrieved_data = &commonIL.RetrievedPodData{}
 					}
+					retrieved_data.ContainerName = container.Name
 					retrieved_data.ConfigMaps = append(retrieved_data.ConfigMaps, configMap)
 				}
 
@@ -78,6 +80,7 @@ func retrieve_data(container v1.Container, pod *v1.Pod) (*commonIL.RetrievedPodD
 					if retrieved_data == nil {
 						retrieved_data = &commonIL.RetrievedPodData{}
 					}
+					retrieved_data.ContainerName = container.Name
 					retrieved_data.Secrets = append(retrieved_data.Secrets, secret)
 				}
 
@@ -86,6 +89,7 @@ func retrieve_data(container v1.Container, pod *v1.Pod) (*commonIL.RetrievedPodD
 				if retrieved_data == nil {
 					retrieved_data = &commonIL.RetrievedPodData{}
 				}
+				retrieved_data.ContainerName = container.Name
 				retrieved_data.EmptyDirs = append(retrieved_data.EmptyDirs, edPath)
 			}
 		}
