@@ -18,10 +18,10 @@ import (
 
 var NoReq uint8
 
-func createRequest(pod commonIL.Request, token string) ([]byte, error) {
+func createRequest(pods []*v1.Pod, token string) ([]byte, error) {
 	var returnValue, _ = json.Marshal(commonIL.PodStatus{PodStatus: commonIL.UNKNOWN})
 
-	bodyBytes, err := json.Marshal(pod)
+	bodyBytes, err := json.Marshal(pods)
 	if err != nil {
 		log.L.Error(err)
 		return nil, err
@@ -49,10 +49,10 @@ func createRequest(pod commonIL.Request, token string) ([]byte, error) {
 	return returnValue, nil
 }
 
-func deleteRequest(pod commonIL.Request, token string) ([]byte, error) {
+func deleteRequest(pods []*v1.Pod, token string) ([]byte, error) {
 	var returnValue, _ = json.Marshal(commonIL.PodStatus{PodStatus: commonIL.UNKNOWN})
 
-	bodyBytes, err := json.Marshal(pod)
+	bodyBytes, err := json.Marshal(pods)
 	if err != nil {
 		log.L.Error(err)
 		return nil, err
@@ -82,7 +82,7 @@ func deleteRequest(pod commonIL.Request, token string) ([]byte, error) {
 	return returnValue, nil
 }
 
-func statusRequest(podsList commonIL.Request, token string) ([]byte, error) {
+func statusRequest(podsList []*v1.Pod, token string) ([]byte, error) {
 	var returnValue []byte
 
 	bodyBytes, err := json.Marshal(podsList)
@@ -117,8 +117,8 @@ func statusRequest(podsList commonIL.Request, token string) ([]byte, error) {
 }
 
 func RemoteExecution(p *VirtualKubeletProvider, ctx context.Context, mode int8, imageLocation string, pod *v1.Pod, container v1.Container) error {
-	var req commonIL.Request
-	req.Pods = map[string]*v1.Pod{pod.Name: pod}
+	var req []*v1.Pod
+	req = []*v1.Pod{pod}
 
 	b, err := os.ReadFile(commonIL.InterLinkConfigInst.VKTokenFile) // just pass the file name
 	if err != nil {
@@ -159,8 +159,11 @@ func checkPodsStatus(p *VirtualKubeletProvider, ctx context.Context, token strin
 	}
 	var returnVal []byte
 	var ret commonIL.StatusResponse
-	var PodsList commonIL.Request
-	PodsList.Pods = p.pods
+	var PodsList []*v1.Pod
+
+	for _, pod := range p.pods {
+		PodsList = append(PodsList, pod)
+	}
 	log.G(ctx).Info(p.pods)
 
 	returnVal, err := statusRequest(PodsList, token)

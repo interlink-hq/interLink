@@ -9,8 +9,8 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 )
 
-func getData(pod *v1.Pod) ([]*commonIL.RetrievedPodData, error) {
-	var retrieved_data []*commonIL.RetrievedPodData
+func getData(pod *v1.Pod) ([]commonIL.RetrievedPodData, error) {
+	var retrieved_data []commonIL.RetrievedPodData
 	for _, container := range pod.Spec.Containers {
 		log.G(Ctx).Info("- Retrieving Secrets and ConfigMaps for the Docker Sidecar. Container: " + container.Name)
 
@@ -20,8 +20,8 @@ func getData(pod *v1.Pod) ([]*commonIL.RetrievedPodData, error) {
 			return nil, err
 		}
 
-		if data != nil {
-			data.Pod = pod
+		if data.Containers != nil {
+			data.Pod = *pod
 			retrieved_data = append(retrieved_data, data)
 		}
 	}
@@ -29,8 +29,8 @@ func getData(pod *v1.Pod) ([]*commonIL.RetrievedPodData, error) {
 	return retrieved_data, nil
 }
 
-func retrieve_data(container v1.Container, pod *v1.Pod) (*commonIL.RetrievedPodData, error) {
-	var retrieved_data *commonIL.RetrievedPodData
+func retrieve_data(container v1.Container, pod *v1.Pod) (commonIL.RetrievedPodData, error) {
+	retrieved_data := commonIL.RetrievedPodData{}
 	for _, mount_var := range container.VolumeMounts {
 		log.G(Ctx).Debug("-- Retrieving data for mountpoint " + mount_var.Name)
 
@@ -50,17 +50,16 @@ func retrieve_data(container v1.Container, pod *v1.Pod) (*commonIL.RetrievedPodD
 
 				if err != nil {
 					log.G(Ctx).Error(err)
-					return nil, err
+					return commonIL.RetrievedPodData{}, err
 				} else {
 					log.G(Ctx).Debug("---- Retrieved ConfigMap " + podVolumeSpec.ConfigMap.Name)
 				}
 
 				if configMap != nil {
-					if retrieved_data == nil {
-						retrieved_data = &commonIL.RetrievedPodData{}
+					if retrieved_data.Containers == nil {
+						retrieved_data.Containers = append(retrieved_data.Containers, commonIL.RetrievedContainer{Name: container.Name})
 					}
-					retrieved_data.ContainerName = container.Name
-					retrieved_data.ConfigMaps = append(retrieved_data.ConfigMaps, configMap)
+					retrieved_data.Containers[len(retrieved_data.Containers)-1].ConfigMaps = append(retrieved_data.Containers[len(retrieved_data.Containers)-1].ConfigMaps, *configMap)
 				}
 
 			} else if podVolumeSpec != nil && podVolumeSpec.Secret != nil {
@@ -71,29 +70,26 @@ func retrieve_data(container v1.Container, pod *v1.Pod) (*commonIL.RetrievedPodD
 
 				if err != nil {
 					log.G(Ctx).Error(err)
-					return nil, err
+					return commonIL.RetrievedPodData{}, err
 				} else {
 					log.G(Ctx).Debug("---- Retrieved Secret " + svs.SecretName)
 				}
 
 				if secret.Data != nil {
-					if retrieved_data == nil {
-						retrieved_data = &commonIL.RetrievedPodData{}
+					if retrieved_data.Containers == nil {
+						retrieved_data.Containers = append(retrieved_data.Containers, commonIL.RetrievedContainer{Name: container.Name})
 					}
-					retrieved_data.ContainerName = container.Name
-					retrieved_data.Secrets = append(retrieved_data.Secrets, secret)
+					retrieved_data.Containers[len(retrieved_data.Containers)-1].Secrets = append(retrieved_data.Containers[len(retrieved_data.Containers)-1].Secrets, *secret)
 				}
 
 			} else if podVolumeSpec != nil && podVolumeSpec.EmptyDir != nil {
 				edPath := filepath.Join(commonIL.InterLinkConfigInst.DataRootFolder, pod.Namespace+"-"+string(pod.UID)+"/"+"emptyDirs/"+vol.Name)
-				if retrieved_data == nil {
-					retrieved_data = &commonIL.RetrievedPodData{}
+				if retrieved_data.Containers == nil {
+					retrieved_data.Containers = append(retrieved_data.Containers, commonIL.RetrievedContainer{Name: container.Name})
 				}
-				retrieved_data.ContainerName = container.Name
-				retrieved_data.EmptyDirs = append(retrieved_data.EmptyDirs, edPath)
+				retrieved_data.Containers[len(retrieved_data.Containers)-1].EmptyDirs = append(retrieved_data.Containers[len(retrieved_data.Containers)-1].EmptyDirs, edPath)
 			}
 		}
 	}
-
 	return retrieved_data, nil
 }

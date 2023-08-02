@@ -9,6 +9,7 @@ import (
 	"net/http"
 
 	commonIL "github.com/intertwin-eu/interlink/pkg/common"
+	v1 "k8s.io/api/core/v1"
 )
 
 func CreateHandler(w http.ResponseWriter, r *http.Request) {
@@ -19,15 +20,12 @@ func CreateHandler(w http.ResponseWriter, r *http.Request) {
 	}
 
 	var req *http.Request //request to forward to sidecar
-	//reader := bytes.NewReader(bodyBytes)
-	var reader *bytes.Reader
-
-	var req2 commonIL.Request //request for interlink
+	var req2 []*v1.Pod    //request for interlink
 	json.Unmarshal(bodyBytes, &req2)
 
-	var retrieved_data []*commonIL.RetrievedPodData
-	for _, pod := range req2.Pods {
-		data := []*commonIL.RetrievedPodData{}
+	var retrieved_data []commonIL.RetrievedPodData
+	for _, pod := range req2 {
+		data := []commonIL.RetrievedPodData{}
 		if commonIL.InterLinkConfigInst.ExportPodData {
 			data, err = getData(pod)
 			if err != nil {
@@ -38,15 +36,16 @@ func CreateHandler(w http.ResponseWriter, r *http.Request) {
 		}
 
 		if data == nil {
-			data = append(data, &commonIL.RetrievedPodData{Pod: pod})
+			data = append(data, commonIL.RetrievedPodData{Pod: *pod})
 		}
 
 		retrieved_data = append(retrieved_data, data...)
 	}
 
-	bodybytes, err := json.Marshal(retrieved_data)
-	reader = bytes.NewReader(bodybytes)
+	bodyBytes, err = json.Marshal(retrieved_data)
+	fmt.Println(retrieved_data)
 	fmt.Println(string(bodyBytes))
+	reader := bytes.NewReader(bodyBytes)
 
 	switch commonIL.InterLinkConfigInst.Sidecarservice {
 	case "docker":

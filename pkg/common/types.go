@@ -22,10 +22,6 @@ type StatusResponse struct {
 	ReturnVal string      `json:"returnVal"`
 }
 
-type Request struct {
-	Pods map[string]*v1.Pod `json:"pods"`
-}
-
 type GenericRequestType struct {
 	Body string `json:"body"`
 }
@@ -38,12 +34,16 @@ type ConfigMapSecret struct {
 	Mode  fs.FileMode `json:"Mode"`
 }
 
+type RetrievedContainer struct {
+	Name       string         `json:"name"`
+	ConfigMaps []v1.ConfigMap `json:"configMaps"`
+	Secrets    []v1.Secret    `json:"secrets"`
+	EmptyDirs  []string       `json:"emptyDirs"`
+}
+
 type RetrievedPodData struct {
-	Pod           *v1.Pod         `json:"pod"`
-	ContainerName string          `json:"containerName"`
-	ConfigMaps    []*v1.ConfigMap `json:"configMaps"`
-	Secrets       []*v1.Secret    `json:"secrets"`
-	EmptyDirs     []string        `json:"emptyDirs"`
+	Pod        v1.Pod               `json:"pod"`
+	Containers []RetrievedContainer `json:"container"`
 }
 
 type InterLinkConfig struct {

@@ -9,6 +9,7 @@ import (
 	exec "github.com/alexellis/go-execute/pkg/v1"
 	"github.com/containerd/containerd/log"
 	commonIL "github.com/intertwin-eu/interlink/pkg/common"
+	v1 "k8s.io/api/core/v1"
 )
 
 func StatusHandler(w http.ResponseWriter, r *http.Request) {
@@ -20,10 +21,10 @@ func StatusHandler(w http.ResponseWriter, r *http.Request) {
 		log.G(Ctx).Error(err)
 	}
 
-	var req commonIL.Request
+	var req []*v1.Pod
 	json.Unmarshal(bodyBytes, &req)
 
-	for _, pod := range req.Pods {
+	for _, pod := range req {
 		for _, container := range pod.Spec.Containers {
 			log.G(Ctx).Debug("- Getting status for container " + container.Name)
 			cmd := []string{"ps -aqf name=" + container.Name}
@@ -74,7 +75,7 @@ func CreateHandler(w http.ResponseWriter, r *http.Request) {
 			cmd := []string{"run", "-d", "--name", container.Name}
 
 			if commonIL.InterLinkConfigInst.ExportPodData {
-				cmd = append(cmd, prepare_mounts(container, data))
+				cmd = append(cmd, prepare_mounts(container, req))
 			}
 
 			cmd = append(cmd, container.Image)
@@ -142,10 +143,10 @@ func DeleteHandler(w http.ResponseWriter, r *http.Request) {
 		log.G(Ctx).Error(err)
 	}
 
-	var req commonIL.Request
+	var req []*v1.Pod
 	json.Unmarshal(bodyBytes, &req)
 
-	for _, pod := range req.Pods {
+	for _, pod := range req {
 		for _, container := range pod.Spec.Containers {
 			log.G(Ctx).Debug("- Deleting container " + container.Name)
 			cmd := []string{"stop", container.Name}
@@ -157,7 +158,11 @@ func DeleteHandler(w http.ResponseWriter, r *http.Request) {
 			execReturn, _ = shell.Execute()
 
 			if execReturn.Stderr != "" {
-				log.G(Ctx).Error("-- Error stopping container " + container.Name + ". Skipping its removal")
+				if strings.Contains(execReturn.Stderr, "No such container") {
+					log.G(Ctx).Debug("-- Unable to find container " + container.Name + ". Probably already removed? Skipping its removal")
+				} else {
+					log.G(Ctx).Error("-- Error stopping container " + container.Name + ". Skipping its removal")
+				}
 				continue
 			}
 
