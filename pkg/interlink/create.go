@@ -27,7 +27,6 @@ func CreateHandler(w http.ResponseWriter, r *http.Request) {
 
 	var retrieved_data []commonIL.RetrievedPodData
 	for _, pod := range req2 {
-
 		data := []commonIL.RetrievedPodData{}
 		if commonIL.InterLinkConfigInst.ExportPodData {
 			data, err = getData(pod)
