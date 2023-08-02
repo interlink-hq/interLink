@@ -31,6 +31,13 @@ type RetrievedContainer struct {
 	EmptyDirs  []string       `json:"emptyDirs"`
 }
 
+type RetrievedContainer struct {
+	Name       string         `json:"name"`
+	ConfigMaps []v1.ConfigMap `json:"configMaps"`
+	Secrets    []v1.Secret    `json:"secrets"`
+	EmptyDirs  []string       `json:"emptyDirs"`
+}
+
 type RetrievedPodData struct {
 	Pod        v1.Pod               `json:"pod"`
 	Containers []RetrievedContainer `json:"container"`
