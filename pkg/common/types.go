@@ -1,8 +1,6 @@
 package common
 
 import (
-	"io/fs"
-
 	v1 "k8s.io/api/core/v1"
 )
 
@@ -24,14 +22,6 @@ type StatusResponse struct {
 
 type GenericRequestType struct {
 	Body string `json:"body"`
-}
-
-type ConfigMapSecret struct {
-	Key   string      `json:"Key"`
-	Value string      `json:"Value"`
-	Path  string      `json:"Path"`
-	Kind  string      `json:"Kind"`
-	Mode  fs.FileMode `json:"Mode"`
 }
 
 type RetrievedContainer struct {
