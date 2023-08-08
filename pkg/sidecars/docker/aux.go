@@ -240,10 +240,8 @@ func mountEmptyDir(container v1.Container, pod v1.Pod, emptyDir string) string {
 					podVolumeSpec = &vol.VolumeSource
 				}
 				if podVolumeSpec != nil && podVolumeSpec.EmptyDir != nil {
-					// pod-global directory
 					edPath = filepath.Join(wd+"/"+commonIL.InterLinkConfigInst.DataRootFolder, pod.Namespace+"-"+string(pod.UID)+"/"+"emptyDirs/"+vol.Name)
 					log.G(Ctx).Info("-- Creating EmptyDir in " + edPath)
-					// mounted for every container
 					cmd := []string{"-p " + edPath}
 					shell := exec2.ExecTask{
 						Command: "mkdir",
