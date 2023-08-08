@@ -18,26 +18,22 @@ var JID []JidStruct
 
 func SubmitHandler(w http.ResponseWriter, r *http.Request) {
 	log.G(Ctx).Info("Slurm Sidecar: received Submit call")
+	//var resp commonIL.StatusResponse
 
 	bodyBytes, err := ioutil.ReadAll(r.Body)
 	if err != nil {
 		log.G(Ctx).Error(err)
-		return
 	}
 
-	var req commonIL.Request
+	var req []commonIL.RetrievedPodData
 	json.Unmarshal(bodyBytes, &req)
-	if err != nil {
-		log.G(Ctx).Error(err)
-		return
-	}
 
-	for _, pod := range req.Pods {
+	for _, data := range req {
 		var metadata metav1.ObjectMeta
 		var containers []v1.Container
 
-		containers = pod.Spec.Containers
-		metadata = pod.ObjectMeta
+		containers = data.Pod.Spec.Containers
+		metadata = data.Pod.ObjectMeta
 
 		for _, container := range containers {
 			log.G(Ctx).Info("- Beginning script generation for container " + container.Name)
@@ -45,7 +41,7 @@ func SubmitHandler(w http.ResponseWriter, r *http.Request) {
 
 			envs := prepare_envs(container)
 			image := ""
-			mounts := prepare_mounts(container, pod)
+			mounts := prepare_mounts(container, &data.Pod, req)
 			if strings.HasPrefix(container.Image, "/") {
 				if image_uri, ok := metadata.Annotations["slurm-job.knoc.io/image-root"]; ok {
 					image = image_uri + container.Image
@@ -65,14 +61,14 @@ func SubmitHandler(w http.ResponseWriter, r *http.Request) {
 			singularity_command = append(singularity_command, container.Args...)
 
 			path := produce_slurm_script(container, metadata, singularity_command)
-			out := slurm_batch_submit(path)
-			handle_jid(container, out, *pod)
+			/*out := */ slurm_batch_submit(path)
+			//handle_jid(container, out, data.Pod)
 
 			jid, err := os.ReadFile(commonIL.InterLinkConfigInst.DataRootFolder + container.Name + ".jid")
 			if err != nil {
 				log.G(Ctx).Error("Unable to read JID from file")
 			}
-			JID = append(JID, JidStruct{JID: string(jid), Pod: *pod})
+			JID = append(JID, JidStruct{JID: string(jid), Pod: data.Pod})
 		}
 	}
 
@@ -88,14 +84,14 @@ func StopHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	var req commonIL.Request
+	var req []*v1.Pod
 	err = json.Unmarshal(bodyBytes, &req)
 	if err != nil {
 		log.G(Ctx).Error(err)
 		return
 	}
 
-	for _, pod := range req.Pods {
+	for _, pod := range req {
 		containers := pod.Spec.Containers
 
 		for _, container := range containers {
@@ -113,7 +109,7 @@ func StatusHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	var req commonIL.Request
+	var req []*v1.Pod
 	var resp commonIL.StatusResponse
 	json.Unmarshal(bodyBytes, &req)
 	if err != nil {
@@ -134,7 +130,7 @@ func StatusHandler(w http.ResponseWriter, r *http.Request) {
 		log.G(Ctx).Error("Unable to retrieve job status: " + execReturn.Stderr)
 	}
 
-	for _, pod := range req.Pods {
+	for _, pod := range req {
 		var flag = false
 		for _, jid := range JID {
 
