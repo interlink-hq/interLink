@@ -133,7 +133,6 @@ func mountData(container v1.Container, pod v1.Pod, data interface{}) ([]string, 
 							log.G(Ctx).Debug("-- Created directory " + podConfigMapDir)
 						}
 
-
 						log.G(Ctx).Info("-- Writing ConfigMaps files")
 						for k, v := range mount.Data {
 							// TODO: Ensure that these files are deleted in failure cases
@@ -152,7 +151,7 @@ func mountData(container v1.Container, pod v1.Pod, data interface{}) ([]string, 
 						}
 						return configMapNamePaths, nil
 					}
-          
+
 				case v1.Secret:
 					var secretNamePaths []string
 					err := os.RemoveAll(commonIL.InterLinkConfigInst.DataRootFolder + pod.Namespace + "-" + string(pod.UID) + "/" + "secrets/" + vol.Name)
