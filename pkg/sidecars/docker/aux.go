@@ -113,10 +113,10 @@ func mountConfigMaps(container v1.Container, pod v1.Pod, cfgMap v1.ConfigMap) []
 					if execReturn.Stderr != "" {
 						log.G(Ctx).Error(err)
 					} else {
-						log.G(Ctx).Debug("--- Created folder " + podConfigMapDir)
+						log.G(Ctx).Debug("-- Created directory " + podConfigMapDir)
 					}
 
-					log.G(Ctx).Debug("--- Writing ConfigMaps files")
+					log.G(Ctx).Info("-- Writing ConfigMaps files")
 					for k, v := range cfgMap.Data {
 						// TODO: Ensure that these files are deleted in failure cases
 						fullPath := filepath.Join(podConfigMapDir, k)
@@ -189,10 +189,10 @@ func mountSecrets(container v1.Container, pod v1.Pod, secret v1.Secret) []string
 					if execReturn.Stderr != "" {
 						log.G(Ctx).Error(err)
 					} else {
-						log.G(Ctx).Debug("--- Created folder " + podSecretDir)
+						log.G(Ctx).Debug("-- Created directory " + podSecretDir)
 					}
 
-					log.G(Ctx).Debug("--- Writing Secret files")
+					log.G(Ctx).Info("-- Writing Secret files")
 					for k, v := range secret.Data {
 						// TODO: Ensure that these files are deleted in failure cases
 						fullPath := filepath.Join(podSecretDir, k)

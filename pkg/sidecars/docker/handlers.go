@@ -14,15 +14,25 @@ import (
 
 func StatusHandler(w http.ResponseWriter, r *http.Request) {
 	log.G(Ctx).Info("Docker Sidecar: received GetStatus call")
-	var resp commonIL.StatusResponse
+	var resp []commonIL.PodStatus
+	var req []*v1.Pod
+	statusCode := http.StatusOK
 
 	bodyBytes, err := ioutil.ReadAll(r.Body)
 	if err != nil {
+		statusCode = http.StatusInternalServerError
+		w.WriteHeader(statusCode)
 		log.G(Ctx).Error(err)
+		return
 	}
 
-	var req []*v1.Pod
-	json.Unmarshal(bodyBytes, &req)
+	err = json.Unmarshal(bodyBytes, &req)
+	if err != nil {
+		statusCode = http.StatusInternalServerError
+		w.WriteHeader(statusCode)
+		log.G(Ctx).Error(err)
+		return
+	}
 
 	for _, pod := range req {
 		for _, container := range pod.Spec.Containers {
@@ -39,30 +49,37 @@ func StatusHandler(w http.ResponseWriter, r *http.Request) {
 
 			if err != nil {
 				log.G(Ctx).Error(err)
-				return
+				statusCode = http.StatusInternalServerError
+				break
 			}
 
 			if execReturn.Stdout == "" {
 				log.G(Ctx).Info("-- Container " + container.Name + " is not running")
-				resp.PodStatus = append(resp.PodStatus, commonIL.PodStatus{PodName: pod.Name, PodStatus: commonIL.STOP})
+				resp = append(resp, commonIL.PodStatus{PodName: pod.Name, PodNamespace: pod.Namespace, PodStatus: commonIL.STOP})
 			} else {
 				log.G(Ctx).Info("-- Container " + container.Name + " is running")
-				resp.PodStatus = append(resp.PodStatus, commonIL.PodStatus{PodName: pod.Name, PodStatus: commonIL.RUNNING})
+				resp = append(resp, commonIL.PodStatus{PodName: pod.Name, PodNamespace: pod.Namespace, PodStatus: commonIL.RUNNING})
 			}
 		}
 	}
 
-	resp.ReturnVal = "Status"
-	bodyBytes, _ = json.Marshal(resp)
+	bodyBytes, err = json.Marshal(resp)
+	if err != nil {
+		log.G(Ctx).Error(err)
+		statusCode = http.StatusInternalServerError
+	}
 
+	w.WriteHeader(statusCode)
 	w.Write(bodyBytes)
 }
 
 func CreateHandler(w http.ResponseWriter, r *http.Request) {
 	log.G(Ctx).Info("Docker Sidecar: received Create call")
 	var execReturn exec.ExecResult
+	statusCode := http.StatusOK
 	bodyBytes, err := ioutil.ReadAll(r.Body)
 	if err != nil {
+		statusCode = http.StatusInternalServerError
 		log.G(Ctx).Error(err)
 	}
 
@@ -95,8 +112,9 @@ func CreateHandler(w http.ResponseWriter, r *http.Request) {
 
 			execReturn, err = shell.Execute()
 			if err != nil {
+				statusCode = http.StatusInternalServerError
 				log.G(Ctx).Error(err)
-				return
+				break
 			}
 
 			if execReturn.Stdout == "" {
@@ -104,6 +122,7 @@ func CreateHandler(w http.ResponseWriter, r *http.Request) {
 				if strings.Contains(execReturn.Stderr, eval) {
 					log.G(Ctx).Warning("Container named " + container.Name + " already exists. Skipping its creation.")
 				} else {
+					statusCode = http.StatusInternalServerError
 					log.G(Ctx).Error("Unable to create container " + container.Name + " : " + execReturn.Stderr)
 				}
 			} else {
@@ -119,6 +138,7 @@ func CreateHandler(w http.ResponseWriter, r *http.Request) {
 			execReturn, err = shell.Execute()
 			execReturn.Stdout = strings.ReplaceAll(execReturn.Stdout, "\n", "")
 			if execReturn.Stderr != "" {
+				statusCode = http.StatusInternalServerError
 				log.G(Ctx).Error("Failed to retrieve " + container.Name + " ID : " + execReturn.Stderr)
 			} else if execReturn.Stdout == "" {
 				log.G(Ctx).Error("Container name not found. Maybe creation failed?")
@@ -128,18 +148,23 @@ func CreateHandler(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	if err != nil {
-		w.Write([]byte(execReturn.Stderr))
+	w.WriteHeader(statusCode)
+
+	if statusCode != http.StatusOK {
+		w.Write([]byte("Some errors occurred creating containers. Check Docker Sidecar's logs"))
 	} else {
-		w.Write([]byte("200"))
+		w.Write([]byte("Containers created"))
 	}
 }
 
 func DeleteHandler(w http.ResponseWriter, r *http.Request) {
 	log.G(Ctx).Info("Docker Sidecar: received Delete call")
 	var execReturn exec.ExecResult
+	statusCode := http.StatusOK
 	bodyBytes, err := ioutil.ReadAll(r.Body)
+
 	if err != nil {
+		statusCode = http.StatusInternalServerError
 		log.G(Ctx).Error(err)
 	}
 
@@ -162,6 +187,7 @@ func DeleteHandler(w http.ResponseWriter, r *http.Request) {
 					log.G(Ctx).Debug("-- Unable to find container " + container.Name + ". Probably already removed? Skipping its removal")
 				} else {
 					log.G(Ctx).Error("-- Error stopping container " + container.Name + ". Skipping its removal")
+					statusCode = http.StatusInternalServerError
 				}
 				continue
 			}
@@ -177,14 +203,16 @@ func DeleteHandler(w http.ResponseWriter, r *http.Request) {
 
 			if execReturn.Stderr != "" {
 				log.G(Ctx).Error("-- Error deleting container " + container.Name)
+				statusCode = http.StatusInternalServerError
 			} else {
 				log.G(Ctx).Info("- Deleted container " + container.Name)
 			}
 		}
 	}
 
-	if err != nil {
-		w.Write([]byte(execReturn.Stderr))
+	w.WriteHeader(statusCode)
+	if statusCode != http.StatusOK {
+		w.Write([]byte("Some errors occurred deleting containers. Check Docker Sidecar's logs"))
 	} else {
 		w.Write([]byte("All containers for submitted Pods have been deleted"))
 	}

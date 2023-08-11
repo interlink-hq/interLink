@@ -101,18 +101,23 @@ func StopHandler(w http.ResponseWriter, r *http.Request) {
 }
 
 func StatusHandler(w http.ResponseWriter, r *http.Request) {
+	var req []*v1.Pod
+	var resp []commonIL.PodStatus
+	statusCode := http.StatusOK
 	log.G(Ctx).Info("Slurm Sidecar: received GetStatus call")
 
 	bodyBytes, err := ioutil.ReadAll(r.Body)
 	if err != nil {
+		statusCode = http.StatusInternalServerError
+		w.WriteHeader(statusCode)
 		log.G(Ctx).Error(err)
 		return
 	}
 
-	var req []*v1.Pod
-	var resp commonIL.StatusResponse
 	json.Unmarshal(bodyBytes, &req)
 	if err != nil {
+		statusCode = http.StatusInternalServerError
+		w.WriteHeader(statusCode)
 		log.G(Ctx).Error(err)
 		return
 	}
@@ -123,11 +128,14 @@ func StatusHandler(w http.ResponseWriter, r *http.Request) {
 		Args:    cmd,
 		Shell:   true,
 	}
-	execReturn, err := shell.Execute()
+	execReturn, _ := shell.Execute()
 	execReturn.Stdout = strings.ReplaceAll(execReturn.Stdout, "\n", "")
 
 	if execReturn.Stderr != "" {
+		statusCode = http.StatusInternalServerError
+		w.WriteHeader(statusCode)
 		log.G(Ctx).Error("Unable to retrieve job status: " + execReturn.Stderr)
+		return
 	}
 
 	for _, pod := range req {
@@ -143,7 +151,9 @@ func StatusHandler(w http.ResponseWriter, r *http.Request) {
 			execReturn, _ := shell.Execute()
 
 			if execReturn.Stderr != "" {
+				statusCode = http.StatusInternalServerError
 				log.G(Ctx).Error("Unable to retrieve job status: " + execReturn.Stderr)
+				break
 			} else if execReturn.Stdout != "" {
 				flag = true
 				log.G(Ctx).Info(execReturn.Stdout)
@@ -151,14 +161,18 @@ func StatusHandler(w http.ResponseWriter, r *http.Request) {
 		}
 
 		if flag {
-			resp.PodStatus = append(resp.PodStatus, commonIL.PodStatus{PodName: string(pod.Name), PodStatus: commonIL.RUNNING})
+			resp = append(resp, commonIL.PodStatus{PodName: pod.Name, PodNamespace: pod.Namespace, PodStatus: commonIL.RUNNING})
 		} else {
-			resp.PodStatus = append(resp.PodStatus, commonIL.PodStatus{PodName: string(pod.Name), PodStatus: commonIL.STOP})
+			resp = append(resp, commonIL.PodStatus{PodName: pod.Name, PodNamespace: pod.Namespace, PodStatus: commonIL.STOP})
 		}
 	}
-	resp.ReturnVal = "Status"
 
-	bodyBytes, _ = json.Marshal(resp)
+	bodyBytes, err = json.Marshal(resp)
+	if err != nil {
+		statusCode = http.StatusInternalServerError
+		log.G(Ctx).Error(err)
+	}
 
+	w.WriteHeader(statusCode)
 	w.Write(bodyBytes)
 }

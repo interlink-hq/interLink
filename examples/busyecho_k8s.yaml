@@ -1,7 +1,7 @@
 apiVersion: v1
 kind: Pod
 metadata:
-  name: testvk
+  name: test-pod
   annotations:
     slurm-job.knoc.io/flags: "--job-name=testvkub  -t 2800  --ntasks=8 --nodes=1 --mem-per-cpu=2000"
 spec:
@@ -23,8 +23,9 @@ spec:
     kubernetes.io/role: agent
     beta.kubernetes.io/os: linux
     type: virtual-kubelet
+    kubernetes.io/hostname: test-vk
   tolerations:
-  - key: virtual-kubelet.io/provider
+  - key: virtual-node.interlink/no-schedule
     operator: Exists
   volumes:
   - name: foo

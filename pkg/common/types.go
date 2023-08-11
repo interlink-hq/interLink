@@ -11,13 +11,9 @@ const (
 )
 
 type PodStatus struct {
-	PodName   string `json:"podname"`
-	PodStatus uint   `json:"podStatus"`
-}
-
-type StatusResponse struct {
-	PodStatus []PodStatus `json:"podstatus"`
-	ReturnVal string      `json:"returnVal"`
+	PodName      string `json:"name"`
+	PodNamespace string `json:"namespace"`
+	PodStatus    uint   `json:"status"`
 }
 
 type GenericRequestType struct {

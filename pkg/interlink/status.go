@@ -2,35 +2,45 @@ package interlink
 
 import (
 	"bytes"
-	"fmt"
 	"io/ioutil"
-	"log"
 	"net/http"
+	"strconv"
 
+	"github.com/containerd/containerd/log"
 	commonIL "github.com/intertwin-eu/interlink/pkg/common"
 )
 
 func StatusHandler(w http.ResponseWriter, r *http.Request) {
-	log.Println("InterLink: received GetStatus call")
+	statusCode := http.StatusOK
+	log.G(Ctx).Info("InterLink: received GetStatus call")
 	bodyBytes, err := ioutil.ReadAll(r.Body)
 	if err != nil {
-		log.Fatal(err)
+		log.G(Ctx).Fatal(err)
 	}
 
 	reader := bytes.NewReader(bodyBytes)
 	req, err := http.NewRequest(http.MethodGet, commonIL.InterLinkConfigInst.Sidecarurl+":"+commonIL.InterLinkConfigInst.Sidecarport+"/status", reader)
 	if err != nil {
-		log.Fatal(err)
+		log.G(Ctx).Fatal(err)
 	}
 
-	log.Println("InterLink: forwarding GetStatus call to sidecar")
+	log.G(Ctx).Info("InterLink: forwarding GetStatus call to sidecar")
 	resp, err := http.DefaultClient.Do(req)
 	if err != nil {
-		log.Fatal(err)
+		statusCode = http.StatusInternalServerError
+		w.WriteHeader(statusCode)
+		log.G(Ctx).Error(err)
+		return
+	}
+
+	if resp.StatusCode != http.StatusOK {
+		log.L.Error("Unexpected error occured. Status code: " + strconv.Itoa(resp.StatusCode) + ". Check " + commonIL.InterLinkConfigInst.Sidecarservice + "'s logs for further informations")
+		statusCode = http.StatusInternalServerError
 	}
 
 	returnValue, _ := ioutil.ReadAll(resp.Body)
-	fmt.Println("InterLink: status " + string(returnValue))
+	log.G(Ctx).Debug("InterLink: status " + string(returnValue))
 
+	w.WriteHeader(statusCode)
 	w.Write(returnValue)
 }

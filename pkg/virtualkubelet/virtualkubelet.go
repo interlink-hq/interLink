@@ -7,6 +7,7 @@ import (
 	"io/ioutil"
 	"math/rand"
 	"os"
+	"strconv"
 	"time"
 
 	"github.com/containerd/containerd/log"
@@ -95,11 +96,11 @@ func NewProviderConfig(config VirtualKubeletConfig, nodeName, operatingSystem st
 			//Annotations: cfg.ExtraAnnotations,
 		},
 		Spec: v1.NodeSpec{
-			// Taints: []v1.Taint{{
-			// 	Key:   "virtual-node.liqo.io/not-allowed",
-			// 	Value:  strconv.FormatBool(true),
-			// 	Effect: corev1.TaintEffectNoExecute,
-			// }},
+			Taints: []v1.Taint{{
+				Key:    "virtual-node.interlink/no-schedule",
+				Value:  strconv.FormatBool(true),
+				Effect: v1.TaintEffectNoSchedule,
+			}},
 		},
 		Status: v1.NodeStatus{
 			// NodeInfo: v1.NodeSystemInfo{

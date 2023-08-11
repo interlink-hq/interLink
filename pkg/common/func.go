@@ -2,14 +2,16 @@ package common
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
 	"io/ioutil"
-	"log"
 	"net/http"
 	"os"
 	"time"
+
+	"github.com/containerd/containerd/log"
 
 	exec "github.com/alexellis/go-execute/pkg/v1"
 	"gopkg.in/yaml.v2"
@@ -27,13 +29,13 @@ func NewInterLinkConfig() {
 		}
 
 		if _, err := os.Stat(path); err != nil {
-			log.Println("File " + path + " doesn't exist. You can set a custom path by exporting INTERLINKCONFIGPATH. Exiting...")
+			log.G(context.Background()).Error("File " + path + " doesn't exist. You can set a custom path by exporting INTERLINKCONFIGPATH. Exiting...")
 			os.Exit(-1)
 		}
 
 		yfile, err := os.ReadFile(path)
 		if err != nil {
-			log.Println("Error opening config file, exiting...")
+			log.G(context.Background()).Error("Error opening config file, exiting...")
 			os.Exit(1)
 		}
 		yaml.Unmarshal(yfile, &InterLinkConfigInst)
@@ -101,7 +103,7 @@ func NewInterLinkConfig() {
 		if os.Getenv("TSOCKSPATH") != "" {
 			path := os.Getenv("TSOCKSPATH")
 			if _, err := os.Stat(path); err != nil {
-				log.Println("File " + path + " doesn't exist. You can set a custom path by exporting TSOCKSPATH. Exiting...")
+				log.G(context.Background()).Error("File " + path + " doesn't exist. You can set a custom path by exporting TSOCKSPATH. Exiting...")
 				os.Exit(-1)
 			}
 
@@ -111,7 +113,7 @@ func NewInterLinkConfig() {
 		if os.Getenv("VKTOKENFILE") != "" {
 			path := os.Getenv("VKTOKENFILE")
 			if _, err := os.Stat(path); err != nil {
-				log.Println("File " + path + " doesn't exist. You can set a custom path by exporting VKTOKENFILE. Exiting...")
+				log.G(context.Background()).Error("File " + path + " doesn't exist. You can set a custom path by exporting VKTOKENFILE. Exiting...")
 				os.Exit(-1)
 			}
 
@@ -133,12 +135,12 @@ func NewServiceAccount() error {
 
 	err := os.MkdirAll(path, os.ModePerm)
 	if err != nil {
-		log.Println(err)
+		log.G(context.Background()).Error(err)
 		return err
 	}
 	f, err := os.Create(path + "getSAConfig.sh")
 	if err != nil {
-		log.Println(err)
+		log.G(context.Background()).Error(err)
 		return err
 	}
 
@@ -166,7 +168,7 @@ func NewServiceAccount() error {
 	_, err = f.Write([]byte(script))
 
 	if err != nil {
-		log.Println(err)
+		log.G(context.Background()).Error(err)
 		return err
 	}
 
@@ -178,13 +180,13 @@ func NewServiceAccount() error {
 	}
 	execResult, _ := shell.Execute()
 	if execResult.Stderr != "" {
-		log.Println(execResult.Stderr)
+		log.G(context.Background()).Error(execResult.Stderr)
 		return errors.New(execResult.Stderr)
 	}
 
 	temp, err := os.ReadFile(path + "kubeconfig-sa")
 	if err != nil {
-		log.Println(err)
+		log.G(context.Background()).Error(err)
 		return err
 	}
 
@@ -195,30 +197,31 @@ func NewServiceAccount() error {
 	for {
 
 		var returnValue, _ = json.Marshal("Error")
-		request := GenericRequestType{Body: sa}
+		//request := GenericRequestType{Body: sa}
 
-		bodyBytes, err := json.Marshal(request)
-		reader := bytes.NewReader(bodyBytes)
+		//bodyBytes, err := json.Marshal(request)
+		reader := bytes.NewReader([]byte(sa))
 		req, err := http.NewRequest(http.MethodPost, InterLinkConfigInst.Interlinkurl+":"+InterLinkConfigInst.Interlinkport+"/setKubeCFG", reader)
 
 		if err != nil {
-			log.Println(err)
+			log.G(context.Background()).Error(err)
 		}
 
 		token, err := os.ReadFile(InterLinkConfigInst.VKTokenFile) // just pass the file name
 		req.Header.Add("Authorization", "Bearer "+string(token))
 		resp, err := http.DefaultClient.Do(req)
 		if err != nil {
-			log.Println(err)
+			log.G(context.Background()).Error(err)
 			time.Sleep(5 * time.Second)
+			continue
 		} else {
 			returnValue, _ = ioutil.ReadAll(resp.Body)
 		}
 
-		if string(returnValue) == "200" {
+		if resp.StatusCode == http.StatusOK {
 			break
 		} else {
-			fmt.Println(string(returnValue))
+			log.G(context.Background()).Error("Error " + err.Error() + " " + string(returnValue))
 		}
 	}
 
