@@ -101,8 +101,6 @@ func StopHandler(w http.ResponseWriter, r *http.Request) {
 }
 
 func StatusHandler(w http.ResponseWriter, r *http.Request) {
-	var req []*v1.Pod
-	var resp []commonIL.PodStatus
 	statusCode := http.StatusOK
 	log.G(Ctx).Info("Slurm Sidecar: received GetStatus call")
 
@@ -113,7 +111,9 @@ func StatusHandler(w http.ResponseWriter, r *http.Request) {
 		log.G(Ctx).Error(err)
 		return
 	}
-
+	
+	var req []*v1.Pod
+	var resp []commonIL.PodStatus
 	json.Unmarshal(bodyBytes, &req)
 	if err != nil {
 		statusCode = http.StatusInternalServerError
