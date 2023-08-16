@@ -75,6 +75,7 @@ func prepare_mounts(container v1.Container, data []commonIL.RetrievedPodData) ([
 						log.G(Ctx).Error(err)
 						return nil, err
 					}
+          
 					for i, path := range configMapsPaths {
 						if os.Getenv("SHARED_FS") != "true" {
 							dirs := strings.Split(path, ":")
@@ -90,7 +91,7 @@ func prepare_mounts(container v1.Container, data []commonIL.RetrievedPodData) ([
 
 			for _, secret := range cont.Secrets {
 				if container.Name == cont.Name {
-					secretsPaths, envs, err := mountData(container, podData.Pod, secret)
+          secretsPaths, envs, err := mountData(container, podData.Pod, secret)
 					if err != nil {
 						log.G(Ctx).Error(err)
 						return nil, err
@@ -304,7 +305,7 @@ func mountData(container v1.Container, pod v1.Pod, data interface{}) ([]string, 
 				if vol.Name == mountSpec.Name {
 					podVolumeSpec = &vol.VolumeSource
 				}
-
+        
 				switch mount := data.(type) {
 				case v1.ConfigMap:
 					configMaps := make(map[string]string)

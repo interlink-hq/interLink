@@ -241,7 +241,7 @@ func delete_root(path string) error {
 		Command: "rm",
 		Args:    cmd,
 		Shell:   true,
-	}
+}
 
 	_, err := shell.Execute()
 	return err

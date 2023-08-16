@@ -18,7 +18,7 @@ spec:
     spec:
       containers:
       - name: inttw-vk
-        image: ghcr.io/intertwin-eu/virtual-kubelet-inttw:0.0.1-pre11
+        image: ghcr.io/intertwin-eu/virtual-kubelet-inttw:0.0.2-pre6
         imagePullPolicy: Always
         args:
         - --nodename
@@ -64,7 +64,7 @@ spec:
             cpu: 2000m
             memory: 2Gi
       - name: refresh-token
-        image: ghcr.io/intertwin-eu/virtual-kubelet-inttw-refresh:0.0.1-pre11
+        image: ghcr.io/intertwin-eu/virtual-kubelet-inttw-refresh:0.0.2-pre6
         imagePullPolicy: Always
         env:
         - name: IAM_SERVER

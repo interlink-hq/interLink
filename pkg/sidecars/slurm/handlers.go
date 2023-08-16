@@ -19,16 +19,17 @@ var JID []JidStruct
 func SubmitHandler(w http.ResponseWriter, r *http.Request) {
 	log.G(Ctx).Info("Slurm Sidecar: received Submit call")
 	statusCode := http.StatusOK
+  
 	bodyBytes, err := ioutil.ReadAll(r.Body)
 	if err != nil {
 		statusCode = http.StatusInternalServerError
 		w.WriteHeader(statusCode)
 		w.Write([]byte("Some errors occurred while creating container. Check Slurm Sidecar's logs"))
 		log.G(Ctx).Error(err)
-		return
 	}
 
 	var req []commonIL.RetrievedPodData
+  
 	err = json.Unmarshal(bodyBytes, &req)
 	if err != nil {
 		statusCode = http.StatusInternalServerError
@@ -37,6 +38,7 @@ func SubmitHandler(w http.ResponseWriter, r *http.Request) {
 		log.G(Ctx).Error(err)
 		return
 	}
+
 
 	for _, data := range req {
 		var metadata metav1.ObjectMeta
@@ -59,6 +61,7 @@ func SubmitHandler(w http.ResponseWriter, r *http.Request) {
 				log.G(Ctx).Error(err)
 				return
 			}
+
 			if strings.HasPrefix(container.Image, "/") {
 				if image_uri, ok := metadata.Annotations["slurm-job.knoc.io/image-root"]; ok {
 					image = image_uri + container.Image
