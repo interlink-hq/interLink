@@ -113,7 +113,7 @@ func StatusHandler(w http.ResponseWriter, r *http.Request) {
 	}
 	
 	var req []*v1.Pod
-	var resp []commonIL.PodStatus
+	var resp commonIL.StatusResponse
 	json.Unmarshal(bodyBytes, &req)
 	if err != nil {
 		statusCode = http.StatusInternalServerError
