@@ -22,6 +22,7 @@ func StatusHandler(w http.ResponseWriter, r *http.Request) {
 	if err != nil {
 		statusCode = http.StatusInternalServerError
 		w.WriteHeader(statusCode)
+		w.Write([]byte("Some errors occurred while checking container status. Check Docker Sidecar's logs"))
 		log.G(Ctx).Error(err)
 		return
 	}
@@ -30,6 +31,7 @@ func StatusHandler(w http.ResponseWriter, r *http.Request) {
 	if err != nil {
 		statusCode = http.StatusInternalServerError
 		w.WriteHeader(statusCode)
+		w.Write([]byte("Some errors occurred while checking container status. Check Docker Sidecar's logs"))
 		log.G(Ctx).Error(err)
 		return
 	}
@@ -63,14 +65,20 @@ func StatusHandler(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	bodyBytes, err = json.Marshal(resp)
-	if err != nil {
-		log.G(Ctx).Error(err)
-		statusCode = http.StatusInternalServerError
-	}
-
 	w.WriteHeader(statusCode)
-	w.Write(bodyBytes)
+
+	if statusCode != http.StatusOK {
+		w.Write([]byte("Some errors occurred while checking container status. Check Docker Sidecar's logs"))
+	} else {
+		bodyBytes, err = json.Marshal(resp)
+		if err != nil {
+			log.G(Ctx).Error(err)
+			statusCode = http.StatusInternalServerError
+			w.Write([]byte("Some errors occurred while checking container status. Check Docker Sidecar's logs"))
+			w.WriteHeader(statusCode)
+		}
+		w.Write(bodyBytes)
+	}
 }
 
 func CreateHandler(w http.ResponseWriter, r *http.Request) {
@@ -80,11 +88,22 @@ func CreateHandler(w http.ResponseWriter, r *http.Request) {
 	bodyBytes, err := ioutil.ReadAll(r.Body)
 	if err != nil {
 		statusCode = http.StatusInternalServerError
+		w.WriteHeader(statusCode)
+		w.Write([]byte("Some errors occurred while creating container. Check Docker Sidecar's logs"))
 		log.G(Ctx).Error(err)
+		return
 	}
 
 	var req []commonIL.RetrievedPodData
-	json.Unmarshal(bodyBytes, &req)
+	err = json.Unmarshal(bodyBytes, &req)
+
+	if err != nil {
+		statusCode = http.StatusInternalServerError
+		w.WriteHeader(statusCode)
+		w.Write([]byte("Some errors occurred while creating container. Check Docker Sidecar's logs"))
+		log.G(Ctx).Error(err)
+		return
+	}
 
 	for _, data := range req {
 		for _, container := range data.Pod.Spec.Containers {
@@ -92,7 +111,15 @@ func CreateHandler(w http.ResponseWriter, r *http.Request) {
 			cmd := []string{"run", "-d", "--name", container.Name}
 
 			if commonIL.InterLinkConfigInst.ExportPodData {
-				cmd = append(cmd, prepare_mounts(container, req))
+				mounts, err := prepare_mounts(container, req)
+				if err != nil {
+					statusCode = http.StatusInternalServerError
+					log.G(Ctx).Error(err)
+					w.WriteHeader(statusCode)
+					w.Write([]byte("Some errors occurred while creating container. Check Docker Sidecar's logs"))
+					return
+				}
+				cmd = append(cmd, mounts)
 			}
 
 			cmd = append(cmd, container.Image)
@@ -114,7 +141,9 @@ func CreateHandler(w http.ResponseWriter, r *http.Request) {
 			if err != nil {
 				statusCode = http.StatusInternalServerError
 				log.G(Ctx).Error(err)
-				break
+				w.WriteHeader(statusCode)
+				w.Write([]byte("Some errors occurred while creating container. Check Docker Sidecar's logs"))
+				return
 			}
 
 			if execReturn.Stdout == "" {
@@ -124,6 +153,9 @@ func CreateHandler(w http.ResponseWriter, r *http.Request) {
 				} else {
 					statusCode = http.StatusInternalServerError
 					log.G(Ctx).Error("Unable to create container " + container.Name + " : " + execReturn.Stderr)
+					w.WriteHeader(statusCode)
+					w.Write([]byte("Some errors occurred while creating container. Check Docker Sidecar's logs"))
+					return
 				}
 			} else {
 				log.G(Ctx).Info("-- Created container " + container.Name)
@@ -140,6 +172,9 @@ func CreateHandler(w http.ResponseWriter, r *http.Request) {
 			if execReturn.Stderr != "" {
 				statusCode = http.StatusInternalServerError
 				log.G(Ctx).Error("Failed to retrieve " + container.Name + " ID : " + execReturn.Stderr)
+				w.WriteHeader(statusCode)
+				w.Write([]byte("Some errors occurred while creating container. Check Docker Sidecar's logs"))
+				return
 			} else if execReturn.Stdout == "" {
 				log.G(Ctx).Error("Container name not found. Maybe creation failed?")
 			} else {
@@ -151,7 +186,7 @@ func CreateHandler(w http.ResponseWriter, r *http.Request) {
 	w.WriteHeader(statusCode)
 
 	if statusCode != http.StatusOK {
-		w.Write([]byte("Some errors occurred creating containers. Check Docker Sidecar's logs"))
+		w.Write([]byte("Some errors occurred while creating containers. Check Docker Sidecar's logs"))
 	} else {
 		w.Write([]byte("Containers created"))
 	}
@@ -166,10 +201,20 @@ func DeleteHandler(w http.ResponseWriter, r *http.Request) {
 	if err != nil {
 		statusCode = http.StatusInternalServerError
 		log.G(Ctx).Error(err)
+		w.WriteHeader(statusCode)
+		w.Write([]byte("Some errors occurred while deleting container. Check Docker Sidecar's logs"))
+		return
 	}
 
 	var req []*v1.Pod
-	json.Unmarshal(bodyBytes, &req)
+	err = json.Unmarshal(bodyBytes, &req)
+	if err != nil {
+		statusCode = http.StatusInternalServerError
+		w.WriteHeader(statusCode)
+		w.Write([]byte("Some errors occurred while creating container. Check Docker Sidecar's logs"))
+		log.G(Ctx).Error(err)
+		return
+	}
 
 	for _, pod := range req {
 		for _, container := range pod.Spec.Containers {
@@ -188,6 +233,9 @@ func DeleteHandler(w http.ResponseWriter, r *http.Request) {
 				} else {
 					log.G(Ctx).Error("-- Error stopping container " + container.Name + ". Skipping its removal")
 					statusCode = http.StatusInternalServerError
+					w.WriteHeader(statusCode)
+					w.Write([]byte("Some errors occurred while deleting container. Check Docker Sidecar's logs"))
+					return
 				}
 				continue
 			}
@@ -204,6 +252,9 @@ func DeleteHandler(w http.ResponseWriter, r *http.Request) {
 			if execReturn.Stderr != "" {
 				log.G(Ctx).Error("-- Error deleting container " + container.Name)
 				statusCode = http.StatusInternalServerError
+				w.WriteHeader(statusCode)
+				w.Write([]byte("Some errors occurred while deleting container. Check Docker Sidecar's logs"))
+				return
 			} else {
 				log.G(Ctx).Info("- Deleted container " + container.Name)
 			}
