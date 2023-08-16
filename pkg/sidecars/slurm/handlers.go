@@ -111,7 +111,7 @@ func StatusHandler(w http.ResponseWriter, r *http.Request) {
 		log.G(Ctx).Error(err)
 		return
 	}
-	
+
 	var req []*v1.Pod
 	var resp commonIL.StatusResponse
 	json.Unmarshal(bodyBytes, &req)
