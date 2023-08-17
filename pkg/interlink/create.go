@@ -61,16 +61,7 @@ func CreateHandler(w http.ResponseWriter, r *http.Request) {
 		log.G(Ctx).Debug(string(bodyBytes))
 		reader := bytes.NewReader(bodyBytes)
 
-		switch commonIL.InterLinkConfigInst.Sidecarservice {
-		case "docker":
-			req, err = http.NewRequest(http.MethodPost, commonIL.InterLinkConfigInst.Sidecarurl+":"+commonIL.InterLinkConfigInst.Sidecarport+"/create", reader)
-
-		case "slurm":
-			req, err = http.NewRequest(http.MethodPost, commonIL.InterLinkConfigInst.Sidecarurl+":"+commonIL.InterLinkConfigInst.Sidecarport+"/submit", reader)
-
-		default:
-			break
-		}
+		req, err = http.NewRequest(http.MethodPost, commonIL.InterLinkConfigInst.Sidecarurl+":"+commonIL.InterLinkConfigInst.Sidecarport+"/create", reader)
 
 		if err != nil {
 			statusCode = http.StatusInternalServerError

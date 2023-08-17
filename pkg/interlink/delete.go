@@ -37,16 +37,7 @@ func DeleteHandler(w http.ResponseWriter, r *http.Request) {
 		if check {
 			ToBeDeleted = append(ToBeDeleted, pod.Name)
 
-			switch commonIL.InterLinkConfigInst.Sidecarservice {
-			case "docker":
-				req, err = http.NewRequest(http.MethodPost, commonIL.InterLinkConfigInst.Sidecarurl+":"+commonIL.InterLinkConfigInst.Sidecarport+"/delete", reader)
-
-			case "slurm":
-				req, err = http.NewRequest(http.MethodPost, commonIL.InterLinkConfigInst.Sidecarurl+":"+commonIL.InterLinkConfigInst.Sidecarport+"/stop", reader)
-
-			default:
-				break
-			}
+			req, err = http.NewRequest(http.MethodPost, commonIL.InterLinkConfigInst.Sidecarurl+":"+commonIL.InterLinkConfigInst.Sidecarport+"/delete", reader)
 
 			temp := ToBeDeleted
 			for _, pod := range pods {
