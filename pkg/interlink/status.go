@@ -34,7 +34,7 @@ func StatusHandler(w http.ResponseWriter, r *http.Request) {
 	}
 
 	if resp.StatusCode != http.StatusOK {
-		log.L.Error("Unexpected error occured. Status code: " + strconv.Itoa(resp.StatusCode) + ". Check " + commonIL.InterLinkConfigInst.Sidecarservice + "'s logs for further informations")
+		log.L.Error("Unexpected error occured. Status code: " + strconv.Itoa(resp.StatusCode) + ". Check Sidecar's logs for further informations")
 		statusCode = http.StatusInternalServerError
 	}
 

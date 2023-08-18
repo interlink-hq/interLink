@@ -39,8 +39,7 @@ type InterLinkConfig struct {
 	Sbatchpath     string `yaml:"SbatchPath"`
 	Scancelpath    string `yaml:"ScancelPath"`
 	Interlinkport  string `yaml:"InterlinkPort"`
-	Sidecarport    string
-	Sidecarservice string `yaml:"SidecarService"`
+	Sidecarport    string `yaml:"SidecarPort"`
 	Commandprefix  string `yaml:"CommandPrefix"`
 	ExportPodData  bool   `yaml:"ExportPodData"`
 	DataRootFolder string `yaml:"DataRootFolder"`

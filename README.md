@@ -123,7 +123,7 @@ Detailed explanation of the InterLink config file key values.
 | InterlinkURL | the URL to allow the Virtual Kubelet to contact the InterLink module. |
 | SidecarURL | the URL to allow InterLink to communicate with the Sidecar module (docker, slurm, etc). Do not specify port here |
 | InterlinkPort | the Interlink listening port. InterLink and VK will communicate over this port. |
-| SidecarService | the sidecar service. At the moment, it can be only "slurm" or "docker". According to the specified service, InterLink will automatically set the listening port to 4000 for Docker and 4001 for Slurm. set $SIDECARPORT environment variable to specify a custom one |
+| SidecarPort | the sidecar listening port. Sidecar and Interlink will communicate on this port. Set $SIDECARPORT environment variable to specify a custom one |
 | SbatchPath | path to your Slurm's sbatch binary |
 | ScancelPath | path to your Slurm's scancel binary | 
 | VKTokenFile | path to a file containing your token fot OAuth2 proxy authentication. |
@@ -147,7 +147,6 @@ Here's the complete list of every customizable environment variable. When specif
 | INTERLINKCONFIGPATH | your InterLink config file path. Default is `./kustomizations/InterLinkConfig.yaml` |
 | SIDECARURL | the URL to allow InterLink to communicate with the Sidecar module (docker, slurm, etc). Do not specify port here. Overwrites SidecarURL. |
 | SIDECARPORT | the Sidecar listening port. Docker default is 4000, Slurm default is 4001. |
-| SIDECARSERVICE | can be "docker" or "slurm" only (for the moment). If SIDECARPORT is not set, will set Sidecar Port in the code to default settings. Overwrites SidecarService. |
 | SBATCHPATH | path to your Slurm's sbatch binary. Overwrites SbatchPath. |
 | SCANCELPATH | path to your Slurm's scancel binary. Overwrites ScancelPath. |
 | VKTOKENFILE | path to a file containing your token fot OAuth2 proxy authentication. Overwrites VKTokenFile. |
