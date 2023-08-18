@@ -239,5 +239,4 @@ func mountData(container v1.Container, pod v1.Pod, data interface{}) ([]string, 
 		}
 	}
 	return nil, err
-
 }
