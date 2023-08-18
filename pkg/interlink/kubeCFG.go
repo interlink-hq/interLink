@@ -70,7 +70,7 @@ func SetKubeCFGHandler(w http.ResponseWriter, r *http.Request) {
 		statusCode = http.StatusInternalServerError
 		w.WriteHeader(statusCode)
 		w.Write([]byte(err.Error()))
-		log.G(Ctx).Fatal("Unable to create a valid config")
+		log.G(Ctx).Fatal("Unable to create a valid clientset config")
 	}
 	Clientset, err = kubernetes.NewForConfig(kubeconfig)
 	if err != nil {

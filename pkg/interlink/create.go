@@ -27,33 +27,24 @@ func CreateHandler(w http.ResponseWriter, r *http.Request) {
 
 	var retrieved_data []commonIL.RetrievedPodData
 	for _, pod := range req2 {
-		check := true //the following loop is used to add a pod to the list of to be created pods. this is to avoid multiple calls
-		for _, s := range ToBeCreated {
-			if pod.Name == s {
-				check = false
-			}
-		}
-		if check {
-			ToBeCreated = append(ToBeCreated, pod.Name)
-			data := []commonIL.RetrievedPodData{}
-			if commonIL.InterLinkConfigInst.ExportPodData {
-				data, err = getData(pod)
-				if err != nil {
-					statusCode = http.StatusInternalServerError
-					w.WriteHeader(statusCode)
-					return
-				}
-				log.G(Ctx).Debug(data)
-			}
 
-			if data == nil {
-				data = append(data, commonIL.RetrievedPodData{Pod: *pod})
+		data := []commonIL.RetrievedPodData{}
+		if commonIL.InterLinkConfigInst.ExportPodData {
+			data, err = getData(pod)
+			if err != nil {
+				statusCode = http.StatusInternalServerError
+				w.WriteHeader(statusCode)
+				return
 			}
-
-			retrieved_data = append(retrieved_data, data...)
-		} else {
-			log.G(Ctx).Warning("Submitted pods are still being created...")
+			log.G(Ctx).Debug(data)
 		}
+
+		if data == nil {
+			data = append(data, commonIL.RetrievedPodData{Pod: *pod})
+		}
+
+		retrieved_data = append(retrieved_data, data...)
+
 	}
 
 	if retrieved_data != nil {
@@ -95,17 +86,5 @@ func CreateHandler(w http.ResponseWriter, r *http.Request) {
 		log.G(Ctx).Debug(string(returnValue))
 		w.WriteHeader(statusCode)
 		w.Write(returnValue)
-
-		if resp.StatusCode == http.StatusOK {
-			temp := ToBeCreated
-			for _, data := range retrieved_data {
-				for j, podName := range ToBeCreated {
-					if podName == data.Pod.Name {
-						temp = append(ToBeCreated[:j], ToBeCreated[j+1:]...)
-					}
-				}
-			}
-			ToBeCreated = temp
-		}
 	}
 }

@@ -19,7 +19,7 @@ var JID []JidStruct
 func SubmitHandler(w http.ResponseWriter, r *http.Request) {
 	log.G(Ctx).Info("Slurm Sidecar: received Submit call")
 	statusCode := http.StatusOK
-  
+
 	bodyBytes, err := ioutil.ReadAll(r.Body)
 	if err != nil {
 		statusCode = http.StatusInternalServerError
@@ -29,7 +29,7 @@ func SubmitHandler(w http.ResponseWriter, r *http.Request) {
 	}
 
 	var req []commonIL.RetrievedPodData
-  
+
 	err = json.Unmarshal(bodyBytes, &req)
 	if err != nil {
 		statusCode = http.StatusInternalServerError
@@ -38,7 +38,6 @@ func SubmitHandler(w http.ResponseWriter, r *http.Request) {
 		log.G(Ctx).Error(err)
 		return
 	}
-
 
 	for _, data := range req {
 		var metadata metav1.ObjectMeta
@@ -59,6 +58,7 @@ func SubmitHandler(w http.ResponseWriter, r *http.Request) {
 				w.WriteHeader(statusCode)
 				w.Write([]byte("Error prepairing mounts. Check Slurm Sidecar's logs"))
 				log.G(Ctx).Error(err)
+				os.RemoveAll(commonIL.InterLinkConfigInst.DataRootFolder + data.Pod.Namespace + "-" + string(data.Pod.UID))
 				return
 			}
 
@@ -86,6 +86,7 @@ func SubmitHandler(w http.ResponseWriter, r *http.Request) {
 				w.WriteHeader(statusCode)
 				w.Write([]byte("Error producing Slurm script. Check Slurm Sidecar's logs"))
 				log.G(Ctx).Error(err)
+				os.RemoveAll(commonIL.InterLinkConfigInst.DataRootFolder + data.Pod.Namespace + "-" + string(data.Pod.UID))
 				return
 			}
 			out, err := slurm_batch_submit(path)
@@ -94,6 +95,7 @@ func SubmitHandler(w http.ResponseWriter, r *http.Request) {
 				w.WriteHeader(statusCode)
 				w.Write([]byte("Error submitting Slurm script. Check Slurm Sidecar's logs"))
 				log.G(Ctx).Error(err)
+				os.RemoveAll(commonIL.InterLinkConfigInst.DataRootFolder + data.Pod.Namespace + "-" + string(data.Pod.UID))
 				return
 			}
 			err = handle_jid(container, out, data.Pod)
@@ -102,6 +104,7 @@ func SubmitHandler(w http.ResponseWriter, r *http.Request) {
 				w.WriteHeader(statusCode)
 				w.Write([]byte("Error handling JID. Check Slurm Sidecar's logs"))
 				log.G(Ctx).Error(err)
+				os.RemoveAll(commonIL.InterLinkConfigInst.DataRootFolder + data.Pod.Namespace + "-" + string(data.Pod.UID))
 				return
 			}
 
@@ -111,6 +114,7 @@ func SubmitHandler(w http.ResponseWriter, r *http.Request) {
 				w.WriteHeader(statusCode)
 				w.Write([]byte("Some errors occurred while creating container. Check Slurm Sidecar's logs"))
 				log.G(Ctx).Error(err)
+				os.RemoveAll(commonIL.InterLinkConfigInst.DataRootFolder + data.Pod.Namespace + "-" + string(data.Pod.UID))
 				return
 			}
 			JID = append(JID, JidStruct{JID: string(jid), Pod: data.Pod})
@@ -154,6 +158,9 @@ func StopHandler(w http.ResponseWriter, r *http.Request) {
 				w.Write([]byte("Error deleting containers. Check Slurm Sidecar's logs"))
 				log.G(Ctx).Error(err)
 				return
+			}
+			if os.Getenv("SHARED_FS") != "true" {
+				err = os.RemoveAll(commonIL.InterLinkConfigInst.DataRootFolder + pod.Namespace + "-" + string(pod.UID))
 			}
 		}
 	}

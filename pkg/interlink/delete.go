@@ -29,25 +29,8 @@ func DeleteHandler(w http.ResponseWriter, r *http.Request) {
 
 	for _, pod := range pods {
 		check := true //the following loop is used to add a pod to the list of to be deleted pods. this is to avoid multiple calls
-		for _, s := range ToBeDeleted {
-			if pod.Name == s {
-				check = false
-			}
-		}
 		if check {
-			ToBeDeleted = append(ToBeDeleted, pod.Name)
-
 			req, err = http.NewRequest(http.MethodPost, commonIL.InterLinkConfigInst.Sidecarurl+":"+commonIL.InterLinkConfigInst.Sidecarport+"/delete", reader)
-
-			temp := ToBeDeleted
-			for _, pod := range pods {
-				for j, podName := range ToBeDeleted {
-					if podName == pod.Name {
-						temp = append(ToBeDeleted[:j], ToBeDeleted[j+1:]...)
-					}
-				}
-			}
-			ToBeDeleted = temp
 
 			log.G(Ctx).Info("InterLink: forwarding Delete call to sidecar")
 			resp, err := http.DefaultClient.Do(req)
@@ -63,15 +46,13 @@ func DeleteHandler(w http.ResponseWriter, r *http.Request) {
 
 			if statusCode != http.StatusOK {
 				w.WriteHeader(http.StatusInternalServerError)
-				ToBeDeleted = append(ToBeDeleted, pod.Name)
 			} else {
 				w.WriteHeader(http.StatusOK)
 			}
 			log.G(Ctx).Debug("InterLink: " + string(returnValue))
 			var returnJson []commonIL.PodStatus
-			for _, pod := range pods {
-				returnJson = append(returnJson, commonIL.PodStatus{PodName: pod.Name, PodNamespace: pod.Namespace, PodStatus: commonIL.STOP})
-			}
+			returnJson = append(returnJson, commonIL.PodStatus{PodName: pod.Name, PodNamespace: pod.Namespace, PodStatus: commonIL.STOP})
+
 			bodyBytes, err = json.Marshal(returnJson)
 			if err != nil {
 				log.G(Ctx).Error(err)
@@ -80,8 +61,6 @@ func DeleteHandler(w http.ResponseWriter, r *http.Request) {
 				w.Write(bodyBytes)
 			}
 
-		} else {
-			w.WriteHeader(http.StatusOK)
 		}
 	}
 }

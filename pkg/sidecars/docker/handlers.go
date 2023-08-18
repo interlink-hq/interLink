@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"io/ioutil"
 	"net/http"
+	"os"
 	"strings"
 
 	exec "github.com/alexellis/go-execute/pkg/v1"
@@ -117,6 +118,7 @@ func CreateHandler(w http.ResponseWriter, r *http.Request) {
 					log.G(Ctx).Error(err)
 					w.WriteHeader(statusCode)
 					w.Write([]byte("Some errors occurred while creating container. Check Docker Sidecar's logs"))
+					os.RemoveAll(commonIL.InterLinkConfigInst.DataRootFolder + data.Pod.Namespace + "-" + string(data.Pod.UID))
 					return
 				}
 				cmd = append(cmd, mounts)
@@ -143,6 +145,7 @@ func CreateHandler(w http.ResponseWriter, r *http.Request) {
 				log.G(Ctx).Error(err)
 				w.WriteHeader(statusCode)
 				w.Write([]byte("Some errors occurred while creating container. Check Docker Sidecar's logs"))
+				os.RemoveAll(commonIL.InterLinkConfigInst.DataRootFolder + data.Pod.Namespace + "-" + string(data.Pod.UID))
 				return
 			}
 
@@ -155,6 +158,7 @@ func CreateHandler(w http.ResponseWriter, r *http.Request) {
 					log.G(Ctx).Error("Unable to create container " + container.Name + " : " + execReturn.Stderr)
 					w.WriteHeader(statusCode)
 					w.Write([]byte("Some errors occurred while creating container. Check Docker Sidecar's logs"))
+					os.RemoveAll(commonIL.InterLinkConfigInst.DataRootFolder + data.Pod.Namespace + "-" + string(data.Pod.UID))
 					return
 				}
 			} else {
@@ -174,6 +178,7 @@ func CreateHandler(w http.ResponseWriter, r *http.Request) {
 				log.G(Ctx).Error("Failed to retrieve " + container.Name + " ID : " + execReturn.Stderr)
 				w.WriteHeader(statusCode)
 				w.Write([]byte("Some errors occurred while creating container. Check Docker Sidecar's logs"))
+				os.RemoveAll(commonIL.InterLinkConfigInst.DataRootFolder + data.Pod.Namespace + "-" + string(data.Pod.UID))
 				return
 			} else if execReturn.Stdout == "" {
 				log.G(Ctx).Error("Container name not found. Maybe creation failed?")
@@ -258,6 +263,8 @@ func DeleteHandler(w http.ResponseWriter, r *http.Request) {
 			} else {
 				log.G(Ctx).Info("- Deleted container " + container.Name)
 			}
+
+			os.RemoveAll(commonIL.InterLinkConfigInst.DataRootFolder + pod.Namespace + "-" + string(pod.UID))
 		}
 	}
 

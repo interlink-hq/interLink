@@ -75,7 +75,7 @@ func prepare_mounts(container v1.Container, data []commonIL.RetrievedPodData) ([
 						log.G(Ctx).Error(err)
 						return nil, err
 					}
-          
+
 					for i, path := range configMapsPaths {
 						if os.Getenv("SHARED_FS") != "true" {
 							dirs := strings.Split(path, ":")
@@ -91,7 +91,7 @@ func prepare_mounts(container v1.Container, data []commonIL.RetrievedPodData) ([
 
 			for _, secret := range cont.Secrets {
 				if container.Name == cont.Name {
-          secretsPaths, envs, err := mountData(container, podData.Pod, secret)
+					secretsPaths, envs, err := mountData(container, podData.Pod, secret)
 					if err != nil {
 						log.G(Ctx).Error(err)
 						return nil, err
@@ -305,12 +305,20 @@ func mountData(container v1.Container, pod v1.Pod, data interface{}) ([]string, 
 				if vol.Name == mountSpec.Name {
 					podVolumeSpec = &vol.VolumeSource
 				}
-        
+
 				switch mount := data.(type) {
 				case v1.ConfigMap:
 					configMaps := make(map[string]string)
 					var configMapNamePaths []string
 					var envs []string
+
+					err := os.RemoveAll(commonIL.InterLinkConfigInst.DataRootFolder + pod.Namespace + "-" + string(pod.UID) + "/" + "configMaps/" + vol.Name)
+
+					if err != nil {
+						log.G(Ctx).Error("Unable to delete root folder")
+						return nil, nil, err
+					}
+
 					if podVolumeSpec != nil && podVolumeSpec.ConfigMap != nil {
 						log.G(Ctx).Info("--- Mounting ConfigMap " + podVolumeSpec.ConfigMap.Name)
 						mode := os.FileMode(*podVolumeSpec.ConfigMap.DefaultMode)
@@ -378,6 +386,14 @@ func mountData(container v1.Container, pod v1.Pod, data interface{}) ([]string, 
 					secrets := make(map[string][]byte)
 					var secretNamePaths []string
 					var envs []string
+
+					err := os.RemoveAll(commonIL.InterLinkConfigInst.DataRootFolder + pod.Namespace + "-" + string(pod.UID) + "/" + "secrets/" + vol.Name)
+
+					if err != nil {
+						log.G(Ctx).Error("Unable to delete root folder")
+						return nil, nil, err
+					}
+
 					if podVolumeSpec != nil && podVolumeSpec.Secret != nil {
 						log.G(Ctx).Info("--- Mounting Secret " + podVolumeSpec.Secret.SecretName)
 						mode := os.FileMode(*podVolumeSpec.Secret.DefaultMode)
@@ -469,16 +485,4 @@ func mountData(container v1.Container, pod v1.Pod, data interface{}) ([]string, 
 		}
 	}
 	return nil, nil, err
-}
-
-func delete_root(path string) error {
-	cmd := []string{"-rf " + commonIL.InterLinkConfigInst.DataRootFolder + path}
-	shell := exec2.ExecTask{
-		Command: "rm",
-		Args:    cmd,
-		Shell:   true,
-	}
-
-	_, err := shell.Execute()
-	return err
 }
