@@ -60,7 +60,6 @@ func DeleteHandler(w http.ResponseWriter, r *http.Request) {
 			} else {
 				w.Write(bodyBytes)
 			}
-
 		}
 	}
 }

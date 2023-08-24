@@ -27,7 +27,7 @@ func CreateHandler(w http.ResponseWriter, r *http.Request) {
 
 	var retrieved_data []commonIL.RetrievedPodData
 	for _, pod := range req2 {
-
+    
 		data := []commonIL.RetrievedPodData{}
 		if commonIL.InterLinkConfigInst.ExportPodData {
 			data, err = getData(pod)
@@ -37,14 +37,26 @@ func CreateHandler(w http.ResponseWriter, r *http.Request) {
 				return
 			}
 			log.G(Ctx).Debug(data)
+      
 		}
+		if check {
+			ToBeCreated = append(ToBeCreated, pod.Name)
+			data := []commonIL.RetrievedPodData{}
+			if commonIL.InterLinkConfigInst.ExportPodData {
+				data, err = getData(pod)
+				if err != nil {
+					statusCode = http.StatusInternalServerError
+					w.WriteHeader(statusCode)
+					return
+				}
+				log.G(Ctx).Debug(data)
+			}
 
-		if data == nil {
-			data = append(data, commonIL.RetrievedPodData{Pod: *pod})
-		}
+			if data == nil {
+				data = append(data, commonIL.RetrievedPodData{Pod: *pod})
+			}
 
 		retrieved_data = append(retrieved_data, data...)
-
 	}
 
 	if retrieved_data != nil {
