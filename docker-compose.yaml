@@ -3,7 +3,6 @@ services:
   interlink:
     image:  docker.io/surax98/interlink:latest
     restart: always
-    privileged: true
     network_mode: "host"
     volumes:
     - type: bind
@@ -18,6 +17,7 @@ services:
   docker-sidecar:
     image: docker.io/surax98/docker-sidecar:latest
     restart: always
+    privileged: true
     network_mode: "host"
     volumes:
     - type: bind
