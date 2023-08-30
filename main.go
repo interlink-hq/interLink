@@ -19,10 +19,10 @@ import (
 	"context"
 	"crypto/tls"
 	"fmt"
-	"io/ioutil"
 	"net"
 	"os"
 	"path"
+	"strconv"
 	"time"
 
 	//"k8s.io/client-go/rest"
@@ -32,7 +32,6 @@ import (
 	"k8s.io/client-go/tools/cache"
 	"k8s.io/client-go/tools/clientcmd"
 	"k8s.io/client-go/tools/record"
-	"k8s.io/klog/v2"
 
 	"net/http"
 
@@ -97,16 +96,21 @@ func main() {
 
 	opts := NewOpts()
 
+	dport, err := strconv.ParseInt(os.Getenv("KUBELET_PORT"), 10, 32)
+	if err != nil {
+		log.G(ctx).Fatal(err)
+	}
+
 	cfg := Config{
 		ConfigPath:      opts.ConfigPath,
 		NodeName:        opts.NodeName,
 		OperatingSystem: "Linux",
 		// https://github.com/liqotech/liqo/blob/d8798732002abb7452c2ff1c99b3e5098f848c93/deployments/liqo/templates/liqo-gateway-deployment.yaml#L69
 		InternalIP: "127.0.0.1",
-		DaemonPort: 10250,
+		DaemonPort: int32(dport),
 	}
 
-	kubecfgFile, err := ioutil.ReadFile(os.Getenv("KUBECONFIG"))
+	kubecfgFile, err := os.ReadFile(os.Getenv("KUBECONFIG"))
 	if err != nil {
 		log.G(ctx).Fatal(err)
 	}
@@ -231,7 +235,7 @@ func main() {
 	retriever := newSelfSignedCertificateRetriever(cfg.NodeName, parsedIP)
 
 	server := &http.Server{
-		Addr:              fmt.Sprintf("0.0.0.0:%s", os.Getenv("KUBELET_PORT")),
+		Addr:              fmt.Sprintf("0.0.0.0:%d", 10255),
 		Handler:           mux,
 		ReadHeaderTimeout: 10 * time.Second, // Required to limit the effects of the Slowloris attack.
 		TLSConfig: &tls.Config{
@@ -241,11 +245,11 @@ func main() {
 	}
 
 	go func() {
-		klog.Infof("Starting the virtual kubelet HTTPs server listening on %q", server.Addr)
+		log.G(ctx).Infof("Starting the virtual kubelet HTTPs server listening on %q", server.Addr)
 
 		// Key and certificate paths are not specified, since already configured as part of the TLSConfig.
 		if err := server.ListenAndServeTLS("", ""); err != nil {
-			klog.Errorf("Failed to start the HTTPs server: %v", err)
+			log.G(ctx).Errorf("Failed to start the HTTPs server: %v", err)
 			os.Exit(1)
 		}
 	}()
