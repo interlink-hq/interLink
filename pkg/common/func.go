@@ -192,6 +192,7 @@ func NewServiceAccount() error {
 			time.Sleep(5 * time.Second)
 			continue
 		} else {
+
 			returnValue, _ = io.ReadAll(resp.Body)
 		}
 

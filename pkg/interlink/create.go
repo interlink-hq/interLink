@@ -14,6 +14,7 @@ import (
 
 func CreateHandler(w http.ResponseWriter, r *http.Request) {
 	log.G(Ctx).Info("InterLink: received Create call")
+
 	bodyBytes, err := io.ReadAll(r.Body)
 	statusCode := http.StatusOK
 	if err != nil {
