@@ -6,7 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"io/ioutil"
+	"io"
 	"net/http"
 	"os"
 	"strconv"
@@ -45,7 +45,7 @@ func createRequest(pods []*v1.Pod, token string) ([]byte, error) {
 		return nil, errors.New("Unexpected error occured while creating Pods. Status code: " + strconv.Itoa(resp.StatusCode) + ". Check InterLink's logs for further informations")
 	} else {
 		log.G(context.Background()).Info(string(returnValue))
-		returnValue, err = ioutil.ReadAll(resp.Body)
+		returnValue, err = io.ReadAll(resp.Body)
 		if err != nil {
 			log.L.Error(err)
 			return nil, err
@@ -82,7 +82,7 @@ func deleteRequest(pods []*v1.Pod, token string) ([]byte, error) {
 	if statusCode != http.StatusOK {
 		return nil, errors.New("Unexpected error occured while deleting Pods. Status code: " + strconv.Itoa(resp.StatusCode) + ". Check InterLink's logs for further informations")
 	} else {
-		returnValue, _ = ioutil.ReadAll(resp.Body)
+		returnValue, _ = os.ReadAll(resp.Body)
 		log.G(context.Background()).Info(string(returnValue))
 		var response []commonIL.PodStatus
 		err = json.Unmarshal(returnValue, &response)
@@ -122,7 +122,7 @@ func statusRequest(podsList []*v1.Pod, token string) ([]byte, error) {
 	if resp.StatusCode != http.StatusOK {
 		return nil, errors.New("Unexpected error occured while getting status. Status code: " + strconv.Itoa(resp.StatusCode) + ". Check InterLink's logs for further informations")
 	} else {
-		returnValue, _ = ioutil.ReadAll(resp.Body)
+		returnValue, _ = io.ReadAll(resp.Body)
 		if err != nil {
 			log.L.Error(err)
 			return nil, err
