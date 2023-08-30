@@ -19,8 +19,8 @@ import (
 	"context"
 	"crypto/tls"
 	"fmt"
-	"io"
 	"io/ioutil"
+	"net"
 	"os"
 	"path"
 	"time"
@@ -32,6 +32,7 @@ import (
 	"k8s.io/client-go/tools/cache"
 	"k8s.io/client-go/tools/clientcmd"
 	"k8s.io/client-go/tools/record"
+	"k8s.io/klog/v2"
 
 	"net/http"
 
@@ -48,28 +49,12 @@ import (
 	"github.com/virtual-kubelet/virtual-kubelet/node/api"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/client-go/informers"
-	stats "k8s.io/kubernetes/pkg/kubelet/apis/stats/v1alpha1"
 )
 
 func PodInformerFilter(node string) informers.SharedInformerOption {
 	return informers.WithTweakListOptions(func(options *metav1.ListOptions) {
 		options.FieldSelector = fields.OneTermEqualSelector("spec.nodeName", node).String()
 	})
-}
-
-type PodHandler interface {
-	// List returns the list of reflected pods.
-	List(context.Context) ([]*v1.Pod, error)
-	// Exec executes a command in a container of a reflected pod.
-	Exec(ctx context.Context, namespace, pod, container string, cmd []string, attach api.AttachIO) error
-	// Attach attaches to a process that is already running inside an existing container of a reflected pod.
-	Attach(ctx context.Context, namespace, pod, container string, attach api.AttachIO) error
-	// PortForward forwards a connection from local to the ports of a reflected pod.
-	PortForward(ctx context.Context, namespace, pod string, port int32, stream io.ReadWriteCloser) error
-	// Logs retrieves the logs of a container of a reflected pod.
-	Logs(ctx context.Context, namespace, pod, container string, opts api.ContainerLogOpts) (io.ReadCloser, error)
-	// Stats retrieves the stats of the reflected pods.
-	Stats(ctx context.Context) (*stats.Summary, error)
 }
 
 type Config struct {
@@ -155,29 +140,6 @@ func main() {
 		nodeProvider, nodeProvider.GetNode(), localClient.CoreV1().Nodes(),
 	)
 
-	// // https://github.com/liqotech/liqo/blob/master/cmd/virtual-kubelet/root/root.go#L195C49-L195C49
-	// // https://github.com/liqotech/liqo/blob/master/cmd/virtual-kubelet/root/http.go#L76-L84
-	// // https://github.com/liqotech/liqo/blob/master/cmd/virtual-kubelet/root/http.go#L93
-
-	// handler := PodHandler{
-	// 	Stats: nc.GetStatsSummary
-	// }
-
-	// podRoutes := api.PodHandlerConfig{
-	// 	// RunInContainer:        handler.Exec,
-	// 	// AttachToContainer:     handler.Attach,
-	// 	// PortForward:           handler.PortForward,
-	// 	// GetContainerLogs:      handler.Logs,
-	// 	GetStatsSummary:       handler.Stats,
-	// 	// GetPodsFromKubernetes: handler.List,
-	// 	// GetPods:               handler.List,
-	// }
-
-	// err = setupHTTPServer(ctx, podProvider.PodHandler(), localClient, remoteConfig, c)
-	// if err != nil {
-	// log.G(ctx).Fatal(err)
-	// }
-
 	go func() error {
 		err = nc.Run(ctx)
 		if err != nil {
@@ -247,5 +209,45 @@ func main() {
 	if err != nil {
 		log.G(ctx).Fatal(err)
 	}
+
+	// start podHandler
+	handlerPodConfig := api.PodHandlerConfig{
+		GetContainerLogs: nodeProvider.GetLogs,
+		GetPods:          nodeProvider.GetPods,
+		GetStatsSummary:  nodeProvider.GetStatsSummary,
+	}
+
+	mux := http.NewServeMux()
+
+	podRoutes := api.PodHandlerConfig{
+		GetContainerLogs: handlerPodConfig.GetContainerLogs,
+		GetStatsSummary:  handlerPodConfig.GetStatsSummary,
+		GetPods:          handlerPodConfig.GetPods,
+	}
+
+	api.AttachPodRoutes(podRoutes, mux, true)
+
+	parsedIP := net.ParseIP(os.Getenv("POD_IP"))
+	retriever := newSelfSignedCertificateRetriever(cfg.NodeName, parsedIP)
+
+	server := &http.Server{
+		Addr:              fmt.Sprintf("0.0.0.0:%s", os.Getenv("KUBELET_PORT")),
+		Handler:           mux,
+		ReadHeaderTimeout: 10 * time.Second, // Required to limit the effects of the Slowloris attack.
+		TLSConfig: &tls.Config{
+			GetCertificate: retriever,
+			MinVersion:     tls.VersionTLS12,
+		},
+	}
+
+	go func() {
+		klog.Infof("Starting the virtual kubelet HTTPs server listening on %q", server.Addr)
+
+		// Key and certificate paths are not specified, since already configured as part of the TLSConfig.
+		if err := server.ListenAndServeTLS("", ""); err != nil {
+			klog.Errorf("Failed to start the HTTPs server: %v", err)
+			os.Exit(1)
+		}
+	}()
 
 }
