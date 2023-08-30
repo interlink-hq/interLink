@@ -254,44 +254,4 @@ func main() {
 		log.G(ctx).Fatal(err)
 	}
 
-	// start podHandler
-	handlerPodConfig := api.PodHandlerConfig{
-		GetContainerLogs: nodeProvider.GetLogs,
-		GetPods:          nodeProvider.GetPods,
-		GetStatsSummary:  nodeProvider.GetStatsSummary,
-	}
-
-	mux := http.NewServeMux()
-
-	podRoutes := api.PodHandlerConfig{
-		GetContainerLogs: handlerPodConfig.GetContainerLogs,
-		GetStatsSummary:  handlerPodConfig.GetStatsSummary,
-		GetPods:          handlerPodConfig.GetPods,
-	}
-
-	api.AttachPodRoutes(podRoutes, mux, true)
-
-	parsedIP := net.ParseIP(os.Getenv("POD_IP"))
-	retriever := newSelfSignedCertificateRetriever(cfg.NodeName, parsedIP)
-
-	server := &http.Server{
-		Addr:              fmt.Sprintf("0.0.0.0:%d", 10255),
-		Handler:           mux,
-		ReadHeaderTimeout: 10 * time.Second, // Required to limit the effects of the Slowloris attack.
-		TLSConfig: &tls.Config{
-			GetCertificate: retriever,
-			MinVersion:     tls.VersionTLS12,
-		},
-	}
-
-	go func() {
-		log.G(ctx).Infof("Starting the virtual kubelet HTTPs server listening on %q", server.Addr)
-
-		// Key and certificate paths are not specified, since already configured as part of the TLSConfig.
-		if err := server.ListenAndServeTLS("", ""); err != nil {
-			log.G(ctx).Errorf("Failed to start the HTTPs server: %v", err)
-			os.Exit(1)
-		}
-	}()
-
 }
