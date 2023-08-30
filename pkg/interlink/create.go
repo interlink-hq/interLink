@@ -3,6 +3,7 @@ package interlink
 import (
 	"bytes"
 	"encoding/json"
+	"io"
 	"net/http"
 	"time"
 
@@ -13,7 +14,7 @@ import (
 
 func CreateHandler(w http.ResponseWriter, r *http.Request) {
 	log.G(Ctx).Info("InterLink: received Create call")
-	bodyBytes, err := os.ReadAll(r.Body)
+	bodyBytes, err := io.ReadAll(r.Body)
 	statusCode := http.StatusOK
 	if err != nil {
 		statusCode = http.StatusInternalServerError
@@ -90,7 +91,7 @@ func CreateHandler(w http.ResponseWriter, r *http.Request) {
 				log.G(Ctx).Debug(statusCode)
 			}
 
-			returnValue, _ := os.ReadAll(resp.Body)
+			returnValue, _ := io.ReadAll(resp.Body)
 			log.G(Ctx).Debug(string(returnValue))
 			w.WriteHeader(statusCode)
 			w.Write(returnValue)
