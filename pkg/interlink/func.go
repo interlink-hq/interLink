@@ -46,7 +46,7 @@ func retrieve_data(container v1.Container, pod *v1.Pod) (commonIL.RetrievedPodDa
 				log.G(Ctx).Info("--- Retrieving ConfigMap " + podVolumeSpec.ConfigMap.Name)
 				cmvs := podVolumeSpec.ConfigMap
 
-				configMap, err := Clientset.CoreV1().ConfigMaps(pod.Namespace).Get(cmvs.Name, metav1.GetOptions{})
+				configMap, err := Clientset.CoreV1().ConfigMaps(pod.Namespace).Get(Ctx, cmvs.Name, metav1.GetOptions{})
 
 				if err != nil {
 					log.G(Ctx).Error(err)
@@ -66,7 +66,7 @@ func retrieve_data(container v1.Container, pod *v1.Pod) (commonIL.RetrievedPodDa
 				log.G(Ctx).Info("--- Retrieving Secret " + podVolumeSpec.Secret.SecretName)
 				svs := podVolumeSpec.Secret
 
-				secret, err := Clientset.CoreV1().Secrets(pod.Namespace).Get(svs.SecretName, metav1.GetOptions{})
+				secret, err := Clientset.CoreV1().Secrets(pod.Namespace).Get(Ctx, svs.SecretName, metav1.GetOptions{})
 
 				if err != nil {
 					log.G(Ctx).Error(err)
