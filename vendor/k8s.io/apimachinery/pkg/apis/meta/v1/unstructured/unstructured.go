@@ -431,31 +431,6 @@ func (u *Unstructured) GroupVersionKind() schema.GroupVersionKind {
 	return gvk
 }
 
-func (u *Unstructured) GetInitializers() *metav1.Initializers {
-	m, found, err := nestedMapNoCopy(u.Object, "metadata", "initializers")
-	if !found || err != nil {
-		return nil
-	}
-	out := &metav1.Initializers{}
-	if err := runtime.DefaultUnstructuredConverter.FromUnstructured(m, out); err != nil {
-		utilruntime.HandleError(fmt.Errorf("unable to retrieve initializers for object: %v", err))
-		return nil
-	}
-	return out
-}
-
-func (u *Unstructured) SetInitializers(initializers *metav1.Initializers) {
-	if initializers == nil {
-		RemoveNestedField(u.Object, "metadata", "initializers")
-		return
-	}
-	out, err := runtime.DefaultUnstructuredConverter.ToUnstructured(initializers)
-	if err != nil {
-		utilruntime.HandleError(fmt.Errorf("unable to retrieve initializers for object: %v", err))
-	}
-	u.setNestedField(out, "metadata", "initializers")
-}
-
 func (u *Unstructured) GetFinalizers() []string {
 	val, _, _ := NestedStringSlice(u.Object, "metadata", "finalizers")
 	return val
@@ -467,18 +442,6 @@ func (u *Unstructured) SetFinalizers(finalizers []string) {
 		return
 	}
 	u.setNestedStringSlice(finalizers, "metadata", "finalizers")
-}
-
-func (u *Unstructured) GetClusterName() string {
-	return getNestedString(u.Object, "metadata", "clusterName")
-}
-
-func (u *Unstructured) SetClusterName(clusterName string) {
-	if len(clusterName) == 0 {
-		RemoveNestedField(u.Object, "metadata", "clusterName")
-		return
-	}
-	u.setNestedField(clusterName, "metadata", "clusterName")
 }
 
 func (u *Unstructured) GetManagedFields() []metav1.ManagedFieldsEntry {
