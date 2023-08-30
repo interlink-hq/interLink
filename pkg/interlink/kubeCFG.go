@@ -1,6 +1,7 @@
 package interlink
 
 import (
+	"io"
 	"net/http"
 	"os"
 
@@ -14,7 +15,7 @@ func SetKubeCFGHandler(w http.ResponseWriter, r *http.Request) {
 	path := "/tmp/.kube/"
 	statusCode := http.StatusOK
 
-	bodyBytes, err := os.ReadAll(r.Body)
+	bodyBytes, err := io.ReadAll(r.Body)
 	if err != nil {
 		statusCode = http.StatusInternalServerError
 		w.WriteHeader(statusCode)
