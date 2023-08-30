@@ -205,15 +205,6 @@ func main() {
 	// 	fmt.Println("pods:", pods[pod].Name)
 	// }
 
-	pc, err := node.NewPodController(podControllerConfig) // <-- instatiates the pod controller
-	if err != nil {
-		log.G(ctx).Fatal(err)
-	}
-	err = pc.Run(ctx, 1) // <-- starts watching for pods to be scheduled on the node
-	if err != nil {
-		log.G(ctx).Fatal(err)
-	}
-
 	// start podHandler
 	handlerPodConfig := api.PodHandlerConfig{
 		GetContainerLogs: nodeProvider.GetLogs,
@@ -253,5 +244,14 @@ func main() {
 			os.Exit(1)
 		}
 	}()
+
+	pc, err := node.NewPodController(podControllerConfig) // <-- instatiates the pod controller
+	if err != nil {
+		log.G(ctx).Fatal(err)
+	}
+	err = pc.Run(ctx, 1) // <-- starts watching for pods to be scheduled on the node
+	if err != nil {
+		log.G(ctx).Fatal(err)
+	}
 
 }
