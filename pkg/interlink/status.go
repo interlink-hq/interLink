@@ -2,7 +2,7 @@ package interlink
 
 import (
 	"bytes"
-	"io/ioutil"
+	"io"
 	"net/http"
 	"strconv"
 
@@ -13,7 +13,7 @@ import (
 func StatusHandler(w http.ResponseWriter, r *http.Request) {
 	statusCode := http.StatusOK
 	log.G(Ctx).Info("InterLink: received GetStatus call")
-	bodyBytes, err := ioutil.ReadAll(r.Body)
+	bodyBytes, err := io.ReadAll(r.Body)
 	if err != nil {
 		log.G(Ctx).Fatal(err)
 	}
@@ -38,7 +38,7 @@ func StatusHandler(w http.ResponseWriter, r *http.Request) {
 		statusCode = http.StatusInternalServerError
 	}
 
-	returnValue, _ := ioutil.ReadAll(resp.Body)
+	returnValue, _ := io.ReadAll(resp.Body)
 	log.G(Ctx).Debug("InterLink: status " + string(returnValue))
 
 	w.WriteHeader(statusCode)

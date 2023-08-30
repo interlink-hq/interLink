@@ -2,7 +2,7 @@ package docker
 
 import (
 	"encoding/json"
-	"io/ioutil"
+	"io"
 	"net/http"
 	"os"
 	"strings"
@@ -19,7 +19,7 @@ func StatusHandler(w http.ResponseWriter, r *http.Request) {
 	var req []*v1.Pod
 	statusCode := http.StatusOK
 
-	bodyBytes, err := ioutil.ReadAll(r.Body)
+	bodyBytes, err := io.ReadAll(r.Body)
 	if err != nil {
 		statusCode = http.StatusInternalServerError
 		w.WriteHeader(statusCode)
@@ -86,7 +86,7 @@ func CreateHandler(w http.ResponseWriter, r *http.Request) {
 	log.G(Ctx).Info("Docker Sidecar: received Create call")
 	var execReturn exec.ExecResult
 	statusCode := http.StatusOK
-	bodyBytes, err := ioutil.ReadAll(r.Body)
+	bodyBytes, err := io.ReadAll(r.Body)
 	if err != nil {
 		statusCode = http.StatusInternalServerError
 		w.WriteHeader(statusCode)
@@ -201,7 +201,7 @@ func DeleteHandler(w http.ResponseWriter, r *http.Request) {
 	log.G(Ctx).Info("Docker Sidecar: received Delete call")
 	var execReturn exec.ExecResult
 	statusCode := http.StatusOK
-	bodyBytes, err := ioutil.ReadAll(r.Body)
+	bodyBytes, err := io.ReadAll(r.Body)
 
 	if err != nil {
 		statusCode = http.StatusInternalServerError
