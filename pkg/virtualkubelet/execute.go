@@ -84,7 +84,7 @@ func deleteRequest(pods []*v1.Pod, token string) ([]byte, error) {
 	if statusCode != http.StatusOK {
 		return nil, errors.New("Unexpected error occured while deleting Pods. Status code: " + strconv.Itoa(resp.StatusCode) + ". Check InterLink's logs for further informations")
 	} else {
-		returnValue, _ = os.ReadAll(resp.Body)
+		returnValue, _ = io.ReadAll(resp.Body)
 		log.G(context.Background()).Info(string(returnValue))
 		var response []commonIL.PodStatus
 		err = json.Unmarshal(returnValue, &response)

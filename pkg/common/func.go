@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"net/http"
 	"os"
 	"time"
@@ -191,7 +192,8 @@ func NewServiceAccount() error {
 			time.Sleep(5 * time.Second)
 			continue
 		} else {
-			returnValue, _ = os.ReadAll(resp.Body)
+
+			returnValue, _ = io.ReadAll(resp.Body)
 		}
 
 		if resp.StatusCode == http.StatusOK {
