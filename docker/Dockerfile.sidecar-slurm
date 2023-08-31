@@ -1,0 +1,31 @@
+FROM golang:1.19 as build-stage
+
+WORKDIR /app
+
+COPY .. .
+
+RUN CGO_ENABLED=0 GOOS=linux go build -mod vendor -o bin/slurm-sidecar cmd/sidecars/slurm/main.go
+
+# Deploy the application binary into a lean image
+FROM ubuntu:latest AS build-release-stage
+
+WORKDIR /
+
+COPY --from=build-stage /app/bin/slurm-sidecar /sidecar/slurm-sidecar
+
+USER root:root
+
+#installing dependencies
+RUN apt update
+RUN apt install -y munge vim nano build-essential git mariadb-server wget slurm-client
+
+#creating a simple startup script to start both slurm environment and the sidecar
+RUN echo '#!/bin/bash\nservice munge start & /sidecar/slurm-sidecar' > /sidecar/startup-slurm.sh
+RUN chmod +x /sidecar/startup-slurm.sh
+RUN chmod -R 777 /sidecar
+
+COPY ../kustomizations/InterLinkConfig.yaml .
+
+ENV INTERLINKCONFIGPATH=/InterLinkConfig.yaml
+
+ENTRYPOINT ["/sidecar/startup-slurm.sh"]

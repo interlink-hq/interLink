@@ -8,9 +8,8 @@ COPY .. .
 
 RUN CGO_ENABLED=0 GOOS=linux go build -mod vendor -o bin/vk
 
-
 # Deploy the application binary into a lean image
-FROM cgr.dev/chainguard/wolfi-base AS build-release-stage
+FROM ubuntu:latest AS build-release-stage
 
 WORKDIR /
 
@@ -18,6 +17,15 @@ COPY --from=build-stage /app/bin/vk /vk
 
 COPY --from=kubectl /opt/bitnami/kubectl/bin/kubectl /usr/local/bin/
 
-USER nobody:nobody
+COPY ../kustomizations/InterLinkConfig.yaml /kustomizations/
+COPY ../kustomizations/knoc-cfg.json /kustomizations/
+COPY ../token /kustomizations/
+COPY ../kubeconfig.yaml /kustomizations/
+ENV INTERLINKCONFIGPATH=/kustomizations/InterLinkConfig.yaml
+ENV VKTOKENFILE="/kustomizations/token"
+ENV TOKEN_PATH="/kustomizations/token"
+ENV KUBECONFIG=/kustomizations/kubeconfig.yaml
+ENV CONFIGPATH=/kustomizations/knoc-cfg.json
+ENV NODENAME=test-vk 
 
 ENTRYPOINT ["/vk"]

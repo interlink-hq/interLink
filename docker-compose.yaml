@@ -29,3 +29,18 @@ services:
     #   timeout: 10s
     #   retries: 3
     #   start_period: 5s
+  vk:
+    image: docker.io/surax98/vk:latest
+    restart: always
+    privileged: true
+    network_mode: "host"
+    volumes:
+    - type: bind
+      source: ./kustomizations
+      target: /etc/interlink
+    # healthcheck:
+    #   test: ["CMD", "/check.sh"]
+    #   interval: 10s
+    #   timeout: 10s
+    #   retries: 3
+    #   start_period: 5s
