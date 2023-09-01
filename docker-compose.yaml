@@ -38,6 +38,13 @@ services:
     - type: bind
       source: ./kustomizations
       target: /etc/interlink
+    environment:
+      - INTERLINKCONFIGPATH=/etc/interlink/InterLinkConfig.yaml
+      - VKTOKENFILE=/etc/interlink/dummy_token
+      - TOKEN_PATH=/etc/interlink/dummy_token
+      - KUBECONFIG=/etc/interlink/kubeconfig.yaml
+      - CONFIGPATH=/etc/interlink/knoc-cfg.json
+      - NODENAME=test-vk 
     # healthcheck:
     #   test: ["CMD", "/check.sh"]
     #   interval: 10s

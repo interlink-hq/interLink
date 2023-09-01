@@ -17,15 +17,4 @@ COPY --from=build-stage /app/bin/vk /vk
 
 COPY --from=kubectl /opt/bitnami/kubectl/bin/kubectl /usr/local/bin/
 
-COPY ../kustomizations/InterLinkConfig.yaml /kustomizations/
-COPY ../kustomizations/knoc-cfg.json /kustomizations/
-COPY ../token /kustomizations/
-COPY ../kubeconfig.yaml /kustomizations/
-ENV INTERLINKCONFIGPATH=/kustomizations/InterLinkConfig.yaml
-ENV VKTOKENFILE="/kustomizations/token"
-ENV TOKEN_PATH="/kustomizations/token"
-ENV KUBECONFIG=/kustomizations/kubeconfig.yaml
-ENV CONFIGPATH=/kustomizations/knoc-cfg.json
-ENV NODENAME=test-vk 
-
 ENTRYPOINT ["/vk"]

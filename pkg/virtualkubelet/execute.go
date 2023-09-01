@@ -18,8 +18,6 @@ import (
 	v1 "k8s.io/api/core/v1"
 )
 
-var NoReq uint8
-
 func createRequest(pods []*v1.Pod, token string) ([]byte, error) {
 	var returnValue, _ = json.Marshal(commonIL.PodStatus{PodStatus: commonIL.UNKNOWN})
 
@@ -156,17 +154,12 @@ func RemoteExecution(p *VirtualKubeletProvider, ctx context.Context, mode int8, 
 		break
 
 	case DELETE:
-		if NoReq > 0 {
-			NoReq--
-		} else {
-			returnVal, err := deleteRequest(req, token)
-			if err != nil {
-				log.G(ctx).Error(err)
-				return err
-			}
-			log.G(ctx).Info(string(returnVal))
+		returnVal, err := deleteRequest(req, token)
+		if err != nil {
+			log.G(ctx).Error(err)
+			return err
 		}
-		break
+		log.G(ctx).Info(string(returnVal))
 	}
 	return nil
 }
@@ -196,7 +189,6 @@ func checkPodsStatus(p *VirtualKubeletProvider, ctx context.Context, token strin
 
 		for i, podStatus := range ret {
 			if podStatus.PodStatus == 1 {
-				NoReq++
 				cmd := []string{"delete pod " + ret[i].PodName + " -n " + ret[i].PodNamespace}
 				shell := exec.ExecTask{
 					Command: "kubectl",
