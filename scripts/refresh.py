@@ -30,15 +30,15 @@ if __name__ == '__main__':
     while True:
         try:
             request_data = {
-                "client_id": iam_client_id,
-                "client_secret": iam_client_secret,
                 "grant_type": "refresh_token",
-                "username": iam_client_id,
-                "password": iam_client_secret,
                 "refresh_token": iam_refresh_token,
                 "scope": "openid profile email address phone offline_access"
             }
-            r = requests.post(iam_server+"token", data=request_data)
+
+            from requests.auth import HTTPBasicAuth
+            auth = HTTPBasicAuth(iam_client_id, iam_client_secret)
+
+            r = requests.post(iam_server+"token", data=request_data, auth=auth)
             response = json.loads(r.text)
 
             #print(iam_client_id, iam_client_secret, response)
