@@ -83,7 +83,7 @@ func NewProviderConfig(config VirtualKubeletConfig, nodeName, operatingSystem st
 	lbls := map[string]string{
 		"alpha.service-controller.kubernetes.io/exclude-balancer": "true",
 		"beta.kubernetes.io/os":                                   "linux",
-		"kubernetes.io/hostname":                                  "test-vk",
+		"kubernetes.io/hostname":                                  nodeName,
 		"kubernetes.io/role":                                      "agent",
 		"node.kubernetes.io/exclude-from-external-load-balancers": "true",
 		"type": "virtual-kubelet",
@@ -160,6 +160,7 @@ func loadConfig(providerConfig, nodeName string, ctx context.Context) (config Vi
 		log.G(ctx).Fatal(err)
 	}
 
+	log.G(context.Background()).Info("Loading Virtual Kubelet config from " + providerConfig)
 	data, err := ioutil.ReadFile(providerConfig)
 	if err != nil {
 		return config, err
@@ -550,7 +551,7 @@ func (p *VirtualKubeletProvider) statusLoop(ctx context.Context) {
 
 	b, err := os.ReadFile(commonIL.InterLinkConfigInst.VKTokenFile) // just pass the file name
 	if err != nil {
-		fmt.Print(err)
+		log.G(context.Background()).Fatal(err)
 	}
 	token := string(b)
 

@@ -138,7 +138,7 @@ func RemoteExecution(p *VirtualKubeletProvider, ctx context.Context, mode int8, 
 
 	b, err := os.ReadFile(commonIL.InterLinkConfigInst.VKTokenFile) // just pass the file name
 	if err != nil {
-		fmt.Print(err)
+		log.G(ctx).Fatal(err)
 	}
 	token := string(b)
 
