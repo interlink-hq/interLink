@@ -33,6 +33,7 @@ func NewInterLinkConfig() {
 			os.Exit(-1)
 		}
 
+		log.G(context.Background()).Info("Loading InterLink config from " + path)
 		yfile, err := os.ReadFile(path)
 		if err != nil {
 			log.G(context.Background()).Error("Error opening config file, exiting...")
@@ -156,8 +157,8 @@ func NewServiceAccount() error {
 		Shell:   true,
 	}
 	execResult, _ := shell.Execute()
-	if execResult.Stderr != "" {
-		log.G(context.Background()).Error(execResult.Stderr)
+	if execResult.Stderr != "" || execResult.Stdout != "" {
+		log.G(context.Background()).Error("Stderr: " + execResult.Stderr + "\nStdout: " + execResult.Stdout)
 		return errors.New(execResult.Stderr)
 	}
 
@@ -171,12 +172,16 @@ func NewServiceAccount() error {
 	os.Remove(path + "getSAConfig.sh")
 	os.Remove(path + "kubeconfig-sa")
 
+	requestCounter := 0
+
 	for {
 
-		var returnValue, _ = json.Marshal("Error")
-		//request := GenericRequestType{Body: sa}
+		if requestCounter == 20 {
+			log.G(context.Background()).Error("Service Account timed out, exiting")
+			return errors.New("Service Account timed out, exiting")
+		}
 
-		//bodyBytes, err := json.Marshal(request)
+		var returnValue, _ = json.Marshal("Error")
 		reader := bytes.NewReader([]byte(sa))
 		req, err := http.NewRequest(http.MethodPost, InterLinkConfigInst.Interlinkurl+":"+InterLinkConfigInst.Interlinkport+"/setKubeCFG", reader)
 
@@ -185,6 +190,10 @@ func NewServiceAccount() error {
 		}
 
 		token, err := os.ReadFile(InterLinkConfigInst.VKTokenFile) // just pass the file name
+		if err != nil {
+			log.G(context.Background()).Error(err)
+			return err
+		}
 		req.Header.Add("Authorization", "Bearer "+string(token))
 		resp, err := http.DefaultClient.Do(req)
 		if err != nil {
@@ -194,6 +203,8 @@ func NewServiceAccount() error {
 		} else {
 			returnValue, _ = ioutil.ReadAll(resp.Body)
 		}
+
+		requestCounter++
 
 		if resp.StatusCode == http.StatusOK {
 			break

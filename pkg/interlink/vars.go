@@ -8,5 +8,3 @@ import (
 
 var Ctx context.Context
 var Clientset *kubernetes.Clientset
-var ToBeDeleted []string
-var ToBeCreated []string

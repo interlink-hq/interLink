@@ -80,7 +80,7 @@ In `./kustomizations` you can then play with the different configuration and dep
 
 ### Setup a Dummy remote executer
 
-- Then, use Docker Compose to create and start up containers:
+- Use Docker Compose to create and start up containers:
     ```bash
     docker compose -f docker-compose.yaml up -d
     ```
@@ -92,7 +92,34 @@ In `./kustomizations` you can then play with the different configuration and dep
     ```bash
     kubectl apply -f examples/busyecho_k8s.yaml -n vk
     ```
-You will see know a container starting up on your host, but managed by the docker compose interlink daemons.
+You will see now a container starting up on your host, but managed by the docker compose interlink daemons.
+
+### Digging in the project
+
+As previous described, the whole project is split across 3 major components:
+- A Virtual Kubelet
+- The InterLink API
+- A Sidecar  
+But what actually happens inside every component?
+
+#### Virtual Kubelet
+The Virtual Kubelet is of course based on the latest Virtual Kubelet release, provided by Kubernetes itself. Being actually a Kubelet, every Pod submitted to the cluster is then registered to the Kubelet if taints and selectors actually match.  
+The first thing done by the Virtual Kubelet is attempting a communication with the InterLink API to send a ServiceAccount configuration, which will then be used by the InterLink API to retrieve from the cluster everything needed by Sidecars. If some error occurs in this phase, the Virtual Kubelet aborts its execution, since the configuration is crucial to InterLink's proper working.
+After that, the VK starts its actual work by managing any basic Pod operation, like adding, removing, quering, etc pods to/from the cluster.  
+While a Pod is being registered, upon a `kubectl apply -f yaml_file.yaml` command for example, the Kubelet sends a Create HTTP call to the InterLink API.
+If at least 1 Pod is registered to the Kubelet, every 5 seconds, a Status HTTP call to the InterLink API is automatically issued to check every Pod's health. If a job executed by a Pod is terminated (returning errors or not) or if a service supposed to run is not running anymore, the Pod is being removed from the Kubernetes Cluster by the Kubelet itself.  
+Another way to remove a running Pod is by manually executing a `kubectl delete pod pod_name` command from the CLI. This triggers the sending of Delete HTTP call to the InterLink API and the deletion of the Pod from the Kubernetes cluster.  
+Every HTTP call is performed as a REST standard call, specifing the interlink path, the interlink port and a fixed path, according to the call; for example  `http://localhost:3000/create` is a create call on a InterLink being run on the same VK machine on the port 3000. InterLink path and port can be specified in the InterLinkConfig.yaml file. The body of every call is the same: a marshalled (JSON type) list of Pod descriptors, stored in variables of type v1.Pod, a built-in go-client standard Kubernetes type.  
+A quick recap to the list of HTTP calls:
+| Call         | URL     |
+|--------------|-----------|
+| Create | InterLinkUrl:InterLinkPort/create|
+| Delete | InterLinkUrl:InterLinkPort/delete|
+| Status | InterLinkUrl:InterLinkPort/status|
+
+#### InterLink
+InterLink is the middleware in charge to translate Virtual Kubelet's HTTP calls in a standard, agnostic output understandable to whatever plugin, called in this context Sidecar, below him.  
+
 
 ### :wrench: Kustomizing your Virtual Kubelet
 

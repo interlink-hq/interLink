@@ -121,28 +121,28 @@ func main() {
 		DaemonPort: 10250,
 	}
 
+	var kubecfg *rest.Config
 	kubecfgFile, err := ioutil.ReadFile(os.Getenv("KUBECONFIG"))
 	if err != nil {
-		log.G(ctx).Fatal(err)
+		log.G(ctx).Error(err)
+		log.G(ctx).Info("Trying InCluster configuration")
+
+		kubecfg, err = rest.InClusterConfig()
+		if err != nil {
+			log.G(ctx).Fatal(err)
+		}
+	} else {
+		clientCfg, err := clientcmd.NewClientConfigFromBytes(kubecfgFile)
+		if err != nil {
+			log.G(ctx).Fatal(err)
+		}
+		kubecfg, err = clientCfg.ClientConfig()
+		if err != nil {
+			log.G(ctx).Fatal(err)
+		}
 	}
 
-	clientCfg, err := clientcmd.NewClientConfigFromBytes(kubecfgFile)
-	if err != nil {
-		log.G(ctx).Fatal(err)
-	}
-
-	var kubecfg *rest.Config
-
-	kubecfg, err = clientCfg.ClientConfig()
-	if err != nil {
-		log.G(ctx).Fatal(err)
-	}
-
-	// TODO: enable on demand
-	// kubecfg, err := rest.InClusterConfig()
-	// if err != nil {
-	//	log.G(ctx).Fatal(err)
-	// }
+	log.G(ctx).Debug(kubecfg)
 
 	localClient := kubernetes.NewForConfigOrDie(kubecfg)
 
