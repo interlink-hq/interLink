@@ -49,6 +49,7 @@ Content is based on:
   - [Going serious with InterLink and Sidecars](#going-serious-with-interlink-and-sidecars)
   - [:information\_source: InterLink Config file](#information_source-interlink-config-file)
   - [:information\_source: Environment Variables list](#information_source-environment-variables-list)
+- [Digging in the project](#digging-in-the-project)
 - [GitHub repository management rules](#github-repository-management-rules)
   - [Merge management](#merge-management)
   - [Protection on main branch](#protection-on-main-branch)
@@ -93,33 +94,6 @@ In `./kustomizations` you can then play with the different configuration and dep
     kubectl apply -f examples/busyecho_k8s.yaml -n vk
     ```
 You will see now a container starting up on your host, but managed by the docker compose interlink daemons.
-
-### Digging in the project
-
-As previous described, the whole project is split across 3 major components:
-- A Virtual Kubelet
-- The InterLink API
-- A Sidecar  
-But what actually happens inside every component?
-
-#### Virtual Kubelet
-The Virtual Kubelet is of course based on the latest Virtual Kubelet release, provided by Kubernetes itself. Being actually a Kubelet, every Pod submitted to the cluster is then registered to the Kubelet if taints and selectors actually match.  
-The first thing done by the Virtual Kubelet is attempting a communication with the InterLink API to send a ServiceAccount configuration, which will then be used by the InterLink API to retrieve from the cluster everything needed by Sidecars. If some error occurs in this phase, the Virtual Kubelet aborts its execution, since the configuration is crucial to InterLink's proper working.
-After that, the VK starts its actual work by managing any basic Pod operation, like adding, removing, quering, etc pods to/from the cluster.  
-While a Pod is being registered, upon a `kubectl apply -f yaml_file.yaml` command for example, the Kubelet sends a Create HTTP call to the InterLink API.
-If at least 1 Pod is registered to the Kubelet, every 5 seconds, a Status HTTP call to the InterLink API is automatically issued to check every Pod's health. If a job executed by a Pod is terminated (returning errors or not) or if a service supposed to run is not running anymore, the Pod is being removed from the Kubernetes Cluster by the Kubelet itself.  
-Another way to remove a running Pod is by manually executing a `kubectl delete pod pod_name` command from the CLI. This triggers the sending of Delete HTTP call to the InterLink API and the deletion of the Pod from the Kubernetes cluster.  
-Every HTTP call is performed as a REST standard call, specifing the interlink path, the interlink port and a fixed path, according to the call; for example  `http://localhost:3000/create` is a create call on a InterLink being run on the same VK machine on the port 3000. InterLink path and port can be specified in the InterLinkConfig.yaml file. The body of every call is the same: a marshalled (JSON type) list of Pod descriptors, stored in variables of type v1.Pod, a built-in go-client standard Kubernetes type.  
-A quick recap to the list of HTTP calls:
-| Call         | URL     |
-|--------------|-----------|
-| Create | InterLinkUrl:InterLinkPort/create|
-| Delete | InterLinkUrl:InterLinkPort/delete|
-| Status | InterLinkUrl:InterLinkPort/status|
-
-#### InterLink
-InterLink is the middleware in charge to translate Virtual Kubelet's HTTP calls in a standard, agnostic output understandable to whatever plugin, called in this context Sidecar, below him.  
-
 
 ### :wrench: Kustomizing your Virtual Kubelet
 
@@ -182,6 +156,66 @@ Here's the complete list of every customizable environment variable. When specif
 | TSOCKS | true or false, to use tsocks library allowing proxy networking. Working on Slurm sidecar at the moment. Overwrites Tsocks. |
 | TSOCKSPATH | path to your tsocks library. Overwrites TsocksPath. |
 
+## Digging in the project
+
+As previous described, the whole project is split across 3 major components:
+- A Virtual Kubelet
+- The InterLink API
+- Sidecars  
+But what actually happens inside every component?
+
+### Virtual Kubelet
+The Virtual Kubelet is of course based on the latest Virtual Kubelet release, provided by Kubernetes itself. Being actually a Kubelet, every Pod submitted to the cluster is then registered to the Kubelet if taints and selectors actually match.  
+The first thing done by the Virtual Kubelet is attempting a communication with the InterLink API to send a ServiceAccount configuration, which will then be used by the InterLink API to retrieve from the cluster everything is needed by Sidecars; this ServiceAccount has restricted permissions and can ONLY READ and retrieve informations from the registered Pods: no edit/creation/deletion is allowed. The configuration is then stored in a temporary file and sent in the HTTP request body. If some error(s) occurs in this phase, the Virtual Kubelet aborts its execution, since the configuration is crucial to InterLink's proper working.
+After that, the VK starts its actual work by managing any basic Pod operation, like adding, removing, quering, etc Pods to/from the cluster.  
+While a Pod is being registered, upon a `kubectl apply -f yaml_file.yaml` command for example, the Kubelet sends a Create HTTP call to the InterLink API.  
+If at least 1 Pod is registered to the Kubelet, every 5 seconds, a Status HTTP call to the InterLink API is automatically issued to check every Pod's health. If a job executed by a Pod is terminated (returning errors or not) or if a service supposed to run is not running anymore, the Pod is being removed from the Kubernetes Cluster by the Kubelet itself.  
+Another way to remove a running Pod is by manually executing a `kubectl delete pod pod_name` command from the CLI. This triggers the sending of a Delete HTTP call to the InterLink API and the deletion of the Pod from the Kubernetes cluster.  
+Every HTTP call is performed as a REST standard call, specifing the interlink path, the interlink port and a fixed path, according to the call; for example  `http://localhost:3000/create` is a create call on a InterLink being run on the same VK machine on the port 3000. InterLink path and port can be specified in the InterLinkConfig.yaml file. The body of every call is the same: a marshalled (JSON type) list of Pod descriptors, which are stored in variables of type v1.Pod, a built-in go-client standard Kubernetes type.  
+
+A quick recap to the list of outgoing HTTP calls:
+| Call          | URL                                   |
+|---------------| :------------------------------------:|
+| SetKubeConfig | InterLinkUrl:InterLinkPort/setKubeCFG |
+| Create        |   InterLinkUrl:InterLinkPort/create   |
+| Delete        |   InterLinkUrl:InterLinkPort/delete   |
+| Status        |   InterLinkUrl:InterLinkPort/status   |
+
+### InterLink
+InterLink is the middleware in charge to translate Virtual Kubelet's HTTP calls in a standard, agnostic outputs understandable to whatever plugin, called in this context Sidecar, below him. To properly work, a working Kubeconfig must be provided by the Virtual Kubelet.  
+Upon the receiving of a call, InterLink usually forwards that call to the sidecar (at least for now), handling any received error, except for the Create call and the SetKubeConfig call, so let's dig it in a bit:
+- SetKubeConfig call:  
+This is the first call sent by the Virtual Kubelet; VK performs some operations in its local machine, in order to retrieve a ServiceAccount. After receiving the configuration over the HTTP request body, it is stored inside /tmp/.kube/config and then the environment variable KUBECONFIG is set to that path, to allow InterLink to access the right Kubernetes cluster. From now, InterLink will look at the same K8S cluster used by the Virtual Kubelet. If any error(s) occur, InterLink panics (since it cannot operate without a working kubeconfig) and the error is forwarded to the VK.  
+
+- Create call:  
+That's the most complex call, for the moment. Everytime a Pod is registered to the Kubernetes cluster, the VK sends a Create Call to InterLink. In this phase, InterLink can retrieve all ConfigMaps, Secrets and EmpyDirs data (if the ExportPodData is set to true in the InterLinkConfig.yaml file); retrieving data means scanning every container in every single submitted Pod, looking for Secrets, ConfigMaps and, eventually, EmptyDirs. Once they have been found, the cluster is again queried, using those names, to retrieve their values. All of these values are then assembled together is a single struct of type RetrievedPodData; this struct contains the standard v1.Pod (defined by Kubernetes go-client standard library) and an array of custom sub-struct containing a container name and every Secret/ConfigMap/EmptyDir related to that specific container. The parent struct is then marshalled into a JSON and sent over the HTTP request body to the Sidecar.  
+
+- Status/Delete call:  
+The received body is just forwarded to the Sidecar and any error is then handled and forwarded to the VK.
+
+A quick recap to the list of HTTP calls:
+
+| Call          |             Incoming URL              |          Outgoing URL         |
+|---------------| :-----------------------------------: |:-----------------------------:|
+| SetKubeConfig | InterLinkUrl:InterLinkPort/setKubeCFG |                               |
+| Create        |   InterLinkUrl:InterLinkPort/create   | SidecarURL:SidecarPort/create |
+| Delete        |   InterLinkUrl:InterLinkPort/delete   | SidecarURL:SidecarPort/delete |
+| Status        |   InterLinkUrl:InterLinkPort/status   | SidecarURL:SidecarPort/status |
+
+### Sidecars
+Sidecars are modular plugins able to talk to InterLink API and, so, to the Kubernetes cluster. They performs specific operations based on what the actual plugin is, but the idea behind them is to submit a Pod on the cluster and, according to annotations, mountpoints, secrets, etc, deploy specific services.
+Let's take the Docker Sidecar from the quick start tutorial for example. Submitting a Pod to the cluster means the Sidecar will receive from InterLink the list of all related Secrets, ConfigMaps, EmptyDirs and the description of the Pod itself. Using these informations, the Docker plugin will be able to run a specific container in the Docker environment, managing volume mounts and choosing the appropriate image for the container; the Slurm Sidecar will instead generate a script to be run in the Slurm HPC environment: starting from the same Pod, we will have different behaviours according to the running Sidecar, but requests and aknlowdgements from/to the InterLink API will be standard. Each Sidecar accepts the three standard outgoing calls we described in the InterLink API.
+
+#### Docker Sidecar
+Despite the InterLink API, there is no outgoing call here, since it's the final endpoint of the chain (like every Sidecar). Let's see every operation performed upon the receving of each call:  
+- Create call:  
+The received JSON is unmarshaled into an array of RetrievedPodData (described in the types.go of the common package). At this point, iterating over the array allows us to run a `docker run *arguments*` command for each received container, handling mountpoints for Secrets, ConfigMaps and EmptyDirs, if the appropriate flag is set in the config file.  
+The majority of the function aims to define a string to automatically replace the `*arguments*` in the previous statement.
+Handling mountpoints actually means creating files and directories reflecting Secrets/ConfigMaps structures; for example, a ConfigMap named "myconfigmap" and having a key named "key1" of value "value1" will generate directories, within a parent directory having the PodID denomination, in the form of ConfigMaps/myconfigmap with a file called "key1" containing the string "value1". Same applies to Secrets and EmptyDirs. Later, using a bind mount, these files will be proper mounted in the container.  
+After mountpoints, commands and relative arguments are also appended to the docker run string.  
+Finally, the docker run command is executed and the container is started.
+If an error occurs, the procedure is aborted and the error is returned to the InterLink API, which will return an error to the VK.
+
 ## GitHub repository management rules
 
 All changes should go through Pull Requests.
@@ -203,3 +237,4 @@ To be configured on the repository settings.
   - Other checks as available and relevant
   - Require branches to be up to date before merging
 - Include administrators
+

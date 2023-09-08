@@ -157,7 +157,7 @@ func NewServiceAccount() error {
 		Shell:   true,
 	}
 	execResult, _ := shell.Execute()
-	if execResult.Stderr != "" || execResult.Stdout != "" {
+	if execResult.Stderr != "" {
 		log.G(context.Background()).Error("Stderr: " + execResult.Stderr + "\nStdout: " + execResult.Stdout)
 		return errors.New(execResult.Stderr)
 	}
