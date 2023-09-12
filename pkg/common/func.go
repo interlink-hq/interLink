@@ -11,6 +11,8 @@ import (
 	"os"
 	"time"
 
+	"k8s.io/client-go/tools/clientcmd"
+
 	"github.com/containerd/containerd/log"
 
 	exec "github.com/alexellis/go-execute/pkg/v1"
@@ -150,6 +152,7 @@ func NewServiceAccount() error {
 		return err
 	}
 
+	//executing the script to actually retrieve a valid service account
 	cmd := []string{path + "getSAConfig.sh"}
 	shell := exec.ExecTask{
 		Command: "sh",
@@ -162,25 +165,24 @@ func NewServiceAccount() error {
 		return errors.New(execResult.Stderr)
 	}
 
-	temp, err := os.ReadFile(path + "kubeconfig-sa")
+	//checking if the config is valid
+	_, err = clientcmd.LoadFromFile(path + "kubeconfig-sa")
 	if err != nil {
 		log.G(context.Background()).Error(err)
 		return err
 	}
 
-	sa = string(temp)
+	config, err := os.ReadFile(path + "kubeconfig-sa")
+	if err != nil {
+		log.G(context.Background()).Error(err)
+		return err
+	}
+
+	sa = string(config)
 	os.Remove(path + "getSAConfig.sh")
 	os.Remove(path + "kubeconfig-sa")
 
-	requestCounter := 0
-
 	for {
-
-		if requestCounter == 20 {
-			log.G(context.Background()).Error("Service Account timed out, exiting")
-			return errors.New("Service Account timed out, exiting")
-		}
-
 		var returnValue, _ = json.Marshal("Error")
 		reader := bytes.NewReader([]byte(sa))
 		req, err := http.NewRequest(http.MethodPost, InterLinkConfigInst.Interlinkurl+":"+InterLinkConfigInst.Interlinkport+"/setKubeCFG", reader)
@@ -204,8 +206,6 @@ func NewServiceAccount() error {
 			returnValue, _ = ioutil.ReadAll(resp.Body)
 		}
 
-		requestCounter++
-
 		if resp.StatusCode == http.StatusOK {
 			break
 		} else {
@@ -214,4 +214,30 @@ func NewServiceAccount() error {
 	}
 
 	return nil
+}
+
+func PingInterLink() (error, bool) {
+	req, err := http.NewRequest(http.MethodPost, InterLinkConfigInst.Interlinkurl+":"+InterLinkConfigInst.Interlinkport+"/ping", nil)
+
+	if err != nil {
+		log.G(context.Background()).Error(err)
+	}
+
+	token, err := os.ReadFile(InterLinkConfigInst.VKTokenFile) // just pass the file name
+	if err != nil {
+		log.G(context.Background()).Error(err)
+		return err, false
+	}
+	req.Header.Add("Authorization", "Bearer "+string(token))
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		return err, false
+	}
+
+	if resp.StatusCode == http.StatusOK {
+		return nil, true
+	} else {
+		log.G(context.Background()).Error("Error " + err.Error() + " " + fmt.Sprint(resp.StatusCode))
+		return nil, false
+	}
 }

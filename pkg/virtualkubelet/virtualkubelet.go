@@ -154,12 +154,6 @@ func NewProvider(providerConfig, nodeName, operatingSystem string, internalIP st
 func loadConfig(providerConfig, nodeName string, ctx context.Context) (config VirtualKubeletConfig, err error) {
 
 	commonIL.NewInterLinkConfig()
-	err = commonIL.NewServiceAccount()
-
-	if err != nil {
-		log.G(ctx).Fatal(err)
-	}
-
 	log.G(context.Background()).Info("Loading Virtual Kubelet config from " + providerConfig)
 	data, err := ioutil.ReadFile(providerConfig)
 	if err != nil {

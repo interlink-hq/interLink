@@ -14,7 +14,7 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 )
 
-var JID []JidStruct
+var JID []string
 
 func SubmitHandler(w http.ResponseWriter, r *http.Request) {
 	log.G(Ctx).Info("Slurm Sidecar: received Submit call")
@@ -116,11 +116,17 @@ func SubmitHandler(w http.ResponseWriter, r *http.Request) {
 				os.RemoveAll(commonIL.InterLinkConfigInst.DataRootFolder + data.Pod.Namespace + "-" + string(data.Pod.UID))
 				return
 			}
-			JID = append(JID, JidStruct{JID: string(jid), Pod: data.Pod})
+			JID = append(JID, string(jid))
 		}
 	}
 
-	w.Write([]byte(nil))
+	w.WriteHeader(statusCode)
+
+	if statusCode != http.StatusOK {
+		w.Write([]byte("Some errors occurred while creating containers. Check Slurm Sidecar's logs"))
+	} else {
+		w.Write([]byte("Containers created"))
+	}
 }
 
 func StopHandler(w http.ResponseWriter, r *http.Request) {
@@ -162,6 +168,13 @@ func StopHandler(w http.ResponseWriter, r *http.Request) {
 				err = os.RemoveAll(commonIL.InterLinkConfigInst.DataRootFolder + pod.Namespace + "-" + string(pod.UID))
 			}
 		}
+	}
+
+	w.WriteHeader(statusCode)
+	if statusCode != http.StatusOK {
+		w.Write([]byte("Some errors occurred deleting containers. Check Slurm Sidecar's logs"))
+	} else {
+		w.Write([]byte("All containers for submitted Pods have been deleted"))
 	}
 }
 
@@ -210,7 +223,7 @@ func StatusHandler(w http.ResponseWriter, r *http.Request) {
 		var flag = false
 		for _, jid := range JID {
 
-			cmd := []string{"-c", "squeue --me | grep " + jid.JID}
+			cmd := []string{"-c", "squeue --me | grep " + jid}
 			shell := exec.ExecTask{
 				Command: "bash",
 				Args:    cmd,
@@ -248,5 +261,9 @@ func StatusHandler(w http.ResponseWriter, r *http.Request) {
 	}
 
 	w.WriteHeader(statusCode)
-	w.Write(bodyBytes)
+	if statusCode != http.StatusOK {
+		w.Write([]byte("Some errors occurred deleting containers. Check Docker Sidecar's logs"))
+	} else {
+		w.Write([]byte("All containers for submitted Pods have been deleted"))
+	}
 }

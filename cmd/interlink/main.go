@@ -2,7 +2,6 @@ package main
 
 import (
 	"context"
-	"fmt"
 	"net/http"
 
 	commonIL "github.com/intertwin-eu/interlink/pkg/common"
@@ -26,14 +25,14 @@ func main() {
 
 	commonIL.NewInterLinkConfig()
 
+	log.G(interlink.Ctx).Info(commonIL.InterLinkConfigInst)
+
 	mutex := http.NewServeMux()
 	mutex.HandleFunc("/status", interlink.StatusHandler)
 	mutex.HandleFunc("/create", interlink.CreateHandler)
 	mutex.HandleFunc("/delete", interlink.DeleteHandler)
 	mutex.HandleFunc("/setKubeCFG", interlink.SetKubeCFGHandler)
-
-	fmt.Println(commonIL.InterLinkConfigInst)
-
+	mutex.HandleFunc("/ping", interlink.Ping)
 	err := http.ListenAndServe(":"+commonIL.InterLinkConfigInst.Interlinkport, mutex)
 	if err != nil {
 		log.G(interlink.Ctx).Fatal(err)

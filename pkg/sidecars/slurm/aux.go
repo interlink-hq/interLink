@@ -20,11 +20,6 @@ import (
 	"k8s.io/client-go/rest"
 )
 
-type JidStruct struct {
-	JID string
-	Pod v1.Pod
-}
-
 var prefix string
 var Clientset *kubernetes.Clientset
 var Ctx context.Context
@@ -258,7 +253,7 @@ func handle_jid(container v1.Container, output string, pod v1.Pod) error {
 		log.G(Ctx).Error(err)
 		return err
 	}
-	JID = append(JID, JidStruct{JID: jid[1], Pod: pod})
+	JID = append(JID, jid[1])
 
 	return nil
 }

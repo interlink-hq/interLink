@@ -40,6 +40,7 @@ import (
 
 	// "net/http"
 
+	commonIL "github.com/intertwin-eu/interlink/pkg/common"
 	"github.com/intertwin-eu/interlink/pkg/virtualkubelet"
 	"github.com/sirupsen/logrus"
 	"github.com/virtual-kubelet/virtual-kubelet/log"
@@ -145,6 +146,31 @@ func main() {
 	localClient := kubernetes.NewForConfigOrDie(kubecfg)
 
 	nodeProvider, err := virtualkubelet.NewProvider(cfg.ConfigPath, cfg.NodeName, cfg.OperatingSystem, cfg.InternalIP, cfg.DaemonPort, ctx)
+	go func() {
+
+		ILbindNow := false
+		ILbindOld := false
+
+		for {
+			err, ILbindNow = commonIL.PingInterLink()
+
+			if err != nil {
+				log.G(ctx).Error(err)
+			}
+
+			if ILbindNow == true && ILbindOld == false {
+				err = commonIL.NewServiceAccount()
+				if err != nil {
+					log.G(ctx).Fatal(err)
+				}
+			}
+
+			ILbindOld = ILbindNow
+			time.Sleep(time.Second * 10)
+
+		}
+	}()
+
 	if err != nil {
 		log.G(ctx).Fatal(err)
 	}
