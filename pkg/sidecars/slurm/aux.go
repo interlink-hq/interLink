@@ -189,7 +189,6 @@ func produce_slurm_script(container v1.Container, metadata metav1.ObjectMeta, co
 	sbatch_macros := "#!/usr/bin/bash" +
 		"\n#SBATCH --job-name=" + container.Name +
 		sbatch_flags_as_string +
-		"\npwd; hostname; date" +
 		prefix +
 		"\n"
 
