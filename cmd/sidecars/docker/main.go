@@ -28,6 +28,7 @@ func main() {
 	mutex.HandleFunc("/status", docker.StatusHandler)
 	mutex.HandleFunc("/create", docker.CreateHandler)
 	mutex.HandleFunc("/delete", docker.DeleteHandler)
+	mutex.HandleFunc("/getLogs", docker.GetLogsHandler)
 	err := http.ListenAndServe(":"+commonIL.InterLinkConfigInst.Sidecarport, mutex)
 
 	if err != nil {

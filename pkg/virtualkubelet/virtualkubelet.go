@@ -5,7 +5,6 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
-	"io/ioutil"
 	"math/rand"
 	"os"
 	"strconv"
@@ -157,7 +156,7 @@ func loadConfig(providerConfig, nodeName string, ctx context.Context) (config Vi
 
 	commonIL.NewInterLinkConfig()
 	log.G(context.Background()).Info("Loading Virtual Kubelet config from " + providerConfig)
-	data, err := ioutil.ReadFile(providerConfig)
+	data, err := os.ReadFile(providerConfig)
 	if err != nil {
 		return config, err
 	}
