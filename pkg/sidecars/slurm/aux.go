@@ -120,9 +120,7 @@ func prepare_mounts(container v1.Container, data []commonIL.RetrievedPodData) ([
 	}
 
 	path_hardcoded := ("/cvmfs/grid.cern.ch/etc/grid-security:/etc/grid-security" + "," +
-		"/cvmfs:/cvmfs" + "," +
-		"/exa5/scratch/user/spigad" + "," +
-		"/exa5/scratch/user/spigad/CMS/SITECONF" + ",")
+		"/cvmfs:/cvmfs" + ",")
 	mount_data += path_hardcoded
 	if last := len(mount_data) - 1; last >= 0 && mount_data[last] == ',' {
 		mount_data = mount_data[:last]
@@ -135,7 +133,7 @@ func produce_slurm_script(container v1.Container, metadata metav1.ObjectMeta, co
 	path := "/tmp/" + container.Name + ".sh"
 	postfix := ""
 
-	err := os.Remove(path)
+	err := os.RemoveAll(path)
 	if err != nil {
 		log.G(Ctx).Error(err)
 		return "", err
@@ -363,7 +361,7 @@ func mountData(container v1.Container, pod v1.Pod, data interface{}) ([]string, 
 								err = os.WriteFile(fullPath, []byte(v), mode)
 								if err != nil {
 									log.G(Ctx).Errorf("Could not write ConfigMap file %s", fullPath)
-									os.Remove(fullPath)
+									os.RemoveAll(fullPath)
 									if err != nil {
 										log.G(Ctx).Error("Unable to remove file " + fullPath)
 										return nil, nil, err
@@ -438,7 +436,7 @@ func mountData(container v1.Container, pod v1.Pod, data interface{}) ([]string, 
 								os.WriteFile(fullPath, v, mode)
 								if err != nil {
 									log.G(Ctx).Errorf("Could not write Secret file %s", fullPath)
-									err = os.Remove(fullPath)
+									err = os.RemoveAll(fullPath)
 									if err != nil {
 										log.G(Ctx).Error("Unable to remove file " + fullPath)
 										return nil, nil, err
