@@ -140,7 +140,7 @@ func mountData(container v1.Container, pod v1.Pod, data interface{}) ([]string, 
 							os.WriteFile(fullPath, []byte(v), mode)
 							if err != nil {
 								log.G(Ctx).Errorf("Could not write ConfigMap file %s", fullPath)
-								err = os.Remove(fullPath)
+								err = os.RemoveAll(fullPath)
 								if err != nil {
 									log.G(Ctx).Error("Unable to remove file " + fullPath)
 								}
@@ -198,7 +198,7 @@ func mountData(container v1.Container, pod v1.Pod, data interface{}) ([]string, 
 							os.WriteFile(fullPath, v, mode)
 							if err != nil {
 								log.G(Ctx).Errorf("Could not write Secret file %s", fullPath)
-								err = os.Remove(fullPath)
+								err = os.RemoveAll(fullPath)
 								if err != nil {
 									log.G(Ctx).Error("Unable to remove file " + fullPath)
 								}
