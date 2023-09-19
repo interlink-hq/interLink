@@ -183,7 +183,6 @@ func checkPodsStatus(p *VirtualKubeletProvider, ctx context.Context, token strin
 	} else if returnVal != nil {
 		err = json.Unmarshal(returnVal, &ret)
 		if err != nil {
-			log.G(ctx).Error(err)
 			return err
 		}
 

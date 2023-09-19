@@ -7,9 +7,10 @@ SbatchPath: "/usr/bin/sbatch"
 ScancelPath: "/usr/bin/scancel"
 CommandPrefix: ""
 ExportPodData: true
-DataRootFolder: ".knoc/"
-ServiceAccount: "jul-vk"
+DataRootFolder: "/tmp/.vk/"
+ServiceAccount: "knoc"
 Namespace: "vk"
 Tsocks: false
 TsocksPath: "$WORK/tsocks-1.8beta5+ds1/libtsocks.so"
 TsocksLoginNode: "login01"
+BashPath: "/bin/bash"

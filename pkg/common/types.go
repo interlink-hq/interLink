@@ -56,6 +56,7 @@ type InterLinkConfig struct {
 	Tsockspath     string `yaml:"TsocksPath"`
 	Tsocksconfig   string `yaml:"TsocksConfig"`
 	Tsockslogin    string `yaml:"TsocksLoginNode"`
+	BashPath       string `yaml:"BashPath"`
 	set            bool
 }
 

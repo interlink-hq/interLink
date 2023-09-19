@@ -24,6 +24,7 @@ var prefix string
 var Clientset *kubernetes.Clientset
 var Ctx context.Context
 var kubecfg *rest.Config
+var JID []string
 
 func prepare_envs(container v1.Container) []string {
 	log.G(Ctx).Info("-- Appending envs")
@@ -36,6 +37,9 @@ func prepare_envs(container v1.Container) []string {
 	}
 	if last := len(env_data) - 1; last >= 0 && env_data[last] == ',' {
 		env_data = env_data[:last]
+	}
+	if env_data == "" {
+		env = []string{}
 	}
 	env = append(env, env_data)
 
@@ -120,9 +124,7 @@ func prepare_mounts(container v1.Container, data []commonIL.RetrievedPodData) ([
 	}
 
 	path_hardcoded := ("/cvmfs/grid.cern.ch/etc/grid-security:/etc/grid-security" + "," +
-		"/cvmfs:/cvmfs" + "," +
-		"/exa5/scratch/user/spigad" + "," +
-		"/exa5/scratch/user/spigad/CMS/SITECONF" + ",")
+		"/cvmfs:/cvmfs" + ",")
 	mount_data += path_hardcoded
 	if last := len(mount_data) - 1; last >= 0 && mount_data[last] == ',' {
 		mount_data = mount_data[:last]
@@ -130,9 +132,9 @@ func prepare_mounts(container v1.Container, data []commonIL.RetrievedPodData) ([
 	return append(mount, mount_data), nil
 }
 
-func produce_slurm_script(container v1.Container, metadata metav1.ObjectMeta, command []string) (string, error) {
+func produce_slurm_script(container v1.Container, podName string, metadata metav1.ObjectMeta, command []string) (string, error) {
 	log.G(Ctx).Info("-- Creating file for the Slurm script")
-	path := "/tmp/" + container.Name + ".sh"
+	path := "/tmp/" + podName + "_" + container.Name + ".sh"
 	postfix := ""
 
 	err := os.RemoveAll(path)
@@ -180,16 +182,16 @@ func produce_slurm_script(container v1.Container, metadata metav1.ObjectMeta, co
 
 		prefix += "\nssh -4 -N -D $port " + commonIL.InterLinkConfigInst.Tsockslogin + " &"
 		prefix += "\nSSH_PID=$!"
-		prefix += "\necho \"local = 10.0.0.0/255.0.0.0 \nserver = 127.0.0.1 \nserver_port = $port\" >> .tmp/" + container.Name + "_tsocks.conf"
-		prefix += "\nexport TSOCKS_CONF_FILE=.tmp/" + container.Name + "_tsocks.conf && export LD_PRELOAD=" + commonIL.InterLinkConfigInst.Tsockspath
+		prefix += "\necho \"local = 10.0.0.0/255.0.0.0 \nserver = 127.0.0.1 \nserver_port = $port\" >> .tmp/" + podName + "_" + container.Name + "_tsocks.conf"
+		prefix += "\nexport TSOCKS_CONF_FILE=.tmp/" + podName + "_" + container.Name + "_tsocks.conf && export LD_PRELOAD=" + commonIL.InterLinkConfigInst.Tsockspath
 	}
 
 	if commonIL.InterLinkConfigInst.Commandprefix != "" {
 		prefix += "\n" + commonIL.InterLinkConfigInst.Commandprefix
 	}
 
-	sbatch_macros := "#!/bin/bash" +
-		"\n#SBATCH --job-name=" + container.Name +
+	sbatch_macros := "#!" + commonIL.InterLinkConfigInst.BashPath +
+		"\n#SBATCH --job-name=" + podName + "_" + container.Name +
 		sbatch_flags_as_string +
 		"\n. ~/.bash_profile" +
 		//"\nmodule load singularity" +
@@ -201,7 +203,7 @@ func produce_slurm_script(container v1.Container, metadata metav1.ObjectMeta, co
 
 	log.G(Ctx).Debug("--- Writing file")
 
-	_, err = f.WriteString(sbatch_macros + "\n" + strings.Join(command[:], " ") + " >> " + commonIL.InterLinkConfigInst.DataRootFolder + container.Name + ".out 2>> " + commonIL.InterLinkConfigInst.DataRootFolder + container.Name + ".err \n echo $? > " + commonIL.InterLinkConfigInst.DataRootFolder + container.Name + ".status" + postfix)
+	_, err = f.WriteString(sbatch_macros + "\n" + strings.Join(command[:], " ") + " >> " + commonIL.InterLinkConfigInst.DataRootFolder + podName + "_" + container.Name + ".out 2>> " + commonIL.InterLinkConfigInst.DataRootFolder + podName + "_" + container.Name + ".err \n echo $? > " + commonIL.InterLinkConfigInst.DataRootFolder + podName + "_" + container.Name + ".status" + postfix)
 	defer f.Close()
 
 	if err != nil {
@@ -239,10 +241,10 @@ func slurm_batch_submit(path string) (string, error) {
 	return string(execReturn.Stdout), nil
 }
 
-func handle_jid(container v1.Container, output string, pod v1.Pod) error {
+func handle_jid(container v1.Container, podName string, output string, pod v1.Pod) error {
 	r := regexp.MustCompile(`Submitted batch job (?P<jid>\d+)`)
 	jid := r.FindStringSubmatch(output)
-	f, err := os.Create(commonIL.InterLinkConfigInst.DataRootFolder + container.Name + ".jid")
+	f, err := os.Create(commonIL.InterLinkConfigInst.DataRootFolder + podName + "_" + container.Name + ".jid")
 	if err != nil {
 		log.G(Ctx).Error("Can't create jid_file")
 		return err
@@ -253,14 +255,12 @@ func handle_jid(container v1.Container, output string, pod v1.Pod) error {
 		log.G(Ctx).Error(err)
 		return err
 	}
-	JID = append(JID, jid[1])
-
 	return nil
 }
 
-func delete_container(container v1.Container) error {
+func delete_container(container v1.Container, podName string) error {
 	log.G(Ctx).Info("- Deleting container " + container.Name)
-	data, err := os.ReadFile(commonIL.InterLinkConfigInst.DataRootFolder + container.Name + ".jid")
+	data, err := os.ReadFile(commonIL.InterLinkConfigInst.DataRootFolder + podName + "_" + container.Name + ".jid")
 	if err != nil {
 		log.G(Ctx).Error(err)
 		return err
@@ -277,11 +277,11 @@ func delete_container(container v1.Container) error {
 	} else {
 		log.G(Ctx).Info("- Deleted job ", jid)
 	}
-	exec.Command("rm", "-f ", commonIL.InterLinkConfigInst.DataRootFolder+container.Name+".out")
-	exec.Command("rm", "-f ", commonIL.InterLinkConfigInst.DataRootFolder+container.Name+".err")
-	exec.Command("rm", "-f ", commonIL.InterLinkConfigInst.DataRootFolder+container.Name+".status")
-	exec.Command("rm", "-f ", commonIL.InterLinkConfigInst.DataRootFolder+container.Name+".jid")
-	exec.Command("rm", "-rf", commonIL.InterLinkConfigInst.DataRootFolder+container.Name)
+	exec.Command("rm", "-f ", commonIL.InterLinkConfigInst.DataRootFolder+podName+"_"+container.Name+".out")
+	exec.Command("rm", "-f ", commonIL.InterLinkConfigInst.DataRootFolder+podName+"_"+container.Name+".err")
+	exec.Command("rm", "-f ", commonIL.InterLinkConfigInst.DataRootFolder+podName+"_"+container.Name+".status")
+	exec.Command("rm", "-f ", commonIL.InterLinkConfigInst.DataRootFolder+podName+"_"+container.Name+".jid")
+	exec.Command("rm", "-rf", commonIL.InterLinkConfigInst.DataRootFolder+podName+"_"+container.Name)
 	return nil
 }
 
