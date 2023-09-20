@@ -76,7 +76,7 @@ func SubmitHandler(w http.ResponseWriter, r *http.Request) {
 			singularity_command = append(singularity_command, container.Command...)
 			singularity_command = append(singularity_command, container.Args...)
 
-			path, err := produce_slurm_script(container, data.Pod.Name, metadata, singularity_command)
+			path, err := produce_slurm_script(container, string(data.Pod.UID), metadata, singularity_command)
 			if err != nil {
 				statusCode = http.StatusInternalServerError
 				w.WriteHeader(statusCode)
@@ -94,18 +94,18 @@ func SubmitHandler(w http.ResponseWriter, r *http.Request) {
 				os.RemoveAll(commonIL.InterLinkConfigInst.DataRootFolder + data.Pod.Namespace + "-" + string(data.Pod.UID))
 				return
 			}
-			err = handle_jid(container, data.Pod.Name, out, data.Pod)
+			err = handle_jid(container, string(data.Pod.UID), out, data.Pod)
 			if err != nil {
 				statusCode = http.StatusInternalServerError
 				w.WriteHeader(statusCode)
 				w.Write([]byte("Error handling JID. Check Slurm Sidecar's logs"))
 				log.G(Ctx).Error(err)
 				os.RemoveAll(commonIL.InterLinkConfigInst.DataRootFolder + data.Pod.Namespace + "-" + string(data.Pod.UID))
-				err = delete_container(container, data.Pod.Name)
+				err = delete_container(container, string(data.Pod.UID))
 				return
 			}
 
-			jid, err := os.ReadFile(commonIL.InterLinkConfigInst.DataRootFolder + data.Pod.Name + "_" + container.Name + ".jid")
+			jid, err := os.ReadFile(commonIL.InterLinkConfigInst.DataRootFolder + string(data.Pod.UID) + "_" + container.Name + ".jid")
 			if err != nil {
 				statusCode = http.StatusInternalServerError
 				w.WriteHeader(statusCode)
@@ -114,7 +114,17 @@ func SubmitHandler(w http.ResponseWriter, r *http.Request) {
 				os.RemoveAll(commonIL.InterLinkConfigInst.DataRootFolder + data.Pod.Namespace + "-" + string(data.Pod.UID))
 				return
 			}
-			JID = append(JID, string(jid))
+
+			flag := true
+			for _, JID := range JIDs {
+				if JID.PodName == data.Pod.Name {
+					flag = false
+					JID.JIDs = append(JID.JIDs, string(jid))
+				}
+			}
+			if flag {
+				JIDs = append(JIDs, commonIL.JidStruct{PodName: data.Pod.Name, JIDs: []string{string(jid)}})
+			}
 		}
 	}
 

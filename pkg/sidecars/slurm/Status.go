@@ -55,25 +55,29 @@ func StatusHandler(w http.ResponseWriter, r *http.Request) {
 
 	for _, pod := range req {
 		var flag = false
-		for _, jid := range JID {
+		for _, JID := range JIDs {
+			for _, jid := range JID.JIDs {
 
-			cmd := []string{"-c", "squeue --me | grep " + jid}
-			shell := exec.ExecTask{
-				Command: "bash",
-				Args:    cmd,
-				Shell:   true,
-			}
-			execReturn, _ := shell.Execute()
+				cmd := []string{"-c", "squeue --me | grep " + jid}
+				shell := exec.ExecTask{
+					Command: "bash",
+					Args:    cmd,
+					Shell:   true,
+				}
+				execReturn, _ := shell.Execute()
 
-			if execReturn.Stderr != "" {
-				statusCode = http.StatusInternalServerError
-				w.WriteHeader(statusCode)
-				w.Write([]byte("Error executing Squeue. Check Slurm Sidecar's logs"))
-				log.G(Ctx).Error("Unable to retrieve job status: " + execReturn.Stderr)
-				return
-			} else if execReturn.Stdout != "" {
-				flag = true
-				log.G(Ctx).Info(execReturn.Stdout)
+				if execReturn.Stderr != "" {
+					statusCode = http.StatusInternalServerError
+					w.WriteHeader(statusCode)
+					w.Write([]byte("Error executing Squeue. Check Slurm Sidecar's logs"))
+					log.G(Ctx).Error("Unable to retrieve job status: " + execReturn.Stderr)
+					return
+				} else if execReturn.Stdout != "" {
+					flag = true
+					log.G(Ctx).Info(execReturn.Stdout)
+				} else if execReturn.Stdout == "" {
+					removeJID(jid)
+				}
 			}
 		}
 

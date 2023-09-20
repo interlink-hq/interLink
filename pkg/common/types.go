@@ -85,3 +85,8 @@ type LogStruct struct {
 	ContainerName string           `json:"ContainerName"`
 	Opts          ContainerLogOpts `json:"Opts"`
 }
+
+type JidStruct struct {
+	PodName string   `json:"PodName"`
+	JIDs    []string `json:"JIDs"`
+}
