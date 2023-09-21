@@ -10,6 +10,7 @@ token
 secret.yaml
 configmap.yaml
 kubeconfig.yaml
+kubeconfigVEGA.yaml
 serviceaccount.yaml
 .knoc
 .tmp

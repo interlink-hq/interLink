@@ -38,7 +38,7 @@ func StopHandler(w http.ResponseWriter, r *http.Request) {
 		containers := pod.Spec.Containers
 
 		for _, container := range containers {
-			err = delete_container(container, pod.Name)
+			err = delete_container(container, string(pod.UID))
 			if err != nil {
 				statusCode = http.StatusInternalServerError
 				w.WriteHeader(statusCode)
