@@ -8,7 +8,7 @@ spec:
   restartPolicy: OnFailure 
   containers:
   #- image: /cvmfs/unpacked.cern.ch/registry.hub.docker.com/cmssw/el8:x86_64
-  - image: busybox 
+  - image: docker://busybox:latest
     volumeMounts:
     - name: foo
       mountPath: "/etc/foo"

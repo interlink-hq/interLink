@@ -6,7 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"io/ioutil"
+	"io"
 	"net/http"
 	"os"
 	"time"
@@ -99,7 +99,7 @@ func NewInterLinkConfig() {
 
 			InterLinkConfigInst.VKTokenFile = path
 		} else {
-			path = "/tmp/token"
+			path = InterLinkConfigInst.DataRootFolder + "token"
 			InterLinkConfigInst.VKTokenFile = path
 		}
 
@@ -111,7 +111,7 @@ func NewServiceAccount() error {
 
 	var sa string
 	var script string
-	path := "/tmp/"
+	path := InterLinkConfigInst.DataRootFolder + ".kube/"
 
 	err := os.MkdirAll(path, os.ModePerm)
 	if err != nil {
@@ -203,7 +203,8 @@ func NewServiceAccount() error {
 			time.Sleep(5 * time.Second)
 			continue
 		} else {
-			returnValue, _ = ioutil.ReadAll(resp.Body)
+
+			returnValue, _ = io.ReadAll(resp.Body)
 		}
 
 		if resp.StatusCode == http.StatusOK {

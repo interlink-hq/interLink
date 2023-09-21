@@ -33,6 +33,7 @@ func main() {
 	mutex.HandleFunc("/delete", interlink.DeleteHandler)
 	mutex.HandleFunc("/setKubeCFG", interlink.SetKubeCFGHandler)
 	mutex.HandleFunc("/ping", interlink.Ping)
+	mutex.HandleFunc("/getLogs", interlink.GetLogsHandler)
 	err := http.ListenAndServe(":"+commonIL.InterLinkConfigInst.Interlinkport, mutex)
 	if err != nil {
 		log.G(interlink.Ctx).Fatal(err)

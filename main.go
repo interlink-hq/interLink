@@ -19,10 +19,11 @@ import (
 	"context"
 	"crypto/tls"
 	"fmt"
-	"io"
 	"io/ioutil"
+	"net"
 	"os"
 	"path"
+	"strconv"
 	"time"
 
 	// "k8s.io/client-go/rest"
@@ -49,28 +50,12 @@ import (
 	"github.com/virtual-kubelet/virtual-kubelet/node/api"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/client-go/informers"
-	stats "k8s.io/kubernetes/pkg/kubelet/apis/stats/v1alpha1"
 )
 
 func PodInformerFilter(node string) informers.SharedInformerOption {
 	return informers.WithTweakListOptions(func(options *metav1.ListOptions) {
 		options.FieldSelector = fields.OneTermEqualSelector("spec.nodeName", node).String()
 	})
-}
-
-type PodHandler interface {
-	// List returns the list of reflected pods.
-	List(context.Context) ([]*v1.Pod, error)
-	// Exec executes a command in a container of a reflected pod.
-	Exec(ctx context.Context, namespace, pod, container string, cmd []string, attach api.AttachIO) error
-	// Attach attaches to a process that is already running inside an existing container of a reflected pod.
-	Attach(ctx context.Context, namespace, pod, container string, attach api.AttachIO) error
-	// PortForward forwards a connection from local to the ports of a reflected pod.
-	PortForward(ctx context.Context, namespace, pod string, port int32, stream io.ReadWriteCloser) error
-	// Logs retrieves the logs of a container of a reflected pod.
-	Logs(ctx context.Context, namespace, pod, container string, opts api.ContainerLogOpts) (io.ReadCloser, error)
-	// Stats retrieves the stats of the reflected pods.
-	Stats(ctx context.Context) (*stats.Summary, error)
 }
 
 type Config struct {
@@ -113,13 +98,18 @@ func main() {
 
 	opts := NewOpts()
 
+	dport, err := strconv.ParseInt(os.Getenv("KUBELET_PORT"), 10, 32)
+	if err != nil {
+		log.G(ctx).Fatal(err)
+	}
+
 	cfg := Config{
 		ConfigPath:      opts.ConfigPath,
 		NodeName:        opts.NodeName,
 		OperatingSystem: "Linux",
 		// https://github.com/liqotech/liqo/blob/d8798732002abb7452c2ff1c99b3e5098f848c93/deployments/liqo/templates/liqo-gateway-deployment.yaml#L69
 		InternalIP: "127.0.0.1",
-		DaemonPort: 10250,
+		DaemonPort: int32(dport),
 	}
 
 	var kubecfg *rest.Config
@@ -178,29 +168,6 @@ func main() {
 	nc, _ := node.NewNodeController(
 		nodeProvider, nodeProvider.GetNode(), localClient.CoreV1().Nodes(),
 	)
-
-	// // https://github.com/liqotech/liqo/blob/master/cmd/virtual-kubelet/root/root.go#L195C49-L195C49
-	// // https://github.com/liqotech/liqo/blob/master/cmd/virtual-kubelet/root/http.go#L76-L84
-	// // https://github.com/liqotech/liqo/blob/master/cmd/virtual-kubelet/root/http.go#L93
-
-	// handler := PodHandler{
-	// 	Stats: nc.GetStatsSummary
-	// }
-
-	// podRoutes := api.PodHandlerConfig{
-	// 	// RunInContainer:        handler.Exec,
-	// 	// AttachToContainer:     handler.Attach,
-	// 	// PortForward:           handler.PortForward,
-	// 	// GetContainerLogs:      handler.Logs,
-	// 	GetStatsSummary:       handler.Stats,
-	// 	// GetPodsFromKubernetes: handler.List,
-	// 	// GetPods:               handler.List,
-	// }
-
-	// err = setupHTTPServer(ctx, podProvider.PodHandler(), localClient, remoteConfig, c)
-	// if err != nil {
-	// log.G(ctx).Fatal(err)
-	// }
 
 	go func() error {
 		err = nc.Run(ctx)
@@ -262,6 +229,46 @@ func main() {
 	// for pod := range pods {
 	// 	fmt.Println("pods:", pods[pod].Name)
 	// }
+
+	// start podHandler
+	handlerPodConfig := api.PodHandlerConfig{
+		GetContainerLogs: nodeProvider.GetLogs,
+		GetPods:          nodeProvider.GetPods,
+		GetStatsSummary:  nodeProvider.GetStatsSummary,
+	}
+
+	mux := http.NewServeMux()
+
+	podRoutes := api.PodHandlerConfig{
+		GetContainerLogs: handlerPodConfig.GetContainerLogs,
+		GetStatsSummary:  handlerPodConfig.GetStatsSummary,
+		GetPods:          handlerPodConfig.GetPods,
+	}
+
+	api.AttachPodRoutes(podRoutes, mux, true)
+
+	parsedIP := net.ParseIP(os.Getenv("POD_IP"))
+	retriever := newSelfSignedCertificateRetriever(cfg.NodeName, parsedIP)
+
+	server := &http.Server{
+		Addr:              fmt.Sprintf("0.0.0.0:%d", 10255),
+		Handler:           mux,
+		ReadHeaderTimeout: 10 * time.Second, // Required to limit the effects of the Slowloris attack.
+		TLSConfig: &tls.Config{
+			GetCertificate: retriever,
+			MinVersion:     tls.VersionTLS12,
+		},
+	}
+
+	go func() {
+		log.G(ctx).Infof("Starting the virtual kubelet HTTPs server listening on %q", server.Addr)
+
+		// Key and certificate paths are not specified, since already configured as part of the TLSConfig.
+		if err := server.ListenAndServeTLS("", ""); err != nil {
+			log.G(ctx).Errorf("Failed to start the HTTPs server: %v", err)
+			os.Exit(1)
+		}
+	}()
 
 	pc, err := node.NewPodController(podControllerConfig) // <-- instatiates the pod controller
 	if err != nil {

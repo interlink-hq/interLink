@@ -19,35 +19,22 @@ package diff
 import (
 	"bytes"
 	"fmt"
+	"reflect"
 	"strings"
 	"text/tabwriter"
 
-	"github.com/davecgh/go-spew/spew"
 	"github.com/google/go-cmp/cmp"
+	"k8s.io/apimachinery/pkg/util/dump"
 )
-
-// StringDiff diffs a and b and returns a human readable diff.
-func StringDiff(a, b string) string {
-	ba := []byte(a)
-	bb := []byte(b)
-	out := []byte{}
-	i := 0
-	for ; i < len(ba) && i < len(bb); i++ {
-		if ba[i] != bb[i] {
-			break
-		}
-		out = append(out, ba[i])
-	}
-	out = append(out, []byte("\n\nA: ")...)
-	out = append(out, ba[i:]...)
-	out = append(out, []byte("\n\nB: ")...)
-	out = append(out, bb[i:]...)
-	out = append(out, []byte("\n\n")...)
-	return string(out)
-}
 
 func legacyDiff(a, b interface{}) string {
 	return cmp.Diff(a, b)
+}
+
+// StringDiff diffs a and b and returns a human readable diff.
+// DEPRECATED: use github.com/google/go-cmp/cmp.Diff
+func StringDiff(a, b string) string {
+	return legacyDiff(a, b)
 }
 
 // ObjectDiff prints the diff of two go objects and fails if the objects
@@ -74,13 +61,8 @@ func ObjectReflectDiff(a, b interface{}) string {
 // ObjectGoPrintSideBySide prints a and b as textual dumps side by side,
 // enabling easy visual scanning for mismatches.
 func ObjectGoPrintSideBySide(a, b interface{}) string {
-	s := spew.ConfigState{
-		Indent: " ",
-		// Extra deep spew.
-		DisableMethods: true,
-	}
-	sA := s.Sdump(a)
-	sB := s.Sdump(b)
+	sA := dump.Pretty(a)
+	sB := dump.Pretty(b)
 
 	linesA := strings.Split(sA, "\n")
 	linesB := strings.Split(sB, "\n")
@@ -115,4 +97,42 @@ func ObjectGoPrintSideBySide(a, b interface{}) string {
 	}
 	w.Flush()
 	return buf.String()
+}
+
+// IgnoreUnset is an option that ignores fields that are unset on the right
+// hand side of a comparison. This is useful in testing to assert that an
+// object is a derivative.
+func IgnoreUnset() cmp.Option {
+	return cmp.Options{
+		// ignore unset fields in v2
+		cmp.FilterPath(func(path cmp.Path) bool {
+			_, v2 := path.Last().Values()
+			switch v2.Kind() {
+			case reflect.Slice, reflect.Map:
+				if v2.IsNil() || v2.Len() == 0 {
+					return true
+				}
+			case reflect.String:
+				if v2.Len() == 0 {
+					return true
+				}
+			case reflect.Interface, reflect.Pointer:
+				if v2.IsNil() {
+					return true
+				}
+			}
+			return false
+		}, cmp.Ignore()),
+		// ignore map entries that aren't set in v2
+		cmp.FilterPath(func(path cmp.Path) bool {
+			switch i := path.Last().(type) {
+			case cmp.MapIndex:
+				if _, v2 := i.Values(); !v2.IsValid() {
+					fmt.Println("E")
+					return true
+				}
+			}
+			return false
+		}, cmp.Ignore()),
+	}
 }

@@ -18,7 +18,6 @@ package wait
 
 import (
 	"context"
-	"errors"
 	"math/rand"
 	"sync"
 	"time"
@@ -27,9 +26,11 @@ import (
 )
 
 // For any test of the style:
-//   ...
-//   <- time.After(timeout):
-//      t.Errorf("Timed out")
+//
+//	...
+//	<- time.After(timeout):
+//	   t.Errorf("Timed out")
+//
 // The value for timeout should effectively be "forever." Obviously we don't want our tests to truly lock up forever, but 30s
 // is long enough that it is effectively forever for the things that can slow down a run on a heavily contended machine
 // (GC, seeks, etc), but not so long as to make a developer ctrl-c a test run if they do happen to break that test.
@@ -79,110 +80,6 @@ func Forever(f func(), period time.Duration) {
 	Until(f, period, NeverStop)
 }
 
-// Until loops until stop channel is closed, running f every period.
-//
-// Until is syntactic sugar on top of JitterUntil with zero jitter factor and
-// with sliding = true (which means the timer for period starts after the f
-// completes).
-func Until(f func(), period time.Duration, stopCh <-chan struct{}) {
-	JitterUntil(f, period, 0.0, true, stopCh)
-}
-
-// UntilWithContext loops until context is done, running f every period.
-//
-// UntilWithContext is syntactic sugar on top of JitterUntilWithContext
-// with zero jitter factor and with sliding = true (which means the timer
-// for period starts after the f completes).
-func UntilWithContext(ctx context.Context, f func(context.Context), period time.Duration) {
-	JitterUntilWithContext(ctx, f, period, 0.0, true)
-}
-
-// NonSlidingUntil loops until stop channel is closed, running f every
-// period.
-//
-// NonSlidingUntil is syntactic sugar on top of JitterUntil with zero jitter
-// factor, with sliding = false (meaning the timer for period starts at the same
-// time as the function starts).
-func NonSlidingUntil(f func(), period time.Duration, stopCh <-chan struct{}) {
-	JitterUntil(f, period, 0.0, false, stopCh)
-}
-
-// NonSlidingUntilWithContext loops until context is done, running f every
-// period.
-//
-// NonSlidingUntilWithContext is syntactic sugar on top of JitterUntilWithContext
-// with zero jitter factor, with sliding = false (meaning the timer for period
-// starts at the same time as the function starts).
-func NonSlidingUntilWithContext(ctx context.Context, f func(context.Context), period time.Duration) {
-	JitterUntilWithContext(ctx, f, period, 0.0, false)
-}
-
-// JitterUntil loops until stop channel is closed, running f every period.
-//
-// If jitterFactor is positive, the period is jittered before every run of f.
-// If jitterFactor is not positive, the period is unchanged and not jittered.
-//
-// If sliding is true, the period is computed after f runs. If it is false then
-// period includes the runtime for f.
-//
-// Close stopCh to stop. f may not be invoked if stop channel is already
-// closed. Pass NeverStop to if you don't want it stop.
-func JitterUntil(f func(), period time.Duration, jitterFactor float64, sliding bool, stopCh <-chan struct{}) {
-	var t *time.Timer
-	var sawTimeout bool
-
-	for {
-		select {
-		case <-stopCh:
-			return
-		default:
-		}
-
-		jitteredPeriod := period
-		if jitterFactor > 0.0 {
-			jitteredPeriod = Jitter(period, jitterFactor)
-		}
-
-		if !sliding {
-			t = resetOrReuseTimer(t, jitteredPeriod, sawTimeout)
-		}
-
-		func() {
-			defer runtime.HandleCrash()
-			f()
-		}()
-
-		if sliding {
-			t = resetOrReuseTimer(t, jitteredPeriod, sawTimeout)
-		}
-
-		// NOTE: b/c there is no priority selection in golang
-		// it is possible for this to race, meaning we could
-		// trigger t.C and stopCh, and t.C select falls through.
-		// In order to mitigate we re-check stopCh at the beginning
-		// of every loop to prevent extra executions of f().
-		select {
-		case <-stopCh:
-			return
-		case <-t.C:
-			sawTimeout = true
-		}
-	}
-}
-
-// JitterUntilWithContext loops until context is done, running f every period.
-//
-// If jitterFactor is positive, the period is jittered before every run of f.
-// If jitterFactor is not positive, the period is unchanged and not jittered.
-//
-// If sliding is true, the period is computed after f runs. If it is false then
-// period includes the runtime for f.
-//
-// Cancel context to stop. f may not be invoked if context is already expired.
-func JitterUntilWithContext(ctx context.Context, f func(context.Context), period time.Duration, jitterFactor float64, sliding bool) {
-	JitterUntil(func() { f(ctx) }, period, jitterFactor, sliding, ctx.Done())
-}
-
 // Jitter returns a time.Duration between duration and duration + maxFactor *
 // duration.
 //
@@ -196,234 +93,118 @@ func Jitter(duration time.Duration, maxFactor float64) time.Duration {
 	return wait
 }
 
-// ErrWaitTimeout is returned when the condition exited without success.
-var ErrWaitTimeout = errors.New("timed out waiting for the condition")
-
 // ConditionFunc returns true if the condition is satisfied, or an error
 // if the loop should be aborted.
 type ConditionFunc func() (done bool, err error)
 
-// Backoff holds parameters applied to a Backoff function.
-type Backoff struct {
-	// The initial duration.
-	Duration time.Duration
-	// Duration is multiplied by factor each iteration. Must be greater
-	// than or equal to zero.
-	Factor float64
-	// The amount of jitter applied each iteration. Jitter is applied after
-	// cap.
-	Jitter float64
-	// The number of steps before duration stops changing. If zero, initial
-	// duration is always used. Used for exponential backoff in combination
-	// with Factor.
-	Steps int
-	// The returned duration will never be greater than cap *before* jitter
-	// is applied. The actual maximum cap is `cap * (1.0 + jitter)`.
-	Cap time.Duration
-}
+// ConditionWithContextFunc returns true if the condition is satisfied, or an error
+// if the loop should be aborted.
+//
+// The caller passes along a context that can be used by the condition function.
+type ConditionWithContextFunc func(context.Context) (done bool, err error)
 
-// Step returns the next interval in the exponential backoff. This method
-// will mutate the provided backoff.
-func (b *Backoff) Step() time.Duration {
-	if b.Steps < 1 {
-		if b.Jitter > 0 {
-			return Jitter(b.Duration, b.Jitter)
-		}
-		return b.Duration
+// WithContext converts a ConditionFunc into a ConditionWithContextFunc
+func (cf ConditionFunc) WithContext() ConditionWithContextFunc {
+	return func(context.Context) (done bool, err error) {
+		return cf()
 	}
-	b.Steps--
-
-	duration := b.Duration
-
-	// calculate the next step
-	if b.Factor != 0 {
-		b.Duration = time.Duration(float64(b.Duration) * b.Factor)
-		if b.Cap > 0 && b.Duration > b.Cap {
-			b.Duration = b.Cap
-			b.Steps = 0
-		}
-	}
-
-	if b.Jitter > 0 {
-		duration = Jitter(duration, b.Jitter)
-	}
-	return duration
 }
 
-// contextForChannel derives a child context from a parent channel.
-//
-// The derived context's Done channel is closed when the returned cancel function
-// is called or when the parent channel is closed, whichever happens first.
-//
-// Note the caller must *always* call the CancelFunc, otherwise resources may be leaked.
-func contextForChannel(parentCh <-chan struct{}) (context.Context, context.CancelFunc) {
-	ctx, cancel := context.WithCancel(context.Background())
-
-	go func() {
-		select {
-		case <-parentCh:
-			cancel()
-		case <-ctx.Done():
-		}
-	}()
-	return ctx, cancel
+// ContextForChannel provides a context that will be treated as cancelled
+// when the provided parentCh is closed. The implementation returns
+// context.Canceled for Err() if and only if the parentCh is closed.
+func ContextForChannel(parentCh <-chan struct{}) context.Context {
+	return channelContext{stopCh: parentCh}
 }
 
-// ExponentialBackoff repeats a condition check with exponential backoff.
-//
-// It checks the condition up to Steps times, increasing the wait by multiplying
-// the previous duration by Factor.
-//
-// If Jitter is greater than zero, a random amount of each duration is added
-// (between duration and duration*(1+jitter)).
-//
-// If the condition never returns true, ErrWaitTimeout is returned. All other
-// errors terminate immediately.
-func ExponentialBackoff(backoff Backoff, condition ConditionFunc) error {
-	for backoff.Steps > 0 {
-		if ok, err := condition(); err != nil || ok {
-			return err
-		}
-		if backoff.Steps == 1 {
-			break
-		}
-		time.Sleep(backoff.Step())
-	}
-	return ErrWaitTimeout
-}
+var _ context.Context = channelContext{}
 
-// Poll tries a condition func until it returns true, an error, or the timeout
-// is reached.
-//
-// Poll always waits the interval before the run of 'condition'.
-// 'condition' will always be invoked at least once.
-//
-// Some intervals may be missed if the condition takes too long or the time
-// window is too short.
-//
-// If you want to Poll something forever, see PollInfinite.
-func Poll(interval, timeout time.Duration, condition ConditionFunc) error {
-	return pollInternal(poller(interval, timeout), condition)
-}
-
-func pollInternal(wait WaitFunc, condition ConditionFunc) error {
-	done := make(chan struct{})
-	defer close(done)
-	return WaitFor(wait, condition, done)
-}
-
-// PollImmediate tries a condition func until it returns true, an error, or the timeout
-// is reached.
-//
-// PollImmediate always checks 'condition' before waiting for the interval. 'condition'
-// will always be invoked at least once.
-//
-// Some intervals may be missed if the condition takes too long or the time
-// window is too short.
-//
-// If you want to immediately Poll something forever, see PollImmediateInfinite.
-func PollImmediate(interval, timeout time.Duration, condition ConditionFunc) error {
-	return pollImmediateInternal(poller(interval, timeout), condition)
-}
-
-func pollImmediateInternal(wait WaitFunc, condition ConditionFunc) error {
-	done, err := condition()
-	if err != nil {
-		return err
-	}
-	if done {
-		return nil
-	}
-	return pollInternal(wait, condition)
-}
-
-// PollInfinite tries a condition func until it returns true or an error
-//
-// PollInfinite always waits the interval before the run of 'condition'.
-//
-// Some intervals may be missed if the condition takes too long or the time
-// window is too short.
-func PollInfinite(interval time.Duration, condition ConditionFunc) error {
-	done := make(chan struct{})
-	defer close(done)
-	return PollUntil(interval, condition, done)
-}
-
-// PollImmediateInfinite tries a condition func until it returns true or an error
-//
-// PollImmediateInfinite runs the 'condition' before waiting for the interval.
-//
-// Some intervals may be missed if the condition takes too long or the time
-// window is too short.
-func PollImmediateInfinite(interval time.Duration, condition ConditionFunc) error {
-	done, err := condition()
-	if err != nil {
-		return err
-	}
-	if done {
-		return nil
-	}
-	return PollInfinite(interval, condition)
-}
-
-// PollUntil tries a condition func until it returns true, an error or stopCh is
+// channelContext will behave as if the context were cancelled when stopCh is
 // closed.
-//
-// PollUntil always waits interval before the first run of 'condition'.
-// 'condition' will always be invoked at least once.
-func PollUntil(interval time.Duration, condition ConditionFunc, stopCh <-chan struct{}) error {
-	ctx, cancel := contextForChannel(stopCh)
-	defer cancel()
-	return WaitFor(poller(interval, 0), condition, ctx.Done())
+type channelContext struct {
+	stopCh <-chan struct{}
 }
 
-// PollImmediateUntil tries a condition func until it returns true, an error or stopCh is closed.
-//
-// PollImmediateUntil runs the 'condition' before waiting for the interval.
-// 'condition' will always be invoked at least once.
-func PollImmediateUntil(interval time.Duration, condition ConditionFunc, stopCh <-chan struct{}) error {
-	done, err := condition()
-	if err != nil {
-		return err
-	}
-	if done {
+func (c channelContext) Done() <-chan struct{} { return c.stopCh }
+func (c channelContext) Err() error {
+	select {
+	case <-c.stopCh:
+		return context.Canceled
+	default:
 		return nil
 	}
-	select {
-	case <-stopCh:
-		return ErrWaitTimeout
-	default:
-		return PollUntil(interval, condition, stopCh)
+}
+func (c channelContext) Deadline() (time.Time, bool) { return time.Time{}, false }
+func (c channelContext) Value(key any) any           { return nil }
+
+// runConditionWithCrashProtection runs a ConditionFunc with crash protection.
+//
+// Deprecated: Will be removed when the legacy polling methods are removed.
+func runConditionWithCrashProtection(condition ConditionFunc) (bool, error) {
+	defer runtime.HandleCrash()
+	return condition()
+}
+
+// runConditionWithCrashProtectionWithContext runs a ConditionWithContextFunc
+// with crash protection.
+//
+// Deprecated: Will be removed when the legacy polling methods are removed.
+func runConditionWithCrashProtectionWithContext(ctx context.Context, condition ConditionWithContextFunc) (bool, error) {
+	defer runtime.HandleCrash()
+	return condition(ctx)
+}
+
+// waitFunc creates a channel that receives an item every time a test
+// should be executed and is closed when the last test should be invoked.
+//
+// Deprecated: Will be removed in a future release in favor of
+// loopConditionUntilContext.
+type waitFunc func(done <-chan struct{}) <-chan struct{}
+
+// WithContext converts the WaitFunc to an equivalent WaitWithContextFunc
+func (w waitFunc) WithContext() waitWithContextFunc {
+	return func(ctx context.Context) <-chan struct{} {
+		return w(ctx.Done())
 	}
 }
 
-// WaitFunc creates a channel that receives an item every time a test
+// waitWithContextFunc creates a channel that receives an item every time a test
 // should be executed and is closed when the last test should be invoked.
-type WaitFunc func(done <-chan struct{}) <-chan struct{}
-
-// WaitFor continually checks 'fn' as driven by 'wait'.
 //
-// WaitFor gets a channel from 'wait()'', and then invokes 'fn' once for every value
-// placed on the channel and once more when the channel is closed. If the channel is closed
-// and 'fn' returns false without error, WaitFor returns ErrWaitTimeout.
+// When the specified context gets cancelled or expires the function
+// stops sending item and returns immediately.
+//
+// Deprecated: Will be removed in a future release in favor of
+// loopConditionUntilContext.
+type waitWithContextFunc func(ctx context.Context) <-chan struct{}
+
+// waitForWithContext continually checks 'fn' as driven by 'wait'.
+//
+// waitForWithContext gets a channel from 'wait()”, and then invokes 'fn'
+// once for every value placed on the channel and once more when the
+// channel is closed. If the channel is closed and 'fn'
+// returns false without error, waitForWithContext returns ErrWaitTimeout.
 //
 // If 'fn' returns an error the loop ends and that error is returned. If
 // 'fn' returns true the loop ends and nil is returned.
 //
-// ErrWaitTimeout will be returned if the 'done' channel is closed without fn ever
-// returning true.
+// context.Canceled will be returned if the ctx.Done() channel is closed
+// without fn ever returning true.
 //
-// When the done channel is closed, because the golang `select` statement is
-// "uniform pseudo-random", the `fn` might still run one or multiple time,
-// though eventually `WaitFor` will return.
-func WaitFor(wait WaitFunc, fn ConditionFunc, done <-chan struct{}) error {
-	stopCh := make(chan struct{})
-	defer close(stopCh)
-	c := wait(stopCh)
+// When the ctx.Done() channel is closed, because the golang `select` statement is
+// "uniform pseudo-random", the `fn` might still run one or multiple times,
+// though eventually `waitForWithContext` will return.
+//
+// Deprecated: Will be removed in a future release in favor of
+// loopConditionUntilContext.
+func waitForWithContext(ctx context.Context, wait waitWithContextFunc, fn ConditionWithContextFunc) error {
+	waitCtx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	c := wait(waitCtx)
 	for {
 		select {
 		case _, open := <-c:
-			ok, err := fn()
+			ok, err := runConditionWithCrashProtectionWithContext(ctx, fn)
 			if err != nil {
 				return err
 			}
@@ -433,72 +214,10 @@ func WaitFor(wait WaitFunc, fn ConditionFunc, done <-chan struct{}) error {
 			if !open {
 				return ErrWaitTimeout
 			}
-		case <-done:
+		case <-ctx.Done():
+			// returning ctx.Err() will break backward compatibility, use new PollUntilContext*
+			// methods instead
 			return ErrWaitTimeout
 		}
 	}
-}
-
-// poller returns a WaitFunc that will send to the channel every interval until
-// timeout has elapsed and then closes the channel.
-//
-// Over very short intervals you may receive no ticks before the channel is
-// closed. A timeout of 0 is interpreted as an infinity, and in such a case
-// it would be the caller's responsibility to close the done channel.
-// Failure to do so would result in a leaked goroutine.
-//
-// Output ticks are not buffered. If the channel is not ready to receive an
-// item, the tick is skipped.
-func poller(interval, timeout time.Duration) WaitFunc {
-	return WaitFunc(func(done <-chan struct{}) <-chan struct{} {
-		ch := make(chan struct{})
-
-		go func() {
-			defer close(ch)
-
-			tick := time.NewTicker(interval)
-			defer tick.Stop()
-
-			var after <-chan time.Time
-			if timeout != 0 {
-				// time.After is more convenient, but it
-				// potentially leaves timers around much longer
-				// than necessary if we exit early.
-				timer := time.NewTimer(timeout)
-				after = timer.C
-				defer timer.Stop()
-			}
-
-			for {
-				select {
-				case <-tick.C:
-					// If the consumer isn't ready for this signal drop it and
-					// check the other channels.
-					select {
-					case ch <- struct{}{}:
-					default:
-					}
-				case <-after:
-					return
-				case <-done:
-					return
-				}
-			}
-		}()
-
-		return ch
-	})
-}
-
-// resetOrReuseTimer avoids allocating a new timer if one is already in use.
-// Not safe for multiple threads.
-func resetOrReuseTimer(t *time.Timer, d time.Duration, sawTimeout bool) *time.Timer {
-	if t == nil {
-		return time.NewTimer(d)
-	}
-	if !t.Stop() && !sawTimeout {
-		<-t.C
-	}
-	t.Reset(d)
-	return t
 }

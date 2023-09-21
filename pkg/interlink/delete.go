@@ -3,7 +3,7 @@ package interlink
 import (
 	"bytes"
 	"encoding/json"
-	"io/ioutil"
+	"io"
 	"net/http"
 
 	"github.com/containerd/containerd/log"
@@ -13,7 +13,8 @@ import (
 
 func DeleteHandler(w http.ResponseWriter, r *http.Request) {
 	log.G(Ctx).Info("InterLink: received Delete call")
-	bodyBytes, err := ioutil.ReadAll(r.Body)
+
+	bodyBytes, err := io.ReadAll(r.Body)
 	statusCode := http.StatusOK
 
 	if err != nil {
@@ -41,7 +42,7 @@ func DeleteHandler(w http.ResponseWriter, r *http.Request) {
 				return
 			}
 
-			returnValue, _ := ioutil.ReadAll(resp.Body)
+			returnValue, _ := io.ReadAll(resp.Body)
 			statusCode = resp.StatusCode
 
 			if statusCode != http.StatusOK {

@@ -2,6 +2,7 @@ package common
 
 import (
 	"io/fs"
+	"time"
 
 	v1 "k8s.io/api/core/v1"
 )
@@ -16,10 +17,6 @@ type PodStatus struct {
 	PodName      string `json:"name"`
 	PodNamespace string `json:"namespace"`
 	PodStatus    uint   `json:"status"`
-}
-
-type GenericRequestType struct {
-	Body string `json:"body"`
 }
 
 type RetrievedContainer struct {
@@ -59,6 +56,7 @@ type InterLinkConfig struct {
 	Tsockspath     string `yaml:"TsocksPath"`
 	Tsocksconfig   string `yaml:"TsocksConfig"`
 	Tsockslogin    string `yaml:"TsocksLoginNode"`
+	BashPath       string `yaml:"BashPath"`
 	set            bool
 }
 
@@ -69,4 +67,26 @@ type ServiceAccount struct {
 	URL         string
 	ClusterName string
 	Config      string
+}
+
+type ContainerLogOpts struct {
+	Tail         int       `json:"Tail"`
+	LimitBytes   int       `json:"Bytes"`
+	Timestamps   bool      `json:"Timestamps"`
+	Follow       bool      `json:"Follow"`
+	Previous     bool      `json:"Previous"`
+	SinceSeconds int       `json:"SinceSeconds"`
+	SinceTime    time.Time `json:"SinceTime"`
+}
+
+type LogStruct struct {
+	Namespace     string           `json:"Namespace"`
+	PodName       string           `json:"PodName"`
+	ContainerName string           `json:"ContainerName"`
+	Opts          ContainerLogOpts `json:"Opts"`
+}
+
+type JidStruct struct {
+	PodName string   `json:"PodName"`
+	JIDs    []string `json:"JIDs"`
 }
