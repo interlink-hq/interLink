@@ -89,7 +89,7 @@ func CreateHandler(w http.ResponseWriter, r *http.Request) {
 				log.G(Ctx).Debug(statusCode)
 			} else {
 				statusCode = http.StatusInternalServerError
-				log.G(Ctx).Debug(statusCode)
+				log.G(Ctx).Error(statusCode)
 			}
 
 			returnValue, _ := io.ReadAll(resp.Body)
