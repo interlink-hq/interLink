@@ -12,7 +12,7 @@ import (
 
 func SetKubeCFGHandler(w http.ResponseWriter, r *http.Request) {
 	log.G(Ctx).Info("InterLink: received SetKubeCFG call")
-	path := "/tmp/.kube/"
+	path := "./.kube/"
 	statusCode := http.StatusOK
 
 	bodyBytes, err := io.ReadAll(r.Body)

@@ -99,7 +99,7 @@ func NewInterLinkConfig() {
 
 			InterLinkConfigInst.VKTokenFile = path
 		} else {
-			path = "/tmp/token"
+			path = InterLinkConfigInst.DataRootFolder + "token"
 			InterLinkConfigInst.VKTokenFile = path
 		}
 
@@ -111,7 +111,7 @@ func NewServiceAccount() error {
 
 	var sa string
 	var script string
-	path := "/tmp/"
+	path := InterLinkConfigInst.DataRootFolder + ".kube/"
 
 	err := os.MkdirAll(path, os.ModePerm)
 	if err != nil {
