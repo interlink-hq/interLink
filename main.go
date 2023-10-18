@@ -265,7 +265,7 @@ func main() {
 
 	api.AttachPodRoutes(podRoutes, mux, true)
 
-	parsedIP := net.ParseIP(os.Getenv("POD_IP"))
+	parsedIP := net.ParseIP(commonIL.InterLinkConfigInst.PodIP)
 	retriever := newSelfSignedCertificateRetriever(cfg.NodeName, parsedIP)
 
 	server := &http.Server{
