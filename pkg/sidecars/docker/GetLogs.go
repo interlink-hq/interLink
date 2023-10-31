@@ -76,7 +76,7 @@ func GetLogsHandler(w http.ResponseWriter, r *http.Request) {
 		for _, line := range lastLines {
 			returnedLogs += line + "\n"
 		}
-	} else {
+	} else if req.Opts.LimitBytes != 0 {
 		var lastBytes []byte
 		if req.Opts.LimitBytes > len(output) {
 			lastBytes = output
@@ -85,6 +85,8 @@ func GetLogsHandler(w http.ResponseWriter, r *http.Request) {
 		}
 
 		returnedLogs = string(lastBytes)
+	} else {
+		returnedLogs = string(output)
 	}
 
 	if req.Opts.Timestamps && (req.Opts.SinceSeconds != 0 || !req.Opts.SinceTime.IsZero()) {

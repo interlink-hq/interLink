@@ -49,12 +49,6 @@ func GetLogsHandler(w http.ResponseWriter, r *http.Request) {
 		}
 		log.G(Ctx).Error(errors.New("Check Opts configurations"))
 		return
-	} else if req2.Opts.Tail == 0 && req2.Opts.LimitBytes == 0 {
-		statusCode = http.StatusInternalServerError
-		w.WriteHeader(statusCode)
-		w.Write([]byte("No Tail or LimitBytes set. Set only one of them"))
-		log.G(Ctx).Error(errors.New("Check Opts configurations"))
-		return
 	}
 
 	bodyBytes, err = json.Marshal(req2)

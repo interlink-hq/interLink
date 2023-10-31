@@ -45,8 +45,8 @@ func GetLogsHandler(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(statusCode)
 		return
 	} else {
-		log.G(Ctx).Info("Reading  .tmp/" + req.PodUID + "_" + req.ContainerName + ".out")
-		cmd = OSexec.Command("cat", ".tmp/"+req.PodUID+"_"+req.ContainerName+".out")
+		log.G(Ctx).Info("Reading  " + commonIL.InterLinkConfigInst.DataRootFolder + req.PodUID + "/" + req.ContainerName + ".out")
+		cmd = OSexec.Command("cat", commonIL.InterLinkConfigInst.DataRootFolder+req.PodUID+"/"+req.ContainerName+".out")
 	}
 
 	output, err := cmd.CombinedOutput()
@@ -74,7 +74,7 @@ func GetLogsHandler(w http.ResponseWriter, r *http.Request) {
 		for _, line := range lastLines {
 			returnedLogs += line + "\n"
 		}
-	} else {
+	} else if req.Opts.LimitBytes != 0 {
 		var lastBytes []byte
 		if req.Opts.LimitBytes > len(output) {
 			lastBytes = output
@@ -83,6 +83,8 @@ func GetLogsHandler(w http.ResponseWriter, r *http.Request) {
 		}
 
 		returnedLogs = string(lastBytes)
+	} else {
+		returnedLogs = string(output)
 	}
 
 	if req.Opts.Timestamps && (req.Opts.SinceSeconds != 0 || !req.Opts.SinceTime.IsZero()) {
