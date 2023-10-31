@@ -14,9 +14,16 @@ import (
 
 func main() {
 	var cancel context.CancelFunc
-
 	logger := logrus.StandardLogger()
-	logger.SetLevel(logrus.DebugLevel)
+
+	if commonIL.InterLinkConfigInst.VerboseLogging {
+		logger.SetLevel(logrus.DebugLevel)
+	} else if commonIL.InterLinkConfigInst.ErrorsOnlyLogging {
+		logger.SetLevel(logrus.ErrorLevel)
+	} else {
+		logger.SetLevel(logrus.InfoLevel)
+	}
+
 	log.L = logruslogger.FromLogrus(logrus.NewEntry(logger))
 
 	docker.Ctx, cancel = context.WithCancel(context.Background())

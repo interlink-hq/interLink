@@ -18,6 +18,7 @@ package main
 import (
 	"context"
 	"crypto/tls"
+	"flag"
 	"fmt"
 	"net"
 	"os"
@@ -72,30 +73,48 @@ type Opts struct {
 	ConfigPath string
 
 	// Node name to use when creating a node in Kubernetes
-	NodeName string
+	NodeName   string
+	Verbose    bool
+	ErrorsOnly bool
 }
 
 // NewOpts returns an Opts struct with the default values set.
-func NewOpts() *Opts {
+func NewOpts(nodename string) *Opts {
+
+	if nodename == "" {
+		nodename = os.Getenv("NODENAME")
+	}
+
 	return &Opts{
 		ConfigPath: os.Getenv("CONFIGPATH"),
-		NodeName:   os.Getenv("NODENAME"),
+		NodeName:   nodename,
+		Verbose:    commonIL.InterLinkConfigInst.VerboseLogging,
+		ErrorsOnly: commonIL.InterLinkConfigInst.ErrorsOnlyLogging,
 	}
 }
 
 func main() {
 	// Try from bash:
 	// INTERLINKCONFIGPATH=$PWD/kustomizations/InterLinkConfig.yaml CONFIGPATH=$PWD/kustomizations/knoc-cfg.json NODENAME=test-vk ./bin/vk
-
-	http.DefaultTransport.(*http.Transport).TLSClientConfig = &tls.Config{InsecureSkipVerify: true}
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
+	nodename := flag.String("nodename", "", "The name of the node")
+	commonIL.NewInterLinkConfig()
+	opts := NewOpts(*nodename)
 
 	logger := logrus.StandardLogger()
-	logger.SetLevel(logrus.DebugLevel)
+	if commonIL.InterLinkConfigInst.VerboseLogging {
+		logger.SetLevel(logrus.DebugLevel)
+	} else if commonIL.InterLinkConfigInst.ErrorsOnlyLogging {
+		logger.SetLevel(logrus.ErrorLevel)
+	} else {
+		logger.SetLevel(logrus.InfoLevel)
+	}
 	log.L = logruslogger.FromLogrus(logrus.NewEntry(logger))
 
-	opts := NewOpts()
+	http.DefaultTransport.(*http.Transport).TLSClientConfig = &tls.Config{InsecureSkipVerify: true}
+
+	log.G(ctx).Debug(*opts)
 
 	dport, err := strconv.ParseInt(os.Getenv("KUBELET_PORT"), 10, 32)
 	if err != nil {

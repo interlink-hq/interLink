@@ -34,26 +34,28 @@ type ConfigMapSecret struct {
 }
 
 type InterLinkConfig struct {
-	VKTokenFile    string `yaml:"VKTokenFile"`
-	Interlinkurl   string `yaml:"InterlinkURL"`
-	Sidecarurl     string `yaml:"SidecarURL"`
-	Sbatchpath     string `yaml:"SbatchPath"`
-	Scancelpath    string `yaml:"ScancelPath"`
-	Squeuepath     string `yaml:"SqueuePath"`
-	Interlinkport  string `yaml:"InterlinkPort"`
-	Sidecarport    string `yaml:"SidecarPort"`
-	Commandprefix  string `yaml:"CommandPrefix"`
-	ExportPodData  bool   `yaml:"ExportPodData"`
-	DataRootFolder string `yaml:"DataRootFolder"`
-	ServiceAccount string `yaml:"ServiceAccount"`
-	Namespace      string `yaml:"Namespace"`
-	Tsocks         bool   `yaml:"Tsocks"`
-	Tsockspath     string `yaml:"TsocksPath"`
-	Tsocksconfig   string `yaml:"TsocksConfig"`
-	Tsockslogin    string `yaml:"TsocksLoginNode"`
-	BashPath       string `yaml:"BashPath"`
-	PodIP          string `yaml:"Pod_IP"`
-	set            bool
+	VKTokenFile       string `yaml:"VKTokenFile"`
+	Interlinkurl      string `yaml:"InterlinkURL"`
+	Sidecarurl        string `yaml:"SidecarURL"`
+	Sbatchpath        string `yaml:"SbatchPath"`
+	Scancelpath       string `yaml:"ScancelPath"`
+	Squeuepath        string `yaml:"SqueuePath"`
+	Interlinkport     string `yaml:"InterlinkPort"`
+	Sidecarport       string `yaml:"SidecarPort"`
+	Commandprefix     string `yaml:"CommandPrefix"`
+	ExportPodData     bool   `yaml:"ExportPodData"`
+	DataRootFolder    string `yaml:"DataRootFolder"`
+	ServiceAccount    string `yaml:"ServiceAccount"`
+	Namespace         string `yaml:"Namespace"`
+	Tsocks            bool   `yaml:"Tsocks"`
+	Tsockspath        string `yaml:"TsocksPath"`
+	Tsocksconfig      string `yaml:"TsocksConfig"`
+	Tsockslogin       string `yaml:"TsocksLoginNode"`
+	BashPath          string `yaml:"BashPath"`
+	PodIP             string `yaml:"Pod_IP"`
+	VerboseLogging    bool   `yaml:"VerboseLogging"`
+	ErrorsOnlyLogging bool   `yaml:"ErrorsOnlyLogging"`
+	set               bool
 }
 
 type ServiceAccount struct {

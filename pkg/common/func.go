@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"flag"
 	"fmt"
 	"io"
 	"net/http"
@@ -26,6 +27,18 @@ var Clientset *kubernetes.Clientset
 func NewInterLinkConfig() {
 	if InterLinkConfigInst.set == false {
 		var path string
+		verbose := flag.Bool("verbose", false, "Enable or disable Debug level logging")
+		errorsOnly := flag.Bool("errorsonly", false, "Prints only errors if enabled")
+		flag.Parse()
+
+		if *verbose {
+			InterLinkConfigInst.VerboseLogging = true
+			InterLinkConfigInst.ErrorsOnlyLogging = false
+		} else if *errorsOnly {
+			InterLinkConfigInst.VerboseLogging = false
+			InterLinkConfigInst.ErrorsOnlyLogging = true
+		}
+
 		if os.Getenv("INTERLINKCONFIGPATH") != "" {
 			path = os.Getenv("INTERLINKCONFIGPATH")
 		} else {

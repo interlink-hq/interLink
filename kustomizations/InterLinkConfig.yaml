@@ -15,4 +15,5 @@ Tsocks: false
 TsocksPath: "$WORK/tsocks-1.8beta5+ds1/libtsocks.so"
 TsocksLoginNode: "login01"
 BashPath: /bin/bash
-Pod_IP: "172.16.9.11"
+VerboseLogging: true
+ErrorsOnlyLogging: false
