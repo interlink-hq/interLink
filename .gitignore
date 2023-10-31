@@ -15,3 +15,5 @@ serviceaccount.yaml
 .knoc
 .tmp
 kustomizations_tmp
+ca*
+condor*
