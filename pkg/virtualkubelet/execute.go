@@ -241,12 +241,17 @@ func checkPodsStatus(p *VirtualKubeletProvider, ctx context.Context, token strin
 				}
 
 				if containerStatus.State.Terminated != nil {
-					log.G(ctx).Info("Deleting Pod " + podStatus.PodName + ": Service " + containerStatus.Name + " is not running on Sidecar")
+					log.G(ctx).Info("Pod " + podStatus.PodName + ": Service " + containerStatus.Name + " is not running on Sidecar")
 					updatePod = false
+					if containerStatus.State.Terminated.ExitCode == 0 {
+						pod.Status.Phase = v1.PodSucceeded
+						updatePod = true
+					}
 				} else if containerStatus.State.Waiting != nil {
 					log.G(ctx).Info("Pod " + podStatus.PodName + ": Service " + containerStatus.Name + " is setting up on Sidecar")
 					updatePod = false
 				} else if containerStatus.State.Running != nil {
+					pod.Status.Phase = v1.PodRunning
 					updatePod = true
 					if pod.Status.ContainerStatuses != nil {
 						pod.Status.ContainerStatuses[index].State = containerStatus.State
@@ -256,9 +261,7 @@ func checkPodsStatus(p *VirtualKubeletProvider, ctx context.Context, token strin
 			}
 
 			if updatePod && pod.Status.Phase != v1.PodRunning {
-				pod.Status.Phase = v1.PodRunning
 				err = p.UpdatePod(ctx, pod)
-
 				if err != nil {
 					log.G(ctx).Error(err)
 					return err
