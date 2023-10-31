@@ -262,7 +262,7 @@ func checkPodsStatus(p *VirtualKubeletProvider, ctx context.Context, token strin
 				}
 			}
 
-			if updatePod && podPhase != v1.PodRunning {
+			if updatePod {
 				err = p.UpdatePod(ctx, pod)
 				if err != nil {
 					log.G(ctx).Error(err)
