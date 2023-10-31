@@ -151,10 +151,17 @@ func prepare_mounts(container v1.Container, data []commonIL.RetrievedPodData) ([
 
 func produce_slurm_script(podUID string, metadata metav1.ObjectMeta, commands []SingularityCommand) (string, error) {
 	log.G(Ctx).Info("-- Creating file for the Slurm script")
-	path := commonIL.InterLinkConfigInst.DataRootFolder + podUID + ".sh"
+	err := os.MkdirAll(commonIL.InterLinkConfigInst.DataRootFolder+podUID, os.ModePerm)
+	if err != nil {
+		log.G(Ctx).Error(err)
+		return "", err
+	} else {
+		log.G(Ctx).Info("-- Created directory " + commonIL.InterLinkConfigInst.DataRootFolder + podUID)
+	}
+	path := commonIL.InterLinkConfigInst.DataRootFolder + podUID + "/job.sh"
 	postfix := ""
 
-	err := os.RemoveAll(path)
+	err = os.RemoveAll(path)
 	if err != nil {
 		log.G(Ctx).Error(err)
 		return "", err
@@ -280,7 +287,7 @@ func slurm_batch_submit(path string) (string, error) {
 func handle_jid(podUID string, output string, pod v1.Pod) error {
 	r := regexp.MustCompile(`Submitted batch job (?P<jid>\d+)`)
 	jid := r.FindStringSubmatch(output)
-	f, err := os.Create(commonIL.InterLinkConfigInst.DataRootFolder + podUID + ".jid")
+	f, err := os.Create(commonIL.InterLinkConfigInst.DataRootFolder + podUID + "/JobID.jid")
 	if err != nil {
 		log.G(Ctx).Error("Can't create jid_file")
 		return err
@@ -324,9 +331,7 @@ func delete_container(podUID string) error {
 			} else {
 				log.G(Ctx).Info("- Deleted Job ", jid.JID)
 			}
-			os.RemoveAll(commonIL.InterLinkConfigInst.DataRootFolder + podUID + ".out")
-			os.RemoveAll(commonIL.InterLinkConfigInst.DataRootFolder + podUID + ".err")
-			os.RemoveAll(commonIL.InterLinkConfigInst.DataRootFolder + podUID + ".status")
+			os.RemoveAll(commonIL.InterLinkConfigInst.DataRootFolder + podUID)
 			removeJID(jid.JID)
 			return nil
 		}
