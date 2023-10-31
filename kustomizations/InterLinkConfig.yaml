@@ -8,7 +8,7 @@ ScancelPath: "/usr/bin/scancel"
 SqueuePath: "/usr/bin/squeue"
 CommandPrefix: ""
 ExportPodData: true
-DataRootFolder: ".tmp/"
+DataRootFolder: ".local/interlink/jobs/"
 ServiceAccount: "interlink"
 Namespace: "vk"
 Tsocks: false

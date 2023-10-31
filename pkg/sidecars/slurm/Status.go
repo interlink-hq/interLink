@@ -16,7 +16,6 @@ import (
 	commonIL "github.com/intertwin-eu/interlink/pkg/common"
 	v1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
-	"k8s.io/apimachinery/pkg/types"
 )
 
 func StatusHandler(w http.ResponseWriter, r *http.Request) {
@@ -76,8 +75,8 @@ func StatusHandler(w http.ResponseWriter, r *http.Request) {
 					if execReturn.Stderr != "" {
 						containerStatuses := []v1.ContainerStatus{}
 						for _, ct := range pod.Spec.Containers {
-							log.G(Ctx).Info("Getting exit status from  .tmp/" + pod.UID + "_" + types.UID(ct.Name) + ".status")
-							file, err := os.Open(".tmp/" + string(pod.UID) + "_" + ct.Name + ".status")
+							log.G(Ctx).Info("Getting exit status from  " + commonIL.InterLinkConfigInst.DataRootFolder + string(pod.UID) + "_" + ct.Name + ".status")
+							file, err := os.Open(commonIL.InterLinkConfigInst.DataRootFolder + string(pod.UID) + "_" + ct.Name + ".status")
 							if err != nil {
 								statusCode = http.StatusInternalServerError
 								w.WriteHeader(statusCode)
