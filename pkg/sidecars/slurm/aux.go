@@ -336,7 +336,8 @@ func delete_container(podUID string) error {
 			return nil
 		}
 	}
-	return errors.New("Unable to find a JID for the provided pod")
+	log.G(Ctx).Error("JID for deletion does not exist anymore")
+	return nil
 }
 
 func mountData(container v1.Container, pod v1.Pod, data interface{}) ([]string, []string, error) {
