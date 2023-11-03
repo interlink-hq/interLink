@@ -48,6 +48,8 @@ import (
 	logruslogger "github.com/virtual-kubelet/virtual-kubelet/log/logrus"
 	"github.com/virtual-kubelet/virtual-kubelet/node"
 	"github.com/virtual-kubelet/virtual-kubelet/node/api"
+	"github.com/virtual-kubelet/virtual-kubelet/trace"
+	"github.com/virtual-kubelet/virtual-kubelet/trace/opentelemetry"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/client-go/informers"
 )
@@ -111,6 +113,8 @@ func main() {
 		logger.SetLevel(logrus.InfoLevel)
 	}
 	log.L = logruslogger.FromLogrus(logrus.NewEntry(logger))
+
+	trace.T = opentelemetry.Adapter{}
 
 	http.DefaultTransport.(*http.Transport).TLSClientConfig = &tls.Config{InsecureSkipVerify: true}
 

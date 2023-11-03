@@ -93,7 +93,8 @@ func StatusHandler(w http.ResponseWriter, r *http.Request) {
 								log.G(Ctx).Error(fmt.Errorf("unable to read container status: %s", err))
 								return
 							}
-							status, err := strconv.Atoi(string(statusb))
+
+							status, err := strconv.Atoi(strings.Replace(string(statusb), "\n", "", -1))
 							if err != nil {
 								statusCode = http.StatusInternalServerError
 								w.WriteHeader(statusCode)
