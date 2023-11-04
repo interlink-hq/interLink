@@ -1,0 +1,35 @@
+version: '3.7'
+services:
+  interlink:
+    image:  docker.io/dciangot/interlink:latest
+    restart: always
+    network_mode: "host"
+    volumes:
+    - type: bind
+      source: ./config
+      target: /etc/interlink
+    environment:
+    - KUBECONFIG=/etc/interlink/compose/kubeconfig.yaml
+    # healthcheck:
+    #   test: ["CMD", "/check.sh"]
+    #   interval: 10s
+    #   timeout: 10s
+    #   retries: 3
+    #   start_period: 5s
+  docker-sidecar:
+    image: docker.io/dciangot/slurm-sidecar:latest
+    restart: always
+    privileged: true
+    cap_add:
+    - SYS_ADMIN
+    network_mode: "host"
+    volumes:
+    - type: bind
+      source: ./config
+      target: /etc/interlink
+    # healthcheck:
+    #   test: ["CMD", "/check.sh"]
+    #   interval: 10s
+    #   timeout: 10s
+    #   retries: 3
+    #   start_period: 5s

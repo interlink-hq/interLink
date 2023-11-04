@@ -16,36 +16,37 @@ spec:
       labels:
         nodeName: test-vk
     spec:
+      initContainers:
+      - name: settoken
+        image: "docker.io/alpine:3"
+        command: ["sh", "-c"]
+        args: ["touch /opt/interlink/token"]
+        volumeMounts:
+        - name: token
+          mountPath: /opt/interlink
       containers:
+      # podman otlp
+      # podman run -d --name jaeger   -e COLLECTOR_OTLP_ENABLED=true   -e COLLECTOR_ZIPKIN_HOST_PORT=:9411   -p 5775:5775/udp   -p 6831:6831/udp   -p 6832:6832/udp   -p 5778:5778   -p 16686:16686   -p 14250:14250   -p 14268:14268   -p 14269:14269   -p 4317:4317   -p 4318:4318   -p 9411:9411   jaegertracing/all-in-one:1.47
       - name: inttw-vk
-        image: ghcr.io/intertwin-eu/virtual-kubelet-inttw:0.0.2-pre6
+        image: dciangot/vk:latest 
         imagePullPolicy: Always
-        args:
-        - --nodename
-        - test-vk
-        - --provider
-        - interlink
-        - --provider-config
-        - $VK_CONFIG_PATH
-        - --startup-timeout
-        - 10s
-        - --klog.v
-        - "2"
-        - --klog.logtostderr
-        - --log-level
-        - debug
+        #command: ["sleep", "infinity"]
         env:
-        - name: KUBELET_PORT
-          value: "10255"
-        - name: VKUBELET_POD_IP
+        - name: NODENAME
+          value: test-vk
+        - name: POD_IP
           valueFrom:
             fieldRef:
               fieldPath: status.podIP
+        #- name: KUBECONFIG
+        #  value: /etc/interlink/kubeconfig
+        - name: KUBELET_PORT
+          value: "10255"
         - name: INTERLINKCONFIGPATH
           value: "/etc/interlink/InterLinkConfig.yaml"
         - name: VKTOKENFILE
           value: "/opt/interlink/token"
-        - name: VK_CONFIG_PATH
+        - name: CONFIGPATH
           value: "/etc/interlink/vk-cfg.json"
         volumeMounts:
         - name: config
@@ -58,13 +59,13 @@ spec:
           mountPath: /opt/interlink
         resources:
           limits:
-            cpu: 2000m
-            memory: 2Gi
+            cpu: 500m
+            memory: 600Mi
           requests:
-            cpu: 2000m
-            memory: 2Gi
+            cpu: 50m
+            memory: 100Mi
       - name: refresh-token
-        image: ghcr.io/intertwin-eu/virtual-kubelet-inttw-refresh:0.0.2-pre6
+        image: ghcr.io/intertwin-eu/virtual-kubelet-inttw-refresh:0.0.3
         imagePullPolicy: Always
         env:
         - name: IAM_SERVER
@@ -82,11 +83,11 @@ spec:
           value: /opt/interlink/token
         resources:
           limits:
-            cpu: 2000m
-            memory: 2Gi
+            cpu: 500m
+            memory: 600Mi
           requests:
-            cpu: 2000m
-            memory: 2Gi
+            cpu: 50m
+            memory: 100Mi
         volumeMounts:
         - name: token
           mountPath: /opt/interlink

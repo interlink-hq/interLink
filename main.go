@@ -160,24 +160,24 @@ func main() {
 	nodeProvider, err := virtualkubelet.NewProvider(cfg.ConfigPath, cfg.NodeName, cfg.OperatingSystem, cfg.InternalIP, cfg.DaemonPort, ctx)
 	go func() {
 
-		ILbindNow := false
-		ILbindOld := false
+		//ILbindNow := false
+		//ILbindOld := false
 
 		for {
-			err, ILbindNow = commonIL.PingInterLink()
+			err, _ = commonIL.PingInterLink()
 
 			if err != nil {
 				log.G(ctx).Error(err)
 			}
 
-			if ILbindNow == true && ILbindOld == false {
-				err = commonIL.NewServiceAccount()
-				if err != nil {
-					log.G(ctx).Fatal(err)
-				}
-			}
+			//if ILbindNow == true && ILbindOld == false {
+			//	err = commonIL.NewServiceAccount()
+			//	if err != nil {
+			//		log.G(ctx).Fatal(err)
+			//	}
+			//}
 
-			ILbindOld = ILbindNow
+			//ILbindOld = ILbindNow
 			time.Sleep(time.Second * 10)
 
 		}

@@ -1,6 +1,6 @@
 FROM bitnami/kubectl as kubectl
 
-FROM golang:1.19 as build-stage
+FROM golang:1.21 as build-stage
 
 WORKDIR /app
 
