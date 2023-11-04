@@ -9,7 +9,8 @@ services:
       source: ./config
       target: /etc/interlink
     environment:
-    - KUBECONFIG=/etc/interlink/compose/kubeconfig.yaml
+    - INTERLINKCONFIGPATH=/etc/interlink/InterLinkConfig.yaml
+    - KUBECONFIG=/etc/interlink/kubeconfig.yaml
     # healthcheck:
     #   test: ["CMD", "/check.sh"]
     #   interval: 10s

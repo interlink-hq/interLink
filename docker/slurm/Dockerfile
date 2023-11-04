@@ -32,12 +32,12 @@ RUN DEBIAN_FRONTEND=noninteractive \
                    slurm-wlm
 
 # Slurm configuration
-COPY docker/test/slurm.conf /etc/slurm/slurm.conf
+COPY docker/slurm/slurm.conf /etc/slurm/slurm.conf
 RUN mkdir -p /var/spool/slurmctld \
     && chown slurm:slurm /var/spool/slurmctld
 
 # Startup configuration
-COPY docker/test/startup.sh /etc/startup.sh
+COPY docker/slurm/startup.sh /etc/startup.sh
 RUN chmod 555 /etc/startup.sh
 
 WORKDIR /root
@@ -46,10 +46,12 @@ COPY --from=build-stage /app/bin/slurm-sidecar /sidecar/slurm-sidecar
 
 ENV INTERLINKCONFIGPATH=/root/InterLinkConfig.yaml
 
-COPY docker/test/InterLinkConfig.yaml .
+COPY docker/slurm/InterLinkConfig.yaml .
 
 RUN apt install -y software-properties-common \
  && add-apt-repository -y ppa:apptainer/ppa \
  && apt install -y apptainer
+
+RUN mkdir -p /cvmfs/grid.cern.ch/etc/grid-security
 
 CMD ["/bin/sh", "-c", "/etc/startup.sh && /sidecar/slurm-sidecar"]

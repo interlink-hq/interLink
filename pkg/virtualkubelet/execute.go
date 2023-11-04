@@ -231,7 +231,6 @@ func checkPodsStatus(p *VirtualKubeletProvider, ctx context.Context, token strin
 				return err
 			}
 
-			podPhase := pod.Status.Phase
 
 			for _, containerStatus := range podStatus.Containers {
 				index := 0
