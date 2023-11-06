@@ -1,4 +1,4 @@
-![Interlink logo](./imgs/interlink_logo.png)
+![Interlink logo](./docs/imgs/interlink_logo.png)
 
 ## :information_source: Overview
 
@@ -18,7 +18,7 @@ The project consists of two main components:
 The project is reusing and get inspired by the [KNoC](https://github.com/CARV-ICS-FORTH/knoc) boilerplates at different levels, implementing the generic API layer in place of an ssh execution as the original contribution.
 
 
-![drawing](imgs/InterLink.svg)
+![drawing](docs/imgs/InterLink.svg)
 
 This repository includes:
 
@@ -50,6 +50,11 @@ Content is based on:
   - [:information\_source: InterLink Config file](#information_source-interlink-config-file)
   - [:information\_source: Environment Variables list](#information_source-environment-variables-list)
 - [Digging in the project](#digging-in-the-project)
+  - [Virtual Kubelet](#virtual-kubelet)
+  - [InterLink](#interlink)
+  - [Sidecars](#sidecars)
+    - [Docker Sidecar](#docker-sidecar)
+    - [Slurm Sidecar](#slurm-sidecar)
 - [GitHub repository management rules](#github-repository-management-rules)
   - [Merge management](#merge-management)
   - [Protection on main branch](#protection-on-main-branch)

@@ -2,6 +2,6 @@ FROM python:3.10
 
 RUN pip3 install requests
 
-COPY ../scripts/refresh.py /opt/refresh.py
+COPY ../docker/scripts/refresh.py /opt/refresh.py
 
 ENTRYPOINT ["python3", "/opt/refresh.py"]

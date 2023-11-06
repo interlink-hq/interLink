@@ -225,6 +225,7 @@ func produce_slurm_script(podUID string, metadata metav1.ObjectMeta, commands []
 
 	sbatch_macros := "#!" + commonIL.InterLinkConfigInst.BashPath +
 		"\n#SBATCH --job-name=" + podUID +
+		"\n#SBATCH --output=" + commonIL.InterLinkConfigInst.DataRootFolder + podUID + "/" + "job.out" +
 		sbatch_flags_as_string +
 		"\n. ~/.bash_profile" +
 		//"\nmodule load singularity" +
