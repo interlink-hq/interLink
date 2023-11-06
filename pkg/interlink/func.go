@@ -43,8 +43,8 @@ func retrieve_data(container v1.Container, pod *v1.Pod) (commonIL.RetrievedConta
 				log.G(Ctx).Info("--- Retrieving ConfigMap " + podVolumeSpec.ConfigMap.Name)
 				cmvs := podVolumeSpec.ConfigMap
 
+				log.G(Ctx).Info(pod.Namespace + " " + cmvs.Name + " ")
 				configMap, err := Clientset.CoreV1().ConfigMaps(pod.Namespace).Get(Ctx, cmvs.Name, metav1.GetOptions{})
-
 				if err != nil {
 					log.G(Ctx).Error(err)
 					return commonIL.RetrievedContainer{}, err

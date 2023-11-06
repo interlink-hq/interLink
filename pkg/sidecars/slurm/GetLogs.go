@@ -5,10 +5,9 @@ import (
 	"errors"
 	"io"
 	"net/http"
+	"os"
 	"strings"
 	"time"
-
-	OSexec "os/exec"
 
 	"github.com/containerd/containerd/log"
 	commonIL "github.com/intertwin-eu/interlink/pkg/common"
@@ -38,7 +37,7 @@ func GetLogsHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	var cmd *OSexec.Cmd
+	var output []byte
 	if req.Opts.Timestamps {
 		log.G(Ctx).Error(errors.New("Not Implemented"))
 		statusCode = http.StatusInternalServerError
@@ -46,16 +45,16 @@ func GetLogsHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	} else {
 		log.G(Ctx).Info("Reading  " + commonIL.InterLinkConfigInst.DataRootFolder + req.PodUID + "/" + req.ContainerName + ".out")
-		cmd = OSexec.Command("cat", commonIL.InterLinkConfigInst.DataRootFolder+req.PodUID+"/"+req.ContainerName+".out")
-	}
-
-	output, err := cmd.CombinedOutput()
-	if err != nil {
-		log.G(Ctx).Error(err)
-		log.G(Ctx).Info(string(output))
-		statusCode = http.StatusInternalServerError
-		w.WriteHeader(statusCode)
-		return
+		output, err = os.ReadFile(commonIL.InterLinkConfigInst.DataRootFolder + req.PodUID + "/" + req.ContainerName + ".out")
+		if err != nil {
+			log.G(Ctx).Info("Failed to read container logs, falling back to job log.")
+			output, err = os.ReadFile(commonIL.InterLinkConfigInst.DataRootFolder + req.PodUID + "/" + "job.out")
+			if err != nil {
+				statusCode = http.StatusInternalServerError
+				w.WriteHeader(statusCode)
+				return
+			}
+		}
 	}
 
 	var returnedLogs string
