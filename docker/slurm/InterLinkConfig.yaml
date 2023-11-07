@@ -9,7 +9,7 @@ SqueuePath: "/usr/bin/squeue"
 CommandPrefix: ""
 SingularityPrefix: ""
 ExportPodData: true
-DataRootFolder: ".local/interlink/jobs/"
+DataRootFolder: ".tmp"
 ServiceAccount: "interlink"
 Namespace: "vk"
 Tsocks: false
@@ -18,3 +18,4 @@ TsocksLoginNode: "login01"
 BashPath: /bin/bash
 VerboseLogging: true
 ErrorsOnlyLogging: false
+Pod_IP: "172.16.9.11"
