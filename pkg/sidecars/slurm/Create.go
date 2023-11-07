@@ -45,7 +45,7 @@ func SubmitHandler(w http.ResponseWriter, r *http.Request) {
 
 		for _, container := range containers {
 			log.G(Ctx).Info("- Beginning script generation for container " + container.Name)
-			commstr1 := []string{"singularity", "exec", "--writable-tmpfs"}
+			commstr1 := []string{"singularity", "exec", "--writable-tmpfs", "--nv", "-W", commonIL.InterLinkConfigInst.DataRootFolder + string(data.Pod.UID)}
 
 			envs := prepare_envs(container)
 			image := ""
@@ -55,7 +55,7 @@ func SubmitHandler(w http.ResponseWriter, r *http.Request) {
 				w.WriteHeader(statusCode)
 				w.Write([]byte("Error prepairing mounts. Check Slurm Sidecar's logs"))
 				log.G(Ctx).Error(err)
-				os.RemoveAll(commonIL.InterLinkConfigInst.DataRootFolder + data.Pod.Namespace + "-" + string(data.Pod.UID))
+				os.RemoveAll(commonIL.InterLinkConfigInst.DataRootFolder + string(data.Pod.UID))
 				return
 			}
 
@@ -86,7 +86,7 @@ func SubmitHandler(w http.ResponseWriter, r *http.Request) {
 			w.WriteHeader(statusCode)
 			w.Write([]byte("Error producing Slurm script. Check Slurm Sidecar's logs"))
 			log.G(Ctx).Error(err)
-			os.RemoveAll(commonIL.InterLinkConfigInst.DataRootFolder + data.Pod.Namespace + "-" + string(data.Pod.UID))
+			os.RemoveAll(commonIL.InterLinkConfigInst.DataRootFolder + string(data.Pod.UID))
 			return
 		}
 		out, err := slurm_batch_submit(path)
@@ -95,7 +95,7 @@ func SubmitHandler(w http.ResponseWriter, r *http.Request) {
 			w.WriteHeader(statusCode)
 			w.Write([]byte("Error submitting Slurm script. Check Slurm Sidecar's logs"))
 			log.G(Ctx).Error(err)
-			os.RemoveAll(commonIL.InterLinkConfigInst.DataRootFolder + data.Pod.Namespace + "-" + string(data.Pod.UID))
+			os.RemoveAll(commonIL.InterLinkConfigInst.DataRootFolder + string(data.Pod.UID))
 			return
 		}
 		err = handle_jid(string(data.Pod.UID), out, data.Pod)
@@ -104,7 +104,7 @@ func SubmitHandler(w http.ResponseWriter, r *http.Request) {
 			w.WriteHeader(statusCode)
 			w.Write([]byte("Error handling JID. Check Slurm Sidecar's logs"))
 			log.G(Ctx).Error(err)
-			os.RemoveAll(commonIL.InterLinkConfigInst.DataRootFolder + data.Pod.Namespace + "-" + string(data.Pod.UID))
+			os.RemoveAll(commonIL.InterLinkConfigInst.DataRootFolder + string(data.Pod.UID))
 			err = delete_container(string(data.Pod.UID))
 			return
 		}
