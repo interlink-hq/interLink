@@ -34,6 +34,7 @@ jobs:
           outputs: "type=registry,push=true"
           tags: |
             ghcr.io/${{ steps.get_repo_owner.outputs.repo_owner }}/virtual-kubelet-inttw:${{ env.RELEASE_VERSION }}
+            ghcr.io/${{ steps.get_repo_owner.outputs.repo_owner }}/virtual-kubelet-inttw:latest
           file: ./docker/Dockerfile.vk
           platforms: linux/amd64, linux/arm64
 
@@ -66,5 +67,6 @@ jobs:
           outputs: "type=registry,push=true"
           tags: |
             ghcr.io/${{ steps.get_repo_owner.outputs.repo_owner }}/virtual-kubelet-inttw-refresh:${{ env.RELEASE_VERSION }}
+            ghcr.io/${{ steps.get_repo_owner.outputs.repo_owner }}/virtual-kubelet-inttw-refresh:latest
           file: ./docker/Dockerfile.refresh-token
           platforms: linux/amd64, linux/arm64
