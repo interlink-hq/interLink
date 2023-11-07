@@ -10,7 +10,7 @@ import (
 )
 
 func Ping(w http.ResponseWriter, r *http.Request) {
-	log.G(Ctx).Info("InterLink: received Ping call")
+	log.G(Ctx).Info("InterLink: received Ping call: " + os.Getenv("KUBECONFIG"))
 	kubeconfig, err := clientcmd.BuildConfigFromFlags("", os.Getenv("KUBECONFIG"))
 	if err != nil {
 		log.G(Ctx).Error("Unable to create a valid clientset config")

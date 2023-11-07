@@ -13,9 +13,6 @@ WORKDIR /
 
 COPY --from=build-stage /app/bin/interlink /interlink
 
-COPY ../kustomizations/InterLinkConfig.yaml .
-ENV INTERLINKCONFIGPATH=/InterLinkConfig.yaml
-
 USER nonroot:nonroot
 
 ENTRYPOINT ["/interlink"]

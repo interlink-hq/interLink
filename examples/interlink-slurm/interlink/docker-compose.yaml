@@ -1,7 +1,9 @@
 version: '3.7'
 services:
   interlink:
-    image:  docker.io/dciangot/interlink:latest
+    build:
+      context: ../../../
+      dockerfile: docker/Dockerfile.interlink
     restart: always
     network_mode: "host"
     volumes:
@@ -18,7 +20,9 @@ services:
     #   retries: 3
     #   start_period: 5s
   docker-sidecar:
-    image: docker.io/dciangot/slurm-sidecar:latest
+    build:
+      context: ../../../
+      dockerfile: docker/slurm/Dockerfile
     restart: always
     privileged: true
     cap_add:
