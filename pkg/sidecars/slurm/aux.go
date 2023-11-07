@@ -98,6 +98,7 @@ func prepare_mounts(container v1.Container, data []commonIL.RetrievedPodData) ([
 							splitDirs := strings.Split(dirs[0], "/")
 							dir := filepath.Join(splitDirs[:len(splitDirs)-1]...)
 							prefix += "\nmkdir -p " + dir + " && touch " + dirs[0] + " && echo $" + envs[i] + " > " + dirs[0]
+							mount_data += dir
 						} else {
 							mount_data += path
 						}
@@ -118,6 +119,7 @@ func prepare_mounts(container v1.Container, data []commonIL.RetrievedPodData) ([
 							splitDirs := strings.Split(dirs[0], "/")
 							dir := filepath.Join(splitDirs[:len(splitDirs)-1]...)
 							prefix += "\nmkdir -p " + dir + " && touch " + dirs[0] + " && echo $" + envs[i] + " > " + dirs[0]
+							mount_data += dir
 						} else {
 							mount_data += path
 						}
@@ -225,6 +227,7 @@ func produce_slurm_script(podUID string, metadata metav1.ObjectMeta, commands []
 
 	sbatch_macros := "#!" + commonIL.InterLinkConfigInst.BashPath +
 		"\n#SBATCH --job-name=" + podUID +
+		"\n#SBATCH --output=" + commonIL.InterLinkConfigInst.DataRootFolder + podUID + "/" + "job.out" +
 		sbatch_flags_as_string +
 		"\n. ~/.bash_profile" +
 		//"\nmodule load singularity" +

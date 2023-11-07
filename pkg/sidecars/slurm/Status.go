@@ -100,7 +100,7 @@ func StatusHandler(w http.ResponseWriter, r *http.Request) {
 								w.WriteHeader(statusCode)
 								w.Write([]byte("Error converting container status.. Check Slurm Sidecar's logs"))
 								log.G(Ctx).Error(fmt.Errorf("unable to convert container status: %s", err))
-								return
+								status = 500
 							}
 
 							containerStatuses = append(

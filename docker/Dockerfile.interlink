@@ -1,4 +1,4 @@
-FROM golang:1.19 as build-stage
+FROM golang:1.21 as build-stage
 
 WORKDIR /app
 
@@ -12,9 +12,6 @@ FROM gcr.io/distroless/base-debian11 AS build-release-stage
 WORKDIR /
 
 COPY --from=build-stage /app/bin/interlink /interlink
-
-COPY ../kustomizations/InterLinkConfig.yaml .
-ENV INTERLINKCONFIGPATH=/InterLinkConfig.yaml
 
 USER nonroot:nonroot
 
