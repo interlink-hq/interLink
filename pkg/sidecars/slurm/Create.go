@@ -45,7 +45,7 @@ func SubmitHandler(w http.ResponseWriter, r *http.Request) {
 
 		for _, container := range containers {
 			log.G(Ctx).Info("- Beginning script generation for container " + container.Name)
-			commstr1 := []string{"singularity", "exec", "--writable-tmpfs", "--nv", "-W", commonIL.InterLinkConfigInst.DataRootFolder + string(data.Pod.UID)}
+			commstr1 := []string{"singularity", "exec", "--writable-tmpfs", "--nv", "-C", "-W", commonIL.InterLinkConfigInst.DataRootFolder + string(data.Pod.UID)}
 
 			envs := prepare_envs(container)
 			image := ""

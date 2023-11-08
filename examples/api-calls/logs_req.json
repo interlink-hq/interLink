@@ -1,0 +1,15 @@
+{
+	"Namespace": "vk",
+	"PodUID": "11718a45-258a-44e8-8feb-695057429fb5",
+	"PodName": "test-pod-cfg-cowsay-dciangot",
+	"ContainerName": "cowsayo",
+	"Opts": {
+		"Tail": 0,
+		"Bytes": 0,
+		"Timestamps": false,
+		"Follow": false,
+		"Previous": false,
+		"SinceSeconds": 0,
+		"SinceTime": "0001-01-01T00:00:00Z"
+	}
+}

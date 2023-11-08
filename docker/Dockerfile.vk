@@ -9,7 +9,7 @@ COPY .. .
 RUN CGO_ENABLED=0 GOOS=linux go build -mod vendor -o bin/vk
 
 # Deploy the application binary into a lean image
-FROM ubuntu:latest AS build-release-stage
+FROM ubuntu:22.04 AS build-release-stage
 
 WORKDIR /
 
