@@ -97,7 +97,7 @@ func NewOpts(nodename string) *Opts {
 	}
 
 	return &Opts{
-		ConfigPath: commonIL.InterLinkConfigInst.ConfigPath,
+		ConfigPath: commonIL.InterLinkConfigInst.VKConfigPath,
 		NodeName:   nodename,
 		Verbose:    commonIL.InterLinkConfigInst.VerboseLogging,
 		ErrorsOnly: commonIL.InterLinkConfigInst.ErrorsOnlyLogging,

@@ -51,7 +51,7 @@ func NewInterLinkConfig() {
 		} else {
 			ILcfgPath = "/etc/interlink/InterLinkConfig.yaml"
 		}
-		InterLinkConfigInst.ConfigPath = *configPath
+		InterLinkConfigInst.VKConfigPath = *configPath
 
 		if _, err := os.Stat(ILcfgPath); err != nil {
 			log.G(context.Background()).Error("File " + ILcfgPath + " doesn't exist. You can set a custom path by exporting INTERLINKCONFIGPATH. Exiting...")
