@@ -37,7 +37,7 @@ func StatusHandler(w http.ResponseWriter, r *http.Request) {
 	}
 
 	for i, pod := range req {
-		resp = append(resp, commonIL.PodStatus{PodName: pod.Name, PodNamespace: pod.Namespace})
+		resp = append(resp, commonIL.PodStatus{PodName: pod.Name, PodUID: string(pod.UID), PodNamespace: pod.Namespace})
 		for _, container := range pod.Spec.Containers {
 			log.G(Ctx).Debug("- Getting status for container " + container.Name)
 			cmd := []string{"ps -af name=^" + container.Name + "$ --format \"{{.Status}}\""}

@@ -26,7 +26,7 @@ var Clientset *kubernetes.Clientset
 
 func NewInterLinkConfig() {
 	if InterLinkConfigInst.set == false {
-		configPath := flag.String("configpath", "/etc/interlink/InterLinkConfig.yaml", "Path to InterLinkConfig file")
+		configPath := flag.String("configpath", "/etc/interlink/vk-cfg.json", "Path to VK config file")
 		verbose := flag.Bool("verbose", false, "Enable or disable Debug level logging")
 		errorsOnly := flag.Bool("errorsonly", false, "Prints only errors if enabled")
 		flag.Parse()
@@ -39,23 +39,35 @@ func NewInterLinkConfig() {
 			InterLinkConfigInst.ErrorsOnlyLogging = true
 		}
 
-		if os.Getenv("INTERLINKCONFIGPATH") != "" {
-			*configPath = os.Getenv("INTERLINKCONFIGPATH")
+		if os.Getenv("VKCONFIGPATH") != "" {
+			*configPath = os.Getenv("VKCONFIGPATH")
 		}
-		InterLinkConfigInst.ConfigPath = *configPath
+		InterLinkConfigInst.VKConfigPath = *configPath
 
-		if _, err := os.Stat(InterLinkConfigInst.ConfigPath); err != nil {
-			log.G(context.Background()).Error("File " + InterLinkConfigInst.ConfigPath + " doesn't exist. You can set a custom path by exporting INTERLINKCONFIGPATH. Exiting...")
+		var ILcfgPath string
+
+		if os.Getenv("INTERLINKCONFIGPATH") != "" {
+			ILcfgPath = os.Getenv("INTERLINKCONFIGPATH")
+		} else {
+			ILcfgPath = "/etc/interlink/InterLinkConfig.yaml"
+		}
+
+		if _, err := os.Stat(ILcfgPath); err != nil {
+			log.G(context.Background()).Error("File " + ILcfgPath + " doesn't exist. You can set a custom path by exporting INTERLINKCONFIGPATH. Exiting...")
 			os.Exit(-1)
 		}
 
-		log.G(context.Background()).Info("Loading InterLink config from " + InterLinkConfigInst.ConfigPath)
-		yfile, err := os.ReadFile(InterLinkConfigInst.ConfigPath)
+		log.G(context.Background()).Info("Loading InterLink config from " + ILcfgPath)
+		yfile, err := os.ReadFile(ILcfgPath)
 		if err != nil {
 			log.G(context.Background()).Error("Error opening config file, exiting...")
 			os.Exit(1)
 		}
-		yaml.Unmarshal(yfile, &InterLinkConfigInst)
+		err = yaml.Unmarshal(yfile, &InterLinkConfigInst)
+		if err != nil {
+			log.G(context.Background()).Error(err)
+			os.Exit(1)
+		}
 
 		if os.Getenv("INTERLINKURL") != "" {
 			InterLinkConfigInst.Interlinkurl = os.Getenv("INTERLINKURL")

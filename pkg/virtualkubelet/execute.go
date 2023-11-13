@@ -165,7 +165,6 @@ func LogRetrieval(p *VirtualKubeletProvider, ctx context.Context, logsRequest co
 	} else {
 		return resp.Body, nil
 	}
-
 }
 
 func RemoteExecution(p *VirtualKubeletProvider, ctx context.Context, mode int8, imageLocation string, pod *v1.Pod) error {

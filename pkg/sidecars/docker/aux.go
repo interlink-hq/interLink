@@ -18,21 +18,15 @@ var Ctx context.Context
 func prepare_mounts(container v1.Container, data []commonIL.RetrievedPodData) (string, error) {
 	log.G(Ctx).Info("- Preparing mountpoints for " + container.Name)
 	mount_data := ""
-	pod_name := strings.Split(container.Name, "-")
-
-	if len(pod_name) > 6 {
-		pod_name = pod_name[0:6]
-	}
-
-	err := os.MkdirAll(commonIL.InterLinkConfigInst.DataRootFolder+strings.Join(pod_name[:len(pod_name)-1], "-"), os.ModePerm)
-	if err != nil {
-		log.G(Ctx).Error("Can't create directory " + commonIL.InterLinkConfigInst.DataRootFolder + strings.Join(pod_name[:len(pod_name)-1], "-"))
-		return "", errors.New("Can't create directory " + commonIL.InterLinkConfigInst.DataRootFolder + strings.Join(pod_name[:len(pod_name)-1], "-"))
-	} else {
-		log.G(Ctx).Debug("- Created directory " + commonIL.InterLinkConfigInst.DataRootFolder + strings.Join(pod_name[:len(pod_name)-1], "-"))
-	}
 
 	for _, podData := range data {
+		err := os.MkdirAll(commonIL.InterLinkConfigInst.DataRootFolder+podData.Pod.Namespace+"-"+string(podData.Pod.UID), os.ModePerm)
+		if err != nil {
+			log.G(Ctx).Error(err)
+			return "", err
+		} else {
+			log.G(Ctx).Info("-- Created directory " + commonIL.InterLinkConfigInst.DataRootFolder + podData.Pod.Namespace + "-" + string(podData.Pod.UID))
+		}
 		for _, cont := range podData.Containers {
 			for _, cfgMap := range cont.ConfigMaps {
 				if container.Name == cont.Name {

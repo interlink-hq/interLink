@@ -34,7 +34,7 @@ func SubmitHandler(w http.ResponseWriter, r *http.Request) {
 	}
 
 	for _, test := range req {
-		log.G(Ctx).Debug(test.Pod.Name)
+		log.G(Ctx).Debug(test.Pod.UID)
 	}
 
 	for _, data := range req {

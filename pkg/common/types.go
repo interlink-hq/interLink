@@ -9,6 +9,7 @@ import (
 
 type PodStatus struct {
 	PodName      string               `json:"name"`
+	PodUID       string               `json:"UID"`
 	PodNamespace string               `json:"namespace"`
 	Containers   []v1.ContainerStatus `json:"containers"`
 }
@@ -34,7 +35,7 @@ type ConfigMapSecret struct {
 }
 
 type InterLinkConfig struct {
-	ConfigPath        string
+	VKConfigPath      string
 	VKTokenFile       string `yaml:"VKTokenFile"`
 	Interlinkurl      string `yaml:"InterlinkURL"`
 	Sidecarurl        string `yaml:"SidecarURL"`

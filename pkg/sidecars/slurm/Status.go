@@ -118,13 +118,13 @@ func StatusHandler(w http.ResponseWriter, r *http.Request) {
 
 						}
 
-						resp = append(resp, commonIL.PodStatus{PodName: pod.Name, PodNamespace: pod.Namespace, Containers: containerStatuses})
+						resp = append(resp, commonIL.PodStatus{PodName: pod.Name, PodUID: string(pod.UID), PodNamespace: pod.Namespace, Containers: containerStatuses})
 					} else {
 						pattern := `(CD|CG|F|PD|PR|R|S|ST)`
 						re := regexp.MustCompile(pattern)
 						match := re.FindString(execReturn.Stdout)
 
-						log.G(Ctx).Info("JID: " + jid.JID + " | Status: " + match + " | Pod: " + pod.Name)
+						log.G(Ctx).Info("JID: " + jid.JID + " | Status: " + match + " | Pod: " + pod.Name + " | UID: " + string(pod.UID))
 
 						switch match {
 						case "CD":
@@ -132,49 +132,49 @@ func StatusHandler(w http.ResponseWriter, r *http.Request) {
 								JIDs[i].EndTime = time.Now()
 							}
 							containerStatus := v1.ContainerStatus{Name: pod.Spec.Containers[0].Name, State: v1.ContainerState{Terminated: &v1.ContainerStateTerminated{StartedAt: metav1.Time{JIDs[i].StartTime}, FinishedAt: metav1.Time{JIDs[i].EndTime}}}, Ready: false}
-							resp = append(resp, commonIL.PodStatus{PodName: pod.Name, PodNamespace: pod.Namespace, Containers: []v1.ContainerStatus{containerStatus}})
+							resp = append(resp, commonIL.PodStatus{PodName: pod.Name, PodUID: string(pod.UID), PodNamespace: pod.Namespace, Containers: []v1.ContainerStatus{containerStatus}})
 						case "CG":
 							if jid.StartTime.IsZero() {
 								JIDs[i].StartTime = time.Now()
 							}
 							containerStatus := v1.ContainerStatus{Name: pod.Spec.Containers[0].Name, State: v1.ContainerState{Running: &v1.ContainerStateRunning{StartedAt: metav1.Time{JIDs[i].StartTime}}}, Ready: true}
-							resp = append(resp, commonIL.PodStatus{PodName: pod.Name, PodNamespace: pod.Namespace, Containers: []v1.ContainerStatus{containerStatus}})
+							resp = append(resp, commonIL.PodStatus{PodName: pod.Name, PodUID: string(pod.UID), PodNamespace: pod.Namespace, Containers: []v1.ContainerStatus{containerStatus}})
 						case "F":
 							if jid.EndTime.IsZero() {
 								JIDs[i].EndTime = time.Now()
 							}
 							containerStatus := v1.ContainerStatus{Name: pod.Spec.Containers[0].Name, State: v1.ContainerState{Terminated: &v1.ContainerStateTerminated{StartedAt: metav1.Time{JIDs[i].StartTime}, FinishedAt: metav1.Time{JIDs[i].EndTime}}}, Ready: false}
-							resp = append(resp, commonIL.PodStatus{PodName: pod.Name, PodNamespace: pod.Namespace, Containers: []v1.ContainerStatus{containerStatus}})
+							resp = append(resp, commonIL.PodStatus{PodName: pod.Name, PodUID: string(pod.UID), PodNamespace: pod.Namespace, Containers: []v1.ContainerStatus{containerStatus}})
 						case "PD":
 							containerStatus := v1.ContainerStatus{Name: pod.Spec.Containers[0].Name, State: v1.ContainerState{Waiting: &v1.ContainerStateWaiting{}}, Ready: false}
-							resp = append(resp, commonIL.PodStatus{PodName: pod.Name, PodNamespace: pod.Namespace, Containers: []v1.ContainerStatus{containerStatus}})
+							resp = append(resp, commonIL.PodStatus{PodName: pod.Name, PodUID: string(pod.UID), PodNamespace: pod.Namespace, Containers: []v1.ContainerStatus{containerStatus}})
 						case "PR":
 							if jid.EndTime.IsZero() {
 								JIDs[i].EndTime = time.Now()
 							}
 							containerStatus := v1.ContainerStatus{Name: pod.Spec.Containers[0].Name, State: v1.ContainerState{Terminated: &v1.ContainerStateTerminated{StartedAt: metav1.Time{JIDs[i].StartTime}, FinishedAt: metav1.Time{JIDs[i].EndTime}}}, Ready: false}
-							resp = append(resp, commonIL.PodStatus{PodName: pod.Name, PodNamespace: pod.Namespace, Containers: []v1.ContainerStatus{containerStatus}})
+							resp = append(resp, commonIL.PodStatus{PodName: pod.Name, PodUID: string(pod.UID), PodNamespace: pod.Namespace, Containers: []v1.ContainerStatus{containerStatus}})
 						case "R":
 							if jid.StartTime.IsZero() {
 								JIDs[i].StartTime = time.Now()
 							}
 							containerStatus := v1.ContainerStatus{Name: pod.Spec.Containers[0].Name, State: v1.ContainerState{Running: &v1.ContainerStateRunning{StartedAt: metav1.Time{JIDs[i].StartTime}}}, Ready: true}
-							resp = append(resp, commonIL.PodStatus{PodName: pod.Name, PodNamespace: pod.Namespace, Containers: []v1.ContainerStatus{containerStatus}})
+							resp = append(resp, commonIL.PodStatus{PodName: pod.Name, PodUID: string(pod.UID), PodNamespace: pod.Namespace, Containers: []v1.ContainerStatus{containerStatus}})
 						case "S":
 							containerStatus := v1.ContainerStatus{Name: pod.Spec.Containers[0].Name, State: v1.ContainerState{Waiting: &v1.ContainerStateWaiting{}}, Ready: false}
-							resp = append(resp, commonIL.PodStatus{PodName: pod.Name, PodNamespace: pod.Namespace, Containers: []v1.ContainerStatus{containerStatus}})
+							resp = append(resp, commonIL.PodStatus{PodName: pod.Name, PodUID: string(pod.UID), PodNamespace: pod.Namespace, Containers: []v1.ContainerStatus{containerStatus}})
 						case "ST":
 							if jid.EndTime.IsZero() {
 								JIDs[i].EndTime = time.Now()
 							}
 							containerStatus := v1.ContainerStatus{Name: pod.Spec.Containers[0].Name, State: v1.ContainerState{Terminated: &v1.ContainerStateTerminated{StartedAt: metav1.Time{JIDs[i].StartTime}, FinishedAt: metav1.Time{JIDs[i].EndTime}}}, Ready: false}
-							resp = append(resp, commonIL.PodStatus{PodName: pod.Name, PodNamespace: pod.Namespace, Containers: []v1.ContainerStatus{containerStatus}})
+							resp = append(resp, commonIL.PodStatus{PodName: pod.Name, PodUID: string(pod.UID), PodNamespace: pod.Namespace, Containers: []v1.ContainerStatus{containerStatus}})
 						default:
 							if jid.EndTime.IsZero() {
 								JIDs[i].EndTime = time.Now()
 							}
 							containerStatus := v1.ContainerStatus{Name: pod.Spec.Containers[0].Name, State: v1.ContainerState{Terminated: &v1.ContainerStateTerminated{StartedAt: metav1.Time{JIDs[i].StartTime}, FinishedAt: metav1.Time{JIDs[i].EndTime}}}, Ready: false}
-							resp = append(resp, commonIL.PodStatus{PodName: pod.Name, PodNamespace: pod.Namespace, Containers: []v1.ContainerStatus{containerStatus}})
+							resp = append(resp, commonIL.PodStatus{PodName: pod.Name, PodUID: string(pod.UID), PodNamespace: pod.Namespace, Containers: []v1.ContainerStatus{containerStatus}})
 						}
 					}
 				}
