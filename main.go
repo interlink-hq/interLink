@@ -97,7 +97,7 @@ func NewOpts(nodename string) *Opts {
 	}
 
 	return &Opts{
-		ConfigPath: os.Getenv("CONFIGPATH"),
+		ConfigPath: commonIL.InterLinkConfigInst.ConfigPath,
 		NodeName:   nodename,
 		Verbose:    commonIL.InterLinkConfigInst.VerboseLogging,
 		ErrorsOnly: commonIL.InterLinkConfigInst.ErrorsOnlyLogging,

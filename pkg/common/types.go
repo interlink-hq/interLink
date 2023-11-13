@@ -34,6 +34,7 @@ type ConfigMapSecret struct {
 }
 
 type InterLinkConfig struct {
+	ConfigPath        string
 	VKTokenFile       string `yaml:"VKTokenFile"`
 	Interlinkurl      string `yaml:"InterlinkURL"`
 	Sidecarurl        string `yaml:"SidecarURL"`
@@ -43,6 +44,7 @@ type InterLinkConfig struct {
 	Interlinkport     string `yaml:"InterlinkPort"`
 	Sidecarport       string `yaml:"SidecarPort"`
 	Commandprefix     string `yaml:"CommandPrefix"`
+	SingularityPrefix string `yaml:"SingularityPrefix"`
 	ExportPodData     bool   `yaml:"ExportPodData"`
 	DataRootFolder    string `yaml:"DataRootFolder"`
 	ServiceAccount    string `yaml:"ServiceAccount"`
