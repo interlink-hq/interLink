@@ -26,7 +26,7 @@ var Clientset *kubernetes.Clientset
 
 func NewInterLinkConfig() {
 	if InterLinkConfigInst.set == false {
-		configPath := flag.String("configpath", "/etc/interlink/vk-cfg.json", "Path to VK config file")
+		configPath := flag.String("configpath", "/etc/interlink/InterLinkConfig.yaml", "Path to InterLinkConfig file")
 		verbose := flag.Bool("verbose", false, "Enable or disable Debug level logging")
 		errorsOnly := flag.Bool("errorsonly", false, "Prints only errors if enabled")
 		flag.Parse()
@@ -51,6 +51,7 @@ func NewInterLinkConfig() {
 		} else {
 			ILcfgPath = "/etc/interlink/InterLinkConfig.yaml"
 		}
+		InterLinkConfigInst.ConfigPath = *configPath
 
 		if _, err := os.Stat(ILcfgPath); err != nil {
 			log.G(context.Background()).Error("File " + ILcfgPath + " doesn't exist. You can set a custom path by exporting INTERLINKCONFIGPATH. Exiting...")
