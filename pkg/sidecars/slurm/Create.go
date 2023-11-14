@@ -98,6 +98,7 @@ func SubmitHandler(w http.ResponseWriter, r *http.Request) {
 			os.RemoveAll(commonIL.InterLinkConfigInst.DataRootFolder + string(data.Pod.UID))
 			return
 		}
+		log.G(Ctx).Info(out)
 		err = handle_jid(string(data.Pod.UID), out, data.Pod)
 		if err != nil {
 			statusCode = http.StatusInternalServerError
