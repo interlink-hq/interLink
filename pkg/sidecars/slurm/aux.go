@@ -142,11 +142,14 @@ func prepare_mounts(container v1.Container, data []commonIL.RetrievedPodData) ([
 		}
 	}
 
-	path_hardcoded := ("/cvmfs/grid.cern.ch/etc/grid-security:/etc/grid-security" + "," +
-		"/cvmfs:/cvmfs" + ",")
-	mount_data += path_hardcoded
+	//path_hardcoded := ("/cvmfs/grid.cern.ch/etc/grid-security:/etc/grid-security" + "," +
+	//	"/cvmfs:/cvmfs" + ",")
+	//mount_data += path_hardcoded
 	if last := len(mount_data) - 1; last >= 0 && mount_data[last] == ',' {
 		mount_data = mount_data[:last]
+	}
+	if len(mount_data) == 0 {
+		return []string{}, nil
 	}
 	return append(mount, mount_data), nil
 }
@@ -169,6 +172,15 @@ func produce_slurm_script(podUID string, metadata metav1.ObjectMeta, commands []
 		return "", err
 	}
 	f, err := os.Create(path)
+	if err != nil {
+		log.G(Ctx).Error(err)
+		return "", err
+	}
+	err = os.Chmod(path, 0774)
+	if err != nil {
+		log.G(Ctx).Error(err)
+		return "", err
+	}
 	defer f.Close()
 
 	if err != nil {
@@ -229,10 +241,7 @@ func produce_slurm_script(podUID string, metadata metav1.ObjectMeta, commands []
 		"\n#SBATCH --job-name=" + podUID +
 		"\n#SBATCH --output=" + commonIL.InterLinkConfigInst.DataRootFolder + podUID + "/" + "job.out" +
 		sbatch_flags_as_string +
-		"\n. ~/.bash_profile" +
-		//"\nmodule load singularity" +
-		"\nexport SINGULARITYENV_SINGULARITY_TMPDIR=$CINECA_SCRATCH" +
-		"\nexport SINGULARITYENV_SINGULARITY_CACHEDIR=$CINECA_SCRATCH" +
+		"\n" +
 		prefix +
 		"\n"
 
@@ -288,6 +297,8 @@ func slurm_batch_submit(path string) (string, error) {
 }
 
 func handle_jid(podUID string, output string, pod v1.Pod) error {
+	//Submitted batch job 8017236
+	//Submitted batch job 60920
 	r := regexp.MustCompile(`Submitted batch job (?P<jid>\d+)`)
 	jid := r.FindStringSubmatch(output)
 	f, err := os.Create(commonIL.InterLinkConfigInst.DataRootFolder + podUID + "/JobID.jid")
