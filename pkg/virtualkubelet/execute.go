@@ -224,38 +224,38 @@ func checkPodsStatus(p *VirtualKubeletProvider, ctx context.Context, token strin
 			updatePod := false
 
 			pod, err := p.GetPod(ctx, podStatus.PodNamespace, podStatus.PodName)
-			//log.G(ctx).Debug(pod)
 			if err != nil {
 				log.G(ctx).Error(err)
 				return err
 			}
 
+			if podStatus.PodUID == string(pod.UID) {
+				for _, containerStatus := range podStatus.Containers {
+					index := 0
 
-			for _, containerStatus := range podStatus.Containers {
-				index := 0
-
-				for i, checkedContainer := range pod.Status.ContainerStatuses {
-					if checkedContainer.Name == containerStatus.Name {
-						index = i
+					for i, checkedContainer := range pod.Status.ContainerStatuses {
+						if checkedContainer.Name == containerStatus.Name {
+							index = i
+						}
 					}
-				}
 
-				if containerStatus.State.Terminated != nil {
-					log.G(ctx).Info("Pod " + podStatus.PodName + ": Service " + containerStatus.Name + " is not running on Sidecar")
-					updatePod = false
-					if containerStatus.State.Terminated.ExitCode == 0 {
-						pod.Status.Phase = v1.PodSucceeded
+					if containerStatus.State.Terminated != nil {
+						log.G(ctx).Info("Pod " + podStatus.PodName + ": Service " + containerStatus.Name + " is not running on Sidecar")
+						updatePod = false
+						if containerStatus.State.Terminated.ExitCode == 0 {
+							pod.Status.Phase = v1.PodSucceeded
+							updatePod = true
+						}
+					} else if containerStatus.State.Waiting != nil {
+						log.G(ctx).Info("Pod " + podStatus.PodName + ": Service " + containerStatus.Name + " is setting up on Sidecar")
+						updatePod = false
+					} else if containerStatus.State.Running != nil {
+						pod.Status.Phase = v1.PodRunning
 						updatePod = true
-					}
-				} else if containerStatus.State.Waiting != nil {
-					log.G(ctx).Info("Pod " + podStatus.PodName + ": Service " + containerStatus.Name + " is setting up on Sidecar")
-					updatePod = false
-				} else if containerStatus.State.Running != nil {
-					pod.Status.Phase = v1.PodRunning
-					updatePod = true
-					if pod.Status.ContainerStatuses != nil {
-						pod.Status.ContainerStatuses[index].State = containerStatus.State
-						pod.Status.ContainerStatuses[index].Ready = containerStatus.Ready
+						if pod.Status.ContainerStatuses != nil {
+							pod.Status.ContainerStatuses[index].State = containerStatus.State
+							pod.Status.ContainerStatuses[index].Ready = containerStatus.Ready
+						}
 					}
 				}
 			}

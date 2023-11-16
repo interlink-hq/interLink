@@ -16,6 +16,8 @@ func main() {
 	var cancel context.CancelFunc
 	logger := logrus.StandardLogger()
 
+	commonIL.NewInterLinkConfig()
+
 	if commonIL.InterLinkConfigInst.VerboseLogging {
 		logger.SetLevel(logrus.DebugLevel)
 	} else if commonIL.InterLinkConfigInst.ErrorsOnlyLogging {
@@ -28,8 +30,6 @@ func main() {
 
 	docker.Ctx, cancel = context.WithCancel(context.Background())
 	defer cancel()
-
-	commonIL.NewInterLinkConfig()
 
 	mutex := http.NewServeMux()
 	mutex.HandleFunc("/status", docker.StatusHandler)

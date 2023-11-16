@@ -56,8 +56,8 @@ type InterLinkConfig struct {
 	Tsockslogin       string `yaml:"TsocksLoginNode"`
 	BashPath          string `yaml:"BashPath"`
 	PodIP             string `yaml:"Pod_IP"`
-	VerboseLogging    bool   `yaml:"VerboseLogging"`
-	ErrorsOnlyLogging bool   `yaml:"ErrorsOnlyLogging"`
+	VerboseLogging    bool
+	ErrorsOnlyLogging bool
 	set               bool
 }
 

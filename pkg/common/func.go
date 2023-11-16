@@ -31,14 +31,6 @@ func NewInterLinkConfig() {
 		errorsOnly := flag.Bool("errorsonly", false, "Prints only errors if enabled")
 		flag.Parse()
 
-		if *verbose {
-			InterLinkConfigInst.VerboseLogging = true
-			InterLinkConfigInst.ErrorsOnlyLogging = false
-		} else if *errorsOnly {
-			InterLinkConfigInst.VerboseLogging = false
-			InterLinkConfigInst.ErrorsOnlyLogging = true
-		}
-
 		if os.Getenv("VKCONFIGPATH") != "" {
 			*configPath = os.Getenv("VKCONFIGPATH")
 		}
@@ -68,6 +60,14 @@ func NewInterLinkConfig() {
 		if err != nil {
 			log.G(context.Background()).Error(err)
 			os.Exit(1)
+		}
+
+		if *verbose {
+			InterLinkConfigInst.VerboseLogging = true
+			InterLinkConfigInst.ErrorsOnlyLogging = false
+		} else if *errorsOnly {
+			InterLinkConfigInst.VerboseLogging = false
+			InterLinkConfigInst.ErrorsOnlyLogging = true
 		}
 
 		if os.Getenv("INTERLINKURL") != "" {

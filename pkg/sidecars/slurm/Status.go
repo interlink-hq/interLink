@@ -71,6 +71,7 @@ func StatusHandler(w http.ResponseWriter, r *http.Request) {
 						Shell:   true,
 					}
 					execReturn, _ := shell.Execute()
+					timeNow = time.Now()
 
 					if execReturn.Stderr != "" {
 						containerStatuses := []v1.ContainerStatus{}
@@ -124,24 +125,51 @@ func StatusHandler(w http.ResponseWriter, r *http.Request) {
 						re := regexp.MustCompile(pattern)
 						match := re.FindString(execReturn.Stdout)
 
-						log.G(Ctx).Info("JID: " + jid.JID + " | Status: " + match + " | Pod: " + pod.Name + " | UID: " + string(pod.UID))
+						log.G(Ctx).Info("JID: " + jid.JID + " | Status: " + match + " | Pod: " + pod.Name + " | UID: " + string(pod.UID) + " Time: " + string(timeNow.Format("2006-01-02 15:04:05.999999999 -0700 MST")))
 
 						switch match {
 						case "CD":
 							if jid.EndTime.IsZero() {
-								JIDs[i].EndTime = time.Now()
+								JIDs[i].EndTime = timeNow
+								f, err := os.Create(commonIL.InterLinkConfigInst.DataRootFolder + string(pod.UID) + "/FinishedAt.time")
+								if err != nil {
+									statusCode = http.StatusInternalServerError
+									w.WriteHeader(statusCode)
+									w.Write([]byte("Error writing end timestamp... Check Slurm Sidecar's logs"))
+									log.G(Ctx).Error(err)
+									return
+								}
+								f.WriteString(JIDs[i].EndTime.Format("2006-01-02 15:04:05.999999999 -0700 MST"))
 							}
 							containerStatus := v1.ContainerStatus{Name: pod.Spec.Containers[0].Name, State: v1.ContainerState{Terminated: &v1.ContainerStateTerminated{StartedAt: metav1.Time{JIDs[i].StartTime}, FinishedAt: metav1.Time{JIDs[i].EndTime}}}, Ready: false}
 							resp = append(resp, commonIL.PodStatus{PodName: pod.Name, PodUID: string(pod.UID), PodNamespace: pod.Namespace, Containers: []v1.ContainerStatus{containerStatus}})
 						case "CG":
 							if jid.StartTime.IsZero() {
-								JIDs[i].StartTime = time.Now()
+								JIDs[i].StartTime = timeNow
+								f, err := os.Create(commonIL.InterLinkConfigInst.DataRootFolder + string(pod.UID) + "/StartedAt.time")
+								if err != nil {
+									statusCode = http.StatusInternalServerError
+									w.WriteHeader(statusCode)
+									w.Write([]byte("Error writing start timestamp... Check Slurm Sidecar's logs"))
+									log.G(Ctx).Error(err)
+									return
+								}
+								f.WriteString(JIDs[i].StartTime.Format("2006-01-02 15:04:05.999999999 -0700 MST"))
 							}
 							containerStatus := v1.ContainerStatus{Name: pod.Spec.Containers[0].Name, State: v1.ContainerState{Running: &v1.ContainerStateRunning{StartedAt: metav1.Time{JIDs[i].StartTime}}}, Ready: true}
 							resp = append(resp, commonIL.PodStatus{PodName: pod.Name, PodUID: string(pod.UID), PodNamespace: pod.Namespace, Containers: []v1.ContainerStatus{containerStatus}})
 						case "F":
 							if jid.EndTime.IsZero() {
-								JIDs[i].EndTime = time.Now()
+								JIDs[i].EndTime = timeNow
+								f, err := os.Create(commonIL.InterLinkConfigInst.DataRootFolder + string(pod.UID) + "/FinishedAt.time")
+								if err != nil {
+									statusCode = http.StatusInternalServerError
+									w.WriteHeader(statusCode)
+									w.Write([]byte("Error writing end timestamp... Check Slurm Sidecar's logs"))
+									log.G(Ctx).Error(err)
+									return
+								}
+								f.WriteString(JIDs[i].EndTime.Format("2006-01-02 15:04:05.999999999 -0700 MST"))
 							}
 							containerStatus := v1.ContainerStatus{Name: pod.Spec.Containers[0].Name, State: v1.ContainerState{Terminated: &v1.ContainerStateTerminated{StartedAt: metav1.Time{JIDs[i].StartTime}, FinishedAt: metav1.Time{JIDs[i].EndTime}}}, Ready: false}
 							resp = append(resp, commonIL.PodStatus{PodName: pod.Name, PodUID: string(pod.UID), PodNamespace: pod.Namespace, Containers: []v1.ContainerStatus{containerStatus}})
@@ -150,13 +178,31 @@ func StatusHandler(w http.ResponseWriter, r *http.Request) {
 							resp = append(resp, commonIL.PodStatus{PodName: pod.Name, PodUID: string(pod.UID), PodNamespace: pod.Namespace, Containers: []v1.ContainerStatus{containerStatus}})
 						case "PR":
 							if jid.EndTime.IsZero() {
-								JIDs[i].EndTime = time.Now()
+								JIDs[i].EndTime = timeNow
+								f, err := os.Create(commonIL.InterLinkConfigInst.DataRootFolder + string(pod.UID) + "/FinishedAt.time")
+								if err != nil {
+									statusCode = http.StatusInternalServerError
+									w.WriteHeader(statusCode)
+									w.Write([]byte("Error writing end timestamp... Check Slurm Sidecar's logs"))
+									log.G(Ctx).Error(err)
+									return
+								}
+								f.WriteString(JIDs[i].EndTime.Format("2006-01-02 15:04:05.999999999 -0700 MST"))
 							}
 							containerStatus := v1.ContainerStatus{Name: pod.Spec.Containers[0].Name, State: v1.ContainerState{Terminated: &v1.ContainerStateTerminated{StartedAt: metav1.Time{JIDs[i].StartTime}, FinishedAt: metav1.Time{JIDs[i].EndTime}}}, Ready: false}
 							resp = append(resp, commonIL.PodStatus{PodName: pod.Name, PodUID: string(pod.UID), PodNamespace: pod.Namespace, Containers: []v1.ContainerStatus{containerStatus}})
 						case "R":
 							if jid.StartTime.IsZero() {
-								JIDs[i].StartTime = time.Now()
+								JIDs[i].StartTime = timeNow
+								f, err := os.Create(commonIL.InterLinkConfigInst.DataRootFolder + string(pod.UID) + "/StartedAt.time")
+								if err != nil {
+									statusCode = http.StatusInternalServerError
+									w.WriteHeader(statusCode)
+									w.Write([]byte("Error writing start timestamp... Check Slurm Sidecar's logs"))
+									log.G(Ctx).Error(err)
+									return
+								}
+								f.WriteString(JIDs[i].StartTime.Format("2006-01-02 15:04:05.999999999 -0700 MST"))
 							}
 							containerStatus := v1.ContainerStatus{Name: pod.Spec.Containers[0].Name, State: v1.ContainerState{Running: &v1.ContainerStateRunning{StartedAt: metav1.Time{JIDs[i].StartTime}}}, Ready: true}
 							resp = append(resp, commonIL.PodStatus{PodName: pod.Name, PodUID: string(pod.UID), PodNamespace: pod.Namespace, Containers: []v1.ContainerStatus{containerStatus}})
@@ -165,13 +211,31 @@ func StatusHandler(w http.ResponseWriter, r *http.Request) {
 							resp = append(resp, commonIL.PodStatus{PodName: pod.Name, PodUID: string(pod.UID), PodNamespace: pod.Namespace, Containers: []v1.ContainerStatus{containerStatus}})
 						case "ST":
 							if jid.EndTime.IsZero() {
-								JIDs[i].EndTime = time.Now()
+								JIDs[i].EndTime = timeNow
+								f, err := os.Create(commonIL.InterLinkConfigInst.DataRootFolder + string(pod.UID) + "/FinishedAt.time")
+								if err != nil {
+									statusCode = http.StatusInternalServerError
+									w.WriteHeader(statusCode)
+									w.Write([]byte("Error writing end timestamp... Check Slurm Sidecar's logs"))
+									log.G(Ctx).Error(err)
+									return
+								}
+								f.WriteString(JIDs[i].EndTime.Format("2006-01-02 15:04:05.999999999 -0700 MST"))
 							}
 							containerStatus := v1.ContainerStatus{Name: pod.Spec.Containers[0].Name, State: v1.ContainerState{Terminated: &v1.ContainerStateTerminated{StartedAt: metav1.Time{JIDs[i].StartTime}, FinishedAt: metav1.Time{JIDs[i].EndTime}}}, Ready: false}
 							resp = append(resp, commonIL.PodStatus{PodName: pod.Name, PodUID: string(pod.UID), PodNamespace: pod.Namespace, Containers: []v1.ContainerStatus{containerStatus}})
 						default:
 							if jid.EndTime.IsZero() {
-								JIDs[i].EndTime = time.Now()
+								JIDs[i].EndTime = timeNow
+								f, err := os.Create(commonIL.InterLinkConfigInst.DataRootFolder + string(pod.UID) + "/FinishedAt.time")
+								if err != nil {
+									statusCode = http.StatusInternalServerError
+									w.WriteHeader(statusCode)
+									w.Write([]byte("Error writing end timestamp... Check Slurm Sidecar's logs"))
+									log.G(Ctx).Error(err)
+									return
+								}
+								f.WriteString(JIDs[i].EndTime.Format("2006-01-02 15:04:05.999999999 -0700 MST"))
 							}
 							containerStatus := v1.ContainerStatus{Name: pod.Spec.Containers[0].Name, State: v1.ContainerState{Terminated: &v1.ContainerStateTerminated{StartedAt: metav1.Time{JIDs[i].StartTime}, FinishedAt: metav1.Time{JIDs[i].EndTime}}}, Ready: false}
 							resp = append(resp, commonIL.PodStatus{PodName: pod.Name, PodUID: string(pod.UID), PodNamespace: pod.Namespace, Containers: []v1.ContainerStatus{containerStatus}})
