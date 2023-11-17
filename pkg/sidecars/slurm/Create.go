@@ -49,7 +49,8 @@ func SubmitHandler(w http.ResponseWriter, r *http.Request) {
 			if singularityAnnotation, ok := metadata.Annotations["job.vk.io/singularity-commands"]; ok {
 				singularityPrefix += " " + singularityAnnotation
 			}
-			commstr1 := []string{"singularity", "exec", singularityPrefix, "--writable-tmpfs"}
+			commstr1 := []string{"singularity", "exec", "--writable-tmpfs", "--nv", "-H", "${HOME}/" +
+				commonIL.InterLinkConfigInst.DataRootFolder + string(data.Pod.UID) + ":${HOME}"}
 
 			envs := prepare_envs(container)
 			image := ""
