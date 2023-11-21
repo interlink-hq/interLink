@@ -9,12 +9,18 @@ import (
 	"net/http"
 	"os"
 	"strconv"
+	"time"
 
 	commonIL "github.com/intertwin-eu/interlink/pkg/common"
 
 	"github.com/containerd/containerd/log"
 	v1 "k8s.io/api/core/v1"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/client-go/kubernetes"
+	"k8s.io/client-go/tools/clientcmd"
 )
+
+var ClientSet *kubernetes.Clientset
 
 func createRequest(pods []*v1.Pod, token string) ([]byte, error) {
 	var returnValue, _ = json.Marshal(commonIL.PodStatus{})
@@ -179,7 +185,46 @@ func RemoteExecution(p *VirtualKubeletProvider, ctx context.Context, mode int8, 
 
 	switch mode {
 	case CREATE:
-		//pod.Spec.NodeSelector["kubernetes.io/hostname"] = "emptyNode"
+
+		for {
+			var err error
+			if ClientSet == nil {
+				kubeconfig := os.Getenv("KUBECONFIG")
+				if err != nil {
+					log.G(ctx).Error(err)
+					return err
+				}
+
+				config, err := clientcmd.BuildConfigFromFlags("", kubeconfig)
+				if err != nil {
+					log.G(ctx).Error(err)
+					return err
+				}
+
+				ClientSet, err = kubernetes.NewForConfig(config)
+				if err != nil {
+					log.G(ctx).Error(err)
+					return err
+				}
+			}
+
+			for _, volume := range pod.Spec.Volumes {
+
+				if volume.ConfigMap != nil {
+					_, err = ClientSet.CoreV1().ConfigMaps(pod.Namespace).Get(ctx, volume.ConfigMap.Name, metav1.GetOptions{})
+				} else if volume.Secret != nil {
+					_, err = ClientSet.CoreV1().Secrets(pod.Namespace).Get(ctx, volume.Secret.SecretName, metav1.GetOptions{})
+				}
+			}
+
+			if err != nil {
+				log.G(ctx).Warning("Unable to find a ConfigMap or a Secret for pod " + pod.Name + ". Waiting for it to be initialized")
+				time.Sleep(time.Second)
+				continue
+			} else {
+				break
+			}
+		}
 		returnVal, err := createRequest(req, token)
 		if err != nil {
 			log.G(ctx).Error(err)
@@ -245,6 +290,10 @@ func checkPodsStatus(p *VirtualKubeletProvider, ctx context.Context, token strin
 						if containerStatus.State.Terminated.ExitCode == 0 {
 							pod.Status.Phase = v1.PodSucceeded
 							updatePod = true
+						} else {
+							pod.Status.Phase = v1.PodFailed
+							updatePod = true
+							log.G(ctx).Error("Container " + containerStatus.Name + " exited with error: " + string(containerStatus.State.Terminated.ExitCode))
 						}
 					} else if containerStatus.State.Waiting != nil {
 						log.G(ctx).Info("Pod " + podStatus.PodName + ": Service " + containerStatus.Name + " is setting up on Sidecar")
