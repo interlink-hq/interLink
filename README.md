@@ -4,12 +4,6 @@
 
 InterLink aims to provide an abstraction for the execution of a Kubernetes pod on any remote resource capable of managing a Container execution lifecycle.
 
-__Goals__:
-- TBD
-
-__Non-goals__:
-- TBD
-
 The project consists of two main components:
 
 - __A Kubernetes Virtual Node:__ based on the [VirtualKubelet](https://virtual-kubelet.io/) technology. Translating request for a kubernetes pod execution into a remote call to the interLink API server.
