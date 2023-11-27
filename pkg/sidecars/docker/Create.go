@@ -63,8 +63,19 @@ func CreateHandler(w http.ResponseWriter, r *http.Request) {
 				cmd = append(cmd, args)
 			}
 
+			docker_options := ""
+
+			if docker_flags, ok := data.Pod.ObjectMeta.Annotations["docker-options.vk.io/flags"]; ok {
+				parsed_docker_options := strings.Split(docker_flags, " ")
+				if parsed_docker_options != nil {
+					for _, option := range parsed_docker_options {
+						docker_options += " " + option
+					}
+				}
+			}
+
 			shell := exec.ExecTask{
-				Command: "docker",
+				Command: "docker" + docker_options,
 				Args:    cmd,
 				Shell:   true,
 			}
