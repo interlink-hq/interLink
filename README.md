@@ -185,4 +185,3 @@ To be configured on the repository settings.
   - Other checks as available and relevant
   - Require branches to be up to date before merging
 - Include administrators
-
