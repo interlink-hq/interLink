@@ -15,7 +15,8 @@ var Url string
 
 func main() {
 	var cancel context.CancelFunc
-	logger := logrus.StandardLogger()
+
+	commonIL.NewInterLinkConfig()
 
 	if commonIL.InterLinkConfigInst.VerboseLogging {
 		logger.SetLevel(logrus.DebugLevel)
@@ -26,11 +27,8 @@ func main() {
 	}
 
 	log.L = logruslogger.FromLogrus(logrus.NewEntry(logger))
-
 	interlink.Ctx, cancel = context.WithCancel(context.Background())
 	defer cancel()
-
-	commonIL.NewInterLinkConfig()
 
 	log.G(interlink.Ctx).Info(commonIL.InterLinkConfigInst)
 

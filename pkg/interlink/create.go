@@ -36,15 +36,13 @@ func CreateHandler(w http.ResponseWriter, r *http.Request) {
 				w.WriteHeader(statusCode)
 				return
 			}
-			//log.G(Ctx).Debug(data)
-
 		}
 
 		retrieved_data = append(retrieved_data, data)
 
 		if retrieved_data != nil {
 			bodyBytes, err = json.Marshal(retrieved_data)
-			//log.G(Ctx).Debug(string(bodyBytes))
+			log.G(Ctx).Info(string(bodyBytes))
 			reader := bytes.NewReader(bodyBytes)
 
 			req, err = http.NewRequest(http.MethodPost, commonIL.InterLinkConfigInst.Sidecarurl+":"+commonIL.InterLinkConfigInst.Sidecarport+"/create", reader)

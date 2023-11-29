@@ -18,21 +18,15 @@ var Ctx context.Context
 func prepare_mounts(container v1.Container, data []commonIL.RetrievedPodData) (string, error) {
 	log.G(Ctx).Info("- Preparing mountpoints for " + container.Name)
 	mount_data := ""
-	pod_name := strings.Split(container.Name, "-")
-
-	if len(pod_name) > 6 {
-		pod_name = pod_name[0:6]
-	}
-
-	err := os.MkdirAll(commonIL.InterLinkConfigInst.DataRootFolder+strings.Join(pod_name[:len(pod_name)-1], "-"), os.ModePerm)
-	if err != nil {
-		log.G(Ctx).Error("Can't create directory " + commonIL.InterLinkConfigInst.DataRootFolder + strings.Join(pod_name[:len(pod_name)-1], "-"))
-		return "", errors.New("Can't create directory " + commonIL.InterLinkConfigInst.DataRootFolder + strings.Join(pod_name[:len(pod_name)-1], "-"))
-	} else {
-		log.G(Ctx).Debug("- Created directory " + commonIL.InterLinkConfigInst.DataRootFolder + strings.Join(pod_name[:len(pod_name)-1], "-"))
-	}
 
 	for _, podData := range data {
+		err := os.MkdirAll(commonIL.InterLinkConfigInst.DataRootFolder+podData.Pod.Namespace+"-"+string(podData.Pod.UID), os.ModePerm)
+		if err != nil {
+			log.G(Ctx).Error(err)
+			return "", err
+		} else {
+			log.G(Ctx).Info("-- Created directory " + commonIL.InterLinkConfigInst.DataRootFolder + podData.Pod.Namespace + "-" + string(podData.Pod.UID))
+		}
 		for _, cont := range podData.Containers {
 			for _, cfgMap := range cont.ConfigMaps {
 				if container.Name == cont.Name {
@@ -100,14 +94,14 @@ func mountData(container v1.Container, pod v1.Pod, data interface{}) ([]string, 
 				switch mount := data.(type) {
 				case v1.ConfigMap:
 					var configMapNamePaths []string
-					err := os.RemoveAll(commonIL.InterLinkConfigInst.DataRootFolder + pod.Namespace + "-" + string(pod.UID) + "/" + "configMaps/" + vol.Name)
+					err := os.RemoveAll(commonIL.InterLinkConfigInst.DataRootFolder + string(pod.UID) + "/" + "configMaps/" + vol.Name)
 
 					if err != nil {
 						log.G(Ctx).Error("Unable to delete root folder")
 						return nil, err
 					}
 					if podVolumeSpec != nil && podVolumeSpec.ConfigMap != nil {
-						podConfigMapDir := filepath.Join(wd+"/"+commonIL.InterLinkConfigInst.DataRootFolder, pod.Namespace+"-"+string(pod.UID)+"/", "configMaps/", vol.Name)
+						podConfigMapDir := filepath.Join(wd+"/"+commonIL.InterLinkConfigInst.DataRootFolder, string(pod.UID)+"/", "configMaps/", vol.Name)
 						mode := os.FileMode(*podVolumeSpec.ConfigMap.DefaultMode)
 
 						if mount.Data != nil {
@@ -154,7 +148,7 @@ func mountData(container v1.Container, pod v1.Pod, data interface{}) ([]string, 
 
 				case v1.Secret:
 					var secretNamePaths []string
-					err := os.RemoveAll(commonIL.InterLinkConfigInst.DataRootFolder + pod.Namespace + "-" + string(pod.UID) + "/" + "secrets/" + vol.Name)
+					err := os.RemoveAll(commonIL.InterLinkConfigInst.DataRootFolder + string(pod.UID) + "/" + "secrets/" + vol.Name)
 
 					if err != nil {
 						log.G(Ctx).Error("Unable to delete root folder")
@@ -162,7 +156,7 @@ func mountData(container v1.Container, pod v1.Pod, data interface{}) ([]string, 
 					}
 					if podVolumeSpec != nil && podVolumeSpec.Secret != nil {
 						mode := os.FileMode(*podVolumeSpec.Secret.DefaultMode)
-						podSecretDir := filepath.Join(wd+"/"+commonIL.InterLinkConfigInst.DataRootFolder, pod.Namespace+"-"+string(pod.UID)+"/", "secrets/", vol.Name)
+						podSecretDir := filepath.Join(wd+"/"+commonIL.InterLinkConfigInst.DataRootFolder, string(pod.UID)+"/", "secrets/", vol.Name)
 
 						if mount.Data != nil {
 							for key := range mount.Data {
@@ -214,7 +208,7 @@ func mountData(container v1.Container, pod v1.Pod, data interface{}) ([]string, 
 					if podVolumeSpec != nil && podVolumeSpec.EmptyDir != nil {
 						var edPath string
 
-						edPath = filepath.Join(wd+"/"+commonIL.InterLinkConfigInst.DataRootFolder, pod.Namespace+"-"+string(pod.UID)+"/"+"emptyDirs/"+vol.Name)
+						edPath = filepath.Join(wd+"/"+commonIL.InterLinkConfigInst.DataRootFolder, string(pod.UID)+"/"+"emptyDirs/"+vol.Name)
 						log.G(Ctx).Info("-- Creating EmptyDir in " + edPath)
 						cmd := []string{"-p " + edPath}
 						shell := exec2.ExecTask{

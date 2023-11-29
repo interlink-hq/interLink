@@ -46,7 +46,6 @@ sed 's/certificate-authority:.*/certificate-authority-data: '$CA_DATA'/g'  $PATH
 
 Then you need to provide the interLink IP address that should be reachable from the kubernetes pods. In case of this demo setup, that address __is the address of your machine__
 
-```bash
 export INTERLINK_ADDR=XXX.XX.X.XXX
 
 sed -i 's/InterlinkURL:.*/InterlinkURL: "http:\/\/'$INTERLINK_IP_ADDRESS'"/g'  interlink/config/InterLinkConfig.yaml | sed -i 's/SidecarURL:.*/SidecarURL: "http:\/\/'$INTERLINK_IP_ADDRESS'"/g' interlink/config/InterLinkConfig.yaml

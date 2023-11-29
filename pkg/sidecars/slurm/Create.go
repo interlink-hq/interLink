@@ -34,7 +34,7 @@ func SubmitHandler(w http.ResponseWriter, r *http.Request) {
 	}
 
 	for _, test := range req {
-		log.G(Ctx).Debug(test.Pod.Name)
+		log.G(Ctx).Debug(test.Pod.UID)
 	}
 
 	for _, data := range req {
@@ -45,7 +45,12 @@ func SubmitHandler(w http.ResponseWriter, r *http.Request) {
 
 		for _, container := range containers {
 			log.G(Ctx).Info("- Beginning script generation for container " + container.Name)
-			commstr1 := []string{"singularity", "exec", "--writable-tmpfs", "--nv", "-H", "${HOME}/" + commonIL.InterLinkConfigInst.DataRootFolder + string(data.Pod.UID) + ":${HOME}"}
+			singularityPrefix := commonIL.InterLinkConfigInst.SingularityPrefix
+			if singularityAnnotation, ok := metadata.Annotations["job.vk.io/singularity-commands"]; ok {
+				singularityPrefix += " " + singularityAnnotation
+			}
+			commstr1 := []string{"singularity", "exec", "--writable-tmpfs", "--nv", "-H", "${HOME}/" +
+				commonIL.InterLinkConfigInst.DataRootFolder + string(data.Pod.UID) + ":${HOME}"}
 
 			envs := prepare_envs(container)
 			image := ""

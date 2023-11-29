@@ -26,10 +26,9 @@ var Clientset *kubernetes.Clientset
 
 func NewInterLinkConfig() {
 	if InterLinkConfigInst.set == false {
-		var path string
+		configPath := flag.String("configpath", "/etc/interlink/InterLinkConfig.yaml", "Path to InterLinkConfig file")
 		verbose := flag.Bool("verbose", false, "Enable or disable Debug level logging")
 		errorsOnly := flag.Bool("errorsonly", false, "Prints only errors if enabled")
-		flag.Parse()
 
 		if *verbose {
 			InterLinkConfigInst.VerboseLogging = true
@@ -40,23 +39,36 @@ func NewInterLinkConfig() {
 		}
 
 		if os.Getenv("INTERLINKCONFIGPATH") != "" {
-			path = os.Getenv("INTERLINKCONFIGPATH")
+			ILcfgPath = os.Getenv("INTERLINKCONFIGPATH")
 		} else {
-			path = "/etc/interlink/InterLinkConfig.yaml"
+			ILcfgPath = "/etc/interlink/InterLinkConfig.yaml"
 		}
+		InterLinkConfigInst.VKConfigPath = *configPath
 
-		if _, err := os.Stat(path); err != nil {
-			log.G(context.Background()).Error("File " + path + " doesn't exist. You can set a custom path by exporting INTERLINKCONFIGPATH. Exiting...")
+		if _, err := os.Stat(ILcfgPath); err != nil {
+			log.G(context.Background()).Error("File " + ILcfgPath + " doesn't exist. You can set a custom path by exporting INTERLINKCONFIGPATH. Exiting...")
 			os.Exit(-1)
 		}
 
-		log.G(context.Background()).Info("Loading InterLink config from " + path)
-		yfile, err := os.ReadFile(path)
+		log.G(context.Background()).Info("Loading InterLink config from " + ILcfgPath)
+		yfile, err := os.ReadFile(ILcfgPath)
 		if err != nil {
 			log.G(context.Background()).Error("Error opening config file, exiting...")
 			os.Exit(1)
 		}
-		yaml.Unmarshal(yfile, &InterLinkConfigInst)
+		err = yaml.Unmarshal(yfile, &InterLinkConfigInst)
+		if err != nil {
+			log.G(context.Background()).Error(err)
+			os.Exit(1)
+		}
+
+		if *verbose {
+			InterLinkConfigInst.VerboseLogging = true
+			InterLinkConfigInst.ErrorsOnlyLogging = false
+		} else if *errorsOnly {
+			InterLinkConfigInst.VerboseLogging = false
+			InterLinkConfigInst.ErrorsOnlyLogging = true
+		}
 
 		if os.Getenv("INTERLINKURL") != "" {
 			InterLinkConfigInst.Interlinkurl = os.Getenv("INTERLINKURL")
@@ -100,26 +112,27 @@ func NewInterLinkConfig() {
 		}
 
 		if os.Getenv("TSOCKSPATH") != "" {
-			path := os.Getenv("TSOCKSPATH")
-			if _, err := os.Stat(path); err != nil {
-				log.G(context.Background()).Error("File " + path + " doesn't exist. You can set a custom path by exporting TSOCKSPATH. Exiting...")
+			tsocksPath := os.Getenv("TSOCKSPATH")
+			if _, err := os.Stat(tsocksPath); err != nil {
+				log.G(context.Background()).Error("File " + tsocksPath + " doesn't exist. You can set a custom path by exporting TSOCKSPATH. Exiting...")
 				os.Exit(-1)
 			}
 
-			InterLinkConfigInst.Tsockspath = path
+			InterLinkConfigInst.Tsockspath = tsocksPath
 		}
 
+		var tokenPath string
 		if os.Getenv("VKTOKENFILE") != "" {
-			path := os.Getenv("VKTOKENFILE")
-			if _, err := os.Stat(path); err != nil {
-				log.G(context.Background()).Error("File " + path + " doesn't exist. You can set a custom path by exporting VKTOKENFILE. Exiting...")
+			tokenPath = os.Getenv("VKTOKENFILE")
+			if _, err := os.Stat(tokenPath); err != nil {
+				log.G(context.Background()).Error("File " + tokenPath + " doesn't exist. You can set a custom path by exporting VKTOKENFILE. Exiting...")
 				os.Exit(-1)
 			}
 
-			InterLinkConfigInst.VKTokenFile = path
+			InterLinkConfigInst.VKTokenFile = tokenPath
 		} else {
-			path = InterLinkConfigInst.DataRootFolder + "token"
-			InterLinkConfigInst.VKTokenFile = path
+			tokenPath = InterLinkConfigInst.DataRootFolder + "token"
+			InterLinkConfigInst.VKTokenFile = tokenPath
 		}
 
 		InterLinkConfigInst.set = true

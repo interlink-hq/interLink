@@ -9,6 +9,7 @@ import (
 
 type PodStatus struct {
 	PodName      string               `json:"name"`
+	PodUID       string               `json:"UID"`
 	PodNamespace string               `json:"namespace"`
 	Containers   []v1.ContainerStatus `json:"containers"`
 }
@@ -34,6 +35,7 @@ type ConfigMapSecret struct {
 }
 
 type InterLinkConfig struct {
+	VKConfigPath      string
 	VKTokenFile       string `yaml:"VKTokenFile"`
 	Interlinkurl      string `yaml:"InterlinkURL"`
 	Sidecarurl        string `yaml:"SidecarURL"`
@@ -52,7 +54,6 @@ type InterLinkConfig struct {
 	Tsocksconfig      string `yaml:"TsocksConfig"`
 	Tsockslogin       string `yaml:"TsocksLoginNode"`
 	BashPath          string `yaml:"BashPath"`
-	PodIP             string `yaml:"Pod_IP"`
 	VerboseLogging    bool   `yaml:"VerboseLogging"`
 	ErrorsOnlyLogging bool   `yaml:"ErrorsOnlyLogging"`
 	set               bool
