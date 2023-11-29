@@ -15,7 +15,6 @@ var Url string
 
 func main() {
 	var cancel context.CancelFunc
-	logger := logrus.StandardLogger()
 
 	commonIL.NewInterLinkConfig()
 

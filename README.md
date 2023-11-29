@@ -4,51 +4,22 @@
 
 InterLink aims to provide an abstraction for the execution of a Kubernetes pod on any remote resource capable of managing a Container execution lifecycle.
 
-__Goals__:
-- TBD
-
-__Non-goals__:
-- TBD
-
 The project consists of two main components:
 
 - __A Kubernetes Virtual Node:__ based on the [VirtualKubelet](https://virtual-kubelet.io/) technology. Translating request for a kubernetes pod execution into a remote call to the interLink API server.
 - __The interLink API server:__ a modular and pluggable REST server where you can create your own Container manager plugin (called sidecars), or use the existing ones: remote docker execution on a remote host, singularity Container on a remote SLURM batch system.
 
-The project is reusing and get inspired by the [KNoC](https://github.com/CARV-ICS-FORTH/knoc) boilerplates at different levels, implementing the generic API layer in place of an ssh execution as the original contribution.
-
+The project got inspired by the [KNoC](https://github.com/CARV-ICS-FORTH/knoc) project, enhancing that with the implemention a generic API layer b/w the virtual kubelet component and the provider logic for the container lifecycle management.
 
 ![drawing](docs/imgs/InterLink.svg)
-
-This repository includes:
-
-- License information
-- Copyright and author information
-- Code of conduct and contribution guidelines
-- Templates for PR and issues
-- Code owners file for automatic assignment of PR reviewers
-- [GitHub actions](https://github.com/features/actions) workflows for linting
-  and checking links
-
-Content is based on:
-
-- [Contributor Covenant](http://contributor-covenant.org)
-- [Semantic Versioning](https://semver.org/)
-- [Chef Cookbook Contributing Guide](https://github.com/chef-cookbooks/community_cookbook_documentation/blob/master/CONTRIBUTING.MD)
 
 
 ## Quick references:
 - [:information\_source: Overview](#information_source-overview)
 - [Quick references:](#quick-references)
 - [:fast\_forward: Quick Start](#fast_forward-quick-start)
-  - [Virtual node setup](#virtual-node-setup)
-    - [:grey\_exclamation:  Requirements](#grey_exclamation--requirements)
-    - [Bring up the virtual node](#bring-up-the-virtual-node)
-  - [Setup a Dummy remote executer](#setup-a-dummy-remote-executer)
-  - [:wrench: Kustomizing your Virtual Kubelet](#wrench-kustomizing-your-virtual-kubelet)
-  - [Going serious with InterLink and Sidecars](#going-serious-with-interlink-and-sidecars)
-  - [:information\_source: InterLink Config file](#information_source-interlink-config-file)
-  - [:information\_source: Environment Variables list](#information_source-environment-variables-list)
+- [:information\_source: InterLink Config file](#information_source-interlink-config-file)
+- [:information\_source: Environment Variables list](#information_source-environment-variables-list)
 - [Digging in the project](#digging-in-the-project)
   - [Virtual Kubelet](#virtual-kubelet)
   - [InterLink](#interlink)
@@ -61,68 +32,9 @@ Content is based on:
 
 ## :fast_forward: Quick Start
 
-### Virtual node setup
+Visit the SLURM batch system example in the [gallery](./examples/interlink-slurm). You will deploy on your laptop a fully emulated instance of a kubernetes cluster able to offload the execution of a pod to a SLURM cluster
 
-#### :grey_exclamation:  Requirements
-
-- A working Kubernetes instance >1.24
-  - if you are in a hurry:
-    - `curl -sfL https://get.k3s.io |  INSTALL_K3S_VERSION=v1.25.11+k3s1 INSTALL_K3S_EXEC="--tls-san X.X.X.X" sh -s - --disable traefik --disable metric-server`
-      - you do need `--tls-san X.X.X.X` only in case of a machine with a Floating IP attached 
-      - `k3s kubect get node` to check whenever the cluster is ready
-- Kubectl
-- Docker 
-
-#### Bring up the virtual node
-
-Fastest way to start using interlink, is by deploying a VK in Kubernetes using the prebuilt image:
-
-```bash
-kubectl create ns vk
-kubectl apply -n vk -k ./kustomizations
-```
-
-In `./kustomizations` you can then play with the different configuration and deployment files in order to customize your setup, as described [here](#wrench-kustomizing-your-virtual-kubelet) .
-
-### Setup a Dummy remote executer
-
-- Use Docker Compose to create and start up containers:
-    ```bash
-    docker compose -f docker-compose.yaml up -d
-    ```
-- You are now running:
-    - A Virtual Kubelet
-    - The InterLink service
-    - A Docker Sidecar
-- Submit a YAML to your K8S cluster to test it. You could try:
-    ```bash
-    kubectl apply -f examples/busyecho_k8s.yaml -n vk
-    ```
-You will see now a Container starting up on your host, but managed by the docker compose interlink daemons.
-
-### :wrench: Kustomizing your Virtual Kubelet
-
-To customize your virtual node deployment edit the configuration files within the kustomizations directory:
-- `kustomization.yaml`: here you can specify resource files and generate configMaps
-- `deployment.yaml`: that's the main file you want to edit. Nested into spec -> template -> spec -> containers you can find these fields:
-    - name: the Container name
-    - image: Here you can specify which image to use, if you need another one. 
-    - args: These are the arguments passed to the VK binary running inside the Container.
-    - env: Environment Variables used by kubelet and by the VK itself. Check the ENVS list for a detailed explanation on how to set them.
-- `vk-cfg.json`: it's the config file for the VK itself. Here you can specify how many resources to allocate for the VK. Note that the name specified here for the VK must match the name given in the others config files.
-- `InterLinkConfig.yaml`: configuration file for the inbound/outbound communication (and not only) to/from the InterLink module. For a detailed explanation of all fields, check the [InterLink Config File](#information_source-interlink-config-file) section.
-If you perform any change to the listed files, you will have to
-```bash
-kubectl apply -n vk -k ./kustomizations
-```
-You can also use Environment Variables to overwrite the majority of default values and even the ones configured in the InterLink Config file. Check the [Environment Variables list](#information_source-environment-variables-list) for a detailed explanation.
-
-### Going serious with InterLink and Sidecars
-
-__You can find instructions on how to get started with installation script (itwinctl) [here](./docs/README.md).__
-
-
-### :information_source: InterLink Config file
+## :information_source: InterLink Config file
 Detailed explanation of the InterLink config file key values.
 | Key         | Value     |
 |--------------|-----------|
@@ -142,7 +54,7 @@ Detailed explanation of the InterLink config file key values.
 | TsocksPath | path to your tsocks library. |
 | TsocksLoginNode | specify an existing node to ssh to. It will be your "window to the external world" |
 
-### :information_source: Environment Variables list
+## :information_source: Environment Variables list
 Here's the complete list of every customizable environment variable. When specified, it overwrites the listed key within the InterLink config file.
 
 | Env         | Value     |
@@ -186,6 +98,7 @@ A quick recap to the list of outgoing HTTP calls:
 | Create        |    InterLinkUrl:InterLinkPort/create    |
 | Delete        |    InterLinkUrl:InterLinkPort/delete    |
 | Status        |    InterLinkUrl:InterLinkPort/status    |
+| Logs          |    InterLinkUrl:InterLinkPort/getLogs   |
 
 ### InterLink
 InterLink is the middleware in charge to translate Virtual Kubelet's HTTP calls in a standard, agnostic outputs understandable to whatever plugin, called in this context Sidecar, below him. To properly work, a working Kubeconfig must be provided by the Virtual Kubelet.  
@@ -211,6 +124,7 @@ A quick recap to the list of HTTP calls:
 | Create        |   InterLinkUrl:InterLinkPort/create   | SidecarURL:SidecarPort/create |
 | Delete        |   InterLinkUrl:InterLinkPort/delete   | SidecarURL:SidecarPort/delete |
 | Status        |   InterLinkUrl:InterLinkPort/status   | SidecarURL:SidecarPort/status |
+| Logs          |    InterLinkUrl:InterLinkPort/getLogs | SidecarURL:SidecarPort/logs   |
 
 ### Sidecars
 Sidecars are modular plugins able to talk to InterLink API and, so, to the Kubernetes cluster. They performs specific operations based on what the actual plugin is, but the idea behind them is to submit a Pod on the cluster and, according to annotations, mountpoints, secrets, etc, deploy specific services.

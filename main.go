@@ -97,11 +97,27 @@ func NewOpts(nodename string) *Opts {
 	}
 
 	return &Opts{
-		ConfigPath: commonIL.InterLinkConfigInst.VKConfigPath,
+		ConfigPath: os.Getenv("CONFIGPATH"),
 		NodeName:   nodename,
 		Verbose:    commonIL.InterLinkConfigInst.VerboseLogging,
 		ErrorsOnly: commonIL.InterLinkConfigInst.ErrorsOnlyLogging,
 	}
+
+	// Register the trace exporter with a TracerProvider, using a batch
+	// span processor to aggregate spans before export.
+	bsp := sdktrace.NewBatchSpanProcessor(traceExporter)
+	tracerProvider := sdktrace.NewTracerProvider(
+		sdktrace.WithSampler(sdktrace.AlwaysSample()),
+		sdktrace.WithResource(res),
+		sdktrace.WithSpanProcessor(bsp),
+	)
+	otel.SetTracerProvider(tracerProvider)
+
+	// set global propagator to tracecontext (the default is no-op).
+	otel.SetTextMapPropagator(propagation.TraceContext{})
+
+	// Shutdown will flush any remaining spans and shut down the exporter.
+	return tracerProvider.Shutdown, nil
 }
 
 func initProvider() (func(context.Context) error, error) {
@@ -233,24 +249,24 @@ func main() {
 	nodeProvider, err := virtualkubelet.NewProvider(cfg.ConfigPath, cfg.NodeName, cfg.OperatingSystem, cfg.InternalIP, cfg.DaemonPort, ctx)
 	go func() {
 
-		ILbindNow := false
-		ILbindOld := false
+		//ILbindNow := false
+		//ILbindOld := false
 
 		for {
-			err, ILbindNow = commonIL.PingInterLink()
+			err, _ = commonIL.PingInterLink()
 
 			if err != nil {
 				log.G(ctx).Error(err)
 			}
 
-			if ILbindNow == true && ILbindOld == false {
-				err = commonIL.NewServiceAccount()
-				if err != nil {
-					log.G(ctx).Fatal(err)
-				}
-			}
+			//if ILbindNow == true && ILbindOld == false {
+			//	err = commonIL.NewServiceAccount()
+			//	if err != nil {
+			//		log.G(ctx).Fatal(err)
+			//	}
+			//}
 
-			ILbindOld = ILbindNow
+			//ILbindOld = ILbindNow
 			time.Sleep(time.Second * 10)
 
 		}

@@ -42,7 +42,7 @@ func retrieve_data(container v1.Container, pod *v1.Pod) (commonIL.RetrievedConta
 
 					configMap, err := Clientset.CoreV1().ConfigMaps(pod.Namespace).Get(Ctx, cmvs.Name, metav1.GetOptions{})
 
-					if err != nil {
+          if err != nil {
 						log.G(Ctx).Error(err)
 						return commonIL.RetrievedContainer{}, err
 					} else {
@@ -50,7 +50,6 @@ func retrieve_data(container v1.Container, pod *v1.Pod) (commonIL.RetrievedConta
 					}
 
 					if configMap != nil {
-
 						retrieved_data.Name = container.Name
 						retrieved_data.ConfigMaps = append(retrieved_data.ConfigMaps, *configMap)
 					}

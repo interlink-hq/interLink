@@ -45,7 +45,6 @@ type InterLinkConfig struct {
 	Interlinkport     string `yaml:"InterlinkPort"`
 	Sidecarport       string `yaml:"SidecarPort"`
 	Commandprefix     string `yaml:"CommandPrefix"`
-	SingularityPrefix string `yaml:"SingularityPrefix"`
 	ExportPodData     bool   `yaml:"ExportPodData"`
 	DataRootFolder    string `yaml:"DataRootFolder"`
 	ServiceAccount    string `yaml:"ServiceAccount"`
@@ -55,9 +54,8 @@ type InterLinkConfig struct {
 	Tsocksconfig      string `yaml:"TsocksConfig"`
 	Tsockslogin       string `yaml:"TsocksLoginNode"`
 	BashPath          string `yaml:"BashPath"`
-	PodIP             string `yaml:"Pod_IP"`
-	VerboseLogging    bool
-	ErrorsOnlyLogging bool
+	VerboseLogging    bool   `yaml:"VerboseLogging"`
+	ErrorsOnlyLogging bool   `yaml:"ErrorsOnlyLogging"`
 	set               bool
 }
 

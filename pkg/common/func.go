@@ -29,14 +29,14 @@ func NewInterLinkConfig() {
 		configPath := flag.String("configpath", "/etc/interlink/InterLinkConfig.yaml", "Path to InterLinkConfig file")
 		verbose := flag.Bool("verbose", false, "Enable or disable Debug level logging")
 		errorsOnly := flag.Bool("errorsonly", false, "Prints only errors if enabled")
-		flag.Parse()
 
-		if os.Getenv("VKCONFIGPATH") != "" {
-			*configPath = os.Getenv("VKCONFIGPATH")
+		if *verbose {
+			InterLinkConfigInst.VerboseLogging = true
+			InterLinkConfigInst.ErrorsOnlyLogging = false
+		} else if *errorsOnly {
+			InterLinkConfigInst.VerboseLogging = false
+			InterLinkConfigInst.ErrorsOnlyLogging = true
 		}
-		InterLinkConfigInst.VKConfigPath = *configPath
-
-		var ILcfgPath string
 
 		if os.Getenv("INTERLINKCONFIGPATH") != "" {
 			ILcfgPath = os.Getenv("INTERLINKCONFIGPATH")
