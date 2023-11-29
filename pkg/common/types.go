@@ -56,6 +56,8 @@ type InterLinkConfig struct {
 	BashPath          string `yaml:"BashPath"`
 	VerboseLogging    bool   `yaml:"VerboseLogging"`
 	ErrorsOnlyLogging bool   `yaml:"ErrorsOnlyLogging"`
+	PodIP             string `yaml:"PodIP"`
+	SingularityPrefix string `yaml:"SingularityPrefix"`
 	set               bool
 }
 

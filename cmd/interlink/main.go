@@ -17,6 +17,7 @@ func main() {
 	var cancel context.CancelFunc
 
 	commonIL.NewInterLinkConfig()
+	logger := logrus.StandardLogger()
 
 	if commonIL.InterLinkConfigInst.VerboseLogging {
 		logger.SetLevel(logrus.DebugLevel)

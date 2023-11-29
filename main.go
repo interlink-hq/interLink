@@ -102,22 +102,6 @@ func NewOpts(nodename string) *Opts {
 		Verbose:    commonIL.InterLinkConfigInst.VerboseLogging,
 		ErrorsOnly: commonIL.InterLinkConfigInst.ErrorsOnlyLogging,
 	}
-
-	// Register the trace exporter with a TracerProvider, using a batch
-	// span processor to aggregate spans before export.
-	bsp := sdktrace.NewBatchSpanProcessor(traceExporter)
-	tracerProvider := sdktrace.NewTracerProvider(
-		sdktrace.WithSampler(sdktrace.AlwaysSample()),
-		sdktrace.WithResource(res),
-		sdktrace.WithSpanProcessor(bsp),
-	)
-	otel.SetTracerProvider(tracerProvider)
-
-	// set global propagator to tracecontext (the default is no-op).
-	otel.SetTextMapPropagator(propagation.TraceContext{})
-
-	// Shutdown will flush any remaining spans and shut down the exporter.
-	return tracerProvider.Shutdown, nil
 }
 
 func initProvider() (func(context.Context) error, error) {
