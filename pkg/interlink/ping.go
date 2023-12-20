@@ -2,7 +2,6 @@ package interlink
 
 import (
 	"net/http"
-	"os"
 
 	"github.com/containerd/containerd/log"
 )
