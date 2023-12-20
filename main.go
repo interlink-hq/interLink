@@ -241,19 +241,22 @@ func main() {
 
 		ILbindNow := false
 		ILbindOld := false
+		retValue := -1
 
 		for {
-			err, ILbindNow = commonIL.PingInterLink(ctx)
+			err, ILbindNow, retValue = commonIL.PingInterLink(ctx)
 
 			if err != nil {
 				log.G(ctx).Error(err)
 			}
 
-			if ILbindNow == true && ILbindOld == false {
+			if ILbindNow == true && ILbindOld == false && retValue == 1 {
 				err = commonIL.NewServiceAccount()
 				if err != nil {
 					log.G(ctx).Fatal(err)
 				}
+			} else if ILbindNow == true && ILbindOld == false && retValue == 0 {
+				commonIL.CreateClientsetFrom(ctx, "")
 			}
 
 			ILbindOld = ILbindNow
