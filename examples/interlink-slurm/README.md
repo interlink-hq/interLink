@@ -42,8 +42,10 @@ mkdir -p interlink/config
 
 cp $PATH_TO_KUBECONFIG interlink/config/kubeconfig.yaml 
 sed 's/certificate-authority:.*/certificate-authority-data: '$CA_DATA'/g'  $PATH_TO_KUBECONFIG | sed 's/client-certificate:.*/client-certificate-data: '$CERT_DATA'/g' - | sed 's/client-key:.*/client-key-data: '$KEY_DATA'/g' - > interlink/config/kubeconfig.yaml 
+sed 's/certificate-authority:.*/certificate-authority-data: '$CA_DATA'/g'  $PATH_TO_KUBECONFIG | sed 's/client-certificate:.*/client-certificate-data: '$CERT_DATA'/g' - | sed 's/client-key:.*/client-key-data: '$KEY_DATA'/g' - > vk/kubeconfig.yaml 
 
 chmod 777 interlink/config/kubeconfig.yaml 
+chmod 777 vk/kubeconfig.yaml 
 ```
 
 Then you need to provide the interLink IP address that should be reachable from the kubernetes pods. In case of this demo setup, that address __is the address of your machine__

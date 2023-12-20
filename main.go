@@ -223,6 +223,7 @@ func main() {
 			log.G(ctx).Fatal(err)
 		}
 	} else {
+		log.G(ctx).Debug("Loading Kubeconfig from " + os.Getenv("KUBECONFIG"))
 		clientCfg, err := clientcmd.NewClientConfigFromBytes(kubecfgFile)
 		if err != nil {
 			log.G(ctx).Fatal(err)

@@ -48,6 +48,8 @@ spec:
           value: "/opt/interlink/token"
         - name: CONFIGPATH
           value: "/etc/interlink/vk-cfg.json"
+        - name: KUBECONFIG
+          value: /etc/interlink/kubeconfig.yaml
         volumeMounts:
         - name: config
           mountPath: /etc/interlink/InterLinkConfig.yaml
@@ -55,6 +57,9 @@ spec:
         - name: config-json
           mountPath: /etc/interlink/vk-cfg.json
           subPath: vk-cfg.json
+        - name: kubeconfig
+          mountPath: "/etc/interlink/kubeconfig.yaml"
+          subPath: kubeconfig.yaml
         - name: token
           mountPath: /opt/interlink
         resources:
@@ -100,6 +105,10 @@ spec:
       - name: config-json
         configMap:
           # Provide the name of the ConfigMap you want to mount.
-          name: test-vk-config
+          name: vk-config-json
+      - name: kubeconfig
+        configMap:
+          # Provide the name of the ConfigMap you want to mount.
+          name: vk-kubeconfig
       - name: token
         emptyDir: {}

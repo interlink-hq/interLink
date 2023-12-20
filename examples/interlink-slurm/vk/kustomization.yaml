@@ -5,9 +5,12 @@ resources:
   - ./service-account.yaml
 
 configMapGenerator:
-  - name: test-vk-config 
+  - name: vk-config-json
     files:
       - vk-cfg.json=vk-cfg.json
   - name: vk-config 
     files:
       - InterLinkConfig.yaml=InterLinkConfig.yaml 
+  - name: vk-kubeconfig 
+    files:
+      - kubeconfig.yaml=kubeconfig.yaml 
