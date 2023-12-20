@@ -41,6 +41,7 @@ export KEY_DATA=$(cat $HOME/.minikube/profiles/minikube/client.key | base64 -w0)
 mkdir -p interlink/config
 
 cp $PATH_TO_KUBECONFIG interlink/config/kubeconfig.yaml 
+cp $PATH_TO_KUBECONFIG vk/kubeconfig.yaml 
 sed 's/certificate-authority:.*/certificate-authority-data: '$CA_DATA'/g'  $PATH_TO_KUBECONFIG | sed 's/client-certificate:.*/client-certificate-data: '$CERT_DATA'/g' - | sed 's/client-key:.*/client-key-data: '$KEY_DATA'/g' - > interlink/config/kubeconfig.yaml 
 sed 's/certificate-authority:.*/certificate-authority-data: '$CA_DATA'/g'  $PATH_TO_KUBECONFIG | sed 's/client-certificate:.*/client-certificate-data: '$CERT_DATA'/g' - | sed 's/client-key:.*/client-key-data: '$KEY_DATA'/g' - > vk/kubeconfig.yaml 
 
