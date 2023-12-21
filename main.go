@@ -251,7 +251,7 @@ func main() {
 			}
 
 			if ILbindNow == true && ILbindOld == false && retValue == 1 {
-				err = commonIL.NewServiceAccount()
+				err = virtualkubelet.NewServiceAccount()
 				if err != nil {
 					log.G(ctx).Fatal(err)
 				}
