@@ -2,7 +2,7 @@
 
 #export INTERLINKCONFIGPATH="$PWD/kustomizations/InterLinkConfig.yaml"
 
-VERSION="${VERSION:-0.0.1-pre6}"
+VERSION="${VERSION:-0.0.4-pre5}"
 
 SIDECAR="${SIDECAR:-slurm}"
 
@@ -31,14 +31,12 @@ OIDC_ISSUER="${OIDC_ISSUER:-https://dodas-iam.cloud.cnaf.infn.it/}"
 AUTHORIZED_GROUPS="${AUTHORIZED_GROUPS:-intw}"
 AUTHORIZED_AUD="${AUTHORIZED_AUD:-intertw-vk}"
 API_HTTP_PORT="${API_HTTP_PORT:-8080}"
-API_HTTPS_PORT="${API_HTTPS_PORT:-443}"
-export HOSTCERT="${HOSTCERT:-/etc/hostcert.pem}"
-export HOSTKEY="${HOSTKEY:-/etc/hostkey.pem}"
-export INTERLINKPORT="${INTERLINKPORT:-3000}"
+API_HTTPS_PORT="${API_HTTPS_PORT:-30443}"
+export HOSTCERT="${HOSTCERT:-/home/ciangottinid/EasyRSA-3.1.5/pki/issued/intertwin.crt}"
+export HOSTKEY="${HOSTKEY:-/home/ciangottinid/EasyRSA-3.1.5/pki/private/InterTwin.key}"
+export INTERLINKPORT="${INTERLINKPORT:-30444}"
 export INTERLINKURL="${INTERLINKURL:-http://0.0.0.0}"
-export INTERLINKPORT="${INTERLINKPORT:-3000}"
-export INTERLINKURL="${INTERLINKURL:-http://0.0.0.0}"
-export INTERLINKCONFIGPATH="${INTERLINKCONFIGPATH:-$HOME/.config/interlink/InterLinkConfig.yaml}"
+export INTERLINKCONFIGPATH="${INTERLINKCONFIGPATH:-$HOME/InterLinkConfig.yaml}"
 export SBATCHPATH="${SBATCHPATH:-/usr/bin/sbatch}"
 export SCANCELPATH="${SCANCELPATH:-/usr/bin/scancel}"
 
@@ -46,13 +44,42 @@ export SCANCELPATH="${SCANCELPATH:-/usr/bin/scancel}"
 install () {
     mkdir -p $HOME/.local/interlink/logs || exit 1
     mkdir -p $HOME/.local/interlink/bin || exit 1
-    mkdir -p $HOME/.config/interlink/ || exit 1
+    mkdir -p $HOME/.local/interlink/config || exit 1
     # download interlinkpath in $HOME/.config/interlink/InterLinkConfig.yaml
-    curl -o $HOME/.config/interlink/InterLinkConfig.yaml https://raw.githubusercontent.com/intertwin-eu/interLink/main/kustomizations/InterLinkConfig.yaml
+    if test -f $HOME/.local/interlink/config/InterLinkConfig.yaml; then
+        echo -e "The InterLink config already exists. Skipping its downloading\n"
+    else 
+        {
+            {
+                curl --fail -o $HOME/.local/interlink/config/InterLinkConfig.yaml https://raw.githubusercontent.com/interTwin-eu/interLink/main/examples/interlink-slurm/vk/InterLinkConfig.yaml
+            } || {
+                echo "Error downloading InterLink config, exiting..."
+                exit 1
+            }
+        }
+    fi
 
-    ## Download binaries to $HOME/.local/interlink/bin
-    curl -L -o interlink.tar.gz https://github.com/intertwin-eu/interLink/releases/download/${VERSION}/interLink_$(uname -s)_$(uname -m).tar.gz \
-        && tar -xzvf interlink.tar.gz -C $HOME/.local/interlink/bin/
+    ## Download binaries to $HOME/.local/interlink/
+    echo "curl --fail -L -o interlink.tar.gz https://github.com/intertwin-eu/interLink/releases/download/${VERSION}/interLink_$(uname -s)_$(uname -m).tar.gz \
+        && tar -xzvf interlink.tar.gz -C $HOME/.local/interlink/bin/"
+    
+    {
+        {
+            export INTERLINKCONFIGPATH=$HOME/interlink/config/InterLinkConfig.yaml
+            curl --fail -L -o interlink.tar.gz https://github.com/intertwin-eu/interLink/releases/download/${VERSION}/interLink_$(uname -s)_$(uname -m).tar.gz
+        } || {
+            echo "Error downloading InterLink binaries, exiting..."
+            exit 1
+        }
+    } && {
+        {
+            tar -xzvf interlink.tar.gz -C $HOME/.local/interlink/bin/
+        } || {
+            echo "Error extracting InterLink binaries, exiting..."
+            rm interlink.tar.gz
+            exit 1
+        }
+    }
     rm interlink.tar.gz
 
     ## Download oauth2 proxy
@@ -62,8 +89,23 @@ install () {
         ;;
     Linux)
         echo "https://github.com/oauth2-proxy/oauth2-proxy/releases/download/v7.4.0/oauth2-proxy-v7.4.0.${OS_LOWER}-$OSARCH.tar.gz"
-        curl -L -o oauth2-proxy-v7.4.0.$OS_LOWER-$OSARCH.tar.gz https://github.com/oauth2-proxy/oauth2-proxy/releases/download/v7.4.0/oauth2-proxy-v7.4.0.${OS_LOWER}-$OSARCH.tar.gz
-        tar -xzvf oauth2-proxy-v7.4.0.$OS_LOWER-$OSARCH.tar.gz -C $HOME/.local/interlink/bin/
+        {
+            {
+                curl --fail -L -o oauth2-proxy-v7.4.0.$OS_LOWER-$OSARCH.tar.gz https://github.com/oauth2-proxy/oauth2-proxy/releases/download/v7.4.0/oauth2-proxy-v7.4.0.${OS_LOWER}-$OSARCH.tar.gz
+            } || {
+                echo "Error downloading OAuth binaries, exiting..."
+                exit 1
+            }
+        } && {
+            {
+                tar -xzvf oauth2-proxy-v7.4.0.$OS_LOWER-$OSARCH.tar.gz -C $HOME/.local/interlink/bin/
+            } || {
+                echo "Error extracting OAuth binaries, exiting..."
+                rm oauth2-proxy-v7.4.0.$OS_LOWER-$OSARCH.tar.gz
+                exit 1
+            }
+        }
+        
         rm oauth2-proxy-v7.4.0.$OS_LOWER-$OSARCH.tar.gz
         ;;
     esac
@@ -103,11 +145,15 @@ start () {
 
     case "$SIDECAR" in
     slurm)
-        $HOME/.local/interlink/bin/interlink-sidecar-slurm  &> $HOME/.local/interlink/logs/sd.log &
+        SHARED_FS=true $HOME/.local/interlink/bin/interlink-sidecar-slurm  &> $HOME/.local/interlink/logs/slurm-sidecar.log &
         echo $! > $HOME/.local/interlink/sd.pid
         ;;
     docker)
-        $HOME/.local/interlink/bin/interlink-sidecar-docker  &> $HOME/.local/interlink/logs/sd.log &
+        $HOME/.local/interlink/bin/interlink-sidecar-docker  &> $HOME/.local/interlink/logs/docker-sidecar.log &
+        echo $! > $HOME/.local/interlink/sd.pid
+        ;;
+    htcondor)
+        $HOME/.local/interlink/bin/interlink-sidecar-htcondor  &> $HOME/.local/interlink/logs/htcondor-sidecar.log &
         echo $! > $HOME/.local/interlink/sd.pid
         ;;
     esac
@@ -117,6 +163,15 @@ stop () {
     kill $(cat $HOME/.local/interlink/oauth2-proxy.pid)
     kill $(cat $HOME/.local/interlink/interlink.pid)
     kill $(cat $HOME/.local/interlink/sd.pid)
+}
+
+help () {
+    echo -e "\n\ninstall:      Downloads InterLink and OAuth binaries, as well as InterLink configuration. Files are stored in $HOME/.local/interlink\n\n"
+    echo -e "uninstall:    Delete the $HOME/.local/interlink folder, removing all downloaded files\n\n"
+    echo -e "start:        Starts the OAuth proxy, the InterLink API and a Sidecar by the ENV SIDECAR. Actually, valid values for SIDECAR are docker, slurm and htcondor\n\n"
+    echo -e "stop:         Kills all the previously started processes\n\n"
+    echo -e "restart:      Kills all started processes and start them again\n\n"
+    echo -e "help:         Shows this command list"
 }
 
 case "$1" in
@@ -135,4 +190,12 @@ case "$1" in
         ;;
     uninstall)
         rm -r $HOME/.local/interlink
+        ;;
+    help)
+        help
+        ;;
+    *)
+        echo -e "You need to specify one of the following commands:"
+        help
+        ;;
 esac
