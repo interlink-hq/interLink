@@ -21,6 +21,8 @@ The project got inspired by the [KNoC](https://github.com/CARV-ICS-FORTH/knoc) p
 
 ## Quick references:
 - [:information\_source: Overview](#information_source-overview)
+  - [Watch for a quick tour](#watch-for-a-quick-tour)
+  - [Introduction](#introduction)
 - [Quick references:](#quick-references)
 - [:fast\_forward: Quick Start](#fast_forward-quick-start)
 - [:information\_source: InterLink Config file](#information_source-interlink-config-file)
@@ -99,7 +101,6 @@ A quick recap to the list of outgoing HTTP calls:
 | Call          |              Outgoing URL               |
 |---------------|:---------------------------------------:|
 | PingInterLink |      InterLinkUrl:InterLinkPort/ping    |
-| SetKubeConfig |   InterLinkUrl:InterLinkPort/setKubeCFG |
 | Create        |    InterLinkUrl:InterLinkPort/create    |
 | Delete        |    InterLinkUrl:InterLinkPort/delete    |
 | Status        |    InterLinkUrl:InterLinkPort/status    |
@@ -125,7 +126,6 @@ A quick recap to the list of HTTP calls:
 | Call          |             Incoming URL              |          Outgoing URL         |
 |---------------| :-----------------------------------: |:-----------------------------:|
 | Ping          |    InterLinkUrl:InterLinkPort/ping    |                               |
-| SetKubeConfig | InterLinkUrl:InterLinkPort/setKubeCFG |                               |
 | Create        |   InterLinkUrl:InterLinkPort/create   | SidecarURL:SidecarPort/create |
 | Delete        |   InterLinkUrl:InterLinkPort/delete   | SidecarURL:SidecarPort/delete |
 | Status        |   InterLinkUrl:InterLinkPort/status   | SidecarURL:SidecarPort/status |

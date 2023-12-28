@@ -236,30 +236,30 @@ func main() {
 	localClient := kubernetes.NewForConfigOrDie(kubecfg)
 
 	nodeProvider, err := virtualkubelet.NewProvider(cfg.ConfigPath, cfg.NodeName, cfg.OperatingSystem, cfg.InternalIP, cfg.DaemonPort, ctx)
-	go func() {
+	// go func() {
 
-		ILbindNow := false
-		ILbindOld := false
+	// 	ILbindNow := false
+	// 	// ILbindOld := false
 
-		for {
-			err, ILbindNow = commonIL.PingInterLink(ctx)
+	// 	for {
+	// 		err, ILbindNow = commonIL.PingInterLink(ctx)
 
-			if err != nil {
-				log.G(ctx).Error(err)
-			}
+	// 		if err != nil {
+	// 			log.G(ctx).Error(err)
+	// 		}
 
-			if ILbindNow == true && ILbindOld == false {
-				err = commonIL.NewServiceAccount()
-				if err != nil {
-					log.G(ctx).Fatal(err)
-				}
-			}
+	// 		if ILbindNow == true && ILbindOld == false {
+	// 			err = commonIL.NewServiceAccount()
+	// 			if err != nil {
+	// 				log.G(ctx).Fatal(err)
+	// 			}
+	// 		}
 
-			ILbindOld = ILbindNow
-			time.Sleep(time.Second * 10)
+	// 		ILbindOld = ILbindNow
+	// 		time.Sleep(time.Second * 10)
 
-		}
-	}()
+	// 	}
+	// }()
 
 	if err != nil {
 		log.G(ctx).Fatal(err)

@@ -28,25 +28,7 @@ minikube start --kubernetes-version=1.24.3
 
 ### Configure interLink
 
-First of all, you need a valid kubeconfig file to be passed to the interLink docker compose. With minikube you will need the following script (check that `PATH_TO_KUBECONFIG` env is pointing to the correct kubeconfig first), otherwise you can simply copy your own there.
-
-__N.B.__ the kubeconfig file should be a stand-alone one. So the certificate data should be loaded as strings not as path.
-
-```bash
-export PATH_TO_KUBECONFIG=$HOME/.kube/config
-export CA_DATA=$(cat $HOME/.minikube/ca.crt | base64 -w0)
-export CERT_DATA=$(cat $HOME/.minikube/profiles/minikube/client.crt | base64 -w0)
-export KEY_DATA=$(cat $HOME/.minikube/profiles/minikube/client.key | base64 -w0)
-
-mkdir -p interlink/config
-
-cp $PATH_TO_KUBECONFIG interlink/config/kubeconfig.yaml 
-sed 's/certificate-authority:.*/certificate-authority-data: '$CA_DATA'/g'  $PATH_TO_KUBECONFIG | sed 's/client-certificate:.*/client-certificate-data: '$CERT_DATA'/g' - | sed 's/client-key:.*/client-key-data: '$KEY_DATA'/g' - > interlink/config/kubeconfig.yaml 
-
-chmod 777 interlink/config/kubeconfig.yaml 
-```
-
-Then you need to provide the interLink IP address that should be reachable from the kubernetes pods. In case of this demo setup, that address __is the address of your machine__
+You need to provide the interLink IP address that should be reachable from the kubernetes pods. In case of this demo setup, that address __is the address of your machine__
 
 ```bash
 export INTERLINK_IP_ADDRESS=XXX.XX.X.XXX
