@@ -19,10 +19,12 @@ jobs:
       - uses: actions/setup-node@v3
         with:
           node-version: 18
+          #cache: yarn
+
       - name: Install dependencies
-        run: yarn install --cwd $PWD/docs-new --frozen-lockfile
+        run: cd docs-new && yarn install  --frozen-lockfile
       - name: Build website
-        run: yarn build  --cwd $PWD/docs-new
+        run: cd docs-new && yarn build
 
       # Popular action to deploy to GitHub Pages:
       # Docs: https://github.com/peaceiris/actions-gh-pages#%EF%B8%8F-docusaurus
