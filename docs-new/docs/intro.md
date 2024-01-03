@@ -1,12 +1,15 @@
-![Interlink logo](./docs/imgs/interlink_logo.png)
+---
+sidebar_position: 1
+---
 
-## :information_source: Overview
+# Introduction
 
-### Watch for a quick tour
-[![Introducing interLink](./docs/imgs/Phenomenal_20231211_063311_0000.png)](https://youtu.be/-djIQGPvYdI?si=eq_qXylYH_KczFeQ)
+:::warning
 
+interLink is in early development phase, thus subject to breaking changes with no guarantee of backward compatibility.
 
-### Introduction
+:::
+
 InterLink aims to provide an abstraction for the execution of a Kubernetes pod on any remote resource capable of managing a Container execution lifecycle.
 
 The project consists of two main components:
@@ -16,14 +19,8 @@ The project consists of two main components:
 
 The project got inspired by the [KNoC](https://github.com/CARV-ICS-FORTH/knoc) project, enhancing that with the implemention a generic API layer b/w the virtual kubelet component and the provider logic for the container lifecycle management.
 
-![drawing](docs/imgs/InterLink.svg)
+Let's discover [**interLink in less than 5 minutes**](./category/tutorial---end-users).
 
+## What you'll need
 
-## :fast_forward: Quick Start
-
-Give it a stab at interLink [website](https://dciangot.github.io/interLink/). You will deploy on your laptop a fully emulated instance of a kubernetes cluster able to offload the execution of a pod to a SLURM cluster
-
-## GitHub repository management rules
-
-All changes should go through Pull Requests.
-
+You need only a machine with [Docker](https://docs.docker.com/engine/install/) engine and git CLI installed.

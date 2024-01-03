@@ -7,6 +7,12 @@ import (
 	v1 "k8s.io/api/core/v1"
 )
 
+type PodCreateRequests struct {
+	Pod        v1.Pod         `json:"pod"`
+	ConfigMaps []v1.ConfigMap `json:"configmaps"`
+	Secrets    []v1.Secret    `json:"secrets"`
+}
+
 type PodStatus struct {
 	PodName      string               `json:"name"`
 	PodUID       string               `json:"UID"`

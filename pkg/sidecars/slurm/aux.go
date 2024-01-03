@@ -15,14 +15,10 @@ import (
 	commonIL "github.com/intertwin-eu/interlink/pkg/common"
 	v1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
-	"k8s.io/client-go/kubernetes"
-	"k8s.io/client-go/rest"
 )
 
 var prefix string
-var Clientset *kubernetes.Clientset
 var Ctx context.Context
-var kubecfg *rest.Config
 var JIDs []JidStruct
 var timer time.Time
 var cachedStatus []commonIL.PodStatus

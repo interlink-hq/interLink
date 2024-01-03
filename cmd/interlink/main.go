@@ -37,7 +37,6 @@ func main() {
 	mutex.HandleFunc("/status", interlink.StatusHandler)
 	mutex.HandleFunc("/create", interlink.CreateHandler)
 	mutex.HandleFunc("/delete", interlink.DeleteHandler)
-	mutex.HandleFunc("/setKubeCFG", interlink.SetKubeCFGHandler)
 	mutex.HandleFunc("/ping", interlink.Ping)
 	mutex.HandleFunc("/getLogs", interlink.GetLogsHandler)
 	err := http.ListenAndServe(":"+commonIL.InterLinkConfigInst.Interlinkport, mutex)

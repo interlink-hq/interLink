@@ -104,10 +104,10 @@ func NewServiceAccount() error {
 	return nil
 }
 
-func createRequest(pods []*v1.Pod, token string) ([]byte, error) {
+func createRequest(pod commonIL.PodCreateRequests, token string) ([]byte, error) {
 	var returnValue, _ = json.Marshal(commonIL.PodStatus{})
 
-	bodyBytes, err := json.Marshal(pods)
+	bodyBytes, err := json.Marshal(pod)
 	if err != nil {
 		log.L.Error(err)
 		return nil, err
@@ -141,10 +141,10 @@ func createRequest(pods []*v1.Pod, token string) ([]byte, error) {
 	return returnValue, nil
 }
 
-func deleteRequest(pods []*v1.Pod, token string) ([]byte, error) {
+func deleteRequest(pod *v1.Pod, token string) ([]byte, error) {
 	returnValue, _ := json.Marshal(commonIL.PodStatus{})
 
-	bodyBytes, err := json.Marshal(pods)
+	bodyBytes, err := json.Marshal(pod)
 	if err != nil {
 		log.G(context.Background()).Error(err)
 		return nil, err
@@ -256,8 +256,6 @@ func LogRetrieval(p *VirtualKubeletProvider, ctx context.Context, logsRequest co
 }
 
 func RemoteExecution(p *VirtualKubeletProvider, ctx context.Context, mode int8, imageLocation string, pod *v1.Pod) error {
-	var req []*v1.Pod
-	req = []*v1.Pod{pod}
 
 	b, err := os.ReadFile(commonIL.InterLinkConfigInst.VKTokenFile) // just pass the file name
 	if err != nil {
@@ -268,6 +266,8 @@ func RemoteExecution(p *VirtualKubeletProvider, ctx context.Context, mode int8, 
 	switch mode {
 	case CREATE:
 
+		var req commonIL.PodCreateRequests
+		req.Pod = *pod
 		for {
 			var err error
 			if ClientSet == nil {
@@ -293,15 +293,17 @@ func RemoteExecution(p *VirtualKubeletProvider, ctx context.Context, mode int8, 
 			for _, volume := range pod.Spec.Volumes {
 
 				if volume.ConfigMap != nil {
-					_, err = ClientSet.CoreV1().ConfigMaps(pod.Namespace).Get(ctx, volume.ConfigMap.Name, metav1.GetOptions{})
+					cfgmap, err := ClientSet.CoreV1().ConfigMaps(pod.Namespace).Get(ctx, volume.ConfigMap.Name, metav1.GetOptions{})
 					if err != nil {
 						log.G(ctx).Warning("Unable to find ConfigMap " + volume.ConfigMap.Name + " for pod " + pod.Name + ". Waiting for it to be initialized")
 					}
+					req.ConfigMaps = append(req.ConfigMaps, *cfgmap)
 				} else if volume.Secret != nil {
-					_, err = ClientSet.CoreV1().Secrets(pod.Namespace).Get(ctx, volume.Secret.SecretName, metav1.GetOptions{})
+					scrt, err := ClientSet.CoreV1().Secrets(pod.Namespace).Get(ctx, volume.Secret.SecretName, metav1.GetOptions{})
 					if err != nil {
 						log.G(ctx).Warning("Unable to find Secret " + volume.Secret.SecretName + " for pod " + pod.Name + ". Waiting for it to be initialized")
 					}
+					req.Secrets = append(req.Secrets, *scrt)
 				}
 			}
 
@@ -321,6 +323,7 @@ func RemoteExecution(p *VirtualKubeletProvider, ctx context.Context, mode int8, 
 		log.G(ctx).Info(string(returnVal))
 		break
 	case DELETE:
+		req := pod
 		returnVal, err := deleteRequest(req, token)
 		if err != nil {
 			log.G(ctx).Error(err)
