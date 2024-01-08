@@ -11,7 +11,6 @@ import (
 	"strconv"
 	"time"
 
-	exec "github.com/alexellis/go-execute/pkg/v1"
 	commonIL "github.com/intertwin-eu/interlink/pkg/common"
 
 	"github.com/containerd/containerd/log"
@@ -22,87 +21,6 @@ import (
 )
 
 var ClientSet *kubernetes.Clientset
-
-func NewServiceAccount() error {
-
-	var sa string
-	var script string
-	path := commonIL.InterLinkConfigInst.DataRootFolder + ".kube/"
-
-	err := os.MkdirAll(path, os.ModePerm)
-	if err != nil {
-		log.G(context.Background()).Error(err)
-		return err
-	}
-	f, err := os.Create(path + "getSAConfig.sh")
-	if err != nil {
-		log.G(context.Background()).Error(err)
-		return err
-	}
-
-	defer f.Close()
-
-	script = "#!" + commonIL.InterLinkConfigInst.BashPath + "\n" +
-		"SERVICE_ACCOUNT_NAME=" + commonIL.InterLinkConfigInst.ServiceAccount + "\n" +
-		"CONTEXT=$(kubectl config current-context)\n" +
-		"NAMESPACE=" + commonIL.InterLinkConfigInst.Namespace + "\n" +
-		"NEW_CONTEXT=" + commonIL.InterLinkConfigInst.Namespace + "\n" +
-		"KUBECONFIG_FILE=\"" + path + "kubeconfig-sa\"\n" +
-		"SECRET_NAME=$(kubectl get secret -l kubernetes.io/service-account.name=${SERVICE_ACCOUNT_NAME} --namespace ${NAMESPACE} --context ${CONTEXT} -o jsonpath='{.items[0].metadata.name}')\n" +
-		"TOKEN_DATA=$(kubectl get secret ${SECRET_NAME} --context ${CONTEXT} --namespace ${NAMESPACE} -o jsonpath='{.data.token}')\n" +
-		"TOKEN=$(echo ${TOKEN_DATA} | base64 -d)\n" +
-		"kubectl config view --raw > ${KUBECONFIG_FILE}.full.tmp\n" +
-		"kubectl --kubeconfig ${KUBECONFIG_FILE}.full.tmp config use-context ${CONTEXT}\n" +
-		"kubectl --kubeconfig ${KUBECONFIG_FILE}.full.tmp config view --flatten --minify > ${KUBECONFIG_FILE}.tmp\n" +
-		"kubectl config --kubeconfig ${KUBECONFIG_FILE}.tmp rename-context ${CONTEXT} ${NEW_CONTEXT}\n" +
-		"kubectl config --kubeconfig ${KUBECONFIG_FILE}.tmp set-credentials ${CONTEXT}-${NAMESPACE}-token-user --token ${TOKEN}\n" +
-		"kubectl config --kubeconfig ${KUBECONFIG_FILE}.tmp set-context ${NEW_CONTEXT} --user ${CONTEXT}-${NAMESPACE}-token-user\n" +
-		"kubectl config --kubeconfig ${KUBECONFIG_FILE}.tmp set-context ${NEW_CONTEXT} --namespace ${NAMESPACE}\n" +
-		"kubectl config --kubeconfig ${KUBECONFIG_FILE}.tmp view --flatten --minify > ${KUBECONFIG_FILE}\n" +
-		"rm ${KUBECONFIG_FILE}.full.tmp\n" +
-		"rm ${KUBECONFIG_FILE}.tmp"
-
-	_, err = f.Write([]byte(script))
-
-	if err != nil {
-		log.G(context.Background()).Error(err)
-		return err
-	}
-
-	//executing the script to actually retrieve a valid service account
-	cmd := []string{path + "getSAConfig.sh"}
-	shell := exec.ExecTask{
-		Command: "sh",
-		Args:    cmd,
-		Shell:   true,
-	}
-	execResult, _ := shell.Execute()
-	if execResult.Stderr != "" {
-		log.G(context.Background()).Error("Stderr: " + execResult.Stderr + "\nStdout: " + execResult.Stdout)
-		return errors.New(execResult.Stderr)
-	}
-
-	//checking if the config is valid
-	_, err = clientcmd.LoadFromFile(path + "kubeconfig-sa")
-	if err != nil {
-		log.G(context.Background()).Error(err)
-		return err
-	}
-
-	config, err := os.ReadFile(path + "kubeconfig-sa")
-	if err != nil {
-		log.G(context.Background()).Error(err)
-		return err
-	}
-
-	sa = string(config)
-	os.Remove(path + "getSAConfig.sh")
-	os.Remove(path + "kubeconfig-sa")
-
-	err = commonIL.CreateClientsetFrom(context.Background(), sa)
-
-	return nil
-}
 
 func createRequest(pod commonIL.PodCreateRequests, token string) ([]byte, error) {
 	var returnValue, _ = json.Marshal(commonIL.PodStatus{})

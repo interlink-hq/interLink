@@ -1,17 +1,13 @@
 package common
 
 import (
-	"bytes"
 	"context"
-	"encoding/json"
-	"errors"
 	"flag"
 	"fmt"
 	"io"
 	"net/http"
 	"os"
 	"strconv"
-	"time"
 
 	"k8s.io/client-go/kubernetes"
 
@@ -163,43 +159,4 @@ func PingInterLink(ctx context.Context) (error, bool, int) {
 		log.G(ctx).Error("Error " + err.Error() + " " + fmt.Sprint(resp.StatusCode))
 		return nil, false, retVal
 	}
-}
-
-func CreateClientsetFrom(ctx context.Context, body string) error {
-	counter := 0
-	for {
-		var returnValue, _ = json.Marshal("Error")
-		reader := bytes.NewReader([]byte(body))
-		req, err := http.NewRequest(http.MethodPost, InterLinkConfigInst.Interlinkurl+":"+InterLinkConfigInst.Interlinkport+"/setKubeCFG", reader)
-
-		if err != nil {
-			log.G(ctx).Error(err)
-		}
-
-		token, err := os.ReadFile(InterLinkConfigInst.VKTokenFile) // just pass the file name
-		if err != nil {
-			log.G(ctx).Error(err)
-			return err
-		}
-		req.Header.Add("Authorization", "Bearer "+string(token))
-		resp, err := http.DefaultClient.Do(req)
-		if err != nil {
-			log.G(ctx).Error(err)
-			counter++
-			if counter > 5 {
-				return errors.New("Timeout occured trying to set a kubeconfig")
-			}
-			time.Sleep(5 * time.Second)
-			continue
-		} else {
-			returnValue, _ = io.ReadAll(resp.Body)
-		}
-
-		if resp.StatusCode == http.StatusOK {
-			break
-		} else {
-			log.G(ctx).Error("Error " + err.Error() + " " + string(returnValue))
-		}
-	}
-	return nil
 }
