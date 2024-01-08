@@ -37,6 +37,7 @@ func GetLogsHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	path := commonIL.InterLinkConfigInst.DataRootFolder + req.Namespace + "-" + req.PodUID
 	var output []byte
 	if req.Opts.Timestamps {
 		log.G(Ctx).Error(errors.New("Not Implemented"))
@@ -44,11 +45,11 @@ func GetLogsHandler(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(statusCode)
 		return
 	} else {
-		log.G(Ctx).Info("Reading  " + commonIL.InterLinkConfigInst.DataRootFolder + req.PodUID + "/" + req.ContainerName + ".out")
-		output, err = os.ReadFile(commonIL.InterLinkConfigInst.DataRootFolder + req.PodUID + "/" + req.ContainerName + ".out")
+		log.G(Ctx).Info("Reading  " + path + "/" + req.ContainerName + ".out")
+		output, err = os.ReadFile(path + "/" + req.ContainerName + ".out")
 		if err != nil {
 			log.G(Ctx).Info("Failed to read container logs, falling back to job log.")
-			output, err = os.ReadFile(commonIL.InterLinkConfigInst.DataRootFolder + req.PodUID + "/" + "job.out")
+			output, err = os.ReadFile(path + "/" + "job.out")
 			if err != nil {
 				statusCode = http.StatusInternalServerError
 				w.WriteHeader(statusCode)

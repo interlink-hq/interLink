@@ -24,43 +24,45 @@ func DeleteHandler(w http.ResponseWriter, r *http.Request) {
 	}
 
 	var req *http.Request
-	var pods []*v1.Pod
+	var pod *v1.Pod
 	reader := bytes.NewReader(bodyBytes)
-	json.Unmarshal(bodyBytes, &pods)
+	err = json.Unmarshal(bodyBytes, &pod)
 
-	for _, pod := range pods {
-		check := true //the following loop is used to add a pod to the list of to be deleted pods. this is to avoid multiple calls
-		if check {
-			req, err = http.NewRequest(http.MethodPost, commonIL.InterLinkConfigInst.Sidecarurl+":"+commonIL.InterLinkConfigInst.Sidecarport+"/delete", reader)
-
-			log.G(Ctx).Info("InterLink: forwarding Delete call to sidecar")
-			resp, err := http.DefaultClient.Do(req)
-			if err != nil {
-				statusCode = http.StatusInternalServerError
-				w.WriteHeader(statusCode)
-				log.G(Ctx).Error(err)
-				return
-			}
-
-			returnValue, _ := io.ReadAll(resp.Body)
-			statusCode = resp.StatusCode
-
-			if statusCode != http.StatusOK {
-				w.WriteHeader(http.StatusInternalServerError)
-			} else {
-				w.WriteHeader(http.StatusOK)
-			}
-			log.G(Ctx).Debug("InterLink: " + string(returnValue))
-			var returnJson []commonIL.PodStatus
-			returnJson = append(returnJson, commonIL.PodStatus{PodName: pod.Name, PodUID: string(pod.UID), PodNamespace: pod.Namespace})
-
-			bodyBytes, err = json.Marshal(returnJson)
-			if err != nil {
-				log.G(Ctx).Error(err)
-				w.Write([]byte{})
-			} else {
-				w.Write(bodyBytes)
-			}
-		}
+	if err != nil {
+		statusCode = http.StatusInternalServerError
+		w.WriteHeader(statusCode)
+		log.G(Ctx).Fatal(err)
 	}
+
+	req, err = http.NewRequest(http.MethodPost, commonIL.InterLinkConfigInst.Sidecarurl+":"+commonIL.InterLinkConfigInst.Sidecarport+"/delete", reader)
+
+	log.G(Ctx).Info("InterLink: forwarding Delete call to sidecar")
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		statusCode = http.StatusInternalServerError
+		w.WriteHeader(statusCode)
+		log.G(Ctx).Error(err)
+		return
+	}
+
+	returnValue, _ := io.ReadAll(resp.Body)
+	statusCode = resp.StatusCode
+
+	if statusCode != http.StatusOK {
+		w.WriteHeader(http.StatusInternalServerError)
+	} else {
+		w.WriteHeader(http.StatusOK)
+	}
+	log.G(Ctx).Debug("InterLink: " + string(returnValue))
+	var returnJson []commonIL.PodStatus
+	returnJson = append(returnJson, commonIL.PodStatus{PodName: pod.Name, PodUID: string(pod.UID), PodNamespace: pod.Namespace})
+
+	bodyBytes, err = json.Marshal(returnJson)
+	if err != nil {
+		log.G(Ctx).Error(err)
+		w.Write([]byte{})
+	} else {
+		w.Write(bodyBytes)
+	}
+
 }

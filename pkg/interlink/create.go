@@ -40,7 +40,7 @@ func CreateHandler(w http.ResponseWriter, r *http.Request) {
 
 	if retrieved_data != nil {
 		bodyBytes, err = json.Marshal(retrieved_data)
-		log.G(Ctx).Info(string(bodyBytes))
+		log.G(Ctx).Debug(string(bodyBytes))
 		reader := bytes.NewReader(bodyBytes)
 
 		req, err = http.NewRequest(http.MethodPost, commonIL.InterLinkConfigInst.Sidecarurl+":"+commonIL.InterLinkConfigInst.Sidecarport+"/create", reader)

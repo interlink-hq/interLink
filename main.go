@@ -239,27 +239,27 @@ func main() {
 	nodeProvider, err := virtualkubelet.NewProvider(cfg.ConfigPath, cfg.NodeName, cfg.OperatingSystem, cfg.InternalIP, cfg.DaemonPort, ctx)
 	go func() {
 
-		ILbindNow := false
-		ILbindOld := false
+		ILbind := false
 		retValue := -1
+		counter := 0
 
 		for {
-			err, ILbindNow, retValue = commonIL.PingInterLink(ctx)
+			err, ILbind, retValue = commonIL.PingInterLink(ctx)
 
 			if err != nil {
 				log.G(ctx).Error(err)
 			}
 
-			if ILbindNow == true && ILbindOld == false && retValue == 1 {
-				err = virtualkubelet.NewServiceAccount()
-				if err != nil {
-					log.G(ctx).Fatal(err)
-				}
-			} else if ILbindNow == true && ILbindOld == false && retValue == 0 {
-				commonIL.CreateClientsetFrom(ctx, "")
+			if !ILbind && retValue == 1 {
+				counter++
+			} else if ILbind && retValue == 0 {
+				counter = 0
 			}
 
-			ILbindOld = ILbindNow
+			if counter > 10 {
+				log.G(ctx).Fatal("Unable to communicate with the InterLink API, exiting...")
+			}
+
 			time.Sleep(time.Second * 10)
 
 		}

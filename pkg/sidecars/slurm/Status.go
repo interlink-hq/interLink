@@ -62,6 +62,7 @@ func StatusHandler(w http.ResponseWriter, r *http.Request) {
 		}
 
 		for _, pod := range req {
+			path := commonIL.InterLinkConfigInst.DataRootFolder + pod.Namespace + "-" + string(pod.UID)
 			for i, jid := range JIDs {
 				if jid.PodUID == string(pod.UID) {
 					cmd := []string{"--noheader", "-a", "-j " + jid.JID}
@@ -73,8 +74,8 @@ func StatusHandler(w http.ResponseWriter, r *http.Request) {
 					execReturn, _ := shell.Execute()
 					timeNow = time.Now()
 
-					log.G(Ctx).Info("ERR: ", execReturn.Stderr)
 					if execReturn.Stderr != "" {
+						log.G(Ctx).Info("ERR: ", execReturn.Stderr)
 						containerStatuses := []v1.ContainerStatus{}
 						for _, ct := range pod.Spec.Containers {
 							log.G(Ctx).Info("Getting exit status from  " + commonIL.InterLinkConfigInst.DataRootFolder + string(pod.UID) + "/" + ct.Name + ".status")
@@ -132,7 +133,7 @@ func StatusHandler(w http.ResponseWriter, r *http.Request) {
 						case "CD":
 							if jid.EndTime.IsZero() {
 								JIDs[i].EndTime = timeNow
-								f, err := os.Create(commonIL.InterLinkConfigInst.DataRootFolder + string(pod.UID) + "/FinishedAt.time")
+								f, err := os.Create(path + "/FinishedAt.time")
 								if err != nil {
 									statusCode = http.StatusInternalServerError
 									w.WriteHeader(statusCode)
@@ -147,7 +148,7 @@ func StatusHandler(w http.ResponseWriter, r *http.Request) {
 						case "CG":
 							if jid.StartTime.IsZero() {
 								JIDs[i].StartTime = timeNow
-								f, err := os.Create(commonIL.InterLinkConfigInst.DataRootFolder + string(pod.UID) + "/StartedAt.time")
+								f, err := os.Create(path + "/StartedAt.time")
 								if err != nil {
 									statusCode = http.StatusInternalServerError
 									w.WriteHeader(statusCode)
@@ -162,7 +163,7 @@ func StatusHandler(w http.ResponseWriter, r *http.Request) {
 						case "F":
 							if jid.EndTime.IsZero() {
 								JIDs[i].EndTime = timeNow
-								f, err := os.Create(commonIL.InterLinkConfigInst.DataRootFolder + string(pod.UID) + "/FinishedAt.time")
+								f, err := os.Create(path + "/FinishedAt.time")
 								if err != nil {
 									statusCode = http.StatusInternalServerError
 									w.WriteHeader(statusCode)
@@ -180,7 +181,7 @@ func StatusHandler(w http.ResponseWriter, r *http.Request) {
 						case "PR":
 							if jid.EndTime.IsZero() {
 								JIDs[i].EndTime = timeNow
-								f, err := os.Create(commonIL.InterLinkConfigInst.DataRootFolder + string(pod.UID) + "/FinishedAt.time")
+								f, err := os.Create(path + "/FinishedAt.time")
 								if err != nil {
 									statusCode = http.StatusInternalServerError
 									w.WriteHeader(statusCode)
@@ -195,7 +196,7 @@ func StatusHandler(w http.ResponseWriter, r *http.Request) {
 						case "R":
 							if jid.StartTime.IsZero() {
 								JIDs[i].StartTime = timeNow
-								f, err := os.Create(commonIL.InterLinkConfigInst.DataRootFolder + string(pod.UID) + "/StartedAt.time")
+								f, err := os.Create(path + "/StartedAt.time")
 								if err != nil {
 									statusCode = http.StatusInternalServerError
 									w.WriteHeader(statusCode)
@@ -213,7 +214,7 @@ func StatusHandler(w http.ResponseWriter, r *http.Request) {
 						case "ST":
 							if jid.EndTime.IsZero() {
 								JIDs[i].EndTime = timeNow
-								f, err := os.Create(commonIL.InterLinkConfigInst.DataRootFolder + string(pod.UID) + "/FinishedAt.time")
+								f, err := os.Create(path + "/FinishedAt.time")
 								if err != nil {
 									statusCode = http.StatusInternalServerError
 									w.WriteHeader(statusCode)
@@ -228,7 +229,7 @@ func StatusHandler(w http.ResponseWriter, r *http.Request) {
 						default:
 							if jid.EndTime.IsZero() {
 								JIDs[i].EndTime = timeNow
-								f, err := os.Create(commonIL.InterLinkConfigInst.DataRootFolder + string(pod.UID) + "/FinishedAt.time")
+								f, err := os.Create(path + "/FinishedAt.time")
 								if err != nil {
 									statusCode = http.StatusInternalServerError
 									w.WriteHeader(statusCode)

@@ -40,6 +40,7 @@ func SubmitHandler(w http.ResponseWriter, r *http.Request) {
 	for _, data := range req {
 		containers := data.Pod.Spec.Containers
 		metadata := data.Pod.ObjectMeta
+		filesPath := commonIL.InterLinkConfigInst.DataRootFolder + data.Pod.Namespace + "-" + string(data.Pod.UID)
 
 		var singularity_command_pod []SingularityCommand
 
@@ -54,13 +55,14 @@ func SubmitHandler(w http.ResponseWriter, r *http.Request) {
 
 			envs := prepare_envs(container)
 			image := ""
-			mounts, err := prepare_mounts(container, req)
+			mounts, err := prepare_mounts(filesPath, container, req)
+			log.G(Ctx).Debug(mounts)
 			if err != nil {
 				statusCode = http.StatusInternalServerError
 				w.WriteHeader(statusCode)
 				w.Write([]byte("Error prepairing mounts. Check Slurm Sidecar's logs"))
 				log.G(Ctx).Error(err)
-				os.RemoveAll(commonIL.InterLinkConfigInst.DataRootFolder + string(data.Pod.UID))
+				os.RemoveAll(filesPath)
 				return
 			}
 
@@ -72,7 +74,7 @@ func SubmitHandler(w http.ResponseWriter, r *http.Request) {
 					log.G(Ctx).Info("- image-uri annotation not specified for path in remote filesystem")
 				}
 			} else {
-				image = "docker://" + container.Image
+				image = container.Image
 			}
 
 			log.G(Ctx).Debug("-- Appending all commands together...")
@@ -85,13 +87,13 @@ func SubmitHandler(w http.ResponseWriter, r *http.Request) {
 			singularity_command_pod = append(singularity_command_pod, SingularityCommand{command: singularity_command, containerName: container.Name})
 		}
 
-		path, err := produce_slurm_script(string(data.Pod.UID), metadata, singularity_command_pod)
+		path, err := produce_slurm_script(filesPath, data.Pod.Namespace, string(data.Pod.UID), metadata, singularity_command_pod)
 		if err != nil {
 			statusCode = http.StatusInternalServerError
 			w.WriteHeader(statusCode)
 			w.Write([]byte("Error producing Slurm script. Check Slurm Sidecar's logs"))
 			log.G(Ctx).Error(err)
-			os.RemoveAll(commonIL.InterLinkConfigInst.DataRootFolder + string(data.Pod.UID))
+			os.RemoveAll(filesPath)
 			return
 		}
 		out, err := slurm_batch_submit(path)
@@ -100,18 +102,18 @@ func SubmitHandler(w http.ResponseWriter, r *http.Request) {
 			w.WriteHeader(statusCode)
 			w.Write([]byte("Error submitting Slurm script. Check Slurm Sidecar's logs"))
 			log.G(Ctx).Error(err)
-			os.RemoveAll(commonIL.InterLinkConfigInst.DataRootFolder + string(data.Pod.UID))
+			os.RemoveAll(filesPath)
 			return
 		}
 		log.G(Ctx).Info(out)
-		err = handle_jid(string(data.Pod.UID), out, data.Pod)
+		err = handle_jid(string(data.Pod.UID), out, data.Pod, filesPath)
 		if err != nil {
 			statusCode = http.StatusInternalServerError
 			w.WriteHeader(statusCode)
 			w.Write([]byte("Error handling JID. Check Slurm Sidecar's logs"))
 			log.G(Ctx).Error(err)
-			os.RemoveAll(commonIL.InterLinkConfigInst.DataRootFolder + string(data.Pod.UID))
-			err = delete_container(string(data.Pod.UID))
+			os.RemoveAll(filesPath)
+			err = delete_container(string(data.Pod.UID), filesPath)
 			return
 		}
 	}
