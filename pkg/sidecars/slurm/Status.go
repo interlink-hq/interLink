@@ -74,12 +74,14 @@ func StatusHandler(w http.ResponseWriter, r *http.Request) {
 					execReturn, _ := shell.Execute()
 					timeNow = time.Now()
 
+					//log.G(Ctx).Info("Pod: " + jid.PodUID + " | JID: " + jid.JID)
+
 					if execReturn.Stderr != "" {
-						log.G(Ctx).Info("ERR: ", execReturn.Stderr)
+						log.G(Ctx).Error("ERR: ", execReturn.Stderr)
 						containerStatuses := []v1.ContainerStatus{}
 						for _, ct := range pod.Spec.Containers {
-							log.G(Ctx).Info("Getting exit status from  " + commonIL.InterLinkConfigInst.DataRootFolder + string(pod.UID) + "/" + ct.Name + ".status")
-							file, err := os.Open(commonIL.InterLinkConfigInst.DataRootFolder + string(pod.UID) + "/" + ct.Name + ".status")
+							log.G(Ctx).Info("Getting exit status from  " + path + "/" + ct.Name + ".status")
+							file, err := os.Open(path + "/" + ct.Name + ".status")
 							if err != nil {
 								statusCode = http.StatusInternalServerError
 								w.WriteHeader(statusCode)

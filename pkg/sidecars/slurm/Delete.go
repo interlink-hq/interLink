@@ -36,7 +36,7 @@ func StopHandler(w http.ResponseWriter, r *http.Request) {
 
 	filesPath := commonIL.InterLinkConfigInst.DataRootFolder + pod.Namespace + "-" + string(pod.UID)
 
-	err = delete_container(string(pod.UID), filesPath)
+	err = delete_container(string(pod.UID), filesPath+"/"+pod.Namespace)
 	if err != nil {
 		statusCode = http.StatusInternalServerError
 		w.WriteHeader(statusCode)

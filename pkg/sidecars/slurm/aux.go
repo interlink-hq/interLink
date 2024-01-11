@@ -389,7 +389,7 @@ func handle_jid(podUID string, output string, pod v1.Pod, path string) error {
 	return nil
 }
 
-func removeJID(jidToBeRemoved string) {
+func removeJID(jidToBeRemoved string) error {
 	for i, jid := range JIDs {
 		if jid.JID == jidToBeRemoved {
 			if len(JIDs) == 1 {
@@ -400,10 +400,11 @@ func removeJID(jidToBeRemoved string) {
 				JIDs = JIDs[:i]
 			} else {
 				JIDs = append(JIDs[:i-1], JIDs[i+1:]...)
-				return
 			}
+			return nil
 		}
 	}
+	return errors.New("Unable to delete JID " + jidToBeRemoved + ". Maybe it already has been deleted?")
 }
 
 func delete_container(podUID string, path string) error {
@@ -417,12 +418,14 @@ func delete_container(podUID string, path string) error {
 			} else {
 				log.G(Ctx).Info("- Deleted Job ", jid.JID)
 			}
-			os.RemoveAll(path)
-			removeJID(jid.JID)
-			return nil
+			os.RemoveAll(path + "/" + podUID)
+			err = removeJID(jid.JID)
+			if err != nil {
+				log.G(Ctx).Warning(err)
+			}
+			return err
 		}
 	}
-	log.G(Ctx).Error("JID for deletion does not exist anymore")
 	return nil
 }
 
