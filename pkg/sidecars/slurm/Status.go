@@ -62,6 +62,11 @@ func StatusHandler(w http.ResponseWriter, r *http.Request) {
 		}
 
 		for _, pod := range req {
+			if pod.Status.Phase == v1.PodPending || pod.Status.Phase == v1.PodRunning {
+
+			} else {
+
+			}
 			path := commonIL.InterLinkConfigInst.DataRootFolder + pod.Namespace + "-" + string(pod.UID)
 			for i, jid := range JIDs {
 				if jid.PodUID == string(pod.UID) {

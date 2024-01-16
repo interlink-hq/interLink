@@ -34,6 +34,7 @@ func DeleteHandler(w http.ResponseWriter, r *http.Request) {
 		log.G(Ctx).Fatal(err)
 	}
 
+	deleteCachedStatus(string(pod.UID))
 	req, err = http.NewRequest(http.MethodPost, commonIL.InterLinkConfigInst.Sidecarurl+":"+commonIL.InterLinkConfigInst.Sidecarport+"/delete", reader)
 
 	log.G(Ctx).Info("InterLink: forwarding Delete call to sidecar")

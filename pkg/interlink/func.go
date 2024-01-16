@@ -8,6 +8,8 @@ import (
 	v1 "k8s.io/api/core/v1"
 )
 
+var PodStatuses []commonIL.PodStatus
+
 func getData(pod commonIL.PodCreateRequests) (commonIL.RetrievedPodData, error) {
 	log.G(Ctx).Debug(pod.ConfigMaps)
 	var retrieved_data commonIL.RetrievedPodData
@@ -65,4 +67,38 @@ func retrieve_data(container v1.Container, pod commonIL.PodCreateRequests) (comm
 		}
 	}
 	return retrieved_data, nil
+}
+
+func updateStatuses(statuses []commonIL.PodStatus) {
+	for _, podStatus := range statuses {
+		updated := false
+		for i, podStatus2 := range PodStatuses {
+			if podStatus.PodUID == podStatus2.PodUID {
+				PodStatuses[i] = podStatus
+				updated = true
+				break
+			}
+		}
+		if !updated {
+			PodStatuses = append(PodStatuses, podStatus)
+		}
+	}
+}
+
+func deleteCachedStatus(uid string) {
+	for i, status := range PodStatuses {
+		if status.PodUID == uid {
+			PodStatuses = append(PodStatuses[:i], PodStatuses[i+1:]...)
+			return
+		}
+	}
+}
+
+func checkIfCached(uid string) bool {
+	for _, podStatus := range PodStatuses {
+		if podStatus.PodUID == uid {
+			return true
+		}
+	}
+	return false
 }
