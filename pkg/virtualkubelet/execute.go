@@ -331,9 +331,7 @@ func checkPodsStatus(ctx context.Context, p *VirtualKubeletProvider, token strin
 	var err error
 
 	for _, pod := range p.pods {
-		if pod.Status.Phase == v1.PodPending || pod.Status.Phase == v1.PodRunning {
-			PodsList = append(PodsList, pod)
-		}
+		PodsList = append(PodsList, pod)
 	}
 	//log.G(ctx).Debug(p.pods) //commented out because it's too verbose. uncomment to see all registered pods
 
