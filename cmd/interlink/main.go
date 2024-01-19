@@ -15,6 +15,7 @@ var Url string
 
 func main() {
 	var cancel context.CancelFunc
+	interlink.PodStatuses.Statuses = make(map[string]commonIL.PodStatus)
 
 	commonIL.NewInterLinkConfig()
 	logger := logrus.StandardLogger()
@@ -39,6 +40,7 @@ func main() {
 	mutex.HandleFunc("/delete", interlink.DeleteHandler)
 	mutex.HandleFunc("/ping", interlink.Ping)
 	mutex.HandleFunc("/getLogs", interlink.GetLogsHandler)
+	mutex.HandleFunc("/updateCache", interlink.UpdateCacheHandler)
 	err := http.ListenAndServe(":"+commonIL.InterLinkConfigInst.Interlinkport, mutex)
 	if err != nil {
 		log.G(interlink.Ctx).Fatal(err)

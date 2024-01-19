@@ -14,6 +14,7 @@ import (
 
 func main() {
 	var cancel context.CancelFunc
+	slurm.JIDs = make(map[string]*slurm.JidStruct)
 	logger := logrus.StandardLogger()
 
 	commonIL.NewInterLinkConfig()

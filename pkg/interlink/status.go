@@ -28,14 +28,17 @@ func StatusHandler(w http.ResponseWriter, r *http.Request) {
 	}
 
 	var podsToBeChecked []*v1.Pod
-	var returnedStatuses []commonIL.PodStatus
+	var returnedStatuses []commonIL.PodStatus //returned from the query to the sidecar
+	var returnPods []commonIL.PodStatus       //returned to the vk
 
+	PodStatuses.mu.Lock()
 	for _, pod := range pods {
 		cached := checkIfCached(string(pod.UID))
 		if pod.Status.Phase == v1.PodRunning || pod.Status.Phase == v1.PodPending || !cached {
 			podsToBeChecked = append(podsToBeChecked, pod)
 		}
 	}
+	PodStatuses.mu.Unlock()
 
 	bodyBytes, err = json.Marshal(podsToBeChecked)
 	if err != nil {
@@ -79,7 +82,18 @@ func StatusHandler(w http.ResponseWriter, r *http.Request) {
 
 	updateStatuses(returnedStatuses)
 
-	returnValue, err := json.Marshal(PodStatuses)
+	for _, pod := range pods {
+		PodStatuses.mu.Lock()
+		for _, cached := range PodStatuses.Statuses {
+			if cached.PodUID == string(pod.UID) {
+				returnPods = append(returnPods, cached)
+				break
+			}
+		}
+		PodStatuses.mu.Unlock()
+	}
+
+	returnValue, err := json.Marshal(returnPods)
 	if err != nil {
 		statusCode = http.StatusInternalServerError
 		w.WriteHeader(statusCode)

@@ -2,16 +2,21 @@ package interlink
 
 import (
 	"path/filepath"
+	"sync"
 
 	"github.com/containerd/containerd/log"
 	commonIL "github.com/intertwin-eu/interlink/pkg/common"
 	v1 "k8s.io/api/core/v1"
 )
 
-var PodStatuses []commonIL.PodStatus
+type MutexStatuses struct {
+	mu       sync.Mutex
+	Statuses map[string]commonIL.PodStatus
+}
+
+var PodStatuses MutexStatuses
 
 func getData(pod commonIL.PodCreateRequests) (commonIL.RetrievedPodData, error) {
-	log.G(Ctx).Debug(pod.ConfigMaps)
 	var retrieved_data commonIL.RetrievedPodData
 	retrieved_data.Pod = pod.Pod
 	for _, container := range pod.Pod.Spec.Containers {
@@ -69,36 +74,33 @@ func retrieve_data(container v1.Container, pod commonIL.PodCreateRequests) (comm
 	return retrieved_data, nil
 }
 
-func updateStatuses(statuses []commonIL.PodStatus) {
-	for _, podStatus := range statuses {
-		updated := false
-		for i, podStatus2 := range PodStatuses {
-			if podStatus.PodUID == podStatus2.PodUID {
-				PodStatuses[i] = podStatus
-				updated = true
-				break
-			}
-		}
-		if !updated {
-			PodStatuses = append(PodStatuses, podStatus)
-		}
-	}
-}
-
 func deleteCachedStatus(uid string) {
-	for i, status := range PodStatuses {
-		if status.PodUID == uid {
-			PodStatuses = append(PodStatuses[:i], PodStatuses[i+1:]...)
-			return
-		}
-	}
+	PodStatuses.mu.Lock()
+	delete(PodStatuses.Statuses, uid)
+	PodStatuses.mu.Unlock()
 }
 
 func checkIfCached(uid string) bool {
-	for _, podStatus := range PodStatuses {
-		if podStatus.PodUID == uid {
-			return true
+	podStatus, ok := PodStatuses.Statuses[uid]
+
+	if &podStatus != nil && ok {
+		return true
+	} else {
+		return false
+	}
+}
+
+func updateStatuses(returnedStatuses []commonIL.PodStatus) {
+	PodStatuses.mu.Lock()
+
+	for _, new := range returnedStatuses {
+		log.G(Ctx).Info(PodStatuses.Statuses, new)
+		if checkIfCached(new.PodUID) {
+			PodStatuses.Statuses[new.PodUID] = new
+		} else {
+			PodStatuses.Statuses[new.PodUID] = new
 		}
 	}
-	return false
+
+	PodStatuses.mu.Unlock()
 }

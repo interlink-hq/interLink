@@ -19,7 +19,7 @@ import (
 
 var prefix string
 var Ctx context.Context
-var JIDs []JidStruct
+var JIDs map[string]*JidStruct
 var timer time.Time
 var cachedStatus []commonIL.PodStatus
 
@@ -118,8 +118,7 @@ func Load_JIDs() error {
 					log.G(Ctx).Debug(err)
 				}
 			}
-
-			JIDs = append(JIDs, JidStruct{PodUID: podUID, JID: string(JID), StartTime: StartedAt, EndTime: FinishedAt})
+			JIDs[podUID] = &JidStruct{PodUID: podUID, JID: string(JID), StartTime: StartedAt, EndTime: FinishedAt}
 		}
 	}
 
@@ -384,49 +383,30 @@ func handle_jid(podUID string, output string, pod v1.Pod, path string) error {
 		log.G(Ctx).Error(err)
 		return err
 	}
-	JIDs = append(JIDs, JidStruct{PodUID: string(pod.UID), JID: string(jid[1])})
-	log.G(Ctx).Info("Job ID is: " + jid[1])
+
+	JIDs[podUID] = &JidStruct{PodUID: string(pod.UID), JID: jid[1]}
+	log.G(Ctx).Info("Job ID is: " + JIDs[podUID].JID)
 	return nil
 }
 
-func removeJID(jidToBeRemoved string) error {
-	for i, jid := range JIDs {
-		if jid.JID == jidToBeRemoved {
-			if len(JIDs) == 1 {
-				JIDs = nil
-			} else if i == 0 {
-				JIDs = JIDs[1:]
-			} else if i == len(JIDs)-1 {
-				JIDs = JIDs[:i]
-			} else {
-				JIDs = append(JIDs[:i-1], JIDs[i+1:]...)
-			}
-			return nil
-		}
-	}
-	return errors.New("Unable to delete JID " + jidToBeRemoved + ". Maybe it already has been deleted?")
+func removeJID(podUID string) {
+	delete(JIDs, podUID)
 }
 
 func delete_container(podUID string, path string) error {
 	log.G(Ctx).Info("- Deleting Job for pod " + podUID)
-	for _, jid := range JIDs {
-		if jid.PodUID == podUID {
-			_, err := exec.Command(commonIL.InterLinkConfigInst.Scancelpath, jid.JID).Output()
-			if err != nil {
-				log.G(Ctx).Error(err)
-				return err
-			} else {
-				log.G(Ctx).Info("- Deleted Job ", jid.JID)
-			}
-			os.RemoveAll(path + "/" + podUID)
-			err = removeJID(jid.JID)
-			if err != nil {
-				log.G(Ctx).Warning(err)
-			}
-			return err
-		}
+	_, err := exec.Command(commonIL.InterLinkConfigInst.Scancelpath, JIDs[podUID].JID).Output()
+	if err != nil {
+		log.G(Ctx).Error(err)
+	} else {
+		log.G(Ctx).Info("- Deleted Job ", JIDs[podUID].JID)
 	}
-	return nil
+	os.RemoveAll(path + "/" + podUID)
+	removeJID(podUID)
+	if err != nil {
+		log.G(Ctx).Warning(err)
+	}
+	return err
 }
 
 func mountData(path string, container v1.Container, pod v1.Pod, data interface{}) ([]string, []string, error) {

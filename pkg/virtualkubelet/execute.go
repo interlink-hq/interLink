@@ -22,6 +22,31 @@ import (
 
 var ClientSet *kubernetes.Clientset
 
+func updateCacheRequest(uid string, token string) error {
+	bodyBytes := []byte(uid)
+
+	reader := bytes.NewReader(bodyBytes)
+	req, err := http.NewRequest(http.MethodPost, commonIL.InterLinkConfigInst.Interlinkurl+":"+commonIL.InterLinkConfigInst.Interlinkport+"/updateCache", reader)
+	if err != nil {
+		log.L.Error(err)
+		return err
+	}
+
+	req.Header.Add("Authorization", "Bearer "+token)
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		log.L.Error(err)
+		return err
+	}
+	statusCode := resp.StatusCode
+
+	if statusCode != http.StatusOK {
+		return errors.New("Unexpected error occured while updating InterLink cache. Status code: " + strconv.Itoa(resp.StatusCode) + ". Check InterLink's logs for further informations")
+	}
+
+	return err
+}
+
 func createRequest(pod commonIL.PodCreateRequests, token string) ([]byte, error) {
 	var returnValue, _ = json.Marshal(commonIL.PodStatus{})
 
@@ -283,6 +308,7 @@ func checkPodsStatus(p *VirtualKubeletProvider, ctx context.Context, token strin
 
 			pod, err := p.GetPod(ctx, podStatus.PodNamespace, podStatus.PodName)
 			if err != nil {
+				updateCacheRequest(podStatus.PodUID, token)
 				log.G(ctx).Error(err)
 				return err
 			}
@@ -298,7 +324,7 @@ func checkPodsStatus(p *VirtualKubeletProvider, ctx context.Context, token strin
 					}
 
 					if containerStatus.State.Terminated != nil {
-						log.G(ctx).Info("Pod " + podStatus.PodName + ": Service " + containerStatus.Name + " is not running on Sidecar")
+						log.G(ctx).Debug("Pod " + podStatus.PodName + ": Service " + containerStatus.Name + " is not running on Sidecar")
 						updatePod = false
 						if containerStatus.State.Terminated.ExitCode == 0 {
 							pod.Status.Phase = v1.PodSucceeded
