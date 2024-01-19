@@ -48,6 +48,7 @@ func main() {
 	mutex.HandleFunc("/getLogs", interLinkAPIs.GetLogsHandler)
 	mutex.HandleFunc("/updateCache", interlink.UpdateCacheHandler)
 	err = http.ListenAndServe(":"+commonIL.InterLinkConfigInst.Interlinkport, mutex)
+
 	if err != nil {
 		log.G(interlink.Ctx).Fatal(err)
 	}
