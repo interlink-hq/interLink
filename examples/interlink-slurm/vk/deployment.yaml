@@ -49,8 +49,6 @@ spec:
           value: "/opt/interlink/token"
         - name: CONFIGPATH
           value: "/etc/interlink/vk-cfg.json"
-        - name: KUBECONFIG
-          value: "/etc/interlink/kubeconfig.yaml"
         volumeMounts:
         - name: config
           mountPath: /etc/interlink/InterLinkConfig.yaml
