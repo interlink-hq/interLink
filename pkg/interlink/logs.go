@@ -9,10 +9,11 @@ import (
 	"strconv"
 
 	"github.com/containerd/containerd/log"
+
 	commonIL "github.com/intertwin-eu/interlink/pkg/common"
 )
 
-func GetLogsHandler(w http.ResponseWriter, r *http.Request) {
+func (h *InterLinkHandler) GetLogsHandler(w http.ResponseWriter, r *http.Request) {
 	statusCode := http.StatusOK
 	log.G(Ctx).Info("InterLink: received GetLogs call")
 	bodyBytes, err := io.ReadAll(r.Body)
@@ -53,7 +54,7 @@ func GetLogsHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	reader := bytes.NewReader(bodyBytes)
-	req, err := http.NewRequest(http.MethodPost, commonIL.InterLinkConfigInst.Sidecarurl+":"+commonIL.InterLinkConfigInst.Sidecarport+"/getLogs", reader)
+	req, err := http.NewRequest(http.MethodPost, h.Config.Sidecarurl+":"+h.Config.Sidecarport+"/getLogs", reader)
 	if err != nil {
 		log.G(Ctx).Fatal(err)
 	}

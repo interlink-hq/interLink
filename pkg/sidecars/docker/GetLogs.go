@@ -10,11 +10,12 @@ import (
 	OSexec "os/exec"
 
 	"github.com/containerd/containerd/log"
+
 	commonIL "github.com/intertwin-eu/interlink/pkg/common"
 )
 
-func GetLogsHandler(w http.ResponseWriter, r *http.Request) {
-	log.G(Ctx).Info("Docker Sidecar: received GetLogs call")
+func (h *SidecarHandler) GetLogsHandler(w http.ResponseWriter, r *http.Request) {
+	log.G(h.Ctx).Info("Docker Sidecar: received GetLogs call")
 	var req commonIL.LogStruct
 	statusCode := http.StatusOK
 	currentTime := time.Now()
@@ -22,14 +23,14 @@ func GetLogsHandler(w http.ResponseWriter, r *http.Request) {
 	//orario, _ := time.Parse("2006-01-02T15:04:05.999999999Z", "2023-09-14T10:35:44.665672258Z")
 	//test := commonIL.LogStruct{PodName: "test-pod", ContainerName: "busyecho", Opts: commonIL.ContainerLogOpts{Tail: 0, LimitBytes: 350, SinceTime: orario, Timestamps: true}}
 	//testBytes, _ := json.Marshal(test)
-	//log.G(Ctx).Debug(string(testBytes))
+	//log.G(h.Ctx).Debug(string(testBytes))
 
 	bodyBytes, err := io.ReadAll(r.Body)
 	if err != nil {
 		statusCode = http.StatusInternalServerError
 		w.WriteHeader(statusCode)
 		w.Write([]byte("Some errors occurred while checking container status. Check Docker Sidecar's logs"))
-		log.G(Ctx).Error(err)
+		log.G(h.Ctx).Error(err)
 		return
 	}
 
@@ -38,7 +39,7 @@ func GetLogsHandler(w http.ResponseWriter, r *http.Request) {
 		statusCode = http.StatusInternalServerError
 		w.WriteHeader(statusCode)
 		w.Write([]byte("Some errors occurred while checking container status. Check Docker Sidecar's logs"))
-		log.G(Ctx).Error(err)
+		log.G(h.Ctx).Error(err)
 		return
 	}
 
@@ -54,7 +55,7 @@ func GetLogsHandler(w http.ResponseWriter, r *http.Request) {
 	output, err := cmd.CombinedOutput()
 
 	if err != nil {
-		log.G(Ctx).Error(err)
+		log.G(h.Ctx).Error(err)
 		statusCode = http.StatusInternalServerError
 		w.WriteHeader(statusCode)
 		return

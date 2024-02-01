@@ -5,8 +5,9 @@ import (
 	"sync"
 
 	"github.com/containerd/containerd/log"
-	commonIL "github.com/intertwin-eu/interlink/pkg/common"
 	v1 "k8s.io/api/core/v1"
+
+	commonIL "github.com/intertwin-eu/interlink/pkg/common"
 )
 
 type MutexStatuses struct {
@@ -16,62 +17,63 @@ type MutexStatuses struct {
 
 var PodStatuses MutexStatuses
 
-func getData(pod commonIL.PodCreateRequests) (commonIL.RetrievedPodData, error) {
-	var retrieved_data commonIL.RetrievedPodData
-	retrieved_data.Pod = pod.Pod
+func getData(pod commonIL.PodCreateRequests, config commonIL.InterLinkConfig) (commonIL.RetrievedPodData, error) {
+	log.G(Ctx).Debug(pod.ConfigMaps)
+	var retrievedData commonIL.RetrievedPodData
+	retrievedData.Pod = pod.Pod
 	for _, container := range pod.Pod.Spec.Containers {
 		log.G(Ctx).Info("- Retrieving Secrets and ConfigMaps for the Docker Sidecar. Container: " + container.Name)
 		log.G(Ctx).Debug(container.VolumeMounts)
-		data, err := retrieve_data(container, pod)
+		data, err := retrieveData(container, pod, config)
 		if err != nil {
 			log.G(Ctx).Error(err)
 			return commonIL.RetrievedPodData{}, err
 		}
-		retrieved_data.Containers = append(retrieved_data.Containers, data)
+		retrievedData.Containers = append(retrievedData.Containers, data)
 	}
 
-	return retrieved_data, nil
+	return retrievedData, nil
 }
 
-func retrieve_data(container v1.Container, pod commonIL.PodCreateRequests) (commonIL.RetrievedContainer, error) {
-	retrieved_data := commonIL.RetrievedContainer{}
-	for _, mount_var := range container.VolumeMounts {
-		log.G(Ctx).Debug("-- Retrieving data for mountpoint " + mount_var.Name)
+func retrieveData(container v1.Container, pod commonIL.PodCreateRequests, config commonIL.InterLinkConfig) (commonIL.RetrievedContainer, error) {
+	retrievedData := commonIL.RetrievedContainer{}
+	for _, mountVar := range container.VolumeMounts {
+		log.G(Ctx).Debug("-- Retrieving data for mountpoint " + mountVar.Name)
 
 		for _, vol := range pod.Pod.Spec.Volumes {
-			if vol.Name == mount_var.Name {
+			if vol.Name == mountVar.Name {
 				if vol.ConfigMap != nil {
 
 					log.G(Ctx).Info("--- Retrieving ConfigMap " + vol.ConfigMap.Name)
-					retrieved_data.Name = container.Name
+					retrievedData.Name = container.Name
 					for _, cfgMap := range pod.ConfigMaps {
 						if cfgMap.Name == vol.ConfigMap.Name {
-							retrieved_data.Name = container.Name
-							retrieved_data.ConfigMaps = append(retrieved_data.ConfigMaps, cfgMap)
+							retrievedData.Name = container.Name
+							retrievedData.ConfigMaps = append(retrievedData.ConfigMaps, cfgMap)
 						}
 					}
 
 				} else if vol.Secret != nil {
 
 					log.G(Ctx).Info("--- Retrieving Secret " + vol.Secret.SecretName)
-					retrieved_data.Name = container.Name
+					retrievedData.Name = container.Name
 					for _, secret := range pod.Secrets {
 						if secret.Name == vol.Secret.SecretName {
-							retrieved_data.Name = container.Name
-							retrieved_data.Secrets = append(retrieved_data.Secrets, secret)
+							retrievedData.Name = container.Name
+							retrievedData.Secrets = append(retrievedData.Secrets, secret)
 						}
 					}
 
 				} else if vol.EmptyDir != nil {
-					edPath := filepath.Join(commonIL.InterLinkConfigInst.DataRootFolder, pod.Pod.Namespace+"-"+string(pod.Pod.UID)+"/"+"emptyDirs/"+vol.Name)
+					edPath := filepath.Join(config.DataRootFolder, pod.Pod.Namespace+"-"+string(pod.Pod.UID)+"/"+"emptyDirs/"+vol.Name)
 
-					retrieved_data.Name = container.Name
-					retrieved_data.EmptyDirs = append(retrieved_data.EmptyDirs, edPath)
+					retrievedData.Name = container.Name
+					retrievedData.EmptyDirs = append(retrievedData.EmptyDirs, edPath)
 				}
 			}
 		}
 	}
-	return retrieved_data, nil
+	return retrievedData, nil
 }
 
 func deleteCachedStatus(uid string) {
@@ -81,9 +83,9 @@ func deleteCachedStatus(uid string) {
 }
 
 func checkIfCached(uid string) bool {
-	podStatus, ok := PodStatuses.Statuses[uid]
+	_, ok := PodStatuses.Statuses[uid]
 
-	if &podStatus != nil && ok {
+	if ok {
 		return true
 	} else {
 		return false

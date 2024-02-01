@@ -23,7 +23,7 @@ services:
   docker-sidecar:
     build:
       context: ../../../
-      dockerfile: docker/slurm/Dockerfile
+      dockerfile: docker/Dockerfile.sidecar-docker
     restart: always
     privileged: true
     cap_add:
@@ -31,10 +31,15 @@ services:
     #network_mode: "host"
     ports:
     - 4000:4000
+    environment:
+    - INTERLINKCONFIGPATH=/etc/interlink/InterLinkConfig.yaml
     volumes:
     - type: bind
       source: ../vk
       target: /etc/interlink
+    - type: bind
+      source: /var/run/docker.sock 
+      target: /var/run/docker.sock 
     # healthcheck:
     #   test: ["CMD", "/check.sh"]
     #   interval: 10s

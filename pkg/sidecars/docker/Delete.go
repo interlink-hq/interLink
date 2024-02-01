@@ -9,19 +9,18 @@ import (
 
 	exec "github.com/alexellis/go-execute/pkg/v1"
 	"github.com/containerd/containerd/log"
-	commonIL "github.com/intertwin-eu/interlink/pkg/common"
 	v1 "k8s.io/api/core/v1"
 )
 
-func DeleteHandler(w http.ResponseWriter, r *http.Request) {
-	log.G(Ctx).Info("Docker Sidecar: received Delete call")
+func (h *SidecarHandler) DeleteHandler(w http.ResponseWriter, r *http.Request) {
+	log.G(h.Ctx).Info("Docker Sidecar: received Delete call")
 	var execReturn exec.ExecResult
 	statusCode := http.StatusOK
 	bodyBytes, err := io.ReadAll(r.Body)
 
 	if err != nil {
 		statusCode = http.StatusInternalServerError
-		log.G(Ctx).Error(err)
+		log.G(h.Ctx).Error(err)
 		w.WriteHeader(statusCode)
 		w.Write([]byte("Some errors occurred while deleting container. Check Docker Sidecar's logs"))
 		return
@@ -33,13 +32,13 @@ func DeleteHandler(w http.ResponseWriter, r *http.Request) {
 		statusCode = http.StatusInternalServerError
 		w.WriteHeader(statusCode)
 		w.Write([]byte("Some errors occurred while creating container. Check Docker Sidecar's logs"))
-		log.G(Ctx).Error(err)
+		log.G(h.Ctx).Error(err)
 		return
 	}
 
 	for _, pod := range req {
 		for _, container := range pod.Spec.Containers {
-			log.G(Ctx).Debug("- Deleting container " + container.Name)
+			log.G(h.Ctx).Debug("- Deleting container " + container.Name)
 			cmd := []string{"stop", container.Name}
 			shell := exec.ExecTask{
 				Command: "docker",
@@ -50,9 +49,9 @@ func DeleteHandler(w http.ResponseWriter, r *http.Request) {
 
 			if execReturn.Stderr != "" {
 				if strings.Contains(execReturn.Stderr, "No such container") {
-					log.G(Ctx).Debug("-- Unable to find container " + container.Name + ". Probably already removed? Skipping its removal")
+					log.G(h.Ctx).Debug("-- Unable to find container " + container.Name + ". Probably already removed? Skipping its removal")
 				} else {
-					log.G(Ctx).Error("-- Error stopping container " + container.Name + ". Skipping its removal")
+					log.G(h.Ctx).Error("-- Error stopping container " + container.Name + ". Skipping its removal")
 					statusCode = http.StatusInternalServerError
 					w.WriteHeader(statusCode)
 					w.Write([]byte("Some errors occurred while deleting container. Check Docker Sidecar's logs"))
@@ -72,17 +71,17 @@ func DeleteHandler(w http.ResponseWriter, r *http.Request) {
 				execReturn.Stdout = strings.ReplaceAll(execReturn.Stdout, "\n", "")
 
 				if execReturn.Stderr != "" {
-					log.G(Ctx).Error("-- Error deleting container " + container.Name)
+					log.G(h.Ctx).Error("-- Error deleting container " + container.Name)
 					statusCode = http.StatusInternalServerError
 					w.WriteHeader(statusCode)
 					w.Write([]byte("Some errors occurred while deleting container. Check Docker Sidecar's logs"))
 					return
 				} else {
-					log.G(Ctx).Info("- Deleted container " + container.Name)
+					log.G(h.Ctx).Info("- Deleted container " + container.Name)
 				}
 			}
 
-			os.RemoveAll(commonIL.InterLinkConfigInst.DataRootFolder + pod.Namespace + "-" + string(pod.UID))
+			os.RemoveAll(h.Config.DataRootFolder + pod.Namespace + "-" + string(pod.UID))
 		}
 	}
 

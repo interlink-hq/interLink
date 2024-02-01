@@ -11,7 +11,6 @@ import (
 	"time"
 
 	"github.com/containerd/containerd/log"
-	commonIL "github.com/intertwin-eu/interlink/pkg/common"
 	"github.com/virtual-kubelet/virtual-kubelet/errdefs"
 	"github.com/virtual-kubelet/virtual-kubelet/node/api"
 	stats "github.com/virtual-kubelet/virtual-kubelet/node/api/statsv1alpha1"
@@ -19,6 +18,8 @@ import (
 	v1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/api/resource"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+
+	commonIL "github.com/intertwin-eu/interlink/pkg/common"
 )
 
 const (
@@ -37,15 +38,15 @@ func BuildKeyFromNames(namespace string, name string) (string, error) {
 }
 
 func BuildKey(pod *v1.Pod) (string, error) {
-	if pod.ObjectMeta.Namespace == "" {
+	if pod.Namespace == "" {
 		return "", fmt.Errorf("pod namespace not found")
 	}
 
-	if pod.ObjectMeta.Name == "" {
+	if pod.Name == "" {
 		return "", fmt.Errorf("pod name not found")
 	}
 
-	return BuildKeyFromNames(pod.ObjectMeta.Namespace, pod.ObjectMeta.Name)
+	return BuildKeyFromNames(pod.Namespace, pod.Name)
 }
 
 type VirtualKubeletProvider struct {
@@ -59,6 +60,7 @@ type VirtualKubeletProvider struct {
 	startTime            time.Time
 	notifier             func(*v1.Pod)
 	onNodeChangeCallback func(*v1.Node)
+	interLinkConfig      commonIL.InterLinkConfig
 }
 
 type VirtualKubeletConfig struct {
@@ -67,8 +69,14 @@ type VirtualKubeletConfig struct {
 	Pods   string `json:"pods,omitempty"`
 }
 
-// NewProviderConfig creates a new KNOCV0Provider. KNOC legacy provider does not implement the new asynchronous podnotifier interface
-func NewProviderConfig(config VirtualKubeletConfig, nodeName, operatingSystem string, internalIP string, daemonEndpointPort int32) (*VirtualKubeletProvider, error) {
+func NewProviderConfig(
+	config VirtualKubeletConfig,
+	nodeName string,
+	operatingSystem string,
+	internalIP string,
+	daemonEndpointPort int32,
+	interLinkConfig commonIL.InterLinkConfig,
+) (*VirtualKubeletProvider, error) {
 
 	// set defaults
 	if config.CPU == "" {
@@ -134,8 +142,8 @@ func NewProviderConfig(config VirtualKubeletConfig, nodeName, operatingSystem st
 		pods:               make(map[string]*v1.Pod),
 		config:             config,
 		startTime:          time.Now(),
+		interLinkConfig:    interLinkConfig,
 		onNodeChangeCallback: func(node *v1.Node) {
-			return
 		},
 		//notifier: func(p *v1.Pod) {
 		//		},
@@ -145,18 +153,18 @@ func NewProviderConfig(config VirtualKubeletConfig, nodeName, operatingSystem st
 }
 
 // NewProvider creates a new Provider, which implements the PodNotifier interface
-func NewProvider(providerConfig, nodeName, operatingSystem string, internalIP string, daemonEndpointPort int32, ctx context.Context) (*VirtualKubeletProvider, error) {
+func NewProvider(providerConfig, nodeName, operatingSystem string, internalIP string, daemonEndpointPort int32, ctx context.Context, interLinkConfig commonIL.InterLinkConfig) (*VirtualKubeletProvider, error) {
 	config, err := loadConfig(providerConfig, nodeName, ctx)
 	if err != nil {
 		return nil, err
 	}
-	return NewProviderConfig(config, nodeName, operatingSystem, internalIP, daemonEndpointPort)
+	return NewProviderConfig(config, nodeName, operatingSystem, internalIP, daemonEndpointPort, interLinkConfig)
 }
 
 // loadConfig loads the given json configuration files and yaml to communicate with InterLink.
 func loadConfig(providerConfig, nodeName string, ctx context.Context) (config VirtualKubeletConfig, err error) {
 
-	log.G(context.Background()).Info("Loading Virtual Kubelet config from " + providerConfig)
+	log.G(ctx).Info("Loading Virtual Kubelet config from " + providerConfig)
 	data, err := os.ReadFile(providerConfig)
 	if err != nil {
 		return config, err
@@ -180,13 +188,13 @@ func loadConfig(providerConfig, nodeName string, ctx context.Context) (config Vi
 	}
 
 	if _, err = resource.ParseQuantity(config.CPU); err != nil {
-		return config, fmt.Errorf("Invalid CPU value %v", config.CPU)
+		return config, fmt.Errorf("invalid CPU value %v", config.CPU)
 	}
 	if _, err = resource.ParseQuantity(config.Memory); err != nil {
-		return config, fmt.Errorf("Invalid memory value %v", config.Memory)
+		return config, fmt.Errorf("invalid memory value %v", config.Memory)
 	}
 	if _, err = resource.ParseQuantity(config.Pods); err != nil {
-		return config, fmt.Errorf("Invalid pods value %v", config.Pods)
+		return config, fmt.Errorf("invalid pods value %v", config.Pods)
 	}
 	return config, nil
 }
@@ -200,35 +208,13 @@ func (p *VirtualKubeletProvider) NotifyNodeStatus(ctx context.Context, f func(*v
 }
 
 func (p *VirtualKubeletProvider) Ping(ctx context.Context) error {
-	// if p.pingDisabled {
-	// 	return nil
-	// }
-
-	// start := time.Now()
-	// klog.V(4).Infof("Checking whether the remote API server is ready")
-
-	// // Get the foreigncluster using the given clusterID
-	// fc, err := foreignclusterutils.GetForeignClusterByIDWithDynamicClient(ctx, p.dynClient, p.foreignClusterID)
-	// if err != nil {
-	// 	klog.Error(err)
-	// 	return err
-	// }
-
-	// // Check the foreign API server status
-	// if !foreignclusterutils.IsAPIServerReady(fc) {
-	// 	return fmt.Errorf("[%s] API server readiness check failed", fc.Spec.ClusterIdentity.ClusterName)
-	// }
-
-	// klog.V(4).Infof("[%s] API server readiness check completed successfully in %v",
-	// 	fc.Spec.ClusterIdentity.ClusterName, time.Since(start))
-	// return nil
 	return nil
 }
 
 // CreatePod accepts a Pod definition and stores it in memory.
 func (p *VirtualKubeletProvider) CreatePod(ctx context.Context, pod *v1.Pod) error {
 	ctx, span := trace.StartSpan(ctx, "CreatePod")
-	var hasInitContainers bool = false
+	var hasInitContainers = false
 	var state v1.ContainerState
 	defer span.End()
 	//distribution := "docker://"
@@ -239,26 +225,33 @@ func (p *VirtualKubeletProvider) CreatePod(ctx context.Context, pod *v1.Pod) err
 		return err
 	}
 	now := metav1.NewTime(time.Now())
-	running_state := v1.ContainerState{
+	runningState := v1.ContainerState{
 		Running: &v1.ContainerStateRunning{
 			StartedAt: now,
 		},
 	}
-	waiting_state := v1.ContainerState{
+	waitingState := v1.ContainerState{
 		Waiting: &v1.ContainerStateWaiting{
 			Reason: "Waiting for InitContainers",
 		},
 	}
-	state = running_state
+	state = runningState
 
-	err = RemoteExecution(p, ctx, CREATE, "", pod)
-	if err != nil {
-		return err
-	}
+	go func() {
+		err = RemoteExecution(p, ctx, CREATE, pod, p.interLinkConfig)
+		if err != nil {
+			if err.Error() == "Deleted pod before actual creation" {
+				log.G(ctx).Warn(err)
+			} else {
+				log.G(ctx).Error(err)
+			}
+			return
+		}
+	}()
 
 	// in case we have initContainers we need to stop main containers from executing for now ...
 	if len(pod.Spec.InitContainers) > 0 {
-		state = waiting_state
+		state = waitingState
 		hasInitContainers = true
 		// run init container with remote execution enabled
 		/*for _, container := range pod.Spec.InitContainers {
@@ -271,8 +264,8 @@ func (p *VirtualKubeletProvider) CreatePod(ctx context.Context, pod *v1.Pod) err
 
 		pod.Status = v1.PodStatus{
 			Phase:     v1.PodRunning,
-			HostIP:    "127.0.0.1",
-			PodIP:     "127.0.0.1",
+			HostIP:    p.internalIP,
+			PodIP:     p.internalIP,
 			StartTime: &now,
 			Conditions: []v1.PodCondition{
 				{
@@ -292,8 +285,8 @@ func (p *VirtualKubeletProvider) CreatePod(ctx context.Context, pod *v1.Pod) err
 	} else {
 		pod.Status = v1.PodStatus{
 			Phase:     v1.PodPending,
-			HostIP:    "127.0.0.1",
-			PodIP:     "127.0.0.1",
+			HostIP:    p.internalIP,
+			PodIP:     p.internalIP,
 			StartTime: &now,
 			Conditions: []v1.PodCondition{
 				{
@@ -378,32 +371,16 @@ func (p *VirtualKubeletProvider) DeletePod(ctx context.Context, pod *v1.Pod) (er
 	}
 
 	now := metav1.Now()
-	pod.Status.Phase = v1.PodSucceeded
 	pod.Status.Reason = "VKProviderPodDeleted"
 
-	err = RemoteExecution(p, ctx, DELETE, "", pod)
-	if err != nil {
-		log.G(ctx).Error(err)
-		return err
-	}
-
-	/*for _, container := range pod.Spec.Containers {
-		err = RemoteExecution(p, ctx, DELETE, "", pod, container)
+	go func() {
+		err = RemoteExecution(p, ctx, DELETE, pod, p.interLinkConfig)
 		if err != nil {
 			log.G(ctx).Error(err)
-			return err
+			return
 		}
+	}()
 
-	}
-
-	for _, container := range pod.Spec.InitContainers {
-		err = RemoteExecution(p, ctx, DELETE, "", pod, container)
-		if err != nil {
-			log.G(ctx).Error(err)
-			return err
-		}
-
-	}*/
 	for idx := range pod.Status.ContainerStatuses {
 		pod.Status.ContainerStatuses[idx].Ready = false
 		pod.Status.ContainerStatuses[idx].State = v1.ContainerState{
@@ -556,11 +533,10 @@ func (p *VirtualKubeletProvider) statusLoop(ctx context.Context) {
 
 	log.G(ctx).Info("statusLoop")
 
-	b, err := os.ReadFile(commonIL.InterLinkConfigInst.VKTokenFile) // just pass the file name
+	_, err := os.ReadFile(p.interLinkConfig.VKTokenFile) // just pass the file name
 	if err != nil {
 		log.G(context.Background()).Fatal(err)
 	}
-	token := string(b)
 
 	for {
 		t.Reset(5 * time.Second)
@@ -570,12 +546,11 @@ func (p *VirtualKubeletProvider) statusLoop(ctx context.Context) {
 		case <-t.C:
 		}
 
-		b, err = os.ReadFile(commonIL.InterLinkConfigInst.VKTokenFile) // just pass the file name
+		b, err := os.ReadFile(p.interLinkConfig.VKTokenFile) // just pass the file name
 		if err != nil {
 			fmt.Print(err)
 		}
-		token = string(b)
-		err = checkPodsStatus(p, ctx, token)
+		err = checkPodsStatus(p, ctx, string(b), p.interLinkConfig)
 		if err != nil {
 			log.G(ctx).Error(err)
 		}
@@ -620,13 +595,13 @@ func (p *VirtualKubeletProvider) GetLogs(ctx context.Context, namespace, podName
 		Opts:          commonIL.ContainerLogOpts(opts),
 	}
 
-	return LogRetrieval(p, ctx, logsRequest)
+	return LogRetrieval(ctx, logsRequest, p.interLinkConfig)
 }
 
 // GetStatsSummary returns dummy stats for all pods known by this provider.
 func (p *VirtualKubeletProvider) GetStatsSummary(ctx context.Context) (*stats.Summary, error) {
 	var span trace.Span
-	ctx, span = trace.StartSpan(ctx, "GetStatsSummary") //nolint: ineffassign,staticcheck
+	_, span = trace.StartSpan(ctx, "GetStatsSummary") //nolint: ineffassign,staticcheck
 	defer span.End()
 
 	// Grab the current timestamp so we can report it as the time the stats were generated.

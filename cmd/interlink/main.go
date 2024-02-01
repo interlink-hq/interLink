@@ -4,25 +4,27 @@ import (
 	"context"
 	"net/http"
 
-	commonIL "github.com/intertwin-eu/interlink/pkg/common"
-	"github.com/intertwin-eu/interlink/pkg/interlink"
 	"github.com/sirupsen/logrus"
 	"github.com/virtual-kubelet/virtual-kubelet/log"
 	logruslogger "github.com/virtual-kubelet/virtual-kubelet/log/logrus"
-)
 
-var Url string
+	commonIL "github.com/intertwin-eu/interlink/pkg/common"
+	"github.com/intertwin-eu/interlink/pkg/interlink"
+)
 
 func main() {
 	var cancel context.CancelFunc
 	interlink.PodStatuses.Statuses = make(map[string]commonIL.PodStatus)
 
-	commonIL.NewInterLinkConfig()
+	interLinkConfig, err := commonIL.NewInterLinkConfig()
+	if err != nil {
+		panic(err)
+	}
 	logger := logrus.StandardLogger()
 
-	if commonIL.InterLinkConfigInst.VerboseLogging {
+	if interLinkConfig.VerboseLogging {
 		logger.SetLevel(logrus.DebugLevel)
-	} else if commonIL.InterLinkConfigInst.ErrorsOnlyLogging {
+	} else if interLinkConfig.ErrorsOnlyLogging {
 		logger.SetLevel(logrus.ErrorLevel)
 	} else {
 		logger.SetLevel(logrus.InfoLevel)
@@ -32,16 +34,20 @@ func main() {
 	interlink.Ctx, cancel = context.WithCancel(context.Background())
 	defer cancel()
 
-	log.G(interlink.Ctx).Info(commonIL.InterLinkConfigInst)
+	log.G(interlink.Ctx).Info(interLinkConfig)
+
+	interLinkAPIs := interlink.InterLinkHandler{
+		Config: interLinkConfig,
+	}
 
 	mutex := http.NewServeMux()
-	mutex.HandleFunc("/status", interlink.StatusHandler)
-	mutex.HandleFunc("/create", interlink.CreateHandler)
-	mutex.HandleFunc("/delete", interlink.DeleteHandler)
-	mutex.HandleFunc("/ping", interlink.Ping)
-	mutex.HandleFunc("/getLogs", interlink.GetLogsHandler)
+	mutex.HandleFunc("/status", interLinkAPIs.StatusHandler)
+	mutex.HandleFunc("/create", interLinkAPIs.CreateHandler)
+	mutex.HandleFunc("/delete", interLinkAPIs.DeleteHandler)
+	mutex.HandleFunc("/ping", interLinkAPIs.Ping)
+	mutex.HandleFunc("/getLogs", interLinkAPIs.GetLogsHandler)
 	mutex.HandleFunc("/updateCache", interlink.UpdateCacheHandler)
-	err := http.ListenAndServe(":"+commonIL.InterLinkConfigInst.Interlinkport, mutex)
+	err = http.ListenAndServe(":"+commonIL.InterLinkConfigInst.Interlinkport, mutex)
 	if err != nil {
 		log.G(interlink.Ctx).Fatal(err)
 	}

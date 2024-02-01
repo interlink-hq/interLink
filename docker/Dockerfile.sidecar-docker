@@ -1,8 +1,8 @@
-FROM golang:1.19 as build-stage
+FROM golang:1.21 as build-stage
 
 WORKDIR /app
 COPY .. .
-RUN CGO_ENABLED=0 GOOS=linux go build -mod vendor -o bin/docker-sidecar cmd/sidecars/docker/main.go
+RUN CGO_ENABLED=0 GOOS=linux go build -o bin/docker-sidecar cmd/sidecars/docker/main.go
 
 FROM bash:latest as bash-stage
 
@@ -25,7 +25,6 @@ RUN echo -e '#!/bin/bash\ndockerd-entrypoint.sh & /sidecar/docker-sidecar' > /si
 RUN chmod +x /sidecar/startup-docker.sh
 RUN chmod -R 777 /sidecar
 
-COPY ../kustomizations/InterLinkConfig.yaml .
 ENV INTERLINKCONFIGPATH=/InterLinkConfig.yaml
 
 USER 1000:1000

@@ -8,11 +8,12 @@ import (
 	"strconv"
 
 	"github.com/containerd/containerd/log"
-	commonIL "github.com/intertwin-eu/interlink/pkg/common"
 	v1 "k8s.io/api/core/v1"
+
+	commonIL "github.com/intertwin-eu/interlink/pkg/common"
 )
 
-func StatusHandler(w http.ResponseWriter, r *http.Request) {
+func (h *InterLinkHandler) StatusHandler(w http.ResponseWriter, r *http.Request) {
 	statusCode := http.StatusOK
 	var pods []*v1.Pod
 	log.G(Ctx).Info("InterLink: received GetStatus call")
@@ -46,7 +47,7 @@ func StatusHandler(w http.ResponseWriter, r *http.Request) {
 	}
 
 	reader := bytes.NewReader(bodyBytes)
-	req, err := http.NewRequest(http.MethodGet, commonIL.InterLinkConfigInst.Sidecarurl+":"+commonIL.InterLinkConfigInst.Sidecarport+"/status", reader)
+	req, err := http.NewRequest(http.MethodGet, h.Config.Sidecarurl+":"+h.Config.Sidecarport+"/status", reader)
 	if err != nil {
 		log.G(Ctx).Fatal(err)
 	}

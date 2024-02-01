@@ -12,14 +12,19 @@ import (
 
 	exec2 "github.com/alexellis/go-execute/pkg/v1"
 	"github.com/containerd/containerd/log"
-	commonIL "github.com/intertwin-eu/interlink/pkg/common"
 	v1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+
+	commonIL "github.com/intertwin-eu/interlink/pkg/common"
 )
 
+type SidecarHandler struct {
+	Config commonIL.InterLinkConfig
+	JIDs   *map[string]*JidStruct
+	Ctx    context.Context
+}
+
 var prefix string
-var Ctx context.Context
-var JIDs map[string]*JidStruct
 var timer time.Time
 var cachedStatus []commonIL.PodStatus
 
@@ -35,12 +40,12 @@ type SingularityCommand struct {
 	command       []string
 }
 
-func parsingTimeFromString(stringTime string) (time.Time, error) {
+func parsingTimeFromString(stringTime string, Ctx context.Context) (time.Time, error) {
 	parsedTime := time.Time{}
 	timestampFormat := "2006-01-02 15:04:05.999999999 -0700 MST"
 	parts := strings.Fields(stringTime)
 	if len(parts) != 4 {
-		err := errors.New("Invalid timestamp format")
+		err := errors.New("invalid timestamp format")
 		log.G(Ctx).Error(err)
 		return time.Time{}, err
 	}
@@ -51,16 +56,11 @@ func parsingTimeFromString(stringTime string) (time.Time, error) {
 		return time.Time{}, err
 	}
 
-	if err != nil {
-		log.G(Ctx).Error(err)
-		return time.Time{}, err
-	}
-
 	return parsedTime, nil
 }
 
-func CreateDirectories() error {
-	path := commonIL.InterLinkConfigInst.DataRootFolder
+func CreateDirectories(config commonIL.InterLinkConfig) error {
+	path := config.DataRootFolder
 	if _, err := os.Stat(path); err != nil {
 		if os.IsNotExist(err) {
 			err = os.MkdirAll(path, os.ModePerm)
@@ -72,8 +72,8 @@ func CreateDirectories() error {
 	return nil
 }
 
-func Load_JIDs() error {
-	path := commonIL.InterLinkConfigInst.DataRootFolder
+func LoadJIDs(config commonIL.InterLinkConfig, JIDs *map[string]*JidStruct, Ctx context.Context) error {
+	path := config.DataRootFolder
 
 	dir, err := os.Open(path)
 	if err != nil {
@@ -103,7 +103,7 @@ func Load_JIDs() error {
 			if err != nil {
 				log.G(Ctx).Debug(err)
 			} else {
-				StartedAt, err = parsingTimeFromString(string(StartedAtString))
+				StartedAt, err = parsingTimeFromString(string(StartedAtString), Ctx)
 				if err != nil {
 					log.G(Ctx).Debug(err)
 				}
@@ -113,21 +113,20 @@ func Load_JIDs() error {
 			if err != nil {
 				log.G(Ctx).Debug(err)
 			} else {
-				FinishedAt, err = parsingTimeFromString(string(FinishedAtString))
+				FinishedAt, err = parsingTimeFromString(string(FinishedAtString), Ctx)
 				if err != nil {
 					log.G(Ctx).Debug(err)
 				}
 			}
-			JIDs[podUID] = &JidStruct{PodUID: podUID, JID: string(JID), StartTime: StartedAt, EndTime: FinishedAt}
+			JIDEntry := JidStruct{PodUID: podUID, JID: string(JID), StartTime: StartedAt, EndTime: FinishedAt}
+			(*JIDs)[podUID] = &JIDEntry
 		}
 	}
-
-	log.G(Ctx).Debug(JIDs)
 
 	return nil
 }
 
-func prepare_envs(container v1.Container) []string {
+func prepareEnvs(container v1.Container, Ctx context.Context) []string {
 	if len(container.Env) > 0 {
 		log.G(Ctx).Info("-- Appending envs")
 		env := make([]string, 1)
@@ -151,11 +150,17 @@ func prepare_envs(container v1.Container) []string {
 	}
 }
 
-func prepare_mounts(workingPath string, container v1.Container, data []commonIL.RetrievedPodData) ([]string, error) {
+func prepareMounts(
+	workingPath string,
+	container v1.Container,
+	data []commonIL.RetrievedPodData,
+	config commonIL.InterLinkConfig,
+	Ctx context.Context,
+) ([]string, error) {
 	log.G(Ctx).Info("-- Preparing mountpoints for " + container.Name)
 	mount := make([]string, 1)
 	mount = append(mount, "--bind")
-	mount_data := ""
+	mountedData := ""
 
 	for _, podData := range data {
 		err := os.MkdirAll(workingPath, os.ModePerm)
@@ -169,7 +174,7 @@ func prepare_mounts(workingPath string, container v1.Container, data []commonIL.
 		for _, cont := range podData.Containers {
 			for _, cfgMap := range cont.ConfigMaps {
 				if container.Name == cont.Name {
-					configMapsPaths, envs, err := mountData(workingPath, container, podData.Pod, cfgMap)
+					configMapsPaths, envs, err := mountData(workingPath, container, podData.Pod, cfgMap, config, Ctx)
 					if err != nil {
 						log.G(Ctx).Error(err)
 						return nil, err
@@ -182,14 +187,14 @@ func prepare_mounts(workingPath string, container v1.Container, data []commonIL.
 							dir := filepath.Join(splitDirs[:len(splitDirs)-1]...)
 							prefix += "\nmkdir -p " + dir + " && touch " + dirs[0] + " && echo $" + envs[i] + " > " + dirs[0]
 						}
-						mount_data += path
+						mountedData += path
 					}
 				}
 			}
 
 			for _, secret := range cont.Secrets {
 				if container.Name == cont.Name {
-					secretsPaths, envs, err := mountData(workingPath, container, podData.Pod, secret)
+					secretsPaths, envs, err := mountData(workingPath, container, podData.Pod, secret, config, Ctx)
 					if err != nil {
 						log.G(Ctx).Error(err)
 						return nil, err
@@ -201,20 +206,20 @@ func prepare_mounts(workingPath string, container v1.Container, data []commonIL.
 							dir := filepath.Join(splitDirs[:len(splitDirs)-1]...)
 							prefix += "\nmkdir -p " + dir + " && touch " + dirs[0] + " && echo $" + envs[i] + " > " + dirs[0]
 						}
-						mount_data += path
+						mountedData += path
 					}
 				}
 			}
 
 			for _, emptyDir := range cont.EmptyDirs {
 				if container.Name == cont.Name {
-					paths, _, err := mountData(workingPath, container, podData.Pod, emptyDir)
+					paths, _, err := mountData(workingPath, container, podData.Pod, emptyDir, config, Ctx)
 					if err != nil {
 						log.G(Ctx).Error(err)
 						return nil, err
 					}
 					for _, path := range paths {
-						mount_data += path
+						mountedData += path
 					}
 				}
 			}
@@ -224,16 +229,24 @@ func prepare_mounts(workingPath string, container v1.Container, data []commonIL.
 	//path_hardcoded := ("/cvmfs/grid.cern.ch/etc/grid-security:/etc/grid-security" + "," +
 	//	"/cvmfs:/cvmfs" + ",")
 	//mount_data += path_hardcoded
-	if last := len(mount_data) - 1; last >= 0 && mount_data[last] == ',' {
-		mount_data = mount_data[:last]
+	if last := len(mountedData) - 1; last >= 0 && mountedData[last] == ',' {
+		mountedData = mountedData[:last]
 	}
-	if len(mount_data) == 0 {
+	if len(mountedData) == 0 {
 		return []string{}, nil
 	}
-	return append(mount, mount_data), nil
+	return append(mount, mountedData), nil
 }
 
-func produce_slurm_script(path string, podNamespace string, podUID string, metadata metav1.ObjectMeta, commands []SingularityCommand) (string, error) {
+func produceSLURMScript(
+	path string,
+	podNamespace string,
+	podUID string,
+	metadata metav1.ObjectMeta,
+	commands []SingularityCommand,
+	config commonIL.InterLinkConfig,
+	Ctx context.Context,
+) (string, error) {
 	log.G(Ctx).Info("-- Creating file for the Slurm script")
 	err := os.MkdirAll(path, os.ModePerm)
 	if err != nil {
@@ -281,7 +294,7 @@ func produce_slurm_script(path string, podNamespace string, podUID string, metad
 		sbatch_flags_as_string += "\n#SBATCH " + slurm_flag
 	}
 
-	if commonIL.InterLinkConfigInst.Tsocks {
+	if config.Tsocks {
 		log.G(Ctx).Debug("--- Adding SSH connection and setting ENVs to use TSOCKS")
 		postfix += "\n\nkill -15 $SSH_PID &> log2.txt"
 
@@ -296,21 +309,21 @@ func produce_slurm_script(path string, podNamespace string, podUID string, metad
 		prefix += "\n  fi"
 		prefix += "\ndone"
 
-		prefix += "\nssh -4 -N -D $port " + commonIL.InterLinkConfigInst.Tsockslogin + " &"
+		prefix += "\nssh -4 -N -D $port " + config.Tsockslogin + " &"
 		prefix += "\nSSH_PID=$!"
 		prefix += "\necho \"local = 10.0.0.0/255.0.0.0 \nserver = 127.0.0.1 \nserver_port = $port\" >> .tmp/" + podUID + "_tsocks.conf"
-		prefix += "\nexport TSOCKS_CONF_FILE=.tmp/" + podUID + "_tsocks.conf && export LD_PRELOAD=" + commonIL.InterLinkConfigInst.Tsockspath
+		prefix += "\nexport TSOCKS_CONF_FILE=.tmp/" + podUID + "_tsocks.conf && export LD_PRELOAD=" + config.Tsockspath
 	}
 
-	if commonIL.InterLinkConfigInst.Commandprefix != "" {
-		prefix += "\n" + commonIL.InterLinkConfigInst.Commandprefix
+	if config.Commandprefix != "" {
+		prefix += "\n" + config.Commandprefix
 	}
 
 	if preExecAnnotations, ok := metadata.Annotations["job.vk.io/pre-exec"]; ok {
 		prefix += "\n" + preExecAnnotations
 	}
 
-	sbatch_macros := "#!" + commonIL.InterLinkConfigInst.BashPath +
+	sbatch_macros := "#!" + config.BashPath +
 		"\n#SBATCH --job-name=" + podUID +
 		"\n#SBATCH --output=" + path + "/job.out" +
 		sbatch_flags_as_string +
@@ -344,11 +357,11 @@ func produce_slurm_script(path string, podNamespace string, podUID string, metad
 	return f.Name(), nil
 }
 
-func slurm_batch_submit(path string) (string, error) {
+func SLURMBatchSubmit(path string, config commonIL.InterLinkConfig, Ctx context.Context) (string, error) {
 	log.G(Ctx).Info("- Submitting Slurm job")
 	cmd := []string{path}
 	shell := exec2.ExecTask{
-		Command: commonIL.InterLinkConfigInst.Sbatchpath,
+		Command: config.Sbatchpath,
 		Args:    cmd,
 		Shell:   true,
 	}
@@ -369,7 +382,7 @@ func slurm_batch_submit(path string) (string, error) {
 	return string(execReturn.Stdout), nil
 }
 
-func handle_jid(podUID string, output string, pod v1.Pod, path string) error {
+func handleJID(podUID string, output string, pod v1.Pod, path string, JIDs *map[string]*JidStruct, Ctx context.Context) error {
 	r := regexp.MustCompile(`Submitted batch job (?P<jid>\d+)`)
 	jid := r.FindStringSubmatch(output)
 	f, err := os.Create(path + "/JobID.jid")
@@ -384,33 +397,37 @@ func handle_jid(podUID string, output string, pod v1.Pod, path string) error {
 		return err
 	}
 
-	JIDs[podUID] = &JidStruct{PodUID: string(pod.UID), JID: jid[1]}
-	log.G(Ctx).Info("Job ID is: " + JIDs[podUID].JID)
+	(*JIDs)[podUID] = &JidStruct{PodUID: string(pod.UID), JID: jid[1]}
+	log.G(Ctx).Info("Job ID is: " + (*JIDs)[podUID].JID)
 	return nil
 }
 
-func removeJID(podUID string) {
-	delete(JIDs, podUID)
+func removeJID(podUID string, JIDs *map[string]*JidStruct) {
+	delete(*JIDs, podUID)
 }
 
-func delete_container(podUID string, path string) error {
+func deleteContainer(podUID string, path string, config commonIL.InterLinkConfig, JIDs *map[string]*JidStruct, Ctx context.Context) error {
 	log.G(Ctx).Info("- Deleting Job for pod " + podUID)
-	_, err := exec.Command(commonIL.InterLinkConfigInst.Scancelpath, JIDs[podUID].JID).Output()
-	if err != nil {
-		log.G(Ctx).Error(err)
-	} else {
-		log.G(Ctx).Info("- Deleted Job ", JIDs[podUID].JID)
+	if checkIfJidExists(JIDs, podUID) {
+		_, err := exec.Command(config.Scancelpath, (*JIDs)[podUID].JID).Output()
+		if err != nil {
+			log.G(Ctx).Error(err)
+			return err
+		} else {
+			log.G(Ctx).Info("- Deleted Job ", (*JIDs)[podUID].JID)
+		}
 	}
-	os.RemoveAll(path + "/" + podUID)
-	removeJID(podUID)
+	err := os.RemoveAll(path + "/" + podUID)
+	removeJID(podUID, JIDs)
 	if err != nil {
 		log.G(Ctx).Warning(err)
+		return err
 	}
 	return err
 }
 
-func mountData(path string, container v1.Container, pod v1.Pod, data interface{}) ([]string, []string, error) {
-	if commonIL.InterLinkConfigInst.ExportPodData {
+func mountData(path string, container v1.Container, pod v1.Pod, data interface{}, config commonIL.InterLinkConfig, Ctx context.Context) ([]string, []string, error) {
+	if config.ExportPodData {
 		for _, mountSpec := range container.VolumeMounts {
 			var podVolumeSpec *v1.VolumeSource
 
@@ -598,4 +615,14 @@ func mountData(path string, container v1.Container, pod v1.Pod, data interface{}
 		}
 	}
 	return nil, nil, nil
+}
+
+func checkIfJidExists(JIDs *map[string]*JidStruct, uid string) bool {
+	_, ok := (*JIDs)[uid]
+
+	if ok {
+		return true
+	} else {
+		return false
+	}
 }

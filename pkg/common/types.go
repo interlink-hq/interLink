@@ -20,6 +20,13 @@ type PodStatus struct {
 	Containers   []v1.ContainerStatus `json:"containers"`
 }
 
+type PodStatusWithMap struct {
+	PodName      string                        `json:"name"`
+	PodUID       string                        `json:"UID"`
+	PodNamespace string                        `json:"namespace"`
+	Containers   map[string]v1.ContainerStatus `json:"containers"`
+}
+
 type RetrievedContainer struct {
 	Name       string         `json:"name"`
 	ConfigMaps []v1.ConfigMap `json:"configMaps"`

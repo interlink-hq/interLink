@@ -18,8 +18,9 @@ import (
 var InterLinkConfigInst InterLinkConfig
 var Clientset *kubernetes.Clientset
 
-func NewInterLinkConfig() {
-	if InterLinkConfigInst.set == false {
+// TODO: implement factory design
+func NewInterLinkConfig() (InterLinkConfig, error) {
+	if !InterLinkConfigInst.set {
 		var path string
 		verbose := flag.Bool("verbose", false, "Enable or disable Debug level logging")
 		errorsOnly := flag.Bool("errorsonly", false, "Prints only errors if enabled")
@@ -44,14 +45,14 @@ func NewInterLinkConfig() {
 
 		if _, err := os.Stat(path); err != nil {
 			log.G(context.Background()).Error("File " + path + " doesn't exist. You can set a custom path by exporting INTERLINKCONFIGPATH. Exiting...")
-			os.Exit(-1)
+			return InterLinkConfig{}, err
 		}
 
 		log.G(context.Background()).Info("Loading InterLink config from " + path)
 		yfile, err := os.ReadFile(path)
 		if err != nil {
 			log.G(context.Background()).Error("Error opening config file, exiting...")
-			os.Exit(1)
+			return InterLinkConfig{}, err
 		}
 		yaml.Unmarshal(yfile, &InterLinkConfigInst)
 
@@ -69,7 +70,6 @@ func NewInterLinkConfig() {
 
 		if os.Getenv("SIDECARPORT") != "" {
 			InterLinkConfigInst.Sidecarport = os.Getenv("SIDECARPORT")
-		} else {
 		}
 
 		if os.Getenv("SBATCHPATH") != "" {
@@ -87,7 +87,7 @@ func NewInterLinkConfig() {
 		if os.Getenv("TSOCKS") != "" {
 			if os.Getenv("TSOCKS") != "true" && os.Getenv("TSOCKS") != "false" {
 				fmt.Println("export TSOCKS as true or false")
-				os.Exit(-1)
+				return InterLinkConfig{}, err
 			}
 			if os.Getenv("TSOCKS") == "true" {
 				InterLinkConfigInst.Tsocks = true
@@ -97,20 +97,20 @@ func NewInterLinkConfig() {
 		}
 
 		if os.Getenv("TSOCKSPATH") != "" {
-			path := os.Getenv("TSOCKSPATH")
+			path = os.Getenv("TSOCKSPATH")
 			if _, err := os.Stat(path); err != nil {
 				log.G(context.Background()).Error("File " + path + " doesn't exist. You can set a custom path by exporting TSOCKSPATH. Exiting...")
-				os.Exit(-1)
+				return InterLinkConfig{}, err
 			}
 
 			InterLinkConfigInst.Tsockspath = path
 		}
 
 		if os.Getenv("VKTOKENFILE") != "" {
-			path := os.Getenv("VKTOKENFILE")
+			path = os.Getenv("VKTOKENFILE")
 			if _, err := os.Stat(path); err != nil {
 				log.G(context.Background()).Error("File " + path + " doesn't exist. You can set a custom path by exporting VKTOKENFILE. Exiting...")
-				os.Exit(-1)
+				return InterLinkConfig{}, err
 			}
 
 			InterLinkConfigInst.VKTokenFile = path
@@ -121,9 +121,10 @@ func NewInterLinkConfig() {
 
 		InterLinkConfigInst.set = true
 	}
+	return InterLinkConfigInst, nil
 }
 
-func PingInterLink(ctx context.Context) (error, bool, int) {
+func PingInterLink(ctx context.Context) (bool, int, error) {
 	log.G(ctx).Info("Pinging: " + InterLinkConfigInst.Interlinkurl + ":" + InterLinkConfigInst.Interlinkport + "/ping")
 	retVal := -1
 	req, err := http.NewRequest(http.MethodPost, InterLinkConfigInst.Interlinkurl+":"+InterLinkConfigInst.Interlinkport+"/ping", nil)
@@ -135,28 +136,28 @@ func PingInterLink(ctx context.Context) (error, bool, int) {
 	token, err := os.ReadFile(InterLinkConfigInst.VKTokenFile) // just pass the file name
 	if err != nil {
 		log.G(ctx).Error(err)
-		return err, false, retVal
+		return false, retVal, err
 	}
 	req.Header.Add("Authorization", "Bearer "+string(token))
 	resp, err := http.DefaultClient.Do(req)
 	if err != nil {
-		return err, false, retVal
+		return false, retVal, err
 	}
 
 	if resp.StatusCode == http.StatusOK {
 		retBytes, err := io.ReadAll(resp.Body)
 		if err != nil {
 			log.G(ctx).Error(err)
-			return err, false, retVal
+			return false, retVal, err
 		}
 		retVal, err = strconv.Atoi(string(retBytes))
 		if err != nil {
 			log.G(ctx).Error(err)
-			return err, false, retVal
+			return false, retVal, err
 		}
-		return nil, true, retVal
+		return true, retVal, nil
 	} else {
-		log.G(ctx).Error("Error " + err.Error() + " " + fmt.Sprint(resp.StatusCode))
-		return nil, false, retVal
+		log.G(ctx).Error("server error: " + fmt.Sprint(resp.StatusCode))
+		return false, retVal, nil
 	}
 }

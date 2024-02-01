@@ -3,7 +3,7 @@ FROM golang:1.21 as build-stage
 WORKDIR /app
 
 COPY . .
-RUN CGO_ENABLED=0 GOOS=linux go build -mod vendor -o bin/slurm-sidecar cmd/sidecars/slurm/main.go
+RUN CGO_ENABLED=0 GOOS=linux go build -o bin/slurm-sidecar cmd/sidecars/slurm/main.go
 
 
 # Deploy the application binary into a lean image
@@ -48,7 +48,7 @@ ENV INTERLINKCONFIGPATH=/root/InterLinkConfig.yaml
 
 COPY docker/slurm/InterLinkConfig.yaml .
 
-RUN apt install -y software-properties-common \
+RUN apt update && apt install -y software-properties-common \
  && add-apt-repository -y ppa:apptainer/ppa \
  && apt install -y apptainer
 

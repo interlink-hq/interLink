@@ -8,18 +8,19 @@ import (
 	"strings"
 
 	"github.com/containerd/containerd/log"
+
 	commonIL "github.com/intertwin-eu/interlink/pkg/common"
 )
 
-func SubmitHandler(w http.ResponseWriter, r *http.Request) {
-	log.G(Ctx).Info("Slurm Sidecar: received Submit call")
+func (h *SidecarHandler) SubmitHandler(w http.ResponseWriter, r *http.Request) {
+	log.G(h.Ctx).Info("Slurm Sidecar: received Submit call")
 	statusCode := http.StatusOK
 	bodyBytes, err := io.ReadAll(r.Body)
 	if err != nil {
 		statusCode = http.StatusInternalServerError
 		w.WriteHeader(statusCode)
 		w.Write([]byte("Some errors occurred while creating container. Check Slurm Sidecar's logs"))
-		log.G(Ctx).Error(err)
+		log.G(h.Ctx).Error(err)
 		return
 	}
 
@@ -29,39 +30,39 @@ func SubmitHandler(w http.ResponseWriter, r *http.Request) {
 		statusCode = http.StatusInternalServerError
 		w.WriteHeader(statusCode)
 		w.Write([]byte("Some errors occurred while creating container. Check Slurm Sidecar's logs"))
-		log.G(Ctx).Error(err)
+		log.G(h.Ctx).Error(err)
 		return
 	}
 
 	for _, test := range req {
-		log.G(Ctx).Debug(test.Pod.UID)
+		log.G(h.Ctx).Debug(test.Pod.UID)
 	}
 
 	for _, data := range req {
 		containers := data.Pod.Spec.Containers
 		metadata := data.Pod.ObjectMeta
-		filesPath := commonIL.InterLinkConfigInst.DataRootFolder + data.Pod.Namespace + "-" + string(data.Pod.UID)
+		filesPath := h.Config.DataRootFolder + data.Pod.Namespace + "-" + string(data.Pod.UID)
 
 		var singularity_command_pod []SingularityCommand
 
 		for _, container := range containers {
-			log.G(Ctx).Info("- Beginning script generation for container " + container.Name)
+			log.G(h.Ctx).Info("- Beginning script generation for container " + container.Name)
 			singularityPrefix := commonIL.InterLinkConfigInst.SingularityPrefix
 			if singularityAnnotation, ok := metadata.Annotations["job.vk.io/singularity-commands"]; ok {
 				singularityPrefix += " " + singularityAnnotation
 			}
 			commstr1 := []string{"singularity", "exec", "--writable-tmpfs", "--nv", "-H", "${HOME}/" +
-				commonIL.InterLinkConfigInst.DataRootFolder + string(data.Pod.UID) + ":${HOME}"}
+				h.Config.DataRootFolder + string(data.Pod.UID) + ":${HOME}"}
 
-			envs := prepare_envs(container)
+			envs := prepareEnvs(container, h.Ctx)
 			image := ""
-			mounts, err := prepare_mounts(filesPath, container, req)
-			log.G(Ctx).Debug(mounts)
+			mounts, err := prepareMounts(filesPath, container, req, h.Config, h.Ctx)
+			log.G(h.Ctx).Debug(mounts)
 			if err != nil {
 				statusCode = http.StatusInternalServerError
 				w.WriteHeader(statusCode)
 				w.Write([]byte("Error prepairing mounts. Check Slurm Sidecar's logs"))
-				log.G(Ctx).Error(err)
+				log.G(h.Ctx).Error(err)
 				os.RemoveAll(filesPath)
 				return
 			}
@@ -71,13 +72,13 @@ func SubmitHandler(w http.ResponseWriter, r *http.Request) {
 				if image_uri, ok := metadata.Annotations["slurm-job.vk.io/image-root"]; ok {
 					image = image_uri + container.Image
 				} else {
-					log.G(Ctx).Info("- image-uri annotation not specified for path in remote filesystem")
+					log.G(h.Ctx).Info("- image-uri annotation not specified for path in remote filesystem")
 				}
 			} else {
 				image = container.Image
 			}
 
-			log.G(Ctx).Debug("-- Appending all commands together...")
+			log.G(h.Ctx).Debug("-- Appending all commands together...")
 			singularity_command := append(commstr1, envs...)
 			singularity_command = append(singularity_command, mounts...)
 			singularity_command = append(singularity_command, image)
@@ -87,33 +88,33 @@ func SubmitHandler(w http.ResponseWriter, r *http.Request) {
 			singularity_command_pod = append(singularity_command_pod, SingularityCommand{command: singularity_command, containerName: container.Name})
 		}
 
-		path, err := produce_slurm_script(filesPath, data.Pod.Namespace, string(data.Pod.UID), metadata, singularity_command_pod)
+		path, err := produceSLURMScript(filesPath, data.Pod.Namespace, string(data.Pod.UID), metadata, singularity_command_pod, h.Config, h.Ctx)
 		if err != nil {
 			statusCode = http.StatusInternalServerError
 			w.WriteHeader(statusCode)
 			w.Write([]byte("Error producing Slurm script. Check Slurm Sidecar's logs"))
-			log.G(Ctx).Error(err)
+			log.G(h.Ctx).Error(err)
 			os.RemoveAll(filesPath)
 			return
 		}
-		out, err := slurm_batch_submit(path)
+		out, err := SLURMBatchSubmit(path, h.Config, h.Ctx)
 		if err != nil {
 			statusCode = http.StatusInternalServerError
 			w.WriteHeader(statusCode)
 			w.Write([]byte("Error submitting Slurm script. Check Slurm Sidecar's logs"))
-			log.G(Ctx).Error(err)
+			log.G(h.Ctx).Error(err)
 			os.RemoveAll(filesPath)
 			return
 		}
-		log.G(Ctx).Info(out)
-		err = handle_jid(string(data.Pod.UID), out, data.Pod, filesPath)
+		log.G(h.Ctx).Info(out)
+		err = handleJID(string(data.Pod.UID), out, data.Pod, filesPath, h.JIDs, h.Ctx)
 		if err != nil {
 			statusCode = http.StatusInternalServerError
 			w.WriteHeader(statusCode)
 			w.Write([]byte("Error handling JID. Check Slurm Sidecar's logs"))
-			log.G(Ctx).Error(err)
+			log.G(h.Ctx).Error(err)
 			os.RemoveAll(filesPath)
-			err = delete_container(string(data.Pod.UID), filesPath)
+			err = deleteContainer(string(data.Pod.UID), filesPath, h.Config, h.JIDs, h.Ctx)
 			return
 		}
 	}

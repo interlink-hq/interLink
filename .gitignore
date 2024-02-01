@@ -1,3 +1,5 @@
+vendor
+vendor/*
 bin
 build.sh
 sidecars/slurm/.*
@@ -17,3 +19,6 @@ serviceaccount.yaml
 kustomizations_tmp
 ca.*
 condor*
+test-deployment.yaml
+test-pod.yaml
+examples/interlink-slurm/vk/*

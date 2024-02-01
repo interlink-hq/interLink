@@ -7,11 +7,12 @@ import (
 	"net/http"
 
 	"github.com/containerd/containerd/log"
-	commonIL "github.com/intertwin-eu/interlink/pkg/common"
 	v1 "k8s.io/api/core/v1"
+
+	commonIL "github.com/intertwin-eu/interlink/pkg/common"
 )
 
-func DeleteHandler(w http.ResponseWriter, r *http.Request) {
+func (h *InterLinkHandler) DeleteHandler(w http.ResponseWriter, r *http.Request) {
 	log.G(Ctx).Info("InterLink: received Delete call")
 
 	bodyBytes, err := io.ReadAll(r.Body)
@@ -35,7 +36,7 @@ func DeleteHandler(w http.ResponseWriter, r *http.Request) {
 	}
 
 	deleteCachedStatus(string(pod.UID))
-	req, err = http.NewRequest(http.MethodPost, commonIL.InterLinkConfigInst.Sidecarurl+":"+commonIL.InterLinkConfigInst.Sidecarport+"/delete", reader)
+	req, err = http.NewRequest(http.MethodPost, h.Config.Sidecarurl+":"+h.Config.Sidecarport+"/delete", reader)
 
 	log.G(Ctx).Info("InterLink: forwarding Delete call to sidecar")
 	resp, err := http.DefaultClient.Do(req)
