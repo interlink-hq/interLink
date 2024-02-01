@@ -273,8 +273,6 @@ func (h *SidecarHandler) StatusHandler(w http.ResponseWriter, r *http.Request) {
 						}
 						resp = append(resp, commonIL.PodStatus{PodName: pod.Name, PodUID: string(pod.UID), PodNamespace: pod.Namespace, Containers: containerStatuses})
 					}
-					containerStatus := v1.ContainerStatus{Name: pod.Spec.Containers[0].Name, State: v1.ContainerState{Terminated: &v1.ContainerStateTerminated{StartedAt: metav1.Time{Time: JIDs[uid].StartTime}, FinishedAt: metav1.Time{Time: JIDs[uid].EndTime}}}, Ready: false}
-					resp = append(resp, commonIL.PodStatus{PodName: pod.Name, PodUID: string(pod.UID), PodNamespace: pod.Namespace, Containers: []v1.ContainerStatus{containerStatus}})
 				}
 			} else {
 				for _, ct := range pod.Spec.Containers {
