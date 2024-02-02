@@ -181,6 +181,12 @@ async def get_status(pods: List[PodRequest]) -> List[PodStatus]:
             statuses = DOCKER.api.containers(filters={"status":"exited", "id": container.id})
             print(statuses)
             reason = statuses[0]["Status"]
+            import re
+            pattern = re.compile(r'Exited \((.*?)\)')
+
+            exitCode = -1
+            for match in re.findall(pattern, reason):
+                exitCode = int(match)
         except Exception as ex:
             raise HTTPException(status_code=500, detail=ex)
             
@@ -197,7 +203,7 @@ async def get_status(pods: List[PodRequest]) -> List[PodStatus]:
                             waiting=None,
                             terminated=StateTerminated(
                                 reason=reason,
-                                exitCode=0
+                                exitCode=exitCode
                             ),
                         )
                     )
