@@ -1,35 +1,18 @@
-import interlink
-
 from fastapi import FastAPI, HTTPException
+from .spec import * 
 from typing import List
-import docker
-import re
 
 
-dockerCLI = docker.DockerClient(base_url="unix:///Users/dciangot/.docker/run/docker.sock")
-
-app = FastAPI()
-
-
-class MyProvider(interlink.provider.Provider):
+class Provider(FastAPI):
     def __init__(
         self,
-        DOCKER
+        docker_client,
     ):
-        super().__init__(DOCKER)
-
-        # Recover already running containers refs
+        self.DOCKER = docker_client
         self.CONTAINER_POD_MAP = {}
-        statuses = self.DOCKER.api.containers(all=True)
-        for status in statuses:
-            name = status["Names"][0]
-            if len(name.split("-")) > 1:
-                uid = name.split("-")[-1]
-                self.CONTAINER_POD_MAP.update({uid: [status["Id"]]})
-        print(self.CONTAINER_POD_MAP)
 
+    def Create(self, pod: Pod):
 
-    def Create(self, pod: interlink.Pod) -> None:
         container = pod.pod.spec.containers[0]
 
         try:
@@ -50,8 +33,9 @@ class MyProvider(interlink.provider.Provider):
         print(self.CONTAINER_POD_MAP)
 
         print(pod)
+        return 
 
-    def Delete(self, pod: interlink.Pod) -> None:
+    def Delete(self, pod: Pod):
         try:
             print(f"docker rm -f {self.CONTAINER_POD_MAP[pod.pod.metadata.uuid][0]}")
             container = self.DOCKER.containers.get(self.CONTAINER_POD_MAP[pod.pod.metadata.uuid][0])
@@ -59,13 +43,33 @@ class MyProvider(interlink.provider.Provider):
             self.CONTAINER_POD_MAP.pop(pod.pod.metadata.uuid)
         except:
             raise HTTPException(status_code=404, detail="No containers found for UUID")
-        print(pod)
         return
 
-    def Status(self,  pod: interlink.PodRequest) -> interlink.PodStatus:
+    def create_pod(self, pods: List[Pod]) -> str:
+        pod = pods[0]
+
+        try:
+            self.Create(pod)
+        except Exception as ex:
+            raise ex
+
+        return "Containers created"
+
+    def delete_pod(self, pods: List[Pod]) -> str:
+        pod = pods[0]
+
+        try:
+            self.Delete(pod)
+        except Exception as ex:
+            raise ex
+
+        return "Containers deleted"
+
+
+    def Status(self, pod: PodRequest) -> PodStatus:  
         print(self.CONTAINER_POD_MAP)
         try:
-            container = self.DOCKER.containers.get(self.CONTAINER_POD_MAP[pod.metadata.uuid][0])
+            container = self.DOCKER.containers.get(CONTAINER_POD_MAP[pod.metadata.uuid][0])
             status = container.status
         except:
             raise HTTPException(status_code=404, detail="No containers found for UUID")
@@ -80,15 +84,15 @@ class MyProvider(interlink.provider.Provider):
             except Exception as ex:
                 raise HTTPException(status_code=500, detail=ex)
 
-            return interlink.PodStatus(
+            return PodStatus(
                     name=pod.metadata.name,
                     UID=pod.metadata.uuid,
                     namespace=pod.metadata.namespace,
                     containers=[
-                        interlink.ContainerStatus(
+                        ContainerStatus(
                             name=pod.spec.containers[0].name,
-                            state=interlink.ContainerStates(
-                                running=interlink.StateRunning(startedAt=startedAt),
+                            state=ContainerStates(
+                                running=StateRunning(startedAt=startedAt),
                                 waiting=None,
                                 terminated=None,
                             )
@@ -101,6 +105,7 @@ class MyProvider(interlink.provider.Provider):
                 statuses = self.DOCKER.api.containers(filters={"status":"exited", "id": container.id})
                 print(statuses)
                 reason = statuses[0]["Status"]
+                import re
                 pattern = re.compile(r'Exited \((.*?)\)')
 
                 exitCode = -1
@@ -109,17 +114,17 @@ class MyProvider(interlink.provider.Provider):
             except Exception as ex:
                 raise HTTPException(status_code=500, detail=ex)
                 
-            return interlink.PodStatus(
+            return PodStatus(
                     name=pod.metadata.name,
                     UID=pod.metadata.uuid,
                     namespace=pod.metadata.namespace,
                     containers=[
-                        interlink.ContainerStatus(
+                        ContainerStatus(
                             name=pod.spec.containers[0].name,
-                            state=interlink.ContainerStates(
+                            state=ContainerStates(
                                 running=None,
                                 waiting=None,
-                                terminated=interlink.StateTerminated(
+                                terminated=StateTerminated(
                                     reason=reason,
                                     exitCode=exitCode
                                 ),
@@ -128,17 +133,17 @@ class MyProvider(interlink.provider.Provider):
                     ]
                 )
             
-        return interlink.PodStatus(
+        return PodStatus(
                 name=pod.metadata.name,
                 UID=pod.metadata.uuid,
                 namespace=pod.metadata.namespace,
                 containers=[
-                    interlink.ContainerStatus(
+                    ContainerStatus(
                         name=pod.spec.containers[0].name,
-                        state=interlink.ContainerStates(
+                        state=ContainerStates(
                             running=None,
                             waiting=None,
-                            terminated=interlink.StateTerminated(
+                            terminated=StateTerminated(
                                 reason="Completed",
                                 exitCode=0
                             ),
@@ -147,17 +152,11 @@ class MyProvider(interlink.provider.Provider):
                 ]
             )
 
-ProviderNew = MyProvider(dockerCLI)
 
-@app.post("/create")
-async def create_pod(pods: List[interlink.Pod]) -> str:
-    return ProviderNew.create_pod(pods)
 
-@app.post("/delete")
-async def delete_pod(pods: List[interlink.Pod]) -> str:
-    return ProviderNew.create_pod(pods)
+    def get_status(self, pods: List[PodRequest]) -> List[PodStatus]:
+        pod = pods[0]
 
-@app.post("/status")
-async def status_pod(pods: List[interlink.PodRequest]) -> List[interlink.PodStatus]:
-    return ProviderNew.get_status(pods)
+        return [self.Status(pod)]
+
 
