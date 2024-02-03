@@ -28,9 +28,50 @@ class MyProvider(interlink.provider.Provider):
                 self.CONTAINER_POD_MAP.update({uid: [status["Id"]]})
         print(self.CONTAINER_POD_MAP)
 
+    def DumpVolumes(self, pods: List[interlink.PodVolume], volumes: List[interlink.Volume]) -> List[str]:
+
+        dataList = []
+
+        # Match data source information (actual bytes) to the mount ref in pod description
+        for v in volumes:
+            if len(v.configMaps) > 0:
+                for dataSource in v.configMaps:
+                    for ref in pods:
+                        podMount = ref.volumeSource.configMap
+                        if podMount:
+                            if ref.name == dataSource.metadata.name:
+                                for filename, content in dataSource.data.items():
+                                    # write content to file
+                                    path = f"{dataSource.metadata.namespace}-{dataSource.metadata.name}/{filename}"
+                                    try:
+                                      os.makedirs(os.path.dirname(path), exist_ok=True)
+                                      with open(path, 'w') as f:
+                                        f.write(content)
+                                    except Exception as ex:
+                                        raise HTTPException(status_code=500, detail=ex)
+
+                                    # dump list of written files
+                                    dataList.append(path)
+
+            if len(v.secrets) > 0:
+                pass
+
+            if len(v.emptyDirs) > 0:
+                pass
+        return []
 
     def Create(self, pod: interlink.Pod) -> None:
         container = pod.pod.spec.containers[0]
+
+        volumes_data = self.DumpVolumes(pod.pod.spec.volumes, pod.container)
+
+        volumes = []
+        for mount in container.volumeMounts:
+            if mount.subPath:
+                volumes.append(f"{pod.pod.metadata.namespace}-{mount.name}/{mount.subPath}:{mount.mountPath}")
+            else:
+                volumes.append(f"{pod.pod.metadata.namespace}-{mount.name}:{mount.mountPath}")
+                
 
         try:
             cmds = " ".join(container.command)
@@ -39,7 +80,8 @@ class MyProvider(interlink.provider.Provider):
                 f"{container.image}:{container.tag}",
                 f"{cmds} {args}",
                 name=f"{container.name}-{pod.pod.metadata.uuid}",
-                detach=True
+                detach=True,
+                volumes=volumes
             )
             docker_run_id = dockerContainer.id
         except Exception as ex:

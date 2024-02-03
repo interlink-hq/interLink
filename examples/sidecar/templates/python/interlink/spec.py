@@ -10,6 +10,11 @@ class Metadata(BaseModel):
     uuid: str
     annotations: List[str]
 
+class VolumeMount(BaseModel):
+    name: str
+    mountPath: str
+    subPath: str
+
 class Container(BaseModel):
     name: str
     image: str
@@ -17,13 +22,14 @@ class Container(BaseModel):
     command: List[str]
     args: List[str]
     resources: dict
+    volumeMounts: List[VolumeMount]
 
 class SecretSource(BaseModel):
     secretName: str
     items: List[dict] 
 
 class ConfigMapSource(BaseModel):
-    secretName: str
+    configMapName: str
     items: List[dict] 
 
 class VolumeSource(BaseModel):
