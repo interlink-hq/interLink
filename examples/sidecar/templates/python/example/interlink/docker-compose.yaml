@@ -1,0 +1,16 @@
+version: '3.7'
+services:
+  interlink:
+    build:
+      context: ../../../
+      dockerfile: docker/Dockerfile.interlink
+    restart: always
+    #network_mode: "host"
+    ports:
+    - 3000:3000
+    volumes:
+    - type: bind
+      source: ../vk
+      target: /etc/interlink
+    environment:
+    - INTERLINKCONFIGPATH=/etc/interlink/InterLinkConfig.yaml

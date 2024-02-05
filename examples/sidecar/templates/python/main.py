@@ -4,6 +4,7 @@ from fastapi import FastAPI, HTTPException
 from typing import List
 import docker
 import re
+import os
 
 
 dockerCLI = docker.DockerClient(base_url="unix:///Users/dciangot/.docker/run/docker.sock")

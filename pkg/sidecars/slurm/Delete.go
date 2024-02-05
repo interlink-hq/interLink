@@ -45,6 +45,11 @@ func (h *SidecarHandler) StopHandler(w http.ResponseWriter, r *http.Request) {
 	}
 	if os.Getenv("SHARED_FS") != "true" {
 		err = os.RemoveAll(filesPath)
+		statusCode = http.StatusInternalServerError
+		w.WriteHeader(statusCode)
+		w.Write([]byte("Error deleting containers. Check Slurm Sidecar's logs"))
+		log.G(h.Ctx).Error(err)
+		return
 	}
 
 	w.WriteHeader(statusCode)

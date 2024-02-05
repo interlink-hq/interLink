@@ -417,7 +417,7 @@ func deleteContainer(Ctx context.Context, config commonIL.InterLinkConfig, podUI
 	err := os.RemoveAll(path + "/" + podUID)
 	removeJID(podUID, JIDs)
 	if err != nil {
-		log.G(Ctx).Warning(err)
+		log.G(Ctx).Error(err)
 		return err
 	}
 	return err
