@@ -71,6 +71,7 @@ func (h *InterLinkHandler) CreateHandler(w http.ResponseWriter, r *http.Request)
 		log.G(Ctx).Info("InterLink: forwarding Create call to sidecar")
 		var resp *http.Response
 
+		req.Header.Set("Content-Type", "application/json")
 		resp, err = http.DefaultClient.Do(req)
 		if err != nil {
 			statusCode = http.StatusInternalServerError

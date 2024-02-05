@@ -56,7 +56,7 @@ func (h *SidecarHandler) SubmitHandler(w http.ResponseWriter, r *http.Request) {
 			overlayPath := h.Config.DataRootFolder + data.Pod.Namespace + "-" + string(data.Pod.UID) + "/overlay.img"
 			createOverlay := []string{"singularity", "overlay", "create", "--sparse", "--size=10248", overlayPath, "&&"}
 
-			commstr1 := []string{"singularity", "exec", "--containall", "--overlay", overlayPath, "--nv"}
+			commstr1 := []string{"singularity", "exec", "--fakeroot", "--containall", "--overlay", overlayPath, "--nv"}
 			//	h.Config.DataRootFolder + string(data.Pod.UID) }
 
 			envs := prepareEnvs(h.Ctx, container)

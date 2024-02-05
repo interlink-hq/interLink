@@ -53,6 +53,7 @@ func (h *InterLinkHandler) StatusHandler(w http.ResponseWriter, r *http.Request)
 	}
 
 	log.G(Ctx).Info("InterLink: forwarding GetStatus call to sidecar")
+	req.Header.Set("Content-Type", "application/json")
 	resp, err := http.DefaultClient.Do(req)
 	if err != nil {
 		statusCode = http.StatusInternalServerError
