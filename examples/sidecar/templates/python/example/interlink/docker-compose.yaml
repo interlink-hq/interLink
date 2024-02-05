@@ -1,9 +1,10 @@
 version: '3.7'
 services:
   interlink:
-    build:
-      context: ../../../
-      dockerfile: docker/Dockerfile.interlink
+    #build:
+    #  context: ../../../
+    #  dockerfile: docker/Dockerfile.interlink
+    image: ghcr.io/dciangot/interlink:iptest10
     restart: always
     #network_mode: "host"
     ports:

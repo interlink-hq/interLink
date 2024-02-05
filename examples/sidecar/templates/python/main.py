@@ -25,7 +25,7 @@ class MyProvider(interlink.provider.Provider):
         for status in statuses:
             name = status["Names"][0]
             if len(name.split("-")) > 1:
-                uid = name.split("-")[-1]
+                uid = "-".join(name.split("-")[-5:])
                 self.CONTAINER_POD_MAP.update({uid: [status["Id"]]})
         print(self.CONTAINER_POD_MAP)
 
@@ -35,7 +35,7 @@ class MyProvider(interlink.provider.Provider):
 
         # Match data source information (actual bytes) to the mount ref in pod description
         for v in volumes:
-            if len(v.configMaps) > 0:
+            if v.configMaps:
                 for dataSource in v.configMaps:
                     for ref in pods:
                         podMount = ref.volumeSource.configMap
@@ -54,10 +54,10 @@ class MyProvider(interlink.provider.Provider):
                                     # dump list of written files
                                     dataList.append(path)
 
-            if len(v.secrets) > 0:
+            if v.secrets:
                 pass
 
-            if len(v.emptyDirs) > 0:
+            if v.emptyDirs:
                 pass
         return []
 
@@ -80,26 +80,27 @@ class MyProvider(interlink.provider.Provider):
             dockerContainer = self.DOCKER.containers.run(
                 f"{container.image}:{container.tag}",
                 f"{cmds} {args}",
-                name=f"{container.name}-{pod.pod.metadata.uuid}",
+                name=f"{container.name}-{pod.pod.metadata.uid}",
                 detach=True,
                 volumes=volumes
             )
+            print(dockerContainer)
             docker_run_id = dockerContainer.id
         except Exception as ex:
             raise HTTPException(status_code=500, detail=ex)
 
 
-        self.CONTAINER_POD_MAP.update({pod.pod.metadata.uuid: [docker_run_id]})
+        self.CONTAINER_POD_MAP.update({pod.pod.metadata.uid: [docker_run_id]})
         print(self.CONTAINER_POD_MAP)
 
         print(pod)
 
-    def Delete(self, pod: interlink.Pod) -> None:
+    def Delete(self, pod: interlink.PodRequest) -> None:
         try:
-            print(f"docker rm -f {self.CONTAINER_POD_MAP[pod.pod.metadata.uuid][0]}")
-            container = self.DOCKER.containers.get(self.CONTAINER_POD_MAP[pod.pod.metadata.uuid][0])
+            print(f"docker rm -f {self.CONTAINER_POD_MAP[pod.metadata.uid][0]}")
+            container = self.DOCKER.containers.get(self.CONTAINER_POD_MAP[pod.metadata.uid][0])
             container.remove(force=True)
-            self.CONTAINER_POD_MAP.pop(pod.pod.metadata.uuid)
+            self.CONTAINER_POD_MAP.pop(pod.metadata.uid)
         except:
             raise HTTPException(status_code=404, detail="No containers found for UUID")
         print(pod)
@@ -107,8 +108,9 @@ class MyProvider(interlink.provider.Provider):
 
     def Status(self,  pod: interlink.PodRequest) -> interlink.PodStatus:
         print(self.CONTAINER_POD_MAP)
+        print(pod.metadata.uid)
         try:
-            container = self.DOCKER.containers.get(self.CONTAINER_POD_MAP[pod.metadata.uuid][0])
+            container = self.DOCKER.containers.get(self.CONTAINER_POD_MAP[pod.metadata.uid][0])
             status = container.status
         except:
             raise HTTPException(status_code=404, detail="No containers found for UUID")
@@ -117,7 +119,7 @@ class MyProvider(interlink.provider.Provider):
 
         if status == "running":
             try:
-                statuses = self.DOCKER.api.containers(filters={"status":"exited", "id": container.id})
+                statuses = self.DOCKER.api.containers(filters={"status":"running", "id": container.id})
                 print(statuses)
                 startedAt = statuses[0]["Created"]
             except Exception as ex:
@@ -125,7 +127,7 @@ class MyProvider(interlink.provider.Provider):
 
             return interlink.PodStatus(
                     name=pod.metadata.name,
-                    UID=pod.metadata.uuid,
+                    UID=pod.metadata.uid,
                     namespace=pod.metadata.namespace,
                     containers=[
                         interlink.ContainerStatus(
@@ -154,7 +156,7 @@ class MyProvider(interlink.provider.Provider):
                 
             return interlink.PodStatus(
                     name=pod.metadata.name,
-                    UID=pod.metadata.uuid,
+                    UID=pod.metadata.uid,
                     namespace=pod.metadata.namespace,
                     containers=[
                         interlink.ContainerStatus(
@@ -173,7 +175,7 @@ class MyProvider(interlink.provider.Provider):
             
         return interlink.PodStatus(
                 name=pod.metadata.name,
-                UID=pod.metadata.uuid,
+                UID=pod.metadata.uid,
                 namespace=pod.metadata.namespace,
                 containers=[
                     interlink.ContainerStatus(
@@ -197,10 +199,10 @@ async def create_pod(pods: List[interlink.Pod]) -> str:
     return ProviderNew.create_pod(pods)
 
 @app.post("/delete")
-async def delete_pod(pods: List[interlink.Pod]) -> str:
-    return ProviderNew.create_pod(pods)
+async def delete_pod(pod: interlink.PodRequest) -> str:
+    return ProviderNew.delete_pod(pod)
 
-@app.post("/status")
+@app.get("/status")
 async def status_pod(pods: List[interlink.PodRequest]) -> List[interlink.PodStatus]:
     return ProviderNew.get_status(pods)
 

@@ -132,6 +132,10 @@ func deleteRequest(config commonIL.InterLinkConfig, pod *v1.Pod, token string) (
 func statusRequest(config commonIL.InterLinkConfig, podsList []*v1.Pod, token string) ([]byte, error) {
 	var returnValue []byte
 
+	if len(podsList) == 0 {
+		log.L.Info("No PODs to monitor")
+		return nil, nil
+	}
 	bodyBytes, err := json.Marshal(podsList)
 	if err != nil {
 		log.L.Error(err)

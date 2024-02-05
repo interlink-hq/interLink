@@ -8,7 +8,7 @@ metadata:
 spec:
   restartPolicy: Never
   containers:
-  - image: docker://ghcr.io/grycap/cowsay 
+  - image: ghcr.io/grycap/cowsay 
     command: ["/bin/sh"]
     args: ["-c",  "\"touch /tmp/test.txt && sleep 60 && echo \\\"hello muu\\\" | /usr/games/cowsay \" " ]
     imagePullPolicy: Always

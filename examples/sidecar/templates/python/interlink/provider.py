@@ -14,7 +14,7 @@ class Provider(FastAPI):
     def Create(self, pod: Pod) -> None:
         raise HTTPException(status_code=404, detail="No containers found for UUID")
 
-    def Delete(self, pod: Pod) -> None:
+    def Delete(self, pod: PodRequest) -> None:
         raise HTTPException(status_code=404, detail="No containers found for UUID")
 
     def create_pod(self, pods: List[Pod]) -> str:
@@ -27,8 +27,7 @@ class Provider(FastAPI):
 
         return "Containers created"
 
-    def delete_pod(self, pods: List[Pod]) -> str:
-        pod = pods[0]
+    def delete_pod(self, pod: PodRequest) -> str:
 
         try:
             self.Delete(pod)

@@ -41,48 +41,55 @@ func (h *InterLinkHandler) StatusHandler(w http.ResponseWriter, r *http.Request)
 	}
 	PodStatuses.mu.Unlock()
 
-	bodyBytes, err = json.Marshal(podsToBeChecked)
-	if err != nil {
-		log.G(Ctx).Fatal(err)
-	}
+	if len(podsToBeChecked) > 0 {
 
-	reader := bytes.NewReader(bodyBytes)
-	req, err := http.NewRequest(http.MethodGet, h.Config.Sidecarurl+":"+h.Config.Sidecarport+"/status", reader)
-	if err != nil {
-		log.G(Ctx).Fatal(err)
-	}
+		bodyBytes, err = json.Marshal(podsToBeChecked)
+		if err != nil {
+			log.G(Ctx).Fatal(err)
+		}
 
-	log.G(Ctx).Info("InterLink: forwarding GetStatus call to sidecar")
-	req.Header.Set("Content-Type", "application/json")
-	resp, err := http.DefaultClient.Do(req)
-	if err != nil {
-		statusCode = http.StatusInternalServerError
-		w.WriteHeader(statusCode)
-		log.G(Ctx).Error(err)
-		return
-	}
+		reader := bytes.NewReader(bodyBytes)
+		req, err := http.NewRequest(http.MethodGet, h.Config.Sidecarurl+":"+h.Config.Sidecarport+"/status", reader)
+		if err != nil {
+			log.G(Ctx).Fatal(err)
+		}
 
-	if resp.StatusCode != http.StatusOK {
-		log.L.Error("Unexpected error occured. Status code: " + strconv.Itoa(resp.StatusCode) + ". Check Sidecar's logs for further informations")
-		statusCode = http.StatusInternalServerError
-	}
+		log.G(Ctx).Info("InterLink: forwarding GetStatus call to sidecar")
+		req.Header.Set("Content-Type", "application/json")
+		log.G(Ctx).Debug(req)
+		resp, err := http.DefaultClient.Do(req)
+		if err != nil {
+			statusCode = http.StatusInternalServerError
+			w.WriteHeader(statusCode)
+			log.G(Ctx).Error(err)
+			return
+		}
 
-	bodyBytes, err = io.ReadAll(resp.Body)
-	if err != nil {
-		statusCode = http.StatusInternalServerError
-		w.WriteHeader(statusCode)
-		log.G(Ctx).Error(err)
-		return
-	}
-	err = json.Unmarshal(bodyBytes, &returnedStatuses)
-	if err != nil {
-		statusCode = http.StatusInternalServerError
-		w.WriteHeader(statusCode)
-		log.G(Ctx).Error(err)
-		return
-	}
+		if resp.StatusCode != http.StatusOK {
+			log.L.Error("Unexpected error occured. Status code: " + strconv.Itoa(resp.StatusCode) + ". Check Sidecar's logs for further informations")
+			statusCode = http.StatusInternalServerError
+		}
 
-	updateStatuses(returnedStatuses)
+		bodyBytes, err = io.ReadAll(resp.Body)
+		if err != nil {
+			statusCode = http.StatusInternalServerError
+			w.WriteHeader(statusCode)
+			log.G(Ctx).Error(err)
+			return
+		}
+
+		log.G(Ctx).Debug(string(bodyBytes))
+		err = json.Unmarshal(bodyBytes, &returnedStatuses)
+		if err != nil {
+			statusCode = http.StatusInternalServerError
+			w.WriteHeader(statusCode)
+			log.G(Ctx).Error(err)
+			return
+		}
+
+		updateStatuses(returnedStatuses)
+
+	}
 
 	for _, pod := range pods {
 		PodStatuses.mu.Lock()

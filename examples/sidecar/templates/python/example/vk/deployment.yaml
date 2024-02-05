@@ -28,7 +28,7 @@ spec:
       - name: jaeger
         image: jaegertracing/all-in-one:1.51
       - name: inttw-vk
-        image: ghcr.io/dciangot/vk:iptest7 
+        image: ghcr.io/dciangot/vk:iptest8 
         #image: dciangot/vk:latest
         imagePullPolicy: Always
         #command: ["sleep", "infinity"]
