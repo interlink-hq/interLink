@@ -1,6 +1,6 @@
 VKTokenFile: "$HOME/interLink/token"
-InterlinkURL: "http://192.168.1.201"
-SidecarURL: "http://192.168.1.201"
+InterlinkURL: "http://10.25.128.35"
+SidecarURL: "http://10.25.128.35"
 InterlinkPort: "3000"
 SidecarPort: "8000"
 SbatchPath: "/usr/bin/sbatch"

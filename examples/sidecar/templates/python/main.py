@@ -5,6 +5,7 @@ from typing import List
 import docker
 import re
 import os
+import pprint
 
 
 dockerCLI = docker.DockerClient(base_url="unix:///Users/dciangot/.docker/run/docker.sock")
@@ -192,6 +193,22 @@ class MyProvider(interlink.provider.Provider):
                 ]
             )
 
+
+    def Logs(self, req: interlink.LogRequest) -> bytes:
+        # TODO: manage more complicated multi container pod
+        #       THIS IS ONLY FOR DEMONSTRATION
+        print(req.PodUID)
+        print(self.CONTAINER_POD_MAP[req.PodUID])
+        try:
+            container = self.DOCKER.containers.get(self.CONTAINER_POD_MAP[req.PodUID][0])
+            #log = container.logs(timestamps=req.Opts.Timestamps, tail=req.Opts.Tail)
+            log = container.logs()
+            print(log)
+        except:
+            raise HTTPException(status_code=404, detail="No containers found for UUID")
+
+        return log
+
 ProviderNew = MyProvider(dockerCLI)
 
 @app.post("/create")
@@ -206,3 +223,6 @@ async def delete_pod(pod: interlink.PodRequest) -> str:
 async def status_pod(pods: List[interlink.PodRequest]) -> List[interlink.PodStatus]:
     return ProviderNew.get_status(pods)
 
+@app.post("/getLogs")
+async def status_pod(req: interlink.LogRequest) -> bytes:
+    return ProviderNew.get_logs(req)

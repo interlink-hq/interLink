@@ -40,7 +40,7 @@ spec:
             fieldRef:
               fieldPath: status.podIP
         - name: KUBELET_PORT
-          value: "10255"
+          value: "10250"
         - name: INTERLINKCONFIGPATH
           value: "/etc/interlink/InterLinkConfig.yaml"
         - name: VKTOKENFILE

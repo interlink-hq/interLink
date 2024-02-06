@@ -1,8 +1,6 @@
 from pydantic import BaseModel
+import datetime
 from typing import List, Optional
-
-## INIT SERVER --> recover ids
-CONTAINER_POD_MAP = {}
 
 class Metadata(BaseModel):
     name: str
@@ -94,4 +92,18 @@ class PodStatus(BaseModel):
     namespace: str
     containers: List[ContainerStatus]
 
+class LogOpts(BaseModel):
+    Tail: int
+    LimitBytes: Optional[int] = None
+    Timestamps: bool
+    Previous: bool
+    SinceSeconds: int
+    SinceTime: datetime.datetime 
+
+class LogRequest(BaseModel):
+    Namespace: str
+    PodUID: str
+    PodName: str
+    ContainerName: str
+    Opts: LogOpts
 
