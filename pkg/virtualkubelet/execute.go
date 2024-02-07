@@ -213,68 +213,81 @@ func RemoteExecution(p *VirtualKubeletProvider, ctx context.Context, mode int8, 
 	case CREATE:
 		var req commonIL.PodCreateRequests
 		req.Pod = *pod
+		startTime := time.Now()
+
 		for {
-			if ClientSet == nil {
-				kubeconfig := os.Getenv("KUBECONFIG")
+			timeNow := time.Now()
+			if timeNow.Sub(startTime).Seconds() < time.Hour.Minutes()*5 {
+				if ClientSet == nil {
+					kubeconfig := os.Getenv("KUBECONFIG")
 
-				config, err := clientcmd.BuildConfigFromFlags("", kubeconfig)
-				if err != nil {
-					log.G(ctx).Error(err)
-					return err
-				}
-
-				ClientSet, err = kubernetes.NewForConfig(config)
-				if err != nil {
-					log.G(ctx).Error(err)
-					return err
-				}
-			}
-
-			pod, err = ClientSet.CoreV1().Pods(pod.Namespace).Get(ctx, pod.Name, metav1.GetOptions{})
-			if err != nil {
-				return errors.New("Deleted pod before actual creation")
-			}
-
-			var failed bool
-
-			for _, volume := range pod.Spec.Volumes {
-
-				if volume.ConfigMap != nil {
-					cfgmap, err := ClientSet.CoreV1().ConfigMaps(pod.Namespace).Get(ctx, volume.ConfigMap.Name, metav1.GetOptions{})
+					config, err := clientcmd.BuildConfigFromFlags("", kubeconfig)
 					if err != nil {
-						failed = true
-						log.G(ctx).Warning("Unable to find ConfigMap " + volume.ConfigMap.Name + " for pod " + pod.Name + ". Waiting for it to be initialized")
-						if pod.Status.Phase != "Initializing" {
-							pod.Status.Phase = "Initializing"
-							p.UpdatePod(ctx, pod)
-						}
-						break
-					} else {
-						req.ConfigMaps = append(req.ConfigMaps, *cfgmap)
+						log.G(ctx).Error(err)
+						return err
 					}
-				} else if volume.Secret != nil {
-					scrt, err := ClientSet.CoreV1().Secrets(pod.Namespace).Get(ctx, volume.Secret.SecretName, metav1.GetOptions{})
+
+					ClientSet, err = kubernetes.NewForConfig(config)
 					if err != nil {
-						failed = true
-						log.G(ctx).Warning("Unable to find Secret " + volume.Secret.SecretName + " for pod " + pod.Name + ". Waiting for it to be initialized")
-						if pod.Status.Phase != "Initializing" {
-							pod.Status.Phase = "Initializing"
-							p.UpdatePod(ctx, pod)
-						}
-						break
-					} else {
-						req.Secrets = append(req.Secrets, *scrt)
+						log.G(ctx).Error(err)
+						return err
 					}
 				}
-			}
 
-			if failed {
-				time.Sleep(time.Second)
-				continue
+				pod, err = ClientSet.CoreV1().Pods(pod.Namespace).Get(ctx, pod.Name, metav1.GetOptions{})
+				if err != nil {
+					return errors.New("Deleted pod before actual creation")
+				}
+
+				var failed bool
+
+				for _, volume := range pod.Spec.Volumes {
+
+					if volume.ConfigMap != nil {
+						cfgmap, err := ClientSet.CoreV1().ConfigMaps(pod.Namespace).Get(ctx, volume.ConfigMap.Name, metav1.GetOptions{})
+						if err != nil {
+							failed = true
+							log.G(ctx).Warning("Unable to find ConfigMap " + volume.ConfigMap.Name + " for pod " + pod.Name + ". Waiting for it to be initialized")
+							if pod.Status.Phase != "Initializing" {
+								pod.Status.Phase = "Initializing"
+								p.UpdatePod(ctx, pod)
+							}
+							break
+						} else {
+							req.ConfigMaps = append(req.ConfigMaps, *cfgmap)
+						}
+					} else if volume.Secret != nil {
+						scrt, err := ClientSet.CoreV1().Secrets(pod.Namespace).Get(ctx, volume.Secret.SecretName, metav1.GetOptions{})
+						if err != nil {
+							failed = true
+							log.G(ctx).Warning("Unable to find Secret " + volume.Secret.SecretName + " for pod " + pod.Name + ". Waiting for it to be initialized")
+							if pod.Status.Phase != "Initializing" {
+								pod.Status.Phase = "Initializing"
+								p.UpdatePod(ctx, pod)
+							}
+							break
+						} else {
+							req.Secrets = append(req.Secrets, *scrt)
+						}
+					}
+				}
+
+				if failed {
+					time.Sleep(time.Second)
+					continue
+				} else {
+					pod.Status.Phase = v1.PodPending
+					p.UpdatePod(ctx, pod)
+					break
+				}
 			} else {
-				pod.Status.Phase = v1.PodPending
+				pod.Status.Phase = v1.PodFailed
+				pod.Status.Reason = "CFGMaps/Secrets not found"
+				for _, ct := range pod.Status.ContainerStatuses {
+					ct.Ready = false
+				}
 				p.UpdatePod(ctx, pod)
-				break
+				return errors.New("Unable to retrieve ConfigMaps or Secrets. Check logs.")
 			}
 		}
 
@@ -284,6 +297,7 @@ func RemoteExecution(p *VirtualKubeletProvider, ctx context.Context, mode int8, 
 			return err
 		}
 		log.G(ctx).Info(string(returnVal))
+
 	case DELETE:
 		req := pod
 		if pod.Status.Phase != "Initializing" {

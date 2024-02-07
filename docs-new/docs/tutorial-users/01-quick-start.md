@@ -214,7 +214,7 @@ What you have to do, is just explicitly allow a pod of yours in the following wa
 apiVersion: v1
 kind: Pod
 metadata:
-  name: test-pod-cfg-cowsay-dciangot
+  name: test-pod-cowsay
   namespace: vk
   annotations:
     slurm-job.knoc.io/flags: "--job-name=test-pod-cfg -t 2800  --ntasks=8 --nodes=1 --mem-per-cpu=2000"
