@@ -48,7 +48,7 @@ type ConfigMapSecret struct {
 }
 
 type InterLinkConfig struct {
-	VKConfigPath      string
+	VKConfigPath      string `yaml:"VKConfigPath"`
 	VKTokenFile       string `yaml:"VKTokenFile"`
 	Interlinkurl      string `yaml:"InterlinkURL"`
 	Sidecarurl        string `yaml:"SidecarURL"`

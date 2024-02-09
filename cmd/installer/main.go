@@ -1,10 +1,10 @@
 package main
 
 import (
+	"bufio"
 	"context"
 	"embed"
 	"fmt"
-	"net/url"
 	"os"
 	"text/template"
 
@@ -16,18 +16,60 @@ var (
 	templates embed.FS
 )
 
+// apiVersion: kustomize.config.k8s.io/v1beta1
+// kind: Kustomization
+// resources:
+//   - ./deployment.yaml
+
 type Resources struct {
 	CPU    string
 	Memory string
 	Pods   string
 }
 
+type oauthStruct struct {
+	RefreshToken string
+	TokenURL     string
+	ClientID     string
+	ClientSecret string
+}
+
 type dataStruct struct {
-	Token         *oauth2.Token
-	InterLinkURL  url.URL
+	OAUTH         oauthStruct
+	InterLinkURL  string
 	InterLinkPort int
 	VKName        string
+	Namespace     string
 	VKLimits      Resources
+}
+
+func evalManifest(path string, dataStruct dataStruct) (string, error) {
+	//tmpl, err := template.ParseFS(templates, "*/deployment.yaml")
+	tmpl, err := template.ParseFS(templates, path)
+	if err != nil {
+		return "", err
+	}
+
+	fDeploy, err := os.CreateTemp("", "tmpfile-") // in Go version older than 1.17 you can use ioutil.TempFile
+	if err != nil {
+		return "", err
+	}
+
+	// close and remove the temporary file at the end of the program
+	defer fDeploy.Close()
+	defer os.Remove(fDeploy.Name())
+
+	err = tmpl.Execute(fDeploy, dataStruct)
+	if err != nil {
+		return "", err
+	}
+
+	deploymentYAML, err := os.ReadFile(fDeploy.Name())
+	if err != nil {
+		return "", err
+	}
+
+	return string(deploymentYAML), nil
 }
 
 func main() {
@@ -58,25 +100,22 @@ func main() {
 	fmt.Println(token.RefreshToken)
 	fmt.Println(token.Expiry)
 	fmt.Println(token.TokenType)
-	tmpl, err := template.ParseFS(templates, "*/deployment.yaml")
-	if err != nil {
-		panic(err)
-	}
 
-	f, err := os.CreateTemp("", "tmpfile-") // in Go version older than 1.17 you can use ioutil.TempFile
-	if err != nil {
-		panic(err)
-	}
-
-	// close and remove the temporary file at the end of the program
-	defer f.Close()
-	defer os.Remove(f.Name())
+	kubeletName := "test-vk"
+	namespace := "interlink"
+	interlinkURL := "http://localhost"
 
 	data := dataStruct{
-		Token:         token,
-		InterLinkURL:  url.URL{},
+		OAUTH: oauthStruct{
+			RefreshToken: token.RefreshToken,
+			TokenURL:     "https://github.com/login/oauth/access_token",
+			ClientID:     "Iv1.3150616a02483aa5",
+			ClientSecret: "93efc7cc0c830dae6882da78a526ab981e12e5e6",
+		},
+		InterLinkURL:  interlinkURL,
 		InterLinkPort: 128,
-		VKName:        "test-vk",
+		VKName:        kubeletName,
+		Namespace:     namespace,
 		VKLimits: Resources{
 			CPU:    "128",
 			Memory: "256Gi",
@@ -84,34 +123,47 @@ func main() {
 		},
 	}
 
-	//err = tmpl.Execute(f, data)
-	err = tmpl.Execute(f, data)
+	namespaceYAML, err := evalManifest("templates/namespace.yaml", data)
 	if err != nil {
 		panic(err)
 	}
 
-	fmt.Println(f.Name())
+	deploymentYAML, err := evalManifest("templates/deployment.yaml", data)
+	if err != nil {
+		panic(err)
+	}
 
-	// TODO: embed template and deploy
-	// TODO: option dump manifest
+	configYAML, err := evalManifest("templates/configs.yaml", data)
+	if err != nil {
+		panic(err)
+	}
 
-	// TODO: keep the following as reference for vk enhancement with
-	// // automatic refresh on http client init to interlink APIs
-	// manualToken := oauth2.Token{
-	// 	AccessToken:  token.AccessToken,
-	// 	TokenType:    token.TokenType,
-	// 	RefreshToken: token.RefreshToken,
-	// 	Expiry:       token.Expiry,
-	// }
-	//
-	// fmt.Println(manualToken)
-	//layout := "2024-02-07 07:06:42.994286 +0100 CET m=+28831.702329543"
-	//token.Expiry.String()
-	//  str := "Fri Sep 23 2017 15:38:22 GMT+0630"
-	//  t, err := time.Parse(layout, str)
-	//  if err != nil {
-	//      WriteError(w, err)
-	//      return
-	//  }
+	serviceaccountYAML, err := evalManifest("templates/service-account.yaml", data)
+	if err != nil {
+		panic(err)
+	}
+
+	manifests := []string{
+		namespaceYAML,
+		serviceaccountYAML,
+		configYAML,
+		deploymentYAML,
+	}
+
+	// Create a file and use bufio.NewWriter.
+	f, err := os.Create("test.yaml")
+	if err != nil {
+		panic(err)
+	}
+	defer f.Close()
+	w := bufio.NewWriter(f)
+
+	for _, mnfst := range manifests {
+
+		fmt.Fprint(w, mnfst)
+		fmt.Fprint(w, "\n---\n")
+	}
+
+	w.Flush()
 
 }

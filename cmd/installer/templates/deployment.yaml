@@ -1,30 +1,8 @@
----
-# create namespace
----
-# vk configuration 
-{
-    "vega-new-vk": {
-        "cpu": {{.VKLimits.CPU}}, 
-        "memory": {{.VKLimits.Memory}},
-        "pods": {{.VKLimits.Pods}}
-  }
-}
----
-# interlink config
-
-InterlinkURL: {{.InterLinkURL}} 
-InterlinkPort: {{.InterLinkPort}}
-CommandPrefix: ""
-ExportPodData: true 
-ServiceAccount: "interlink"
-Namespace: "interlink"
-VKTokenFile: /opt/interlink/token
-
----
 apiVersion: apps/v1
 kind: Deployment
 metadata:
   name: {{.VKName}} 
+  namespace: {{.Namespace}}
   labels:
     nodeName: {{.VKName}}
 spec:
@@ -69,7 +47,7 @@ spec:
         - name: config-json
           mountPath: /etc/interlink/interlink-cfg.json
           subPath: interlink-cfg.json
-        - name: vega-token
+        - name: token
           mountPath: /opt/interlink
         resources:
           limits:
@@ -83,14 +61,14 @@ spec:
         imagePullPolicy: Always
         env:
         - name: IAM_TOKEN_ENDPOINT 
-          value: {.OAUTH.TokenURL} 
+          value: {{.OAUTH.TokenURL}} 
         # TODO load env IAM client from secret
         - name: IAM_CLIENT_ID
-          value: {.OAUTH.ClientID} 
+          value: {{.OAUTH.ClientID}}
         - name: IAM_CLIENT_SECRET
-          value: {.OAUTH.ClientSecret} 
+          value: {{.OAUTH.ClientSecret}} 
         - name: IAM_REFRESH_TOKEN
-          value: {.Token.RefreshToken} 
+          value: {{.OAUTH.RefreshToken}}
         - name: TOKEN_PATH
           value: /opt/interlink/token
         command:
@@ -104,17 +82,17 @@ spec:
             cpu: 100m
             memory: 300Mi
         volumeMounts:
-        - name: vega-token
+        - name: token
           mountPath: /opt/interlink
-      serviceAccountName: interlink
+      serviceAccountName: {{.VKName}} 
       volumes:
       - name: config
         configMap:
           # Provide the name of the ConfigMap you want to mount.
-          name: vega-new-vk-config
+          name: {{.VKName}}-config
       - name: config-json
         configMap:
           # Provide the name of the ConfigMap you want to mount.
-          name: vega-new-vk-config-json
-      - name: vega-token
+          name: {{.VKName}}-config-json
+      - name: token
         emptyDir: {}
