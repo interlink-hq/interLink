@@ -53,6 +53,10 @@ builds:
       - ppc64le
     main: ./cmd/sidecars/slurm
 archives:
+  - id: sdk
+    files:
+        - examples/sidecar/templates/python/*
+    name_template: sidecar_sdk_python_{{ .Version }}
   - name_template: >-
       {{ .ProjectName }}_
       {{- title .Os }}_

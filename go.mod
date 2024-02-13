@@ -9,6 +9,7 @@ require (
 	github.com/alexellis/go-execute v0.6.0
 	github.com/containerd/containerd v1.7.6
 	github.com/sirupsen/logrus v1.9.3
+	github.com/spf13/cobra v1.7.0
 	github.com/virtual-kubelet/virtual-kubelet v1.10.0
 	go.opentelemetry.io/otel v1.19.0
 	go.opentelemetry.io/otel/exporters/otlp/otlptrace/otlptracegrpc v1.19.0
@@ -47,6 +48,7 @@ require (
 	github.com/gorilla/mux v1.8.0 // indirect
 	github.com/grpc-ecosystem/grpc-gateway/v2 v2.16.0 // indirect
 	github.com/imdario/mergo v0.3.16 // indirect
+	github.com/inconshreveable/mousetrap v1.1.0 // indirect
 	github.com/josharian/intern v1.0.0 // indirect
 	github.com/json-iterator/go v1.1.12 // indirect
 	github.com/mailru/easyjson v0.7.7 // indirect
