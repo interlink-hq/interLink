@@ -56,7 +56,7 @@ func (h *SidecarHandler) SubmitHandler(w http.ResponseWriter, r *http.Request) {
 
 			envs := prepareEnvs(h.Ctx, container)
 			image := ""
-			mounts, err := prepareMounts(h.Config, h.Ctx, req, container, filesPath)
+			mounts, err := prepareMounts(h.Ctx, h.Config, req, container, filesPath)
 			log.G(h.Ctx).Debug(mounts)
 			if err != nil {
 				statusCode = http.StatusInternalServerError
@@ -88,7 +88,7 @@ func (h *SidecarHandler) SubmitHandler(w http.ResponseWriter, r *http.Request) {
 			singularity_command_pod = append(singularity_command_pod, SingularityCommand{command: singularity_command, containerName: container.Name})
 		}
 
-		path, err := produceSLURMScript(h.Config, h.Ctx, data.Pod.Namespace, string(data.Pod.UID), filesPath, metadata, singularity_command_pod)
+		path, err := produceSLURMScript(h.Ctx, h.Config, data.Pod.Namespace, string(data.Pod.UID), filesPath, metadata, singularity_command_pod)
 		if err != nil {
 			statusCode = http.StatusInternalServerError
 			w.WriteHeader(statusCode)
@@ -97,7 +97,7 @@ func (h *SidecarHandler) SubmitHandler(w http.ResponseWriter, r *http.Request) {
 			os.RemoveAll(filesPath)
 			return
 		}
-		out, err := SLURMBatchSubmit(h.Config, h.Ctx, path)
+		out, err := SLURMBatchSubmit(h.Ctx, h.Config, path)
 		if err != nil {
 			statusCode = http.StatusInternalServerError
 			w.WriteHeader(statusCode)
@@ -114,7 +114,7 @@ func (h *SidecarHandler) SubmitHandler(w http.ResponseWriter, r *http.Request) {
 			w.Write([]byte("Error handling JID. Check Slurm Sidecar's logs"))
 			log.G(h.Ctx).Error(err)
 			os.RemoveAll(filesPath)
-			err = deleteContainer(h.Config, h.Ctx, string(data.Pod.UID), h.JIDs, filesPath)
+			err = deleteContainer(h.Ctx, h.Config, string(data.Pod.UID), h.JIDs, filesPath)
 			return
 		}
 	}

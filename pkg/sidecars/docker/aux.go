@@ -19,7 +19,7 @@ type SidecarHandler struct {
 	Ctx    context.Context
 }
 
-func prepareMounts(config commonIL.InterLinkConfig, Ctx context.Context, data []commonIL.RetrievedPodData, container v1.Container) (string, error) {
+func prepareMounts(Ctx context.Context, config commonIL.InterLinkConfig, data []commonIL.RetrievedPodData, container v1.Container) (string, error) {
 	log.G(Ctx).Info("- Preparing mountpoints for " + container.Name)
 	mountedData := ""
 
@@ -34,7 +34,7 @@ func prepareMounts(config commonIL.InterLinkConfig, Ctx context.Context, data []
 		for _, cont := range podData.Containers {
 			for _, cfgMap := range cont.ConfigMaps {
 				if container.Name == cont.Name {
-					paths, err := mountData(config, Ctx, podData.Pod, cfgMap, container)
+					paths, err := mountData(Ctx, config, podData.Pod, cfgMap, container)
 					if err != nil {
 						log.G(Ctx).Error("Error mounting ConfigMap " + cfgMap.Name)
 						return "", errors.New("Error mounting ConfigMap " + cfgMap.Name)
@@ -47,7 +47,7 @@ func prepareMounts(config commonIL.InterLinkConfig, Ctx context.Context, data []
 
 			for _, secret := range cont.Secrets {
 				if container.Name == cont.Name {
-					paths, err := mountData(config, Ctx, podData.Pod, secret, container)
+					paths, err := mountData(Ctx, config, podData.Pod, secret, container)
 					if err != nil {
 						log.G(Ctx).Error("Error mounting Secret " + secret.Name)
 						return "", errors.New("Error mounting Secret " + secret.Name)
@@ -60,7 +60,7 @@ func prepareMounts(config commonIL.InterLinkConfig, Ctx context.Context, data []
 
 			for _, emptyDir := range cont.EmptyDirs {
 				if container.Name == cont.Name {
-					paths, err := mountData(config, Ctx, podData.Pod, emptyDir, container)
+					paths, err := mountData(Ctx, config, podData.Pod, emptyDir, container)
 					if err != nil {
 						log.G(Ctx).Error("Error mounting EmptyDir " + emptyDir)
 						return "", errors.New("Error mounting EmptyDir " + emptyDir)
@@ -79,7 +79,7 @@ func prepareMounts(config commonIL.InterLinkConfig, Ctx context.Context, data []
 	return mountedData, nil
 }
 
-func mountData(config commonIL.InterLinkConfig, Ctx context.Context, pod v1.Pod, data interface{}, container v1.Container) ([]string, error) {
+func mountData(Ctx context.Context, config commonIL.InterLinkConfig, pod v1.Pod, data interface{}, container v1.Container) ([]string, error) {
 	wd, err := os.Getwd()
 	if err != nil {
 		log.G(Ctx).Error(err)

@@ -163,7 +163,7 @@ func statusRequest(config commonIL.InterLinkConfig, podsList []*v1.Pod, token st
 	return returnValue, nil
 }
 
-func LogRetrieval(config commonIL.InterLinkConfig, ctx context.Context, logsRequest commonIL.LogStruct) (io.ReadCloser, error) {
+func LogRetrieval(ctx context.Context, config commonIL.InterLinkConfig, logsRequest commonIL.LogStruct) (io.ReadCloser, error) {
 	b, err := os.ReadFile(config.VKTokenFile) // just pass the file name
 	if err != nil {
 		log.G(ctx).Fatal(err)
@@ -200,7 +200,7 @@ func LogRetrieval(config commonIL.InterLinkConfig, ctx context.Context, logsRequ
 	}
 }
 
-func RemoteExecution(config commonIL.InterLinkConfig, p *VirtualKubeletProvider, ctx context.Context, pod *v1.Pod, mode int8) error {
+func RemoteExecution(ctx context.Context, config commonIL.InterLinkConfig, p *VirtualKubeletProvider, pod *v1.Pod, mode int8) error {
 
 	b, err := os.ReadFile(config.VKTokenFile) // just pass the file name
 	if err != nil {
@@ -312,7 +312,7 @@ func RemoteExecution(config commonIL.InterLinkConfig, p *VirtualKubeletProvider,
 	return nil
 }
 
-func checkPodsStatus(p *VirtualKubeletProvider, ctx context.Context, token string, config commonIL.InterLinkConfig) error {
+func checkPodsStatus(ctx context.Context, p *VirtualKubeletProvider, token string, config commonIL.InterLinkConfig) error {
 	if len(p.pods) == 0 {
 		return nil
 	}

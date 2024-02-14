@@ -72,7 +72,7 @@ func CreateDirectories(config commonIL.InterLinkConfig) error {
 	return nil
 }
 
-func LoadJIDs(config commonIL.InterLinkConfig, Ctx context.Context, JIDs *map[string]*JidStruct) error {
+func LoadJIDs(Ctx context.Context, config commonIL.InterLinkConfig, JIDs *map[string]*JidStruct) error {
 	path := config.DataRootFolder
 
 	dir, err := os.Open(path)
@@ -151,8 +151,8 @@ func prepareEnvs(Ctx context.Context, container v1.Container) []string {
 }
 
 func prepareMounts(
-	config commonIL.InterLinkConfig,
 	Ctx context.Context,
+	config commonIL.InterLinkConfig,
 	data []commonIL.RetrievedPodData,
 	container v1.Container,
 	workingPath string,
@@ -174,7 +174,7 @@ func prepareMounts(
 		for _, cont := range podData.Containers {
 			for _, cfgMap := range cont.ConfigMaps {
 				if container.Name == cont.Name {
-					configMapsPaths, envs, err := mountData(config, Ctx, podData.Pod, container, cfgMap, workingPath)
+					configMapsPaths, envs, err := mountData(Ctx, config, podData.Pod, container, cfgMap, workingPath)
 					if err != nil {
 						log.G(Ctx).Error(err)
 						return nil, err
@@ -194,7 +194,7 @@ func prepareMounts(
 
 			for _, secret := range cont.Secrets {
 				if container.Name == cont.Name {
-					secretsPaths, envs, err := mountData(config, Ctx, podData.Pod, container, secret, workingPath)
+					secretsPaths, envs, err := mountData(Ctx, config, podData.Pod, container, secret, workingPath)
 					if err != nil {
 						log.G(Ctx).Error(err)
 						return nil, err
@@ -213,7 +213,7 @@ func prepareMounts(
 
 			for _, emptyDir := range cont.EmptyDirs {
 				if container.Name == cont.Name {
-					paths, _, err := mountData(config, Ctx, podData.Pod, container, emptyDir, workingPath)
+					paths, _, err := mountData(Ctx, config, podData.Pod, container, emptyDir, workingPath)
 					if err != nil {
 						log.G(Ctx).Error(err)
 						return nil, err
@@ -236,8 +236,8 @@ func prepareMounts(
 }
 
 func produceSLURMScript(
-	config commonIL.InterLinkConfig,
 	Ctx context.Context,
+	config commonIL.InterLinkConfig,
 	podNamespace string,
 	podUID string,
 	path string,
@@ -354,7 +354,7 @@ func produceSLURMScript(
 	return f.Name(), nil
 }
 
-func SLURMBatchSubmit(config commonIL.InterLinkConfig, Ctx context.Context, path string) (string, error) {
+func SLURMBatchSubmit(Ctx context.Context, config commonIL.InterLinkConfig, path string) (string, error) {
 	log.G(Ctx).Info("- Submitting Slurm job")
 	cmd := []string{path}
 	shell := exec2.ExecTask{
@@ -403,7 +403,7 @@ func removeJID(podUID string, JIDs *map[string]*JidStruct) {
 	delete(*JIDs, podUID)
 }
 
-func deleteContainer(config commonIL.InterLinkConfig, Ctx context.Context, podUID string, JIDs *map[string]*JidStruct, path string) error {
+func deleteContainer(Ctx context.Context, config commonIL.InterLinkConfig, podUID string, JIDs *map[string]*JidStruct, path string) error {
 	log.G(Ctx).Info("- Deleting Job for pod " + podUID)
 	if checkIfJidExists(JIDs, podUID) {
 		_, err := exec.Command(config.Scancelpath, (*JIDs)[podUID].JID).Output()
@@ -423,7 +423,7 @@ func deleteContainer(config commonIL.InterLinkConfig, Ctx context.Context, podUI
 	return err
 }
 
-func mountData(config commonIL.InterLinkConfig, Ctx context.Context, pod v1.Pod, container v1.Container, data interface{}, path string) ([]string, []string, error) {
+func mountData(Ctx context.Context, config commonIL.InterLinkConfig, pod v1.Pod, container v1.Container, data interface{}, path string) ([]string, []string, error) {
 	if config.ExportPodData {
 		for _, mountSpec := range container.VolumeMounts {
 			var podVolumeSpec *v1.VolumeSource

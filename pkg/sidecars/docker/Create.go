@@ -43,7 +43,7 @@ func (h *SidecarHandler) CreateHandler(w http.ResponseWriter, r *http.Request) {
 			cmd := []string{"run", "-d", "--name", container.Name}
 
 			if h.Config.ExportPodData {
-				mounts, err := prepareMounts(h.Config, h.Ctx, req, container)
+				mounts, err := prepareMounts(h.Ctx, h.Config, req, container)
 				if err != nil {
 					statusCode = http.StatusInternalServerError
 					log.G(h.Ctx).Error(err)
