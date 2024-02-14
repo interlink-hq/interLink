@@ -358,7 +358,7 @@ func SLURMBatchSubmit(Ctx context.Context, config commonIL.InterLinkConfig, path
 	log.G(Ctx).Info("- Submitting Slurm job")
 	shell := exec2.ExecTask{
 		Command: "sh",
-		Args:    []string{"-c", BuildStageCMD + "&&" + config.Sbatchpath + " " + path},
+		Args:    []string{"-c", "\"" + BuildStageCMD + "&&" + config.Sbatchpath + " " + path + "\""},
 		Shell:   true,
 	}
 

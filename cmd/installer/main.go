@@ -55,7 +55,7 @@ type dataStruct struct {
 }
 
 func evalManifest(path string, dataStruct dataStruct) (string, error) {
-	//tmpl, err := template.ParseFS(templates, "*/deployment.yaml")
+
 	tmpl, err := template.ParseFS(templates, path)
 	if err != nil {
 		return "", err
