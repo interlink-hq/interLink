@@ -53,10 +53,6 @@ builds:
       - ppc64le
     main: ./cmd/sidecars/slurm
 archives:
-  - id: sdk
-    files:
-        - examples/sidecar/templates/python/*
-    name_template: sidecar_sdk_python_{{ .Version }}
   - name_template: >-
       {{ .ProjectName }}_
       {{- title .Os }}_
@@ -64,6 +60,8 @@ archives:
       {{- else if eq .Arch "linux" }}Linux
       {{- else if eq .Arch "darwin" }}MacOS
       {{- else }}{{ .Arch }}{{ end }}
+    files:
+        - examples/sidecar/templates/python/*
 checksum:
   name_template: 'checksums.txt'
 snapshot:
