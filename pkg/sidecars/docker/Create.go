@@ -43,7 +43,7 @@ func (h *SidecarHandler) CreateHandler(w http.ResponseWriter, r *http.Request) {
 			cmd := []string{"run", "-d", "--name", container.Name}
 
 			if h.Config.ExportPodData {
-				mounts, err := prepareMounts(container, req, h.Config, h.Ctx)
+				mounts, err := prepareMounts(h.Config, h.Ctx, req, container)
 				if err != nil {
 					statusCode = http.StatusInternalServerError
 					log.G(h.Ctx).Error(err)
@@ -64,19 +64,19 @@ func (h *SidecarHandler) CreateHandler(w http.ResponseWriter, r *http.Request) {
 				cmd = append(cmd, args)
 			}
 
-			docker_options := ""
+			dockerOptions := ""
 
-			if docker_flags, ok := data.Pod.ObjectMeta.Annotations["docker-options.vk.io/flags"]; ok {
-				parsed_docker_options := strings.Split(docker_flags, " ")
-				if parsed_docker_options != nil {
-					for _, option := range parsed_docker_options {
-						docker_options += " " + option
+			if dockerFlags, ok := data.Pod.ObjectMeta.Annotations["docker-options.vk.io/flags"]; ok {
+				parsedDockerOptions := strings.Split(dockerFlags, " ")
+				if parsedDockerOptions != nil {
+					for _, option := range parsedDockerOptions {
+						dockerOptions += " " + option
 					}
 				}
 			}
 
 			shell := exec.ExecTask{
-				Command: "docker" + docker_options,
+				Command: "docker" + dockerOptions,
 				Args:    cmd,
 				Shell:   true,
 			}

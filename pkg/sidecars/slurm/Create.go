@@ -54,9 +54,9 @@ func (h *SidecarHandler) SubmitHandler(w http.ResponseWriter, r *http.Request) {
 			commstr1 := []string{"singularity", "exec", "--writable-tmpfs", "--nv", "-H", "${HOME}/" +
 				h.Config.DataRootFolder + string(data.Pod.UID) + ":${HOME}"}
 
-			envs := prepareEnvs(container, h.Ctx)
+			envs := prepareEnvs(h.Ctx, container)
 			image := ""
-			mounts, err := prepareMounts(filesPath, container, req, h.Config, h.Ctx)
+			mounts, err := prepareMounts(h.Config, h.Ctx, req, container, filesPath)
 			log.G(h.Ctx).Debug(mounts)
 			if err != nil {
 				statusCode = http.StatusInternalServerError
@@ -88,7 +88,7 @@ func (h *SidecarHandler) SubmitHandler(w http.ResponseWriter, r *http.Request) {
 			singularity_command_pod = append(singularity_command_pod, SingularityCommand{command: singularity_command, containerName: container.Name})
 		}
 
-		path, err := produceSLURMScript(filesPath, data.Pod.Namespace, string(data.Pod.UID), metadata, singularity_command_pod, h.Config, h.Ctx)
+		path, err := produceSLURMScript(h.Config, h.Ctx, data.Pod.Namespace, string(data.Pod.UID), filesPath, metadata, singularity_command_pod)
 		if err != nil {
 			statusCode = http.StatusInternalServerError
 			w.WriteHeader(statusCode)
@@ -97,7 +97,7 @@ func (h *SidecarHandler) SubmitHandler(w http.ResponseWriter, r *http.Request) {
 			os.RemoveAll(filesPath)
 			return
 		}
-		out, err := SLURMBatchSubmit(path, h.Config, h.Ctx)
+		out, err := SLURMBatchSubmit(h.Config, h.Ctx, path)
 		if err != nil {
 			statusCode = http.StatusInternalServerError
 			w.WriteHeader(statusCode)
@@ -107,14 +107,14 @@ func (h *SidecarHandler) SubmitHandler(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		log.G(h.Ctx).Info(out)
-		err = handleJID(string(data.Pod.UID), out, data.Pod, filesPath, h.JIDs, h.Ctx)
+		err = handleJID(h.Ctx, data.Pod, string(data.Pod.UID), h.JIDs, out, filesPath)
 		if err != nil {
 			statusCode = http.StatusInternalServerError
 			w.WriteHeader(statusCode)
 			w.Write([]byte("Error handling JID. Check Slurm Sidecar's logs"))
 			log.G(h.Ctx).Error(err)
 			os.RemoveAll(filesPath)
-			err = deleteContainer(string(data.Pod.UID), filesPath, h.Config, h.JIDs, h.Ctx)
+			err = deleteContainer(h.Config, h.Ctx, string(data.Pod.UID), h.JIDs, filesPath)
 			return
 		}
 	}

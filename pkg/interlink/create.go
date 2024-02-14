@@ -38,7 +38,7 @@ func (h *InterLinkHandler) CreateHandler(w http.ResponseWriter, r *http.Request)
 
 	data := commonIL.RetrievedPodData{}
 	if h.Config.ExportPodData {
-		data, err = getData(pod, h.Config)
+		data, err = getData(h.Config, pod)
 		if err != nil {
 			statusCode = http.StatusInternalServerError
 			log.G(Ctx).Fatal(err)

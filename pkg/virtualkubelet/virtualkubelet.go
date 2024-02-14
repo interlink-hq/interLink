@@ -238,7 +238,7 @@ func (p *VirtualKubeletProvider) CreatePod(ctx context.Context, pod *v1.Pod) err
 	state = runningState
 
 	go func() {
-		err = RemoteExecution(p, ctx, CREATE, pod, p.interLinkConfig)
+		err = RemoteExecution(p.interLinkConfig, p, ctx, pod, CREATE)
 		if err != nil {
 			if err.Error() == "Deleted pod before actual creation" {
 				log.G(ctx).Warn(err)
@@ -374,7 +374,7 @@ func (p *VirtualKubeletProvider) DeletePod(ctx context.Context, pod *v1.Pod) (er
 	pod.Status.Reason = "VKProviderPodDeleted"
 
 	go func() {
-		err = RemoteExecution(p, ctx, DELETE, pod, p.interLinkConfig)
+		err = RemoteExecution(p.interLinkConfig, p, ctx, pod, DELETE)
 		if err != nil {
 			log.G(ctx).Error(err)
 			return
@@ -595,7 +595,7 @@ func (p *VirtualKubeletProvider) GetLogs(ctx context.Context, namespace, podName
 		Opts:          commonIL.ContainerLogOpts(opts),
 	}
 
-	return LogRetrieval(ctx, logsRequest, p.interLinkConfig)
+	return LogRetrieval(p.interLinkConfig, ctx, logsRequest)
 }
 
 // GetStatsSummary returns dummy stats for all pods known by this provider.
