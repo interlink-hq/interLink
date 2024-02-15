@@ -83,6 +83,7 @@ archives:
       - src: "examples/sidecar/templates/python/*"
         dst: docs
         strip_parent: true
+    id: interlink-install
       
 checksum:
   name_template: 'checksums.txt'
