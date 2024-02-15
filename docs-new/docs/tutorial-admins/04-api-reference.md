@@ -4,10 +4,7 @@ sidebar_position: 3
 
 # API reference
 
-Rerence of both interLink and plugins API.
+Please find the sidecar OpenAPI JSON spec can be found [https://raw.githubusercontent.com/intertwin-eu/interLink/sdk_rebased/examples/sidecar/templates/python/openapi.json].
 
-:::warning
+With an example of sidecar developemnt in python FastAPI at the same folder.
 
-TBD
-
-:::

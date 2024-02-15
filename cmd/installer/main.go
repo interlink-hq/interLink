@@ -266,7 +266,7 @@ func root(cmd *cobra.Command, args []string) error {
 		return err
 	}
 
-	fmt.Println("\n\n=== Installation script for remote interLink APIs stored at: " + outFolder + "/interlink-remote.sh ===\n\n  Please execute the script on the remote server: " + configCLI.InterLinkURL)
+	fmt.Println("\n\n=== Installation script for remote interLink APIs stored at: " + outFolder + "/interlink-remote.sh ===\n\n  Please execute the script on the remote server: " + configCLI.InterLinkURL + "\n\n  \"./interlink-remote.sh install\" followed by \"interlink-remote.sh start\"")
 
 	return nil
 
