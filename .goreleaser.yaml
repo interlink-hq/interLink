@@ -73,17 +73,6 @@ archives:
       {{- else if eq .Arch "darwin" }}MacOS
       {{- else }}{{ .Arch }}{{ end }}
     format: binary
-  - name_template: >-
-      examples_{{- title .Os}}_
-      {{- if eq .Arch "amd64" }}x86_64
-      {{- else if eq .Arch "linux" }}Linux
-      {{- else if eq .Arch "darwin" }}MacOS
-      {{- else }}{{ .Arch }}{{ end }}
-    files:
-      - src: "examples/sidecar/templates/python/*"
-        dst: docs
-        strip_parent: true
-    id: interlink-install
       
 checksum:
   name_template: 'checksums.txt'
