@@ -66,7 +66,7 @@ builds:
     main: ./cmd/sidecars/slurm
 archives:
   - name_template: >-
-      {{ .ProjectName }}_
+      {{ .Binary }}_
       {{- title .Os }}_
       {{- if eq .Arch "amd64" }}x86_64
       {{- else if eq .Arch "linux" }}Linux
