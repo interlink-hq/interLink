@@ -8,7 +8,7 @@ export default function HomepageVideo(): JSX.Element {
     <div className="container">
           <div style={{textAlign: 'center'}}>
           <Heading as="h1">
-          A world-class HPC at you hand with interLink
+          A world-class HPC at your hand with interLink
         </Heading>
         <iframe width="560" height="315" src="https://www.youtube.com/embed/-djIQGPvYdI?si=cyYXCkfhDgSZ_VtP" title="YouTube video player"  allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture; web-share" allowFullScreen ></iframe>
         </div>

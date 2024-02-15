@@ -6,6 +6,7 @@ import (
 	"embed"
 	"fmt"
 	"io"
+	"io/fs"
 	"os"
 	"text/template"
 
@@ -17,7 +18,7 @@ import (
 var (
 	// Used for flags.
 	cfgFile     string
-	outFile     string
+	outFolder   string
 	userLicense string
 
 	rootCmd = &cobra.Command{
@@ -37,8 +38,14 @@ type Resources struct {
 }
 
 type oauthStruct struct {
+	Provider      string   `yaml:"provider"`
+	Issuer        string   `yaml:"issuer,omitempty"`
 	RefreshToken  string   `yaml:"refresh_token,omitempty"`
+	Audience      string   `yaml:"audience,omitempty"`
+	Group         string   `yaml:"group,omitempty"`
+	GroupClaim    string   `yaml:"groupClaim,omitempty"`
 	Scopes        []string `yaml:"scopes"`
+	GitHUBOrg     string   `yaml:"github_org"`
 	TokenURL      string   `yaml:"token_url"`
 	DeviceCodeURL string   `yaml:"device_code_url"`
 	ClientID      string   `yaml:"client_id"`
@@ -46,12 +53,13 @@ type oauthStruct struct {
 }
 
 type dataStruct struct {
-	OAUTH         oauthStruct `yaml:"oauth,omitempty"`
-	InterLinkURL  string      `yaml:"interlink_url"`
-	InterLinkPort int         `yaml:"interlink_port"`
-	VKName        string      `yaml:"kubelet_node_name"`
-	Namespace     string      `yaml:"kubernetes_namespace,omitempty"`
-	VKLimits      Resources   `yaml:"node_limits"`
+	InterLinkURL     string      `yaml:"interlink_url"`
+	InterLinkPort    int         `yaml:"interlink_port"`
+	InterLinkVersion string      `yaml:"interlink_version"`
+	VKName           string      `yaml:"kubelet_node_name"`
+	Namespace        string      `yaml:"kubernetes_namespace,omitempty"`
+	VKLimits         Resources   `yaml:"node_limits"`
+	OAUTH            oauthStruct `yaml:"oauth,omitempty"`
 }
 
 func evalManifest(path string, dataStruct dataStruct) (string, error) {
@@ -92,6 +100,11 @@ func root(cmd *cobra.Command, args []string) error {
 	}
 
 	if onlyInit {
+
+		if _, err = os.Stat(cfgFile); err == nil {
+			return fmt.Errorf("File " + cfgFile + " exists. Please remove it before trying init again.")
+		}
+
 		dumpConfig := dataStruct{
 			VKName:    "my_VK_Node",
 			Namespace: "interlink",
@@ -100,14 +113,17 @@ func root(cmd *cobra.Command, args []string) error {
 				Memory: "256Gi",
 				Pods:   "10",
 			},
-			InterLinkURL:  "https://example.com",
-			InterLinkPort: 8443,
+			InterLinkURL:     "https://example.com",
+			InterLinkPort:    8443,
+			InterLinkVersion: "v0.1.2",
 			OAUTH: oauthStruct{
 				ClientID:      "",
 				ClientSecret:  "",
 				Scopes:        []string{""},
 				TokenURL:      "",
 				DeviceCodeURL: "",
+				Provider:      "github",
+				Issuer:        "https://github.com/oauth",
 			},
 		}
 
@@ -175,10 +191,10 @@ func root(cmd *cobra.Command, args []string) error {
 	if err != nil {
 		panic(err)
 	}
-	fmt.Println(token.AccessToken)
-	fmt.Println(token.RefreshToken)
-	fmt.Println(token.Expiry)
-	fmt.Println(token.TokenType)
+	//fmt.Println(token.AccessToken)
+	//fmt.Println(token.RefreshToken)
+	//fmt.Println(token.Expiry)
+	//fmt.Println(token.TokenType)
 
 	configCLI.OAUTH.RefreshToken = token.RefreshToken
 
@@ -209,8 +225,12 @@ func root(cmd *cobra.Command, args []string) error {
 		deploymentYAML,
 	}
 
+	err = os.MkdirAll(outFolder, fs.ModePerm)
+	if err != nil {
+		panic(err)
+	}
 	// Create a file and use bufio.NewWriter.
-	f, err := os.Create(outFile)
+	f, err := os.Create(outFolder + "/interlink.yaml")
 	if err != nil {
 		panic(err)
 	}
@@ -225,9 +245,28 @@ func root(cmd *cobra.Command, args []string) error {
 
 	w.Flush()
 
-	fmt.Println("Deployment file written at: " + outFile)
+	fmt.Println("\n\n=== Deployment file written at:  " + outFolder + "/interlink.yaml ===\n\n To deploy the virtual kubelet run:\n    kubectl apply -f " + outFolder + "/interlink.yaml")
 
 	// TODO: ilctl.sh templating
+	tmpl, err := template.ParseFS(templates, "templates/interlink-install.sh")
+	if err != nil {
+		return err
+	}
+
+	fInterlinkScript, err := os.Create(outFolder + "/interlink-remote.sh") // in Go version older than 1.17 you can use ioutil.TempFile
+	if err != nil {
+		return err
+	}
+
+	// close and remove the temporary file at the end of the program
+	defer fInterlinkScript.Close()
+	//
+	err = tmpl.Execute(fInterlinkScript, configCLI)
+	if err != nil {
+		return err
+	}
+
+	fmt.Println("\n\n=== Installation script for remote interLink APIs stored at: " + outFolder + "/interlink-remote.sh ===\n\n  Please execute the script on the remote server: " + configCLI.InterLinkURL)
 
 	return nil
 
@@ -237,7 +276,7 @@ func init() {
 	cobra.OnInitialize(initConfig)
 
 	rootCmd.PersistentFlags().StringVar(&cfgFile, "config", os.Getenv("HOME")+"/.interlink.yaml", "config file (default is $HOME/.interlink.yaml)")
-	rootCmd.PersistentFlags().StringVar(&outFile, "output", os.Getenv("HOME")+"/.interlink-deployment.yaml", "interlink deployment manifest location file (default is $HOME/.interlink-deployment.yaml)")
+	rootCmd.PersistentFlags().StringVar(&outFolder, "output-dir", os.Getenv("HOME")+"/.interlink", "interlink deployment manifests location (default is $HOME/.interlink)")
 	rootCmd.PersistentFlags().Bool("init", false, "dump an empty configuration to get started")
 	// rootCmd.AddCommand(vkCmd)
 	// rootCmd.AddCommand(sdkCmd)

@@ -224,5 +224,5 @@ async def status_pod(pods: List[interlink.PodRequest]) -> List[interlink.PodStat
     return ProviderNew.get_status(pods)
 
 @app.post("/getLogs")
-async def status_pod(req: interlink.LogRequest) -> bytes:
+async def get_logs(req: interlink.LogRequest) -> bytes:
     return ProviderNew.get_logs(req)

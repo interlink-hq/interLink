@@ -40,6 +40,30 @@ builds:
       - amd64
       - ppc64le
     main: ./cmd/sidecars/docker
+  - id: "interlink-install"
+    binary: interlink-install
+    env:
+      - CGO_ENABLED=0
+    goos:
+      - linux
+      - darwin
+    goarch:
+      - arm64
+      - amd64
+      - ppc64le
+    main: ./cmd/installer
+  - id: "interlink-sidecar-docker"
+    binary: interlink-sidecar-docker
+    env:
+      - CGO_ENABLED=0
+    goos:
+      - linux
+      - darwin
+    goarch:
+      - arm64
+      - amd64
+      - ppc64le
+    main: ./cmd/sidecars/docker
   - id: "interlink-sidecar-slurm"
     binary: interlink-sidecar-slurm
     env:
