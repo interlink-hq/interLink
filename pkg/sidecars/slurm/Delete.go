@@ -35,7 +35,7 @@ func (h *SidecarHandler) StopHandler(w http.ResponseWriter, r *http.Request) {
 
 	filesPath := h.Config.DataRootFolder + pod.Namespace + "-" + string(pod.UID)
 
-	err = deleteContainer(string(pod.UID), filesPath+"/"+pod.Namespace, h.Config, h.JIDs, h.Ctx)
+	err = deleteContainer(h.Ctx, h.Config, string(pod.UID), h.JIDs, filesPath+"/"+pod.Namespace)
 	if err != nil {
 		statusCode = http.StatusInternalServerError
 		w.WriteHeader(statusCode)
@@ -45,6 +45,11 @@ func (h *SidecarHandler) StopHandler(w http.ResponseWriter, r *http.Request) {
 	}
 	if os.Getenv("SHARED_FS") != "true" {
 		err = os.RemoveAll(filesPath)
+		statusCode = http.StatusInternalServerError
+		w.WriteHeader(statusCode)
+		w.Write([]byte("Error deleting containers. Check Slurm Sidecar's logs"))
+		log.G(h.Ctx).Error(err)
+		return
 	}
 
 	w.WriteHeader(statusCode)

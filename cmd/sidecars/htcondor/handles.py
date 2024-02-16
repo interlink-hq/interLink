@@ -478,7 +478,7 @@ def SubmitHandler():
                         mounts = prepare_mounts(pod, container_standalone)
             else:
                 mounts = [""]
-            if container["image"].startswith("/") or "://" in container["image"]:
+            if container["image"].startswith("/") or ".io" in container["image"]:
                 image_uri = metadata.get("Annotations", {}).get(
                     "htcondor-job.knoc.io/image-root", None
                 )
@@ -486,13 +486,12 @@ def SubmitHandler():
                     logging.info(image_uri)
                     image = image_uri + container["image"]
                 else:
-                    image =  container["image"]
                     logging.warning(
                         "image-uri not specified for path in remote filesystem"
                     )
             else:
                 image = "docker://" + container["image"]
-            #image = container["image"]
+            image = container["image"]
             logging.info("Appending all commands together...")
             input_files = []
             for mount in mounts[-1].split(","):
@@ -558,7 +557,7 @@ def StopHandler():
     # READ THE REQUEST ######
     logging.info("HTCondor Sidecar: received Stop call")
     request_data_string = request.data.decode("utf-8")
-    req = json.loads(request_data_string)[0]
+    req = json.loads(request_data_string)
     if req is None or not isinstance(req, dict):
         print("Invalid delete request body is: ", req)
         logging.error("Invalid request data")

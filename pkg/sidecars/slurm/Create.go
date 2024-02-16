@@ -51,12 +51,19 @@ func (h *SidecarHandler) SubmitHandler(w http.ResponseWriter, r *http.Request) {
 			if singularityAnnotation, ok := metadata.Annotations["job.vk.io/singularity-commands"]; ok {
 				singularityPrefix += " " + singularityAnnotation
 			}
-			commstr1 := []string{"singularity", "exec", "--writable-tmpfs", "--nv", "-H", "${HOME}/" +
-				h.Config.DataRootFolder + string(data.Pod.UID) + ":${HOME}"}
 
-			envs := prepareEnvs(container, h.Ctx)
+			//container.Resources.Requests
+			//overlayPath := h.Config.DataRootFolder + data.Pod.Namespace + "-" + string(data.Pod.UID) + "/overlay.img"
+			createOverlay := []string{}
+			//createOverlay := []string{"singularity", "overlay", "create", "--sparse", "--size=1024", overlayPath, "&&"}
+
+			commstr1 := []string{"singularity", "exec", "--nv"}
+			//commstr1 := []string{"singularity", "exec", "--containall", "--overlay", overlayPath, "--nv"}
+			//	h.Config.DataRootFolder + string(data.Pod.UID) }
+
+			envs := prepareEnvs(h.Ctx, container)
 			image := ""
-			mounts, err := prepareMounts(filesPath, container, req, h.Config, h.Ctx)
+			mounts, err := prepareMounts(h.Ctx, h.Config, req, container, filesPath)
 			log.G(h.Ctx).Debug(mounts)
 			if err != nil {
 				statusCode = http.StatusInternalServerError
@@ -79,7 +86,8 @@ func (h *SidecarHandler) SubmitHandler(w http.ResponseWriter, r *http.Request) {
 			}
 
 			log.G(h.Ctx).Debug("-- Appending all commands together...")
-			singularity_command := append(commstr1, envs...)
+			singularity_command := append(createOverlay, commstr1...)
+			singularity_command = append(singularity_command, envs...)
 			singularity_command = append(singularity_command, mounts...)
 			singularity_command = append(singularity_command, image)
 			singularity_command = append(singularity_command, container.Command...)
@@ -88,7 +96,7 @@ func (h *SidecarHandler) SubmitHandler(w http.ResponseWriter, r *http.Request) {
 			singularity_command_pod = append(singularity_command_pod, SingularityCommand{command: singularity_command, containerName: container.Name})
 		}
 
-		path, err := produceSLURMScript(filesPath, data.Pod.Namespace, string(data.Pod.UID), metadata, singularity_command_pod, h.Config, h.Ctx)
+		path, err := produceSLURMScript(h.Ctx, h.Config, data.Pod.Namespace, string(data.Pod.UID), filesPath, metadata, singularity_command_pod)
 		if err != nil {
 			statusCode = http.StatusInternalServerError
 			w.WriteHeader(statusCode)
@@ -97,7 +105,7 @@ func (h *SidecarHandler) SubmitHandler(w http.ResponseWriter, r *http.Request) {
 			os.RemoveAll(filesPath)
 			return
 		}
-		out, err := SLURMBatchSubmit(path, h.Config, h.Ctx)
+		out, err := SLURMBatchSubmit(h.Ctx, h.Config, path)
 		if err != nil {
 			statusCode = http.StatusInternalServerError
 			w.WriteHeader(statusCode)
@@ -107,14 +115,14 @@ func (h *SidecarHandler) SubmitHandler(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		log.G(h.Ctx).Info(out)
-		err = handleJID(string(data.Pod.UID), out, data.Pod, filesPath, h.JIDs, h.Ctx)
+		err = handleJID(h.Ctx, data.Pod, string(data.Pod.UID), h.JIDs, out, filesPath)
 		if err != nil {
 			statusCode = http.StatusInternalServerError
 			w.WriteHeader(statusCode)
 			w.Write([]byte("Error handling JID. Check Slurm Sidecar's logs"))
 			log.G(h.Ctx).Error(err)
 			os.RemoveAll(filesPath)
-			err = deleteContainer(string(data.Pod.UID), filesPath, h.Config, h.JIDs, h.Ctx)
+			err = deleteContainer(h.Ctx, h.Config, string(data.Pod.UID), h.JIDs, filesPath)
 			return
 		}
 	}

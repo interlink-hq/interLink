@@ -28,6 +28,18 @@ builds:
       - amd64
       - ppc64le
     main: ./cmd/interlink
+  - id: "interlink-install"
+    binary: interlink-install
+    env:
+      - CGO_ENABLED=0
+    goos:
+      - linux
+      - darwin
+    goarch:
+      - arm64
+      - amd64
+      - ppc64le
+    main: ./cmd/installer
   - id: "interlink-sidecar-docker"
     binary: interlink-sidecar-docker
     env:
@@ -54,12 +66,14 @@ builds:
     main: ./cmd/sidecars/slurm
 archives:
   - name_template: >-
-      {{ .ProjectName }}_
+      {{ .Binary }}_
       {{- title .Os }}_
       {{- if eq .Arch "amd64" }}x86_64
       {{- else if eq .Arch "linux" }}Linux
       {{- else if eq .Arch "darwin" }}MacOS
       {{- else }}{{ .Arch }}{{ end }}
+    format: binary
+      
 checksum:
   name_template: 'checksums.txt'
 snapshot:
@@ -68,7 +82,7 @@ changelog:
   sort: asc
   filters:
     exclude:
-      - '^docs:'
+      - '^docs_new:'
       - '^test:'
 
 # modelines, feel free to remove those if you don't want/use them:

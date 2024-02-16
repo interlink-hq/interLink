@@ -59,6 +59,7 @@ func (h *InterLinkHandler) GetLogsHandler(w http.ResponseWriter, r *http.Request
 		log.G(Ctx).Fatal(err)
 	}
 
+	req.Header.Set("Content-Type", "application/json")
 	log.G(Ctx).Info("InterLink: forwarding GetLogs call to sidecar")
 	resp, err := http.DefaultClient.Do(req)
 	if err != nil {

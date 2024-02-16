@@ -8,6 +8,7 @@ import json
 import time
 import logging
 import requests
+from urllib import parse
 
 if __name__ == '__main__':
     """
@@ -15,7 +16,7 @@ if __name__ == '__main__':
     """
     try:
         iam_server = os.environ.get(
-            "IAM_SERVER", "https://cms-auth.web.cern.ch/")
+            "IAM_TOKEN_ENDPOINT", "https://cms-auth.web.cern.ch/token")
         iam_client_id = os.environ.get("IAM_CLIENT_ID")
         iam_client_secret = os.environ.get("IAM_CLIENT_SECRET")
         iam_refresh_token = os.environ.get("IAM_REFRESH_TOKEN")
@@ -25,32 +26,57 @@ if __name__ == '__main__':
         print(ex)
         exit(1)
 
+    try:
+        with open(output_file+"-refresh", "r") as text_file:
+            rt = text_file.readline()
+        if rt != "": 
+            iam_refresh_token = rt
+    except:
+        logging.info("No cache for refresh token, starting from ENV value")
+
+    print(iam_refresh_token)
     token = None
 
     while True:
         try:
             request_data = {
-                "audience": audience,
+                #"audience": audience,
                 "grant_type": "refresh_token",
                 "refresh_token": iam_refresh_token,
-                "scope": "openid profile email address phone offline_access"
+                #"scope": "openid profile email address phone offline_access"
             }
 
             from requests.auth import HTTPBasicAuth
             auth = HTTPBasicAuth(iam_client_id, iam_client_secret)
 
-            r = requests.post(iam_server+"token", data=request_data, auth=auth)
-            response = json.loads(r.text)
+            r = requests.post(iam_server, data=request_data, auth=auth)
+            print(r.text)
+            try:
+                response = json.loads(r.text)
+            except:
+                try:
+                    response = dict(parse.parse_qsl(r.text)) 
+                    print(response)
+                except:
+                    exit(1)
+                    
 
-            #print(iam_client_id, iam_client_secret, response)
+            print(iam_client_id, iam_client_secret, response)
             token = response['access_token']
+            refresh_token = response['refresh_token']
 
-            logging.info("Token retrieved")
+            print("Token retrieved")
+
+            ## TODO: collect new refresh token and store it somewhere
+            with open(output_file+"-refresh", "w") as text_file:
+                text_file.write(refresh_token)
+
+            print(f"Refresh token written in {output_file+'-refresh'}")
 
             with open(output_file, "w") as text_file:
                 text_file.write(token)
 
-            logging.info(f"Token written in {output_file}")
+            print(f"Token written in {output_file}")
 
         except Exception as e:
             logging.warn("ERROR oidc get token: {}".format(e))

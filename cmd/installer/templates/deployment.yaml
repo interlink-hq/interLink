@@ -1,0 +1,98 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{.VKName}} 
+  namespace: {{.Namespace}}
+  labels:
+    nodeName: {{.VKName}}
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      nodeName: {{.VKName}}
+  template:
+    metadata:
+      labels:
+        nodeName: {{.VKName}}
+    spec:
+      #hostNetwork: true
+      containers:
+      - name: jaeger
+        image: jaegertracing/all-in-one:1.51
+      - name: inttw-vk
+        image: ghcr.io/intertwin-eu/virtual-kubelet-inttw:latest
+        imagePullPolicy: Always
+        env:
+        - name: NODENAME
+          value: {{.VKName}} 
+        - name: CONFIGPATH
+          value: /etc/interlink/interlink-cfg.json
+        - name: KUBELET_PORT
+          value: "10250"
+        - name: POD_IP
+          valueFrom:
+            fieldRef:
+              fieldPath: status.podIP
+        - name: INTERLINKCONFIGPATH
+          value: "/etc/interlink/InterLinkConfig.yaml"
+        - name: VKTOKENFILE
+          value: "/opt/interlink/token"
+        volumeMounts:
+        - name: config
+          mountPath: /etc/interlink/InterLinkConfig.yaml
+          subPath: InterLinkConfig.yaml
+        - name: config
+          mountPath: /etc/interlink/kubeconfig
+          subPath: kubeconfig
+        - name: config-json
+          mountPath: /etc/interlink/interlink-cfg.json
+          subPath: interlink-cfg.json
+        - name: token
+          mountPath: /opt/interlink
+        resources:
+          limits:
+            cpu: 2000m
+            memory: 2Gi
+          requests:
+            cpu: 100m
+            memory: 200Mi
+      - name: refresh-token
+        image: ghcr.io/intertwin-eu/virtual-kubelet-inttw-refresh:latest
+        imagePullPolicy: Always
+        env:
+        - name: IAM_TOKEN_ENDPOINT 
+          value: {{.OAUTH.TokenURL}} 
+        # TODO load env IAM client from secret
+        - name: IAM_CLIENT_ID
+          value: {{.OAUTH.ClientID}}
+        - name: IAM_CLIENT_SECRET
+          value: {{.OAUTH.ClientSecret}} 
+        - name: IAM_REFRESH_TOKEN
+          value: {{.OAUTH.RefreshToken}}
+        - name: TOKEN_PATH
+          value: /opt/interlink/token
+        command:
+        - python3
+        - /opt/refresh.py
+        resources:
+          limits:
+            cpu: 200m
+            memory: 500Mi
+          requests:
+            cpu: 100m
+            memory: 300Mi
+        volumeMounts:
+        - name: token
+          mountPath: /opt/interlink
+      serviceAccountName: {{.VKName}} 
+      volumes:
+      - name: config
+        configMap:
+          # Provide the name of the ConfigMap you want to mount.
+          name: {{.VKName}}-config
+      - name: config-json
+        configMap:
+          # Provide the name of the ConfigMap you want to mount.
+          name: {{.VKName}}-config-json
+      - name: token
+        emptyDir: {}

@@ -1,4 +1,4 @@
-all: interlink vk sidecars
+all: interlink vk sidecars installer
 
 interlink:
 	CGO_ENABLED=0 OOS=linux go build -o bin/interlink cmd/interlink/main.go
@@ -9,6 +9,9 @@ vk:
 sidecars:
 	CGO_ENABLED=0 GOOS=linux go build -o bin/docker-sd cmd/sidecars/docker/main.go
 	CGO_ENABLED=0 GOOS=linux go build -o bin/slurm-sd cmd/sidecars/slurm/main.go
+
+installer:
+	CGO_ENABLED=0 OOS=linux go build -o bin/interlink cmd/installer/main.go
 
 clean:
 	rm -rf ./bin

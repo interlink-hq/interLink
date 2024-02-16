@@ -38,7 +38,7 @@ func (h *InterLinkHandler) CreateHandler(w http.ResponseWriter, r *http.Request)
 
 	data := commonIL.RetrievedPodData{}
 	if h.Config.ExportPodData {
-		data, err = getData(pod, h.Config)
+		data, err = getData(h.Config, pod)
 		if err != nil {
 			statusCode = http.StatusInternalServerError
 			log.G(Ctx).Fatal(err)
@@ -59,6 +59,7 @@ func (h *InterLinkHandler) CreateHandler(w http.ResponseWriter, r *http.Request)
 		log.G(Ctx).Debug(string(bodyBytes))
 		reader := bytes.NewReader(bodyBytes)
 
+		log.G(Ctx).Info(req)
 		req, err = http.NewRequest(http.MethodPost, h.Config.Sidecarurl+":"+h.Config.Sidecarport+"/create", reader)
 
 		if err != nil {
@@ -71,6 +72,7 @@ func (h *InterLinkHandler) CreateHandler(w http.ResponseWriter, r *http.Request)
 		log.G(Ctx).Info("InterLink: forwarding Create call to sidecar")
 		var resp *http.Response
 
+		req.Header.Set("Content-Type", "application/json")
 		resp, err = http.DefaultClient.Do(req)
 		if err != nil {
 			statusCode = http.StatusInternalServerError

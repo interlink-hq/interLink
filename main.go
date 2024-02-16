@@ -124,6 +124,8 @@ func initProvider() (func(context.Context) error, error) {
 		return nil, fmt.Errorf("failed to create resource: %w", err)
 	}
 
+	// TODO: disable is telemetry is disabled
+
 	// If the OpenTelemetry Collector is running on a local cluster (minikube or
 	// microk8s), it should be accessible through the NodePort service at the
 	// `localhost:30080` endpoint. Otherwise, replace `localhost` with the
@@ -164,8 +166,6 @@ func initProvider() (func(context.Context) error, error) {
 }
 
 func main() {
-	// Try from bash:
-	// INTERLINKCONFIGPATH=$PWD/kustomizations/InterLinkConfig.yaml CONFIGPATH=$PWD/kustomizations/knoc-cfg.json NODENAME=test-vk ./bin/vk
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 	nodename := flag.String("nodename", "", "The name of the node")
@@ -198,7 +198,11 @@ func main() {
 
 	log.G(ctx).Info("Tracer setup succeeded")
 
+	// TODO: disable this through options
 	trace.T = opentelemetry.Adapter{}
+
+	// TODO: if token specified http.DefaultClient = ...
+	// and remove reading from file
 
 	http.DefaultTransport.(*http.Transport).TLSClientConfig = &tls.Config{InsecureSkipVerify: true}
 

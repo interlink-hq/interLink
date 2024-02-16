@@ -17,14 +17,14 @@ type MutexStatuses struct {
 
 var PodStatuses MutexStatuses
 
-func getData(pod commonIL.PodCreateRequests, config commonIL.InterLinkConfig) (commonIL.RetrievedPodData, error) {
+func getData(config commonIL.InterLinkConfig, pod commonIL.PodCreateRequests) (commonIL.RetrievedPodData, error) {
 	log.G(Ctx).Debug(pod.ConfigMaps)
 	var retrievedData commonIL.RetrievedPodData
 	retrievedData.Pod = pod.Pod
 	for _, container := range pod.Pod.Spec.Containers {
 		log.G(Ctx).Info("- Retrieving Secrets and ConfigMaps for the Docker Sidecar. Container: " + container.Name)
 		log.G(Ctx).Debug(container.VolumeMounts)
-		data, err := retrieveData(container, pod, config)
+		data, err := retrieveData(config, pod, container)
 		if err != nil {
 			log.G(Ctx).Error(err)
 			return commonIL.RetrievedPodData{}, err
@@ -35,7 +35,7 @@ func getData(pod commonIL.PodCreateRequests, config commonIL.InterLinkConfig) (c
 	return retrievedData, nil
 }
 
-func retrieveData(container v1.Container, pod commonIL.PodCreateRequests, config commonIL.InterLinkConfig) (commonIL.RetrievedContainer, error) {
+func retrieveData(config commonIL.InterLinkConfig, pod commonIL.PodCreateRequests, container v1.Container) (commonIL.RetrievedContainer, error) {
 	retrievedData := commonIL.RetrievedContainer{}
 	for _, mountVar := range container.VolumeMounts {
 		log.G(Ctx).Debug("-- Retrieving data for mountpoint " + mountVar.Name)
