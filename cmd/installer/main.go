@@ -45,7 +45,7 @@ type oauthStruct struct {
 	Group         string   `yaml:"group,omitempty"`
 	GroupClaim    string   `yaml:"groupClaim,omitempty"`
 	Scopes        []string `yaml:"scopes"`
-	GitHUBOrg     string   `yaml:"github_org"`
+	GitHUBUser    string   `yaml:"github_user"`
 	TokenURL      string   `yaml:"token_url"`
 	DeviceCodeURL string   `yaml:"device_code_url"`
 	ClientID      string   `yaml:"client_id"`
@@ -53,7 +53,7 @@ type oauthStruct struct {
 }
 
 type dataStruct struct {
-	InterLinkURL     string      `yaml:"interlink_url"`
+	InterLinkIP      string      `yaml:"interlink_ip"`
 	InterLinkPort    int         `yaml:"interlink_port"`
 	InterLinkVersion string      `yaml:"interlink_version"`
 	VKName           string      `yaml:"kubelet_node_name"`
@@ -106,16 +106,16 @@ func root(cmd *cobra.Command, args []string) error {
 		}
 
 		dumpConfig := dataStruct{
-			VKName:    "my_VK_Node",
+			VKName:    "my-vk-node",
 			Namespace: "interlink",
 			VKLimits: Resources{
 				CPU:    "10",
 				Memory: "256Gi",
 				Pods:   "10",
 			},
-			InterLinkURL:     "https://example.com",
+			InterLinkIP:      "127.0.0.1",
 			InterLinkPort:    8443,
-			InterLinkVersion: "v0.1.2",
+			InterLinkVersion: "0.1.2",
 			OAUTH: oauthStruct{
 				ClientID:      "",
 				ClientSecret:  "",
@@ -123,6 +123,7 @@ func root(cmd *cobra.Command, args []string) error {
 				TokenURL:      "",
 				DeviceCodeURL: "",
 				Provider:      "github",
+				GitHUBUser:    "myusername",
 				Issuer:        "https://github.com/oauth",
 			},
 		}
@@ -266,7 +267,7 @@ func root(cmd *cobra.Command, args []string) error {
 		return err
 	}
 
-	fmt.Println("\n\n=== Installation script for remote interLink APIs stored at: " + outFolder + "/interlink-remote.sh ===\n\n  Please execute the script on the remote server: " + configCLI.InterLinkURL + "\n\n  \"./interlink-remote.sh install\" followed by \"interlink-remote.sh start\"")
+	fmt.Println("\n\n=== Installation script for remote interLink APIs stored at: " + outFolder + "/interlink-remote.sh ===\n\n  Please execute the script on the remote server: " + configCLI.InterLinkIP + "\n\n  \"./interlink-remote.sh install\" followed by \"interlink-remote.sh start\"")
 
 	return nil
 

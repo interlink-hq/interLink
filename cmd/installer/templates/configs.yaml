@@ -1,7 +1,7 @@
 apiVersion: v1
 data:
   InterLinkConfig.yaml: |
-    InterlinkURL: {{.InterLinkURL}}
+    InterlinkURL: https://{{.InterLinkIP}}
     InterlinkPort: {{.InterLinkPort}}
     CommandPrefix: ""
     ExportPodData: true
@@ -10,7 +10,7 @@ data:
     VKTokenFile: /opt/interlink/token
 kind: ConfigMap
 metadata:
-  name: {{.VKName}} 
+  name: "{{.VKName}}-config"
   namespace: {{.Namespace}} 
 ---
 apiVersion: v1
@@ -18,12 +18,12 @@ data:
   interlink-cfg.json: |
     {
       "{{.VKName}}": {
-        "cpu": {{.VKLimits.CPU}},
-        "memory": {{.VKLimits.Memory}},
-        "pods": {{.VKLimits.Pods}}
+        "cpu": "{{.VKLimits.CPU}}",
+        "memory": "{{.VKLimits.Memory}}",
+        "pods": "{{.VKLimits.Pods}}"
       }
     }
 kind: ConfigMap
 metadata:
-  name: {{.VKName}} 
+  name: "{{.VKName}}-config-json"
   namespace: {{.Namespace}} 

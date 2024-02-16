@@ -44,7 +44,7 @@ func main() {
 	mutex.HandleFunc("/status", interLinkAPIs.StatusHandler)
 	mutex.HandleFunc("/create", interLinkAPIs.CreateHandler)
 	mutex.HandleFunc("/delete", interLinkAPIs.DeleteHandler)
-	mutex.HandleFunc("/ping", interLinkAPIs.Ping)
+	mutex.HandleFunc("/pinglink", interLinkAPIs.Ping)
 	mutex.HandleFunc("/getLogs", interLinkAPIs.GetLogsHandler)
 	mutex.HandleFunc("/updateCache", interlink.UpdateCacheHandler)
 	err = http.ListenAndServe(":"+commonIL.InterLinkConfigInst.Interlinkport, mutex)
