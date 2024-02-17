@@ -8,7 +8,7 @@ import useBaseUrl from '@docusaurus/useBaseUrl';
 
 Learn how to deploy interLink virtual nodes on your cluster. In this tutorial you are going to setup all the needed components to be able to either __develop__ or __deploy__ the sidecar for container management on a **remote** host via a **local** kubernetes cluster.
 
-The installation script that we are going to configure will take care of providing you with a complete Kubernetes manifest to instatiate the virtual node interface. Also you will get an installation bash script to be executed on the remote host where you want to delegate your container execution. That script is already configured to **automatically** authenticate the incoming request from the virtual node component, and forward the correct instructions to the openAPI interface of the [interLink plugin](./category/guides) (a.k.a. sidecar) of your choice. Thus you can use this setup also for directly [developing a sidecar](./category/guides), without caring for anything else. 
+The installation script that we are going to configure will take care of providing you with a complete Kubernetes manifest to instatiate the virtual node interface. Also you will get an installation bash script to be executed on the remote host where you want to delegate your container execution. That script is already configured to **automatically** authenticate the incoming request from the virtual node component, and forward the correct instructions to the openAPI interface of the [interLink plugin](./03-api-reference.md) (a.k.a. sidecar) of your choice. Thus you can use this setup also for directly [developing a sidecar](./03-api-reference.md), without caring for anything else. 
 
 ## Requirements
 
@@ -200,5 +200,5 @@ To stop or restart the components you can use the dedicated commands:
 
 Next chapter will show the basics for developing a new plugin following the interLink openAPI spec.
 
-In alterative you can start an [already supported one](./category/guides).
+In alterative you can start an [already supported one](./03-api-reference.md).
 
