@@ -40,7 +40,7 @@ func (h *InterLinkHandler) GetLogsHandler(w http.ResponseWriter, r *http.Request
 		} else {
 			w.Write([]byte("Both SinceSeconds and SinceTime set. Set only one of them"))
 		}
-		log.G(Ctx).Error(errors.New("Check Opts configurations"))
+		log.G(Ctx).Error(errors.New("check opts configurations"))
 		return
 	}
 

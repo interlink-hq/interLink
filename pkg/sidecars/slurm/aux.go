@@ -40,9 +40,10 @@ type SingularityCommand struct {
 	command       []string
 }
 
-func parsingTimeFromString(Ctx context.Context, stringTime string) (time.Time, error) {
+// Parses time from a string and returns it into a variable of type time.Time.
+// The format time can be specified in the 3rd argument.
+func parsingTimeFromString(Ctx context.Context, stringTime string, timestampFormat string) (time.Time, error) {
 	parsedTime := time.Time{}
-	timestampFormat := "2006-01-02 15:04:05.999999999 -0700 MST"
 	parts := strings.Fields(stringTime)
 	if len(parts) != 4 {
 		err := errors.New("invalid timestamp format")
@@ -59,6 +60,7 @@ func parsingTimeFromString(Ctx context.Context, stringTime string) (time.Time, e
 	return parsedTime, nil
 }
 
+// Just a dummy function to be sure directories exists at runtime
 func CreateDirectories(config commonIL.InterLinkConfig) error {
 	path := config.DataRootFolder
 	if _, err := os.Stat(path); err != nil {
@@ -72,6 +74,9 @@ func CreateDirectories(config commonIL.InterLinkConfig) error {
 	return nil
 }
 
+// Loads Job IDs into the main JIDs struct from files in the root folder.
+// It's useful went down and needed to be restarded, but there were jobs running, for example.
+// Return only error in case of failure
 func LoadJIDs(Ctx context.Context, config commonIL.InterLinkConfig, JIDs *map[string]*JidStruct) error {
 	path := config.DataRootFolder
 
@@ -103,7 +108,7 @@ func LoadJIDs(Ctx context.Context, config commonIL.InterLinkConfig, JIDs *map[st
 			if err != nil {
 				log.G(Ctx).Debug(err)
 			} else {
-				StartedAt, err = parsingTimeFromString(Ctx, string(StartedAtString))
+				StartedAt, err = parsingTimeFromString(Ctx, string(StartedAtString), "2006-01-02 15:04:05.999999999 -0700 MST")
 				if err != nil {
 					log.G(Ctx).Debug(err)
 				}
@@ -113,7 +118,7 @@ func LoadJIDs(Ctx context.Context, config commonIL.InterLinkConfig, JIDs *map[st
 			if err != nil {
 				log.G(Ctx).Debug(err)
 			} else {
-				FinishedAt, err = parsingTimeFromString(Ctx, string(FinishedAtString))
+				FinishedAt, err = parsingTimeFromString(Ctx, string(FinishedAtString), "2006-01-02 15:04:05.999999999 -0700 MST")
 				if err != nil {
 					log.G(Ctx).Debug(err)
 				}
@@ -126,6 +131,8 @@ func LoadJIDs(Ctx context.Context, config commonIL.InterLinkConfig, JIDs *map[st
 	return nil
 }
 
+// Reads all Environment variables from a container and append them to a slice of strings.
+// It returns the slice containing all envs in the form of key=value.
 func prepareEnvs(Ctx context.Context, container v1.Container) []string {
 	if len(container.Env) > 0 {
 		log.G(Ctx).Info("-- Appending envs")
@@ -150,6 +157,12 @@ func prepareEnvs(Ctx context.Context, container v1.Container) []string {
 	}
 }
 
+// Iterates along the struct provided in the data parameter and checks for ConfigMaps, Secrets and EmptyDirs to be mounted.
+// For each element found, the mountData function is called.
+// In this context, the general case is given by host and container not sharing the file system, so data are stored within ENVS with matching names.
+// The content of these ENVS will be written to a text file by the generated SLURM script later, so the container will be able to mount these files.
+// The command to write files is appended in the global "prefix" variable.
+// It returns a string composed as the singularity --bind command to bind mount directories and files and the first encountered error.
 func prepareMounts(
 	Ctx context.Context,
 	config commonIL.InterLinkConfig,
@@ -235,6 +248,10 @@ func prepareMounts(
 	return append(mount, mountedData), nil
 }
 
+// As the name suggests, this function generates a SLURM script according to data collected.
+// It must be called after ENVS and mounts are already set up since
+// it relies on "prefix" variable being populated with needed data and ENVS passed in the commands parameter.
+// It returns the path to the generated script and the first encountered error.
 func produceSLURMScript(
 	Ctx context.Context,
 	config commonIL.InterLinkConfig,
@@ -354,6 +371,9 @@ func produceSLURMScript(
 	return f.Name(), nil
 }
 
+// Submits the job provided in the path argument to the SLURM queue.
+// At this point, it's up to the SLURM scheduler to manage the job.
+// Returns the output of the sbatch command and the first encoundered error.
 func SLURMBatchSubmit(Ctx context.Context, config commonIL.InterLinkConfig, path string) (string, error) {
 	log.G(Ctx).Info("- Submitting Slurm job")
 	shell := exec2.ExecTask{
@@ -378,6 +398,11 @@ func SLURMBatchSubmit(Ctx context.Context, config commonIL.InterLinkConfig, path
 	return string(execReturn.Stdout), nil
 }
 
+// This function creates a JID file to store the Job ID of the submitted job.
+// The output parameter must be the output of SLURMBatchSubmit function and the path
+// is the path where to store the JID file.
+// It also adds the JID to the JIDs main structure.
+// Return the first encountered error.
 func handleJID(Ctx context.Context, pod v1.Pod, podUID string, JIDs *map[string]*JidStruct, output string, path string) error {
 	r := regexp.MustCompile(`Submitted batch job (?P<jid>\d+)`)
 	jid := r.FindStringSubmatch(output)
@@ -398,10 +423,14 @@ func handleJID(Ctx context.Context, pod v1.Pod, podUID string, JIDs *map[string]
 	return nil
 }
 
+// Just delete a JID from the structure
 func removeJID(podUID string, JIDs *map[string]*JidStruct) {
 	delete(*JIDs, podUID)
 }
 
+// Checks if a Job has not yet deleted and, in case, calls the scancel command to abort the job execution.
+// It then removes the JID from the main JIDs structure and all the related files on the disk.
+// Returns the first encountered error.
 func deleteContainer(Ctx context.Context, config commonIL.InterLinkConfig, podUID string, JIDs *map[string]*JidStruct, path string) error {
 	log.G(Ctx).Info("- Deleting Job for pod " + podUID)
 	if checkIfJidExists(JIDs, podUID) {
@@ -422,6 +451,11 @@ func deleteContainer(Ctx context.Context, config commonIL.InterLinkConfig, podUI
 	return err
 }
 
+// This function is called by prepareMounts and creates files and directory according to their definition in the pod structure.
+// The data parameter is an interface and it can be of type v1.ConfigMap, v1.Secret and string (for the empty dir).
+// Returns 2 slices of string, one containing the ConfigMaps/Secrets/EmptyDirs paths and one the list of relatives ENVS to be used
+// to create the files inside the container.
+// It also returns the first encountered error.
 func mountData(Ctx context.Context, config commonIL.InterLinkConfig, pod v1.Pod, container v1.Container, data interface{}, path string) ([]string, []string, error) {
 	if config.ExportPodData {
 		for _, mountSpec := range container.VolumeMounts {
@@ -613,6 +647,7 @@ func mountData(Ctx context.Context, config commonIL.InterLinkConfig, pod v1.Pod,
 	return nil, nil, nil
 }
 
+// Just checks if a JID is in the main JIDs struct
 func checkIfJidExists(JIDs *map[string]*JidStruct, uid string) bool {
 	_, ok := (*JIDs)[uid]
 

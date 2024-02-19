@@ -14,6 +14,8 @@ import (
 	commonIL "github.com/intertwin-eu/interlink/pkg/common"
 )
 
+// Reads Jobs' output file to return what's logged inside.
+// What's returned is based on the provided parameters (Tail/LimitBytes/Timestamps/etc)
 func (h *SidecarHandler) GetLogsHandler(w http.ResponseWriter, r *http.Request) {
 	log.G(h.Ctx).Info("Docker Sidecar: received GetLogs call")
 	var req commonIL.LogStruct

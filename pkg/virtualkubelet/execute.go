@@ -22,6 +22,7 @@ import (
 
 var ClientSet *kubernetes.Clientset
 
+// Called when the VK receives the status of a pod already deleted. Tells to the InterLink API to update the cache deleting that pod
 func updateCacheRequest(config commonIL.InterLinkConfig, uid string, token string) error {
 	bodyBytes := []byte(uid)
 
@@ -48,6 +49,8 @@ func updateCacheRequest(config commonIL.InterLinkConfig, uid string, token strin
 	return err
 }
 
+// REST call to the InterLink API when a Pod is registered to the VK. It Marshals the pod with already retrieved ConfigMaps and Secrets and sends it to InterLink.
+// Returns the call response expressed in bytes and/or the first encountered error
 func createRequest(config commonIL.InterLinkConfig, pod commonIL.PodCreateRequests, token string) ([]byte, error) {
 	var returnValue, _ = json.Marshal(commonIL.PodStatus{})
 
@@ -86,6 +89,8 @@ func createRequest(config commonIL.InterLinkConfig, pod commonIL.PodCreateReques
 	return returnValue, nil
 }
 
+// REST call to the InterLink API when a Pod is deleted from the VK. It Marshals the standard v1.Pod struct and sends it to InterLink.
+// Returns the call response expressed in bytes and/or the first encountered error
 func deleteRequest(config commonIL.InterLinkConfig, pod *v1.Pod, token string) ([]byte, error) {
 	bodyBytes, err := json.Marshal(pod)
 	if err != nil {
@@ -126,9 +131,11 @@ func deleteRequest(config commonIL.InterLinkConfig, pod *v1.Pod, token string) (
 		}
 		return returnValue, nil
 	}
-
 }
 
+// REST call to the InterLink API when the VK needs an update on its Pods' status. A Marshalled slice of v1.Pod is sent to the InterLink API,
+// to query the below plugin for their status.
+// Returns the call response expressed in bytes and/or the first encountered error
 func statusRequest(config commonIL.InterLinkConfig, podsList []*v1.Pod, token string) ([]byte, error) {
 	var returnValue []byte
 
@@ -171,6 +178,9 @@ func statusRequest(config commonIL.InterLinkConfig, podsList []*v1.Pod, token st
 	return returnValue, nil
 }
 
+// REST call to the InterLink API when the user ask for a log retrieval. Compared to create/delete/status request, a way smaller struct is marshalled and sent.
+// This struct only includes a minimum data set needed to identify the job/container to get the logs from.
+// Returns the call response and/or the first encountered error
 func LogRetrieval(ctx context.Context, config commonIL.InterLinkConfig, logsRequest commonIL.LogStruct) (io.ReadCloser, error) {
 	b, err := os.ReadFile(config.VKTokenFile) // just pass the file name
 	if err != nil {
@@ -209,6 +219,10 @@ func LogRetrieval(ctx context.Context, config commonIL.InterLinkConfig, logsRequ
 	}
 }
 
+// This function is called by the VK everytime a Pod is being registered or deleted to/from the VK.
+// Depending on the mode (CREATE/DELETE), it performs different actions, making different REST calls.
+// Note: for the CREATE mode, the function gets stuck up to 5 minutes waiting for every missing ConfigMap/Secret.
+// If after 5m they are not still available, the function errors out
 func RemoteExecution(ctx context.Context, config commonIL.InterLinkConfig, p *VirtualKubeletProvider, pod *v1.Pod, mode int8) error {
 
 	b, err := os.ReadFile(config.VKTokenFile) // just pass the file name
@@ -321,6 +335,9 @@ func RemoteExecution(ctx context.Context, config commonIL.InterLinkConfig, p *Vi
 	return nil
 }
 
+// It is regularly called by the VK itself at regular intervals of time to query InterLink for Pods' status.
+// It basically append all available pods registered to the VK to a slice and passes this slice to the statusRequest function.
+// After the statusRequest returns a response, this function uses that response to update every Pod and Container status.
 func checkPodsStatus(ctx context.Context, p *VirtualKubeletProvider, token string, config commonIL.InterLinkConfig) error {
 	if len(p.pods) == 0 {
 		return nil

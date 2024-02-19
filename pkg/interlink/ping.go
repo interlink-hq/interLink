@@ -7,6 +7,7 @@ import (
 	"github.com/containerd/containerd/log"
 )
 
+// Just a very basic Ping function
 func (h *InterLinkHandler) Ping(w http.ResponseWriter, r *http.Request) {
 	log.G(Ctx).Info("InterLink: received Ping call")
 	w.WriteHeader(http.StatusOK)

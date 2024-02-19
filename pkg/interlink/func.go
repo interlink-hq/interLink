@@ -17,6 +17,9 @@ type MutexStatuses struct {
 
 var PodStatuses MutexStatuses
 
+// Retrieves ConfigMaps, Secrets and EmptyDirs from the provided pod by calling the retrieveData function.
+// The config is needed by the retrieveData function.
+// The function aggregates the return values of retrieveData function in a commonIL.RetrievedPodData variable and returns it, along with the first encountered error.
 func getData(config commonIL.InterLinkConfig, pod commonIL.PodCreateRequests) (commonIL.RetrievedPodData, error) {
 	log.G(Ctx).Debug(pod.ConfigMaps)
 	var retrievedData commonIL.RetrievedPodData
@@ -35,6 +38,9 @@ func getData(config commonIL.InterLinkConfig, pod commonIL.PodCreateRequests) (c
 	return retrievedData, nil
 }
 
+// Retrieves ConfigMaps, Secrets and EmptyDirs.
+// The config is needed to specify the EmptyDirs mounting point.
+// It returns the retrieved data in a variable of type commonIL.RetrievedContainer and the first encountered error.
 func retrieveData(config commonIL.InterLinkConfig, pod commonIL.PodCreateRequests, container v1.Container) (commonIL.RetrievedContainer, error) {
 	retrievedData := commonIL.RetrievedContainer{}
 	for _, mountVar := range container.VolumeMounts {
@@ -76,12 +82,14 @@ func retrieveData(config commonIL.InterLinkConfig, pod commonIL.PodCreateRequest
 	return retrievedData, nil
 }
 
+// Locks the map PodStatuses and delete the uid key from that map
 func deleteCachedStatus(uid string) {
 	PodStatuses.mu.Lock()
 	delete(PodStatuses.Statuses, uid)
 	PodStatuses.mu.Unlock()
 }
 
+// Checks if the uid key is present in the PodStatuses map and returns a bool
 func checkIfCached(uid string) bool {
 	_, ok := PodStatuses.Statuses[uid]
 
@@ -92,16 +100,13 @@ func checkIfCached(uid string) bool {
 	}
 }
 
+// Locks and updates the PodStatuses map with the statuses contained in the returnedStatuses slice
 func updateStatuses(returnedStatuses []commonIL.PodStatus) {
 	PodStatuses.mu.Lock()
 
 	for _, new := range returnedStatuses {
-		log.G(Ctx).Info(PodStatuses.Statuses, new)
-		if checkIfCached(new.PodUID) {
-			PodStatuses.Statuses[new.PodUID] = new
-		} else {
-			PodStatuses.Statuses[new.PodUID] = new
-		}
+		//log.G(Ctx).Debug(PodStatuses.Statuses, new)
+		PodStatuses.Statuses[new.PodUID] = new
 	}
 
 	PodStatuses.mu.Unlock()
