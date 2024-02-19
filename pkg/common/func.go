@@ -19,6 +19,8 @@ var InterLinkConfigInst InterLinkConfig
 var Clientset *kubernetes.Clientset
 
 // TODO: implement factory design
+
+// Returns a variable of type InterLinkConfig, used in many other functions and the first encountered error.
 func NewInterLinkConfig() (InterLinkConfig, error) {
 	if !InterLinkConfigInst.set {
 		var path string
@@ -124,6 +126,7 @@ func NewInterLinkConfig() (InterLinkConfig, error) {
 	return InterLinkConfigInst, nil
 }
 
+// Pings the InterLink API and returns true if there's an answer. The second return value is given by the answer provided by the API.
 func PingInterLink(ctx context.Context) (bool, int, error) {
 	log.G(ctx).Info("Pinging: " + InterLinkConfigInst.Interlinkurl + ":" + InterLinkConfigInst.Interlinkport + "/ping")
 	retVal := -1

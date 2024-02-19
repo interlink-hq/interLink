@@ -12,6 +12,7 @@ import (
 	v1 "k8s.io/api/core/v1"
 )
 
+// Stops and deletes containers from provided data
 func (h *SidecarHandler) DeleteHandler(w http.ResponseWriter, r *http.Request) {
 	log.G(h.Ctx).Info("Docker Sidecar: received Delete call")
 	var execReturn exec.ExecResult

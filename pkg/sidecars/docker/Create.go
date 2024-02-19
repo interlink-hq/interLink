@@ -13,6 +13,7 @@ import (
 	commonIL "github.com/intertwin-eu/interlink/pkg/common"
 )
 
+// Creates a Docker Container based on data provided by the InterLink API.
 func (h *SidecarHandler) CreateHandler(w http.ResponseWriter, r *http.Request) {
 	log.G(h.Ctx).Info("Docker Sidecar: received Create call")
 	var execReturn exec.ExecResult

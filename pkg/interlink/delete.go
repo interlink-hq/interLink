@@ -12,6 +12,7 @@ import (
 	commonIL "github.com/intertwin-eu/interlink/pkg/common"
 )
 
+// Deletes the cached status for the provided Pod and forwards the request to the sidecar
 func (h *InterLinkHandler) DeleteHandler(w http.ResponseWriter, r *http.Request) {
 	log.G(Ctx).Info("InterLink: received Delete call")
 
@@ -37,6 +38,12 @@ func (h *InterLinkHandler) DeleteHandler(w http.ResponseWriter, r *http.Request)
 
 	deleteCachedStatus(string(pod.UID))
 	req, err = http.NewRequest(http.MethodPost, h.Config.Sidecarurl+":"+h.Config.Sidecarport+"/delete", reader)
+	if err != nil {
+		statusCode = http.StatusInternalServerError
+		w.WriteHeader(statusCode)
+		log.G(Ctx).Error(err)
+		return
+	}
 
 	req.Header.Set("Content-Type", "application/json")
 	log.G(Ctx).Info("InterLink: forwarding Delete call to sidecar")
