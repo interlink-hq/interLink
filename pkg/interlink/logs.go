@@ -54,7 +54,7 @@ func (h *InterLinkHandler) GetLogsHandler(w http.ResponseWriter, r *http.Request
 		return
 	}
 	reader := bytes.NewReader(bodyBytes)
-	req, err := http.NewRequest(http.MethodPost, h.Config.Sidecarurl+":"+h.Config.Sidecarport+"/getLogs", reader)
+	req, err := http.NewRequest(http.MethodGet, h.Config.Sidecarurl+":"+h.Config.Sidecarport+"/getLogs", reader)
 	if err != nil {
 		log.G(Ctx).Fatal(err)
 	}
