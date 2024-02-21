@@ -12,7 +12,7 @@ import (
 	commonIL "github.com/intertwin-eu/interlink/pkg/common"
 )
 
-// Generates and submits a SLURM batch script according to provided data.
+// SubmitHandler generates and submits a SLURM batch script according to provided data.
 // 1 Pod = 1 Job. If a Pod has multiple containers, every container is a line with it's parameters in the SLURM script.
 func (h *SidecarHandler) SubmitHandler(w http.ResponseWriter, r *http.Request) {
 	log.G(h.Ctx).Info("Slurm Sidecar: received Submit call")

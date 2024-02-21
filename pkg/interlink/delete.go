@@ -12,7 +12,7 @@ import (
 	commonIL "github.com/intertwin-eu/interlink/pkg/common"
 )
 
-// Deletes the cached status for the provided Pod and forwards the request to the sidecar
+// DeleteHandler deletes the cached status for the provided Pod and forwards the request to the sidecar
 func (h *InterLinkHandler) DeleteHandler(w http.ResponseWriter, r *http.Request) {
 	log.G(Ctx).Info("InterLink: received Delete call")
 

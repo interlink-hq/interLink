@@ -40,7 +40,7 @@ type SingularityCommand struct {
 	command       []string
 }
 
-// Parses time from a string and returns it into a variable of type time.Time.
+// parsingTimeFromString parses time from a string and returns it into a variable of type time.Time.
 // The format time can be specified in the 3rd argument.
 func parsingTimeFromString(Ctx context.Context, stringTime string, timestampFormat string) (time.Time, error) {
 	parsedTime := time.Time{}
@@ -60,7 +60,7 @@ func parsingTimeFromString(Ctx context.Context, stringTime string, timestampForm
 	return parsedTime, nil
 }
 
-// Just a dummy function to be sure directories exists at runtime
+// CreateDirectories is just a function to be sure directories exists at runtime
 func CreateDirectories(config commonIL.InterLinkConfig) error {
 	path := config.DataRootFolder
 	if _, err := os.Stat(path); err != nil {
@@ -74,7 +74,7 @@ func CreateDirectories(config commonIL.InterLinkConfig) error {
 	return nil
 }
 
-// Loads Job IDs into the main JIDs struct from files in the root folder.
+// LoadJIDs loads Job IDs into the main JIDs struct from files in the root folder.
 // It's useful went down and needed to be restarded, but there were jobs running, for example.
 // Return only error in case of failure
 func LoadJIDs(Ctx context.Context, config commonIL.InterLinkConfig, JIDs *map[string]*JidStruct) error {
@@ -131,7 +131,7 @@ func LoadJIDs(Ctx context.Context, config commonIL.InterLinkConfig, JIDs *map[st
 	return nil
 }
 
-// Reads all Environment variables from a container and append them to a slice of strings.
+// prepareEnvs reads all Environment variables from a container and append them to a slice of strings.
 // It returns the slice containing all envs in the form of key=value.
 func prepareEnvs(Ctx context.Context, container v1.Container) []string {
 	if len(container.Env) > 0 {
@@ -157,7 +157,7 @@ func prepareEnvs(Ctx context.Context, container v1.Container) []string {
 	}
 }
 
-// Iterates along the struct provided in the data parameter and checks for ConfigMaps, Secrets and EmptyDirs to be mounted.
+// prepareMounts iterates along the struct provided in the data parameter and checks for ConfigMaps, Secrets and EmptyDirs to be mounted.
 // For each element found, the mountData function is called.
 // In this context, the general case is given by host and container not sharing the file system, so data are stored within ENVS with matching names.
 // The content of these ENVS will be written to a text file by the generated SLURM script later, so the container will be able to mount these files.
@@ -248,7 +248,7 @@ func prepareMounts(
 	return append(mount, mountedData), nil
 }
 
-// As the name suggests, this function generates a SLURM script according to data collected.
+// produceSLURMScript generates a SLURM script according to data collected.
 // It must be called after ENVS and mounts are already set up since
 // it relies on "prefix" variable being populated with needed data and ENVS passed in the commands parameter.
 // It returns the path to the generated script and the first encountered error.
@@ -371,7 +371,7 @@ func produceSLURMScript(
 	return f.Name(), nil
 }
 
-// Submits the job provided in the path argument to the SLURM queue.
+// SLURMBatchSubmit submits the job provided in the path argument to the SLURM queue.
 // At this point, it's up to the SLURM scheduler to manage the job.
 // Returns the output of the sbatch command and the first encoundered error.
 func SLURMBatchSubmit(Ctx context.Context, config commonIL.InterLinkConfig, path string) (string, error) {
@@ -398,7 +398,7 @@ func SLURMBatchSubmit(Ctx context.Context, config commonIL.InterLinkConfig, path
 	return string(execReturn.Stdout), nil
 }
 
-// This function creates a JID file to store the Job ID of the submitted job.
+// handleJID creates a JID file to store the Job ID of the submitted job.
 // The output parameter must be the output of SLURMBatchSubmit function and the path
 // is the path where to store the JID file.
 // It also adds the JID to the JIDs main structure.
@@ -423,12 +423,12 @@ func handleJID(Ctx context.Context, pod v1.Pod, podUID string, JIDs *map[string]
 	return nil
 }
 
-// Just delete a JID from the structure
+// removeJID delete a JID from the structure
 func removeJID(podUID string, JIDs *map[string]*JidStruct) {
 	delete(*JIDs, podUID)
 }
 
-// Checks if a Job has not yet deleted and, in case, calls the scancel command to abort the job execution.
+// deleteContainer checks if a Job has not yet been deleted and, in case, calls the scancel command to abort the job execution.
 // It then removes the JID from the main JIDs structure and all the related files on the disk.
 // Returns the first encountered error.
 func deleteContainer(Ctx context.Context, config commonIL.InterLinkConfig, podUID string, JIDs *map[string]*JidStruct, path string) error {
@@ -451,7 +451,7 @@ func deleteContainer(Ctx context.Context, config commonIL.InterLinkConfig, podUI
 	return err
 }
 
-// This function is called by prepareMounts and creates files and directory according to their definition in the pod structure.
+// mountData is called by prepareMounts and creates files and directory according to their definition in the pod structure.
 // The data parameter is an interface and it can be of type v1.ConfigMap, v1.Secret and string (for the empty dir).
 // Returns 2 slices of string, one containing the ConfigMaps/Secrets/EmptyDirs paths and one the list of relatives ENVS to be used
 // to create the files inside the container.
@@ -647,7 +647,7 @@ func mountData(Ctx context.Context, config commonIL.InterLinkConfig, pod v1.Pod,
 	return nil, nil, nil
 }
 
-// Just checks if a JID is in the main JIDs struct
+// checkIfJidExists checks if a JID is in the main JIDs struct
 func checkIfJidExists(JIDs *map[string]*JidStruct, uid string) bool {
 	_, ok := (*JIDs)[uid]
 

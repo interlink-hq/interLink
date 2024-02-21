@@ -11,7 +11,7 @@ import (
 	commonIL "github.com/intertwin-eu/interlink/pkg/common"
 )
 
-// Collects and rearranges all needed ConfigMaps/Secrets/EmptyDirs to ship them to the sidecar, then sends a response to the client
+// CreateHandler collects and rearranges all needed ConfigMaps/Secrets/EmptyDirs to ship them to the sidecar, then sends a response to the client
 func (h *InterLinkHandler) CreateHandler(w http.ResponseWriter, r *http.Request) {
 	log.G(Ctx).Info("InterLink: received Create call")
 

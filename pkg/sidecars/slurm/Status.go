@@ -19,7 +19,7 @@ import (
 	commonIL "github.com/intertwin-eu/interlink/pkg/common"
 )
 
-// Performs a squeue --me and uses regular expressions to get the running Jobs' status
+// StatusHandler performs a squeue --me and uses regular expressions to get the running Jobs' status
 func (h *SidecarHandler) StatusHandler(w http.ResponseWriter, r *http.Request) {
 	var req []*v1.Pod
 	var resp []commonIL.PodStatus

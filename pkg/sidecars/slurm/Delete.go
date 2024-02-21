@@ -10,7 +10,7 @@ import (
 	v1 "k8s.io/api/core/v1"
 )
 
-// Basically runs a scancel command, updating JIDs and cached statuses
+// StopHandler runs a scancel command, updating JIDs and cached statuses
 func (h *SidecarHandler) StopHandler(w http.ResponseWriter, r *http.Request) {
 	log.G(h.Ctx).Info("Slurm Sidecar: received Stop call")
 	statusCode := http.StatusOK

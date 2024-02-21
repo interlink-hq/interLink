@@ -7,6 +7,7 @@ import (
 	"github.com/containerd/containerd/log"
 )
 
+// UpdateCacheHandler is responsible for deleting not-available-anymore Pods on the Virtual Kubelet from the InterLink caching structure
 func UpdateCacheHandler(w http.ResponseWriter, r *http.Request) {
 	log.G(Ctx).Info("InterLink: received UpdateCache call")
 
