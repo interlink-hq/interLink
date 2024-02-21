@@ -1,18 +1,19 @@
 package common
 
 import (
-	"io/fs"
 	"time"
 
 	v1 "k8s.io/api/core/v1"
 )
 
+// PodCreateRequests is a struct holding data for a create request. Retrieved ConfigMaps and Secrets are held along the Pod description itself.
 type PodCreateRequests struct {
 	Pod        v1.Pod         `json:"pod"`
 	ConfigMaps []v1.ConfigMap `json:"configmaps"`
 	Secrets    []v1.Secret    `json:"secrets"`
 }
 
+// PodStatus is a simplified v1.Pod struct, holding only necessary variables to uniquely identify a job/service in the sidecar. It is used to request
 type PodStatus struct {
 	PodName      string               `json:"name"`
 	PodUID       string               `json:"UID"`
@@ -20,13 +21,7 @@ type PodStatus struct {
 	Containers   []v1.ContainerStatus `json:"containers"`
 }
 
-type PodStatusWithMap struct {
-	PodName      string                        `json:"name"`
-	PodUID       string                        `json:"UID"`
-	PodNamespace string                        `json:"namespace"`
-	Containers   map[string]v1.ContainerStatus `json:"containers"`
-}
-
+// RetrievedContainer is used in InterLink to rearrange data structure in a suitable way for the sidecar
 type RetrievedContainer struct {
 	Name       string         `json:"name"`
 	ConfigMaps []v1.ConfigMap `json:"configMaps"`
@@ -34,19 +29,13 @@ type RetrievedContainer struct {
 	EmptyDirs  []string       `json:"emptyDirs"`
 }
 
+// RetrievedPoData is used in InterLink to rearrange data structure in a suitable way for the sidecar
 type RetrievedPodData struct {
 	Pod        v1.Pod               `json:"pod"`
 	Containers []RetrievedContainer `json:"container"`
 }
 
-type ConfigMapSecret struct {
-	Key   string      `json:"Key"`
-	Value string      `json:"Value"`
-	Path  string      `json:"Path"`
-	Kind  string      `json:"Kind"`
-	Mode  fs.FileMode `json:"Mode"`
-}
-
+// InterLinkConfig holds the whole configuration
 type InterLinkConfig struct {
 	VKConfigPath      string `yaml:"VKConfigPath"`
 	VKTokenFile       string `yaml:"VKTokenFile"`
@@ -74,15 +63,7 @@ type InterLinkConfig struct {
 	set               bool
 }
 
-type ServiceAccount struct {
-	Name        string
-	Token       string
-	CA          string
-	URL         string
-	ClusterName string
-	Config      string
-}
-
+// ContainerLogOpts is a struct in which it is possible to specify options to retrieve logs from the sidecar
 type ContainerLogOpts struct {
 	Tail         int       `json:"Tail"`
 	LimitBytes   int       `json:"Bytes"`
@@ -93,6 +74,7 @@ type ContainerLogOpts struct {
 	SinceTime    time.Time `json:"SinceTime"`
 }
 
+// LogStruct is needed to identify the job/container running on the sidecar to retrieve the logs from. Using ContainerLogOpts struct allows to specify more options on how to collect logs
 type LogStruct struct {
 	Namespace     string           `json:"Namespace"`
 	PodUID        string           `json:"PodUID"`

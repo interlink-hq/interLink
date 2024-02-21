@@ -19,7 +19,7 @@ type SidecarHandler struct {
 	Ctx    context.Context
 }
 
-// Iterates along the struct provided in the data parameter and checks for ConfigMaps, Secrets and EmptyDirs to be mounted.
+// prepareMounts iterates along the struct provided in the data parameter and checks for ConfigMaps, Secrets and EmptyDirs to be mounted.
 // For each element found, the mountData function is called.
 // It returns a string composed as the docker -v command to bind mount directories and files and the first encountered error.
 func prepareMounts(Ctx context.Context, config commonIL.InterLinkConfig, data []commonIL.RetrievedPodData, container v1.Container) (string, error) {
@@ -82,7 +82,7 @@ func prepareMounts(Ctx context.Context, config commonIL.InterLinkConfig, data []
 	return mountedData, nil
 }
 
-// This function is called by prepareMounts and creates files and directory according to their definition in the pod structure.
+// mountData is called by prepareMounts and creates files and directory according to their definition in the pod structure.
 // The data parameter is an interface and it can be of type v1.ConfigMap, v1.Secret and string (for the empty dir).
 // Returns a string which is a bind mount of the file/directory. Example: path/to/file/on/host:path/to/file/in/container.
 // It also returns the first encountered error.

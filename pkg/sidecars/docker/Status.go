@@ -13,7 +13,7 @@ import (
 	commonIL "github.com/intertwin-eu/interlink/pkg/common"
 )
 
-// Checks Docker Container's status by running docker ps -af command and returns that status
+// StatusHandler checks Docker Container's status by running docker ps -af command and returns that status
 func (h *SidecarHandler) StatusHandler(w http.ResponseWriter, r *http.Request) {
 	log.G(h.Ctx).Info("Docker Sidecar: received GetStatus call")
 	var resp []commonIL.PodStatus

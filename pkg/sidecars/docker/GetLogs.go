@@ -14,7 +14,7 @@ import (
 	commonIL "github.com/intertwin-eu/interlink/pkg/common"
 )
 
-// Performs a Docker logs command and returns its manipulated output
+// GetLogsHandler performs a Docker logs command and returns its manipulated output
 func (h *SidecarHandler) GetLogsHandler(w http.ResponseWriter, r *http.Request) {
 	log.G(h.Ctx).Info("Docker Sidecar: received GetLogs call")
 	var req commonIL.LogStruct
