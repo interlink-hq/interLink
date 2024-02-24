@@ -8,7 +8,8 @@ import os
 import pprint
 
 
-dockerCLI = docker.DockerClient(base_url="unix:///Users/dciangot/.docker/run/docker.sock")
+dockerCLI = docker.DockerClient()
+#dockerCLI = docker.DockerClient(base_url="unix:///Users/dciangot/.docker/run/docker.sock")
 
 app = FastAPI()
 

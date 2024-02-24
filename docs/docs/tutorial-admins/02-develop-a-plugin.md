@@ -78,13 +78,15 @@ import docker
 import re
 import os
 import pprint
+from datetime import datetime
 
-
+# Initialize the docker client
 dockerCLI = docker.DockerClient()
 
+# Initialize FastAPI app
 app = FastAPI()
 
-
+# Define my custom interLink provider
 class MyProvider(interlink.provider.Provider):
     def __init__(
         self,
@@ -92,7 +94,7 @@ class MyProvider(interlink.provider.Provider):
     ):
         super().__init__(DOCKER)
 
-        # Recover already running containers refs
+        # Recover container ID to pod UID map for the already running containers
         self.CONTAINER_POD_MAP = {}
         statuses = self.DOCKER.api.containers(all=True)
         for status in statuses:
@@ -103,6 +105,7 @@ class MyProvider(interlink.provider.Provider):
         print(self.CONTAINER_POD_MAP)
 
 
+# Please Take my provider and handle the interLink REST layer for me
 ProviderDocker = MyProvider(dockerCLI)
 
 @app.post("/create")
@@ -145,8 +148,10 @@ Let's implement the `Create` method of the `MyProvider` class:
 
 ```python
     def Create(self, pod: interlink.Pod) -> None:
+        # Get the first container of the request
         container = pod.pod.spec.containers[0]
 
+        # Build the docker container execution command
         try:
             cmds = " ".join(container.command)
             args = " ".join(container.args)
@@ -160,7 +165,7 @@ Let's implement the `Create` method of the `MyProvider` class:
         except Exception as ex:
             raise HTTPException(status_code=500, detail=ex)
 
-
+        # Store the container ID to pod UID map information
         self.CONTAINER_POD_MAP.update({pod.pod.metadata.uid: [docker_run_id]})
 ```
 
@@ -169,6 +174,8 @@ As you can see, here we are getting the basic information we needed to launch a 
 For fields available in `interlink.Pod` request please refer to the [spec file](https://github.com/interTwin-eu/interLink/blob/main/examples/sidecar/templates/python/interlink/spec.py).
 
 ### The Delete request
+
+At this point there is nothing new anymore. The delete request should indeed take care of the deletion of the container for the pod in the request:
 
 ```python
     def Delete(self, pod: interlink.PodRequest) -> None:
@@ -179,109 +186,113 @@ For fields available in `interlink.Pod` request please refer to the [spec file](
             self.CONTAINER_POD_MAP.pop(pod.metadata.uid)
         except:
             raise HTTPException(status_code=404, detail="No containers found for UUID")
-        print(pod)
         return
 ```
 
 ### The Status request
 
+The status request takes care of the returing a proper [PodStatus](https://github.com/interTwin-eu/interLink/blob/main/examples/sidecar/templates/python/interlink/spec.py#L89C1-L93C38)
+response for the pod in the request:
+
 ```python
     def Status(self,  pod: interlink.PodRequest) -> interlink.PodStatus:
-        print(self.CONTAINER_POD_MAP)
-        print(pod.metadata.uid)
+        # Collect the container status
         try:
             container = self.DOCKER.containers.get(self.CONTAINER_POD_MAP[pod.metadata.uid][0])
             status = container.status
         except:
             raise HTTPException(status_code=404, detail="No containers found for UUID")
 
-        print(status)
+        match status:
+            # If running: get the start time and return a running pod state
+            case "running":
+                try:
+                    statuses = self.DOCKER.api.containers(filters={"status":"running", "id": container.id})
+                    # Convert data to the correct format
+                    startedAt = statuses[0]["Created"]
+                    startedAt = datetime.utcfromtimestamp(startedAt).strftime('%Y-%m-%dT%H:%M:%SZ')
+                except Exception as ex:
+                    raise HTTPException(status_code=500, detail=ex)
 
-        if status == "running":
-            try:
-                statuses = self.DOCKER.api.containers(filters={"status":"running", "id": container.id})
-                print(statuses)
-                startedAt = statuses[0]["Created"]
-            except Exception as ex:
-                raise HTTPException(status_code=500, detail=ex)
-
-            return interlink.PodStatus(
-                    name=pod.metadata.name,
-                    UID=pod.metadata.uid,
-                    namespace=pod.metadata.namespace,
-                    containers=[
-                        interlink.ContainerStatus(
-                            name=pod.spec.containers[0].name,
-                            state=interlink.ContainerStates(
-                                running=interlink.StateRunning(startedAt=startedAt),
-                                waiting=None,
-                                terminated=None,
+                return interlink.PodStatus(
+                        name=pod.metadata.name,
+                        UID=pod.metadata.uid,
+                        namespace=pod.metadata.namespace,
+                        containers=[
+                            interlink.ContainerStatus(
+                                name=pod.spec.containers[0].name,
+                                state=interlink.ContainerStates(
+                                    running=interlink.StateRunning(startedAt=startedAt),
+                                    waiting=None,
+                                    terminated=None,
+                                )
                             )
-                        )
-                    ]
-                )
-        elif status == "exited":
-
-            try:
-                statuses = self.DOCKER.api.containers(filters={"status":"exited", "id": container.id})
-                print(statuses)
-                reason = statuses[0]["Status"]
-                pattern = re.compile(r'Exited \((.*?)\)')
-
-                exitCode = -1
-                for match in re.findall(pattern, reason):
-                    exitCode = int(match)
-            except Exception as ex:
-                raise HTTPException(status_code=500, detail=ex)
-                
-            return interlink.PodStatus(
-                    name=pod.metadata.name,
-                    UID=pod.metadata.uid,
-                    namespace=pod.metadata.namespace,
-                    containers=[
-                        interlink.ContainerStatus(
-                            name=pod.spec.containers[0].name,
-                            state=interlink.ContainerStates(
-                                running=None,
-                                waiting=None,
-                                terminated=interlink.StateTerminated(
-                                    reason=reason,
-                                    exitCode=exitCode
-                                ),
-                            )
-                        )
-                    ]
-                )
-            
-        return interlink.PodStatus(
-                name=pod.metadata.name,
-                UID=pod.metadata.uid,
-                namespace=pod.metadata.namespace,
-                containers=[
-                    interlink.ContainerStatus(
-                        name=pod.spec.containers[0].name,
-                        state=interlink.ContainerStates(
-                            running=None,
-                            waiting=None,
-                            terminated=interlink.StateTerminated(
-                                reason="Completed",
-                                exitCode=0
-                            ),
-                        )
+                        ]
                     )
-                ]
-            )
+            # If exited, collect the exitcode and the reason, then file a valid PodStatus with those info
+            case "exited":
+                try:
+                    statuses = self.DOCKER.api.containers(filters={"status":"exited", "id": container.id})
+                    reason = statuses[0]["Status"]
+                    pattern = re.compile(r'Exited \((.*?)\)')
+
+                    exitCode = -1
+                    for match in re.findall(pattern, reason):
+                        exitCode = int(match)
+                except Exception as ex:
+                    raise HTTPException(status_code=500, detail=ex)
+                    
+                return interlink.PodStatus(
+                        name=pod.metadata.name,
+                        UID=pod.metadata.uid,
+                        namespace=pod.metadata.namespace,
+                        containers=[
+                            interlink.ContainerStatus(
+                                name=pod.spec.containers[0].name,
+                                state=interlink.ContainerStates(
+                                    running=None,
+                                    waiting=None,
+                                    terminated=interlink.StateTerminated(
+                                        reason=reason,
+                                        exitCode=exitCode
+                                    ),
+                                )
+                            )
+                        ]
+                    )
+            
+            # If none of the above are true, the container ended with 0 exit code. Set the status to completed
+            case _:
+                return interlink.PodStatus(
+                        name=pod.metadata.name,
+                        UID=pod.metadata.uid,
+                        namespace=pod.metadata.namespace,
+                        containers=[
+                            interlink.ContainerStatus(
+                                name=pod.spec.containers[0].name,
+                                state=interlink.ContainerStates(
+                                    running=None,
+                                    waiting=None,
+                                    terminated=interlink.StateTerminated(
+                                        reason="Completed",
+                                        exitCode=0
+                                    ),
+                                )
+                            )
+                        ]
+                    )
 ```
 
 ### The Logs request
 
+When receiving the LogRequest, there are many log options to satisfy, in any case the response is a byte array. Here the basic example:
+
 ```python
     def Logs(self, req: interlink.LogRequest) -> bytes:
-        # TODO: manage more complicated multi container pod
+        # We are not managing more complicated multi container pod
         #       THIS IS ONLY FOR DEMONSTRATION
-        print(req.PodUID)
-        print(self.CONTAINER_POD_MAP[req.PodUID])
         try:
+            # Get the container in the request and collect the logs
             container = self.DOCKER.containers.get(self.CONTAINER_POD_MAP[req.PodUID][0])
             #log = container.logs(timestamps=req.Opts.Timestamps, tail=req.Opts.Tail)
             log = container.logs()
@@ -305,14 +316,43 @@ you can now kickstart the newly created plugin and make it spawn on the port 400
 You can submit a pod like the following to test the whole workflow:
 
 ```yaml
-
+apiVersion: v1
+kind: Pod
+metadata:
+  name: interlink-quickstart
+  namespace: default
+spec:
+  nodeSelector:
+    kubernetes.io/hostname: my-civo-node 
+  automountServiceAccountToken: false
+  containers:
+  - args:
+    - -c
+    - 'sleep 600 && echo "FINISHED!"'
+    command:
+    - /bin/sh
+    image: busybox
+    imagePullPolicy: Always
+    name: my-container
+    resources:
+      limits:
+        cpu: "1"
+        memory: 1Gi
+      requests:
+        cpu: "1"
+        memory: 1Gi
+  tolerations:
+  - key: virtual-node.interlink/no-schedule
+    operator: Exists
+  - effect: NoExecute
+    key: node.kubernetes.io/not-ready
+    operator: Exists
+    tolerationSeconds: 300
+  - effect: NoExecute
+    key: node.kubernetes.io/unreachable
+    operator: Exists
+    tolerationSeconds: 300
 ```
 
-### Getting status and logs
-
-
-### Removing the pod
-
-
-
+Finally you should check that all the supported commands (get,logs,delete...) works on this pod.
 

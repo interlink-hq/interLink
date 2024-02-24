@@ -20,7 +20,7 @@ class Container(BaseModel):
     command: List[str]
     args: List[str]
     resources: dict
-    volumeMounts: List[VolumeMount]
+    volumeMounts: Optional[List[VolumeMount]] = None
 
 class SecretSource(BaseModel):
     secretName: str
@@ -42,7 +42,7 @@ class PodVolume(BaseModel):
 class PodSpec(BaseModel):
     containers: List[Container]
     initContainers: Optional[List[Container]] = None
-    volumes: List[PodVolume]
+    volumes: Optional[List[PodVolume]] = None
 
 class PodRequest(BaseModel):
     metadata: Metadata
