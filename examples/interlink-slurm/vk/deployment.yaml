@@ -40,15 +40,13 @@ spec:
             fieldRef:
               fieldPath: status.podIP
         - name: KUBELET_PORT
-          value: "10255"
+          value: "10250"
         - name: INTERLINKCONFIGPATH
           value: "/etc/interlink/InterLinkConfig.yaml"
         - name: VKTOKENFILE
           value: "/opt/interlink/token"
         - name: CONFIGPATH
           value: "/etc/interlink/vk-cfg.json"
-        - name: KUBECONFIG
-          value: "/etc/interlink/kubeconfig.yaml"
         volumeMounts:
         - name: config
           mountPath: /etc/interlink/InterLinkConfig.yaml
@@ -58,9 +56,6 @@ spec:
           subPath: vk-cfg.json
         - name: token
           mountPath: /opt/interlink
-        - name: kubeconfig
-          mountPath: "/etc/interlink/kubeconfig.yaml"
-          subPath: kubeconfig.yaml
         resources:
           limits:
             cpu: 500m
