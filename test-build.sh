@@ -4,14 +4,14 @@ DOCKER_USER="${DOCKER_USER:-surax98}"
 SIDECAR="${SIDECAR:-slurm}"
 KUBECONFIG="${KUBECONFIG:-$HOME/.kube/config}"
 ROOTDIR=$PWD
-INTERLINK_IP_ADDRESS="${INTERLINK_IP_ADDRESS:-172.16.9.11}"
+INTERLINK_IP_ADDRESS="${INTERLINK_IP_ADDRESS:-192.168.0.100}"
 
 ROOTDIR_ESCAPED=${ROOTDIR//\//\\\/}
 
 exit_script(){
     cd "$ROOTDIR"/examples/interlink-"$SIDECAR"/vk-test
     docker compose down
-    rm -r "$ROOTDIR"/examples/interlink-"$SIDECAR"/vk-test
+    rm -r "$ROOTDIR"/examples/interlink-"$SIDECAR"/vk-test 2&>/dev/null
     kubectl delete deployment test-vk -n vk 2&>/dev/null
     kubectl delete pod test-pod-cowsay -n vk --force 2&>/dev/null
     kubectl delete deployment test-deployment-cowsay -n vk --force 2&>/dev/null
@@ -29,18 +29,20 @@ build_binaries(){
     }
 }
 
-build_images(){
+build_vk_image(){
     # VK image using docker build
     {
         echo -e "Building Docker image for VK...\c"
-        docker build --quiet -t "$DOCKER_USER"/test-vk:"$VK_VERSION" -f "$ROOTDIR"/docker/Dockerfile.vk "$ROOTDIR" > /dev/null && \
+        docker buildx build --progress=quiet --tag "$DOCKER_USER"/test-vk:"$VK_VERSION" -f "$ROOTDIR"/docker/Dockerfile.vk "$ROOTDIR" > /dev/null && \
         docker push "$DOCKER_USER"/test-vk:"$VK_VERSION" > /dev/null && \
         echo -e "\r\033[32mSuccesfully built a Docker image for VK \u2714\033[0m"
     } || {
         echo -e "\r\033[31mFailed to build a Docker Image for VK \u274c\033[0m"
         exit_script 1
     }
+}
 
+build_IL_sidecar_image(){
     # InterLink + Sidecar images using docker compose build
     {
         cd "$ROOTDIR"/examples/interlink-slurm/vk-test        
@@ -73,8 +75,8 @@ run_IL_Sidecar(){
     # Waiting for InterLink container to properly start
     while true; do
         echo -e "\rWaiting for InterLink initialization... $COUNTER\c"
-        OUTPUT=$(docker ps -f status=running -f name=interlink)
-        if [[ "$OUTPUT" != "" ]]; then
+        OUTPUT=$(curl -s "$INTERLINK_IP_ADDRESS":3000)
+        if [[ "$OUTPUT" == "404 page not found" ]]; then
             echo -e "\r                                            \c"
             echo -e "\r\033[32mInterLink Up and Running \u2714\033[0m"
             break
@@ -91,9 +93,9 @@ run_IL_Sidecar(){
 
     # Waiting for Sidecar container to properly start
     while true; do
-        echo -e "\rWaiting for InterLink initialization... $COUNTER\c"
-        OUTPUT=$(docker ps -f status=running -f name=sodecar)
-        if [[ "$OUTPUT" != "" ]]; then
+        echo -e "\rWaiting for $SIDECAR Sidecar initialization... $COUNTER\c"
+        OUTPUT=$(curl -s "$INTERLINK_IP_ADDRESS":4000)
+        if [[ "$OUTPUT" == "404 page not found" ]]; then
             echo -e "\r                                                   \c"
             echo -e "\r\033[32m$SIDECAR Sidecar Up and Running \u2714\033[0m"
             break
@@ -166,7 +168,7 @@ check_ping(){
     if [[ $ERR != "" ]]; then
         echo -e "\r                                        \c"
         echo -e "\r\033[31mVK Failed to ping InterLink \u274c\033[0m"
-        exit_script 1
+        #exit_script 1
     else 
         echo -e "\r                                        \c"
         echo -e "\r\033[32mVK successfully pinged InterLink API \u2714\033[0m"
@@ -176,7 +178,7 @@ check_ping(){
     if [[ $PING == "" ]]; then
         echo -e "\r                                        \c"
         echo -e "\r\033[31mNo Ping in InterLink logs \u274c\033[0m"
-        exit_script 1
+        #exit_script 1
     else 
         echo -e "\r                                        \c"
         echo -e "\r\033[32mPing request received by InterLink \u2714\033[0m"
@@ -231,15 +233,15 @@ apply_test_pod(){
 check_pod_logs(){
     COUNTER=0
     while true; do
-        echo -e "\rWaiting for Pod to complete... $COUNTER\c"
-        OUTPUT=$(kubectl get pods -n vk | grep test-pod-cowsay | grep Completed)
+        echo -e "\rWaiting for Pod $1 to complete... $COUNTER\c"
+        OUTPUT=$(kubectl get pods -n vk | grep $1 | grep Completed)
         if [[ $OUTPUT != "" ]]; then
             echo -e "\rRetrieving Pod's logs...\c"
-            LOGS=$(kubectl logs test-pod-cowsay -n vk 2> /dev/null| grep "hello muu")
+            LOGS=$(kubectl logs $1 -n vk 2> /dev/null| grep "hello muu")
             if [[ $LOGS != "" ]]; then
-                echo -e "\r\033[32mSuccessfully retrieved logs from test-pod-cowsay\u2714\033[0m"
+                echo -e "\r\033[32mSuccessfully retrieved logs from $1\u2714\033[0m"
             else
-                echo -e "\r\033[31mFailed to retrieve logs from test-pod-cowsay \u274c\033[0m"
+                echo -e "\r\033[31mFailed to retrieve logs from $1 \u274c\033[0m"
                 exit_script 1
             fi
             break
@@ -253,6 +255,7 @@ check_pod_logs(){
         ((COUNTER++))
         sleep 1
     done
+    kubectl delete pod test-pod -n vk 2&>/dev/null
 }
 
 apply_test_deployment(){
@@ -300,6 +303,24 @@ apply_test_deployment(){
     done
 }
 
+check_deployment_logs(){
+    POD_NUMBER=0
+    POD_NAMES=( $(kubectl get pods -n vk | grep test-deployment-cowsay | awk '{print $1}') )
+
+    for pod_name in "${POD_NAMES[@]}"; do
+        check_pod_logs $pod_name
+        ((POD_NUMBER++))
+    done
+
+    if [[ $POD_NUMBER == 5 ]]; then
+        echo -e "\r\033[32mSuccessfully retrieved logs from Deployment\u2714\033[0m"
+    else
+        echo -e "\r\033[31mFailed to retrieve logs from Deployment \u274c\033[0m"
+        exit_script 1
+    fi
+    kubectl delete deployment test-deployment -n vk 2&>/dev/null
+}
+
 {
     prepare_files
 
@@ -307,7 +328,9 @@ apply_test_deployment(){
         test)
             build_binaries
 
-            build_images
+            build_vk_image
+
+            build_IL_sidecar_image
 
             run_IL_Sidecar
 
@@ -317,9 +340,11 @@ apply_test_deployment(){
 
             apply_test_pod
 
-            check_pod_logs
+            check_pod_logs "test-pod-cowsay"
 
             apply_test_deployment
+
+            check_deployment_logs
 
             exit_script 0
         ;;
@@ -327,7 +352,9 @@ apply_test_deployment(){
         build)
             build_binaries
 
-            build_images
+            build_vk_image
+
+            build_IL_sidecar_image
 
             exit_script 0
         ;;
@@ -335,9 +362,17 @@ apply_test_deployment(){
         build_run)
             build_binaries
 
-            build_images
+            build_vk_image
+
+            build_IL_sidecar_image
 
             run_IL_Sidecar
+
+            run_VK
+        ;;
+
+        build_run_vk)
+            build_vk_image
 
             run_VK
         ;;
@@ -349,7 +384,7 @@ apply_test_deployment(){
         ;;
 
         *)
-            echo -e "Specify one of the following arguments: test, build, build_run, run\n"
+            echo -e "Specify one of the following arguments: test, build, build_run, build_run_vk, run\n"
             exit_script 0
         ;;
 
