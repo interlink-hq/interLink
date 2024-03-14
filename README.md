@@ -1,13 +1,10 @@
-![Interlink logo](./docs/imgs/interlink_logo.png)
+![Interlink logo](./docs/static/img/interlink_logo.png)
 
 ## :information_source: Overview
 
-### Watch for a quick tour
-[![Introducing interLink](./docs/imgs/Phenomenal_20231211_063311_0000.png)](https://youtu.be/-djIQGPvYdI?si=eq_qXylYH_KczFeQ)
-
-
 ### Introduction
 InterLink aims to provide an abstraction for the execution of a Kubernetes pod on any remote resource capable of managing a Container execution lifecycle.
+We target to facilitate the development of provider specific plugins, so the resource providers can leverage the power of virtual kubelet without a black belt in kubernetes internals.
 
 The project consists of two main components:
 
@@ -16,14 +13,5 @@ The project consists of two main components:
 
 The project got inspired by the [KNoC](https://github.com/CARV-ICS-FORTH/knoc) and [Liqo](https://github.com/liqotech/liqo/tree/master) projects, enhancing that with the implemention a generic API layer b/w the virtual kubelet component and the provider logic for the container lifecycle management.
 
-![drawing](docs/imgs/InterLink.svg)
-
-
-## :fast_forward: Quick Start
-
-Give it a stab at interLink [website](https://intertwin-eu.github.io/interLink/). You will deploy on your laptop a fully emulated instance of a kubernetes cluster able to offload the execution of a pod to a SLURM cluster
-
-## GitHub repository management rules
-
-All changes should go through Pull Requests.
+For usage and development guides please refer to [our website](https://intertwin-eu.github.io/interLink/)
 

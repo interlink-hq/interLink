@@ -69,9 +69,11 @@ spec:
           value: {{.OAUTH.ClientSecret}} 
         - name: IAM_REFRESH_TOKEN
           value: {{.OAUTH.RefreshToken}}
+        - name: IAM_VK_AUD
+          value: {{.OAUTH.Audience}}
         - name: TOKEN_PATH
           value: /opt/interlink/token
-        command:
+        command: 
         - python3
         - /opt/refresh.py
         resources:

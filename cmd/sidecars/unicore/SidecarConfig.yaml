@@ -1,0 +1,4 @@
+CommandPrefix: ""
+ExportPodData: true
+DataRootFolder: ".knoc"
+UnicoreBaseUrl: "https://zam2125.zam.kfa-juelich.de:9112/HDFML/rest/core"

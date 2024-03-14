@@ -257,7 +257,7 @@ func RemoteExecution(ctx context.Context, config commonIL.InterLinkConfig, p *Vi
 					}
 				}
 
-				pod, err = ClientSet.CoreV1().Pods(pod.Namespace).Get(ctx, pod.Name, metav1.GetOptions{})
+				_, err := ClientSet.CoreV1().Pods(pod.Namespace).Get(ctx, pod.Name, metav1.GetOptions{})
 				if err != nil {
 					return errors.New("Deleted pod before actual creation")
 				}
@@ -374,6 +374,7 @@ func checkPodsStatus(ctx context.Context, p *VirtualKubeletProvider, token strin
 				if podStatus.PodUID == string(pod.UID) {
 					podRunning := false
 					podErrored := false
+					podCompleted := false
 					failedReason := ""
 					for _, containerStatus := range podStatus.Containers {
 						index := 0
@@ -394,6 +395,7 @@ func checkPodsStatus(ctx context.Context, p *VirtualKubeletProvider, token strin
 
 						if containerStatus.State.Terminated != nil {
 							log.G(ctx).Debug("Pod " + podStatus.PodName + ": Service " + containerStatus.Name + " is not running on Sidecar")
+							podCompleted = true
 							pod.Status.ContainerStatuses[index].State.Terminated.Reason = "Completed"
 							if containerStatus.State.Terminated.ExitCode != 0 {
 								podErrored = true
@@ -411,22 +413,16 @@ func checkPodsStatus(ctx context.Context, p *VirtualKubeletProvider, token strin
 
 					}
 
-					if podRunning {
-						if pod.Status.Phase != v1.PodRunning {
-							pod.Status.Phase = v1.PodRunning
-						}
-					} else {
-						if podErrored {
-							if pod.Status.Phase != v1.PodFailed {
-								pod.Status.Phase = v1.PodFailed
-								pod.Status.Reason = failedReason
-							}
-						} else {
-							if pod.Status.Phase != v1.PodSucceeded {
-								pod.Status.Phase = v1.PodSucceeded
-								pod.Status.Reason = "Completed"
-							}
-						}
+					if podRunning && pod.Status.Phase != v1.PodRunning {
+						pod.Status.Phase = v1.PodRunning
+						pod.Status.Conditions = append(pod.Status.Conditions, v1.PodCondition{Type: v1.PodReady, Status: v1.ConditionTrue})
+					} else if podErrored && pod.Status.Phase != v1.PodFailed {
+						pod.Status.Phase = v1.PodFailed
+						pod.Status.Reason = failedReason
+					} else if podCompleted && pod.Status.Phase != v1.PodSucceeded {
+						pod.Status.Conditions = append(pod.Status.Conditions, v1.PodCondition{Type: v1.PodReady, Status: v1.ConditionFalse})
+						pod.Status.Phase = v1.PodSucceeded
+						pod.Status.Reason = "Completed"
 					}
 
 					err = p.UpdatePod(ctx, pod)

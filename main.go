@@ -225,7 +225,9 @@ func main() {
 	var kubecfg *rest.Config
 	kubecfgFile, err := os.ReadFile(os.Getenv("KUBECONFIG"))
 	if err != nil {
-		log.G(ctx).Error(err)
+		if os.Getenv("KUBECONFIG") != "" {
+			log.G(ctx).Error(err)
+		}
 		log.G(ctx).Info("Trying InCluster configuration")
 
 		kubecfg, err = rest.InClusterConfig()

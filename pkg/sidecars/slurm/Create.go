@@ -54,14 +54,17 @@ func (h *SidecarHandler) SubmitHandler(w http.ResponseWriter, r *http.Request) {
 				singularityPrefix += " " + singularityAnnotation
 			}
 
-			//container.Resources.Requests
-			//overlayPath := h.Config.DataRootFolder + data.Pod.Namespace + "-" + string(data.Pod.UID) + "/overlay.img"
-			createOverlay := []string{}
-			//createOverlay := []string{"singularity", "overlay", "create", "--sparse", "--size=1024", overlayPath, "&&"}
+			singularityMounts := ""
+			if singMounts, ok := metadata.Annotations["job.vk.io/singularity-mounts"]; ok {
+				singularityMounts = singMounts
+			}
 
-			commstr1 := []string{"singularity", "exec", "--nv"}
-			//commstr1 := []string{"singularity", "exec", "--containall", "--overlay", overlayPath, "--nv"}
-			//	h.Config.DataRootFolder + string(data.Pod.UID) }
+			singularityOptions := ""
+			if singOpts, ok := metadata.Annotations["job.vk.io/singularity-options"]; ok {
+				singularityOptions = singOpts
+			}
+
+			commstr1 := []string{"singularity", "exec", "--containall", "--nv", singularityMounts, singularityOptions}
 
 			envs := prepareEnvs(h.Ctx, container)
 			image := ""
@@ -88,8 +91,7 @@ func (h *SidecarHandler) SubmitHandler(w http.ResponseWriter, r *http.Request) {
 			}
 
 			log.G(h.Ctx).Debug("-- Appending all commands together...")
-			singularity_command := append(createOverlay, commstr1...)
-			singularity_command = append(singularity_command, envs...)
+			singularity_command := append(commstr1, envs...)
 			singularity_command = append(singularity_command, mounts...)
 			singularity_command = append(singularity_command, image)
 			singularity_command = append(singularity_command, container.Command...)

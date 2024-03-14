@@ -7,7 +7,9 @@
 		"creationTimestamp": "2023-11-08T12:12:40Z",
 		"deletionTimestamp": "2023-11-08T12:13:25Z",
 		"deletionGracePeriodSeconds": 30,
-		"annotations": {}
+		"annotations": {
+			"unicoreToken": "<TOKEN>"
+		}
 	},
 	"spec": {
 		"volumes": [{

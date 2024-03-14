@@ -11,7 +11,7 @@ sidecars:
 	CGO_ENABLED=0 GOOS=linux go build -o bin/slurm-sd cmd/sidecars/slurm/main.go
 
 installer:
-	CGO_ENABLED=0 OOS=linux go build -o bin/interlink cmd/installer/main.go
+	CGO_ENABLED=0 OOS=linux go build -o bin/installer cmd/installer/main.go
 
 clean:
 	rm -rf ./bin

@@ -6,7 +6,9 @@
 			"uid": "2ee53299-7980-4016-8fef-a045282aecd1",
 			"resourceVersion": "120436",
 			"creationTimestamp": "2023-11-08T11:42:42Z",
-			"annotations": {}
+			"annotations": {
+				"unicoreToken": "<TOKEN>"
+			}
 		},
 		"spec": {
 			"volumes": [{

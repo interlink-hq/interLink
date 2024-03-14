@@ -237,18 +237,6 @@ func (p *VirtualKubeletProvider) CreatePod(ctx context.Context, pod *v1.Pod) err
 	}
 	state = runningState
 
-	go func() {
-		err = RemoteExecution(ctx, p.interLinkConfig, p, pod, CREATE)
-		if err != nil {
-			if err.Error() == "Deleted pod before actual creation" {
-				log.G(ctx).Warn(err)
-			} else {
-				log.G(ctx).Error(err)
-			}
-			return
-		}
-	}()
-
 	// in case we have initContainers we need to stop main containers from executing for now ...
 	if len(pod.Spec.InitContainers) > 0 {
 		state = waitingState
@@ -304,6 +292,19 @@ func (p *VirtualKubeletProvider) CreatePod(ctx context.Context, pod *v1.Pod) err
 			},
 		}
 	}
+
+	go func() {
+		err = RemoteExecution(ctx, p.interLinkConfig, p, pod, CREATE)
+		if err != nil {
+			if err.Error() == "Deleted pod before actual creation" {
+				log.G(ctx).Warn(err)
+			} else {
+				log.G(ctx).Error(err)
+			}
+			return
+		}
+	}()
+
 	// deploy main containers
 	for _, container := range pod.Spec.Containers {
 		//var err error

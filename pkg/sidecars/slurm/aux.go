@@ -262,6 +262,7 @@ func produceSLURMScript(
 	commands []SingularityCommand,
 ) (string, error) {
 	log.G(Ctx).Info("-- Creating file for the Slurm script")
+	prefix = ""
 	err := os.MkdirAll(path, os.ModePerm)
 	if err != nil {
 		log.G(Ctx).Error(err)

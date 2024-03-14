@@ -1,14 +1,15 @@
 import interlink
 
+from fastapi.responses import PlainTextResponse
 from fastapi import FastAPI, HTTPException
 from typing import List
 import docker
 import re
 import os
-import pprint
 
 
-dockerCLI = docker.DockerClient(base_url="unix:///Users/dciangot/.docker/run/docker.sock")
+dockerCLI = docker.DockerClient()
+#dockerCLI = docker.DockerClient(base_url="unix:///Users/dciangot/.docker/run/docker.sock")
 
 app = FastAPI()
 
@@ -60,19 +61,21 @@ class MyProvider(interlink.provider.Provider):
 
             if v.emptyDirs:
                 pass
-        return []
+        return dataList 
 
     def Create(self, pod: interlink.Pod) -> None:
         container = pod.pod.spec.containers[0]
 
-        volumes_data = self.DumpVolumes(pod.pod.spec.volumes, pod.container)
+        if pod.pod.spec.volumes:
+            _ = self.DumpVolumes(pod.pod.spec.volumes, pod.container)
 
         volumes = []
-        for mount in container.volumeMounts:
-            if mount.subPath:
-                volumes.append(f"{pod.pod.metadata.namespace}-{mount.name}/{mount.subPath}:{mount.mountPath}")
-            else:
-                volumes.append(f"{pod.pod.metadata.namespace}-{mount.name}:{mount.mountPath}")
+        if container.volumeMounts:
+            for mount in container.volumeMounts:
+                if mount.subPath:
+                    volumes.append(f"{pod.pod.metadata.namespace}-{mount.name}/{mount.subPath}:{mount.mountPath}")
+                else:
+                    volumes.append(f"{pod.pod.metadata.namespace}-{mount.name}:{mount.mountPath}")
                 
 
         try:
@@ -84,6 +87,9 @@ class MyProvider(interlink.provider.Provider):
                 name=f"{container.name}-{pod.pod.metadata.uid}",
                 detach=True,
                 volumes=volumes
+                #runtime="nvidia",
+                #device_requests=[
+                #           docker.types.DeviceRequest(device_ids=["0"], capabilities=[['gpu']])]
             )
             print(dockerContainer)
             docker_run_id = dockerContainer.id
@@ -206,8 +212,7 @@ class MyProvider(interlink.provider.Provider):
             print(log)
         except:
             raise HTTPException(status_code=404, detail="No containers found for UUID")
-
-        return log
+        return log 
 
 ProviderNew = MyProvider(dockerCLI)
 
@@ -223,6 +228,6 @@ async def delete_pod(pod: interlink.PodRequest) -> str:
 async def status_pod(pods: List[interlink.PodRequest]) -> List[interlink.PodStatus]:
     return ProviderNew.get_status(pods)
 
-@app.post("/getLogs")
+@app.post("/getLogs", response_class=PlainTextResponse)
 async def get_logs(req: interlink.LogRequest) -> bytes:
     return ProviderNew.get_logs(req)

@@ -40,7 +40,7 @@ if __name__ == '__main__':
     while True:
         try:
             request_data = {
-                #"audience": audience,
+                "audience": audience,
                 "grant_type": "refresh_token",
                 "refresh_token": iam_refresh_token,
                 #"scope": "openid profile email address phone offline_access"
