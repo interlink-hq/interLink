@@ -4,7 +4,7 @@ DOCKER_USER="${DOCKER_USER:-surax98}"
 SIDECAR="${SIDECAR:-slurm}"
 KUBECONFIG="${KUBECONFIG:-$HOME/.kube/config}"
 ROOTDIR=$PWD
-INTERLINK_IP_ADDRESS="${INTERLINK_IP_ADDRESS:-192.168.0.100}"
+INTERLINK_IP_ADDRESS="${INTERLINK_IP_ADDRESS:-192.168.122.121}"
 
 ROOTDIR_ESCAPED=${ROOTDIR//\//\\\/}
 
@@ -12,9 +12,10 @@ exit_script(){
     cd "$ROOTDIR"/examples/interlink-"$SIDECAR"/vk-test
     docker compose down
     rm -r "$ROOTDIR"/examples/interlink-"$SIDECAR"/vk-test 2&>/dev/null
-    kubectl delete deployment test-vk -n vk 2&>/dev/null
     kubectl delete pod test-pod-cowsay -n vk --force 2&>/dev/null
-    kubectl delete deployment test-deployment-cowsay -n vk --force 2&>/dev/null
+    kubectl delete deployment test-vk test-deployment test-deployment-cfgmap test-deployment-secret test-deployment-cfgmap-secret -n vk --force 2&>/dev/null
+    kubectl delete configmap my-configmap my-configmap2 -n vk 2&>/dev/null
+    kubectl delete secret my-secret my-secret2 -n vk 2&>/dev/null
     exit "$1"
 }
 
@@ -113,6 +114,10 @@ run_IL_Sidecar(){
 
 run_VK(){
     COUNTER=0
+    EXISTING_NS=$(kubectl get namespace 2>/dev/null | grep vk)
+    if [[ "$EXISTING_NS" == "" ]]; then
+        kubectl create namespace vk 
+    fi
 
     #checking if already existing test vk are running
     ALREADYRUNNING=$(kubectl get pods -n vk 2>/dev/null | grep test-vk | grep Running)
@@ -168,7 +173,7 @@ check_ping(){
     if [[ $ERR != "" ]]; then
         echo -e "\r                                        \c"
         echo -e "\r\033[31mVK Failed to ping InterLink \u274c\033[0m"
-        #exit_script 1
+        exit_script 1
     else 
         echo -e "\r                                        \c"
         echo -e "\r\033[32mVK successfully pinged InterLink API \u2714\033[0m"
@@ -178,7 +183,7 @@ check_ping(){
     if [[ $PING == "" ]]; then
         echo -e "\r                                        \c"
         echo -e "\r\033[31mNo Ping in InterLink logs \u274c\033[0m"
-        #exit_script 1
+        exit_script 1
     else 
         echo -e "\r                                        \c"
         echo -e "\r\033[32mPing request received by InterLink \u2714\033[0m"
@@ -196,20 +201,20 @@ apply_test_pod(){
 
     while true; do
         echo -e "\rWaiting for previous Pod to terminate... $COUNTER\c"
-        TERMINATING=$(kubectl get pods -n vk 2> /dev/null | grep test-pod-cowsay | grep Terminating)
+        TERMINATING=$(kubectl get pods -n vk 2> /dev/null | grep test-pod | grep Terminating)
         if [[ "$TERMINATING" == "" ]]; then
-            OUTPUT=$(kubectl apply -f "$ROOTDIR"/examples/interlink-"$SIDECAR"/test_pod.yaml)
+            OUTPUT=$(kubectl apply -f "$ROOTDIR"/examples/interlink-"$SIDECAR"/test-pod.yaml)
             while true; do
                 echo -e "\r                                                  \c"
                 echo -e "\rWaiting for Pod initialization... $COUNTER\c"
-                OUTPUT=$(kubectl get pods -n vk | grep test-pod-cowsay | grep Running)
+                OUTPUT=$(kubectl get pods -n vk | grep test-pod | grep Running)
                 if [[ "$OUTPUT" != "" ]]; then
                     echo -e "\r                                             \c"
                     echo -e "\r\033[32mPod test-pod-cowsay is running \u2714\033[0m"
                     break
                 fi
 
-                if [[ $i == 300 ]]; then
+                if [ $COUNTER -ge 300 ]; then
                     echo -e "\r                                        \c"
                     echo -e "\r\033[31mPod test-pod-cowsay failed to run \u274c\033[0m"
                     exit_script 1
@@ -239,7 +244,7 @@ check_pod_logs(){
             echo -e "\rRetrieving Pod's logs...\c"
             LOGS=$(kubectl logs $1 -n vk 2> /dev/null| grep "hello muu")
             if [[ $LOGS != "" ]]; then
-                echo -e "\r\033[32mSuccessfully retrieved logs from $1\u2714\033[0m"
+                echo -e "\r\033[32mSuccessfully retrieved logs from $1 \u2714\033[0m"
             else
                 echo -e "\r\033[31mFailed to retrieve logs from $1 \u274c\033[0m"
                 exit_script 1
@@ -255,36 +260,36 @@ check_pod_logs(){
         ((COUNTER++))
         sleep 1
     done
-    kubectl delete pod test-pod -n vk 2&>/dev/null
+    kubectl delete pod $1 -n vk 2&>/dev/null
 }
 
 apply_test_deployment(){
     COUNTER=0
 
-    ALREADYRUNNING=$(kubectl get deployment -n vk | grep test-deployment-cowsay)
+    ALREADYRUNNING=$(kubectl get deployment -n vk | grep $1)
     if [[ "$ALREADYRUNNING" != "" ]]; then
-        kubectl delete deployment test-deployment-cowsay -n vk &> /dev/null
+        kubectl delete deployment $1 -n vk &> /dev/null
         sleep 1
     fi
 
     while true; do
         echo -e "\rWaiting for previous Deployment to terminate... $COUNTER\c"
-        TERMINATING=$(kubectl get pods -n vk 2> /dev/null | grep test-deployment-cowsay)
+        TERMINATING=$(kubectl get pods -n vk 2> /dev/null | grep $1)
         if [[ "$TERMINATING" == "" ]]; then
-            OUTPUT=$(kubectl apply -f "$ROOTDIR"/examples/interlink-"$SIDECAR"/test_deployment.yaml)
+            OUTPUT=$(kubectl apply -f "$ROOTDIR"/examples/interlink-"$SIDECAR"/"$1".yaml)
             while true; do
                 echo -e "\r                                                  \c"
                 echo -e "\rWaiting for Pods initialization... $COUNTER\c"
-                OUTPUT=$(kubectl get deployments -n vk | grep test-deployment-cowsay | grep "5/5")
+                OUTPUT=$(kubectl get deployments -n vk | grep $1 | grep "5/5")
                 if [[ "$OUTPUT" != "" ]]; then
                     echo -e "\r                                             \c"
-                    echo -e "\r\033[32mDeployment is set-up and Pods are running \u2714\033[0m"
+                    echo -e "\r\033[32mDeployment $1 is set-up and Pods are running \u2714\033[0m"
                     break
                 fi
 
                 if [ $COUNTER -ge 300 ]; then
                     echo -e "\r                                        \c"
-                    echo -e "\r\033[31mFailed to set-up Deployment \u274c\033[0m"
+                    echo -e "\r\033[31mFailed to set-up Deployment $1 \u274c\033[0m"
                     exit_script 1
                 fi
                 ((COUNTER++))
@@ -295,7 +300,7 @@ apply_test_deployment(){
 
         if [ $COUNTER -ge 300 ]; then
             echo -e "\r                                             \c"
-            echo -e "\r\033[31mFailed to set-up Deployment \u274c\033[0m"
+            echo -e "\r\033[31mFailed to set-up Deployment $1 \u274c\033[0m"
             exit_script 1
         fi
         ((COUNTER++))
@@ -305,7 +310,7 @@ apply_test_deployment(){
 
 check_deployment_logs(){
     POD_NUMBER=0
-    POD_NAMES=( $(kubectl get pods -n vk | grep test-deployment-cowsay | awk '{print $1}') )
+    POD_NAMES=( $(kubectl get pods -n vk | grep $1 | awk '{print $1}') )
 
     for pod_name in "${POD_NAMES[@]}"; do
         check_pod_logs $pod_name
@@ -313,15 +318,19 @@ check_deployment_logs(){
     done
 
     if [[ $POD_NUMBER == 5 ]]; then
-        echo -e "\r\033[32mSuccessfully retrieved logs from Deployment\u2714\033[0m"
+        echo -e "\r\033[32mSuccessfully retrieved logs from Deployment $1 \u2714\033[0m"
     else
-        echo -e "\r\033[31mFailed to retrieve logs from Deployment \u274c\033[0m"
+        echo -e "\r\033[31mFailed to retrieve logs from Deployment $1 \u274c\033[0m"
         exit_script 1
     fi
-    kubectl delete deployment test-deployment -n vk 2&>/dev/null
+    kubectl delete deployment $1 -n vk 2&>/dev/null
 }
 
-{
+{   
+    kubectl delete deployment test-deployment test-deployment-cfgmap test-deployment-secret test-deployment-cfgmap-secret test-vk -n vk 2&>/dev/null
+    kubectl delete pod test-pod -n vk 2&>/dev/null
+    kubectl delete configmap my-configmap my-configmap2 -n vk 2&>/dev/null
+    kubectl delete secret my-secret my-secret2 -n vk 2&>/dev/null
     prepare_files
 
     case $1 in 
@@ -340,11 +349,23 @@ check_deployment_logs(){
 
             apply_test_pod
 
-            check_pod_logs "test-pod-cowsay"
+            check_pod_logs "test-pod"
 
-            apply_test_deployment
+            apply_test_deployment "test-deployment"
 
-            check_deployment_logs
+            check_deployment_logs "test-deployment"
+
+            apply_test_deployment "test-deployment-cfgmap"
+
+            check_deployment_logs "test-deployment-cfgmap"
+
+            apply_test_deployment "test-deployment-secret"
+
+            check_deployment_logs "test-deployment-secret"
+
+            apply_test_deployment "test-deployment-cfgmap-secret"
+
+            check_deployment_logs "test-deployment-cfgmap-secret"
 
             exit_script 0
         ;;
