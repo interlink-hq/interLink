@@ -21,7 +21,5 @@ serviceaccount.yaml
 kustomizations_tmp
 ca.*
 condor*
-test-deployment.yaml
-test-pod.yaml
 examples/interlink-slurm/vk/*
 examples/sidecar/templates/python/__pycache__/*

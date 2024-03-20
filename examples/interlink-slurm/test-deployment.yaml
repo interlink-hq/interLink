@@ -1,7 +1,7 @@
 apiVersion: apps/v1
 kind: Deployment
 metadata:
-  name: test-deployment-cowsay
+  name: test-deployment
   namespace: vk
 spec:
   replicas: 5
@@ -16,7 +16,7 @@ spec:
       containers:
       - image: docker://ghcr.io/grycap/cowsay 
         command: ["/bin/sh"]
-        args: ["-c",  "\"touch /tmp/test.txt && sleep 60 && echo \\\"hello muu\\\" | /usr/games/cowsay \" " ]
+        args: ["-c",  "\"touch /tmp/test.txt && sleep 10 && echo \\\"hello muu\\\" | /usr/games/cowsay \" " ]
         imagePullPolicy: Always
         name: cowsayo
       nodeSelector:

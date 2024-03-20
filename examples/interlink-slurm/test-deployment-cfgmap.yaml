@@ -1,7 +1,7 @@
 apiVersion: apps/v1
 kind: Deployment
 metadata:
-  name: test-deployment-cowsay
+  name: test-deployment-cfgmap
   namespace: vk
 spec:
   replicas: 5
@@ -17,7 +17,8 @@ spec:
       - image: docker://ghcr.io/grycap/cowsay 
         command: ["/bin/sh"]
         # Modify the args to use a variable from the ConfigMap
-        args: ["-c", "$(cat /config/message.txt)"]  
+        args: ["-c",  "\"echo hello > /tmp/test.txt && sleep 10 && cat /config/message | /usr/games/cowsay\"" ]
+        #args: ["-c",  "\"touch /tmp/test.txt && sleep 60 && /usr/games/cowsay \"$(cat /config/message.txt)\"\" " ]  
         imagePullPolicy: Always
         name: cowsayo
         # Add the volumeMounts section
@@ -29,20 +30,21 @@ spec:
       - name: config-volume  # Volume name (same as mount point name)
         configMap:
           name: my-configmap  # Reference the ConfigMap name 
-  nodeSelector:
-    kubernetes.io/hostname: test-vk
-  tolerations:
-  - key: virtual-node.interlink/no-schedule
-    operator: Exists
-  - key: virtual-kubelet.io/provider
-    operator: Exists
+      nodeSelector:
+        kubernetes.io/hostname: test-vk
+      tolerations:
+      - key: virtual-node.interlink/no-schedule
+        operator: Exists
+      - key: virtual-kubelet.io/provider
+        operator: Exists
 
 ---
 
 apiVersion: v1
 kind: ConfigMap
 metadata:
-  name: my-configmap
+  name: my-configmap 
+  namespace: vk
 
 data:
-  message.txt: "hello muu"  # This message will be used by the container
+  message: "hello muu"  # This message will be used by the container
