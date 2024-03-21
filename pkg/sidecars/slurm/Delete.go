@@ -36,7 +36,7 @@ func (h *SidecarHandler) StopHandler(w http.ResponseWriter, r *http.Request) {
 
 	filesPath := h.Config.DataRootFolder + pod.Namespace + "-" + string(pod.UID)
 
-	err = deleteContainer(h.Ctx, h.Config, string(pod.UID), h.JIDs, filesPath+"/"+pod.Namespace)
+	err = deleteContainer(h.Ctx, h.Config, h.Mutex, string(pod.UID), h.JIDs, filesPath+"/"+pod.Namespace)
 	if err != nil {
 		statusCode = http.StatusInternalServerError
 		w.WriteHeader(statusCode)

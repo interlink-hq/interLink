@@ -4,6 +4,7 @@ import (
 	"context"
 	"net/http"
 	"strconv"
+	"sync"
 
 	"github.com/sirupsen/logrus"
 	"github.com/virtual-kubelet/virtual-kubelet/log"
@@ -33,6 +34,7 @@ func main() {
 
 	JobIDs := make(map[string]*slurm.JidStruct)
 	Ctx, cancel := context.WithCancel(context.Background())
+	Mutex := &sync.Mutex{}
 	defer cancel()
 	log.G(Ctx).Debug("Debug level: " + strconv.FormatBool(interLinkConfig.VerboseLogging))
 
@@ -40,6 +42,7 @@ func main() {
 		Config: interLinkConfig,
 		JIDs:   &JobIDs,
 		Ctx:    Ctx,
+		Mutex:  Mutex,
 	}
 
 	mutex := http.NewServeMux()

@@ -126,7 +126,15 @@ func (h *SidecarHandler) SubmitHandler(w http.ResponseWriter, r *http.Request) {
 			w.Write([]byte("Error handling JID. Check Slurm Sidecar's logs"))
 			log.G(h.Ctx).Error(err)
 			os.RemoveAll(filesPath)
-			err = deleteContainer(h.Ctx, h.Config, string(data.Pod.UID), h.JIDs, filesPath)
+			err = deleteContainer(h.Ctx, h.Config, h.Mutex, string(data.Pod.UID), h.JIDs, filesPath)
+			if err != nil {
+				statusCode = http.StatusInternalServerError
+				w.WriteHeader(statusCode)
+				w.Write([]byte("Error deleting containers after JID handling error. Check Slurm Sidecar's logs"))
+				log.G(h.Ctx).Error(err)
+				os.RemoveAll(filesPath)
+				return
+			}
 			return
 		}
 	}

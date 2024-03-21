@@ -8,6 +8,7 @@ import (
 	"path/filepath"
 	"regexp"
 	"strings"
+	"sync"
 	"time"
 
 	exec2 "github.com/alexellis/go-execute/pkg/v1"
@@ -22,6 +23,7 @@ type SidecarHandler struct {
 	Config commonIL.InterLinkConfig
 	JIDs   *map[string]*JidStruct
 	Ctx    context.Context
+	Mutex  *sync.Mutex
 }
 
 var prefix string
@@ -262,7 +264,6 @@ func produceSLURMScript(
 	commands []SingularityCommand,
 ) (string, error) {
 	log.G(Ctx).Info("-- Creating file for the Slurm script")
-	prefix = ""
 	err := os.MkdirAll(path, os.ModePerm)
 	if err != nil {
 		log.G(Ctx).Error(err)
@@ -425,14 +426,16 @@ func handleJID(Ctx context.Context, pod v1.Pod, podUID string, JIDs *map[string]
 }
 
 // removeJID delete a JID from the structure
-func removeJID(podUID string, JIDs *map[string]*JidStruct) {
+func removeJID(mutex *sync.Mutex, podUID string, JIDs *map[string]*JidStruct) {
+	mutex.Lock()
 	delete(*JIDs, podUID)
+	mutex.Unlock()
 }
 
 // deleteContainer checks if a Job has not yet been deleted and, in case, calls the scancel command to abort the job execution.
 // It then removes the JID from the main JIDs structure and all the related files on the disk.
 // Returns the first encountered error.
-func deleteContainer(Ctx context.Context, config commonIL.InterLinkConfig, podUID string, JIDs *map[string]*JidStruct, path string) error {
+func deleteContainer(Ctx context.Context, config commonIL.InterLinkConfig, mutex *sync.Mutex, podUID string, JIDs *map[string]*JidStruct, path string) error {
 	log.G(Ctx).Info("- Deleting Job for pod " + podUID)
 	if checkIfJidExists(JIDs, podUID) {
 		_, err := exec.Command(config.Scancelpath, (*JIDs)[podUID].JID).Output()
@@ -444,7 +447,7 @@ func deleteContainer(Ctx context.Context, config commonIL.InterLinkConfig, podUI
 		}
 	}
 	err := os.RemoveAll(path + "/" + podUID)
-	removeJID(podUID, JIDs)
+	removeJID(mutex, podUID, JIDs)
 	if err != nil {
 		log.G(Ctx).Error(err)
 		return err
