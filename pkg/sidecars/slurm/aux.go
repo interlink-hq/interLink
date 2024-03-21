@@ -79,7 +79,7 @@ func CreateDirectories(config commonIL.InterLinkConfig) error {
 // LoadJIDs loads Job IDs into the main JIDs struct from files in the root folder.
 // It's useful went down and needed to be restarded, but there were jobs running, for example.
 // Return only error in case of failure
-func LoadJIDs(Ctx context.Context, config commonIL.InterLinkConfig, JIDs *map[string]*JidStruct) error {
+func LoadJIDs(Ctx context.Context, config commonIL.InterLinkConfig, mutex *sync.Mutex, JIDs *map[string]*JidStruct) error {
 	path := config.DataRootFolder
 
 	dir, err := os.Open(path)
@@ -95,6 +95,7 @@ func LoadJIDs(Ctx context.Context, config commonIL.InterLinkConfig, JIDs *map[st
 		return err
 	}
 
+	mutex.Lock()
 	for _, entry := range entries {
 		if entry.IsDir() {
 			podUID := entry.Name()
@@ -129,6 +130,7 @@ func LoadJIDs(Ctx context.Context, config commonIL.InterLinkConfig, JIDs *map[st
 			(*JIDs)[podUID] = &JIDEntry
 		}
 	}
+	mutex.Unlock()
 
 	return nil
 }
@@ -405,7 +407,7 @@ func SLURMBatchSubmit(Ctx context.Context, config commonIL.InterLinkConfig, path
 // is the path where to store the JID file.
 // It also adds the JID to the JIDs main structure.
 // Return the first encountered error.
-func handleJID(Ctx context.Context, pod v1.Pod, podUID string, JIDs *map[string]*JidStruct, output string, path string) error {
+func handleJID(Ctx context.Context, mutex *sync.Mutex, pod v1.Pod, podUID string, JIDs *map[string]*JidStruct, output string, path string) error {
 	r := regexp.MustCompile(`Submitted batch job (?P<jid>\d+)`)
 	jid := r.FindStringSubmatch(output)
 	f, err := os.Create(path + "/JobID.jid")
@@ -419,8 +421,9 @@ func handleJID(Ctx context.Context, pod v1.Pod, podUID string, JIDs *map[string]
 		log.G(Ctx).Error(err)
 		return err
 	}
-
+	mutex.Lock()
 	(*JIDs)[podUID] = &JidStruct{PodUID: string(pod.UID), JID: jid[1]}
+	mutex.Unlock()
 	log.G(Ctx).Info("Job ID is: " + (*JIDs)[podUID].JID)
 	return nil
 }

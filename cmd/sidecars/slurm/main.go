@@ -52,7 +52,7 @@ func main() {
 	mutex.HandleFunc("/getLogs", SidecarAPIs.GetLogsHandler)
 
 	slurm.CreateDirectories(interLinkConfig)
-	slurm.LoadJIDs(Ctx, interLinkConfig, &JobIDs)
+	slurm.LoadJIDs(Ctx, interLinkConfig, SidecarAPIs.Mutex, &JobIDs)
 
 	err = http.ListenAndServe(":"+interLinkConfig.Sidecarport, mutex)
 	if err != nil {

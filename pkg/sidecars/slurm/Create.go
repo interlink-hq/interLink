@@ -119,7 +119,7 @@ func (h *SidecarHandler) SubmitHandler(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		log.G(h.Ctx).Info(out)
-		err = handleJID(h.Ctx, data.Pod, string(data.Pod.UID), h.JIDs, out, filesPath)
+		err = handleJID(h.Ctx, h.Mutex, data.Pod, string(data.Pod.UID), h.JIDs, out, filesPath)
 		if err != nil {
 			statusCode = http.StatusInternalServerError
 			w.WriteHeader(statusCode)
