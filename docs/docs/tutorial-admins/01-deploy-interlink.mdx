@@ -20,7 +20,7 @@ The installation script that we are going to configure will take care of providi
 
 :::warning
 
-In this tutoria GitHub tokens are just an example of authentication mechanism, any OAuth2 compliant identity provider is supported with the very same deployment script.
+In this tutoria GitHub tokens are just an example of authentication mechanism, any OpenID compliant identity provider is also supported with the very same deployment script, see [examples here](./04-oidc-IAM.md).
 
 :::
 
@@ -83,10 +83,14 @@ You are now ready to go ahead and edit the produced file with all the setup info
 
 Let's take the following as an example of a valid configuration file:
 
+:::warning
+see [release page](https://github.com/interTwin-eu/interLink/releases) to get the latest one! And change the value accordingly!
+:::
+
 ```yaml
 interlink_ip: 192.168.1.127
 interlink_port: 30443
-interlink_version: 0.1.3
+interlink_version: 0.2.1-patch2
 kubelet_node_name: my-civo-node
 kubernetes_namespace: interlink
 node_limits:
@@ -201,6 +205,7 @@ To stop or restart the components you can use the dedicated commands:
 
 In alterative you can start an already supported one.
 
+
 ### Remote docker execution
 
 :::warning
@@ -212,4 +217,5 @@ Coming soon...
 :::warning
 Coming soon...
 :::
+ 
 

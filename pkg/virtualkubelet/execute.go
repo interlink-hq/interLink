@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"io"
 	"net/http"
 	"os"
@@ -21,6 +22,45 @@ import (
 )
 
 var ClientSet *kubernetes.Clientset
+
+// PingInterLink pings the InterLink API and returns true if there's an answer. The second return value is given by the answer provided by the API.
+func PingInterLink(ctx context.Context) (bool, int, error) {
+	log.G(ctx).Info("Pinging: " + InterLinkConfigInst.Interlinkurl + ":" + InterLinkConfigInst.Interlinkport + "/pinglink")
+	retVal := -1
+	req, err := http.NewRequest(http.MethodPost, InterLinkConfigInst.Interlinkurl+":"+InterLinkConfigInst.Interlinkport+"/pinglink", nil)
+
+	if err != nil {
+		log.G(ctx).Error(err)
+	}
+
+	token, err := os.ReadFile(InterLinkConfigInst.VKTokenFile) // just pass the file name
+	if err != nil {
+		log.G(ctx).Error(err)
+		return false, retVal, err
+	}
+	req.Header.Add("Authorization", "Bearer "+string(token))
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		return false, retVal, err
+	}
+
+	if resp.StatusCode == http.StatusOK {
+		retBytes, err := io.ReadAll(resp.Body)
+		if err != nil {
+			log.G(ctx).Error(err)
+			return false, retVal, err
+		}
+		retVal, err = strconv.Atoi(string(retBytes))
+		if err != nil {
+			log.G(ctx).Error(err)
+			return false, retVal, err
+		}
+		return true, retVal, nil
+	} else {
+		log.G(ctx).Error("server error: " + fmt.Sprint(resp.StatusCode))
+		return false, retVal, nil
+	}
+}
 
 // updateCacheRequest is called when the VK receives the status of a pod already deleted. It performs a REST call InterLink API to update the cache deleting that pod from the cached structure
 func updateCacheRequest(config commonIL.InterLinkConfig, uid string, token string) error {
