@@ -1,4 +1,4 @@
-package main
+package virtualkubelet
 
 import (
 	"crypto/ed25519"
@@ -22,10 +22,10 @@ import (
 
 type crtretriever func(*tls.ClientHelloInfo) (*tls.Certificate, error)
 
-// newCertificateManager creates a certificate manager for the kubelet when retrieving a server certificate, or returns an error.
+// NewCertificateManager creates a certificate manager for the kubelet when retrieving a server certificate, or returns an error.
 // This function is inspired by the original kubelet implementation:
 // https://github.com/kubernetes/kubernetes/blob/master/pkg/kubelet/certificate/kubelet.go
-func newCertificateRetriever(kubeClient kubernetes.Interface, signer, nodeName string, nodeIP net.IP) (crtretriever, error) {
+func NewCertificateRetriever(kubeClient kubernetes.Interface, signer, nodeName string, nodeIP net.IP) (crtretriever, error) {
 	const (
 		vkCertsPath   = "/tmp/certs"
 		vkCertsPrefix = "virtual-kubelet"
@@ -85,7 +85,7 @@ func newCertificateRetriever(kubeClient kubernetes.Interface, signer, nodeName s
 }
 
 // newSelfSignedCertificateRetriever creates a new retriever for self-signed certificates.
-func newSelfSignedCertificateRetriever(nodeName string, nodeIP net.IP) crtretriever {
+func NewSelfSignedCertificateRetriever(nodeName string, nodeIP net.IP) crtretriever {
 	creator := func() (*tls.Certificate, time.Time, error) {
 		expiration := time.Now().AddDate(1, 0, 0) // 1 year
 

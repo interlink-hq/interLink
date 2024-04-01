@@ -11,4 +11,8 @@ type VirtualKubeletConfig struct {
 	PodIP             string `yaml:"PodIP"`
 	VerboseLogging    bool   `yaml:"VerboseLogging"`
 	ErrorsOnlyLogging bool   `yaml:"ErrorsOnlyLogging"`
+	CPU               string `yaml:"cpu,omitempty"`
+	Memory            string `yaml:"memory,omitempty"`
+	Pods              string `yaml:"pods,omitempty"`
+	GPU               string `yaml:"nvidia.com/gpu,omitempty"`
 }

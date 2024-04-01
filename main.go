@@ -8,13 +8,13 @@ import (
 	"github.com/virtual-kubelet/virtual-kubelet/log"
 	logruslogger "github.com/virtual-kubelet/virtual-kubelet/log/logrus"
 
-	"github.com/intertwin-eu/interlink/pkg/interlink"
 	commonIL "github.com/intertwin-eu/interlink/pkg/interlink"
+	"github.com/intertwin-eu/interlink/pkg/interlink/api"
 )
 
 func main() {
 	var cancel context.CancelFunc
-	interlink.PodStatuses.Statuses = make(map[string]commonIL.PodStatus)
+	api.PodStatuses.Statuses = make(map[string]commonIL.PodStatus)
 
 	interLinkConfig, err := commonIL.NewInterLinkConfig()
 	if err != nil {
@@ -36,7 +36,7 @@ func main() {
 
 	log.G(ctx).Info(interLinkConfig)
 
-	interLinkAPIs := VKapi.InterLinkHandler{
+	interLinkAPIs := api.InterLinkHandler{
 		Config: interLinkConfig,
 		Ctx:    ctx,
 	}
@@ -47,10 +47,10 @@ func main() {
 	mutex.HandleFunc("/delete", interLinkAPIs.DeleteHandler)
 	mutex.HandleFunc("/pinglink", interLinkAPIs.Ping)
 	mutex.HandleFunc("/getLogs", interLinkAPIs.GetLogsHandler)
-	mutex.HandleFunc("/updateCache", interlink.UpdateCacheHandler)
-	err = http.ListenAndServe(":"+commonIL.InterLinkConfigInst.Interlinkport, mutex)
+	mutex.HandleFunc("/updateCache", interLinkAPIs.UpdateCacheHandler)
+	err = http.ListenAndServe(":"+interLinkConfig.Interlinkport, mutex)
 
 	if err != nil {
-		log.G(interlink.Ctx).Fatal(err)
+		log.G(ctx).Fatal(err)
 	}
 }

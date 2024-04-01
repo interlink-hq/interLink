@@ -19,7 +19,7 @@ import (
 	"k8s.io/apimachinery/pkg/api/resource"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 
-	commonIL "github.com/intertwin-eu/interlink/pkg/common"
+	commonIL "github.com/intertwin-eu/interlink/pkg/interlink"
 )
 
 const (
@@ -61,14 +61,6 @@ type VirtualKubeletProvider struct {
 	startTime            time.Time
 	notifier             func(*v1.Pod)
 	onNodeChangeCallback func(*v1.Node)
-	interLinkConfig      commonIL.InterLinkConfig
-}
-
-type VirtualKubeletConfig struct {
-	CPU    string `json:"cpu,omitempty"`
-	Memory string `json:"memory,omitempty"`
-	Pods   string `json:"pods,omitempty"`
-	GPU    string `json:"nvidia.com/gpu,omitempty"`
 }
 
 func NewProviderConfig(
@@ -77,7 +69,6 @@ func NewProviderConfig(
 	operatingSystem string,
 	internalIP string,
 	daemonEndpointPort int32,
-	interLinkConfig commonIL.InterLinkConfig,
 ) (*VirtualKubeletProvider, error) {
 
 	// set defaults
@@ -125,15 +116,15 @@ func NewProviderConfig(
 			Addresses:       []v1.NodeAddress{{Type: v1.NodeInternalIP, Address: internalIP}},
 			DaemonEndpoints: v1.NodeDaemonEndpoints{KubeletEndpoint: v1.DaemonEndpoint{Port: int32(daemonEndpointPort)}},
 			Capacity: v1.ResourceList{
-				"cpu":    resource.MustParse(config.CPU),
-				"memory": resource.MustParse(config.Memory),
-				"pods":   resource.MustParse(config.Pods),
+				"cpu":            resource.MustParse(config.CPU),
+				"memory":         resource.MustParse(config.Memory),
+				"pods":           resource.MustParse(config.Pods),
 				"nvidia.com/gpu": resource.MustParse(config.GPU),
 			},
 			Allocatable: v1.ResourceList{
-				"cpu":    resource.MustParse(config.CPU),
-				"memory": resource.MustParse(config.Memory),
-				"pods":   resource.MustParse(config.Pods),
+				"cpu":            resource.MustParse(config.CPU),
+				"memory":         resource.MustParse(config.Memory),
+				"pods":           resource.MustParse(config.Pods),
 				"nvidia.com/gpu": resource.MustParse(config.GPU),
 			},
 			Conditions: nodeConditions(),
@@ -149,7 +140,6 @@ func NewProviderConfig(
 		pods:               make(map[string]*v1.Pod),
 		config:             config,
 		startTime:          time.Now(),
-		interLinkConfig:    interLinkConfig,
 		onNodeChangeCallback: func(node *v1.Node) {
 		},
 		//notifier: func(p *v1.Pod) {
@@ -160,16 +150,16 @@ func NewProviderConfig(
 }
 
 // NewProvider creates a new Provider, which implements the PodNotifier interface
-func NewProvider(providerConfig, nodeName, operatingSystem string, internalIP string, daemonEndpointPort int32, ctx context.Context, interLinkConfig commonIL.InterLinkConfig) (*VirtualKubeletProvider, error) {
-	config, err := loadConfig(providerConfig, nodeName, ctx)
+func NewProvider(providerConfig, nodeName, operatingSystem string, internalIP string, daemonEndpointPort int32, ctx context.Context) (*VirtualKubeletProvider, error) {
+	config, err := LoadConfig(providerConfig, nodeName, ctx)
 	if err != nil {
 		return nil, err
 	}
-	return NewProviderConfig(config, nodeName, operatingSystem, internalIP, daemonEndpointPort, interLinkConfig)
+	return NewProviderConfig(config, nodeName, operatingSystem, internalIP, daemonEndpointPort)
 }
 
 // loadConfig loads the given json configuration files and yaml to communicate with InterLink.
-func loadConfig(providerConfig, nodeName string, ctx context.Context) (config VirtualKubeletConfig, err error) {
+func LoadConfig(providerConfig, nodeName string, ctx context.Context) (config VirtualKubeletConfig, err error) {
 
 	log.G(ctx).Info("Loading Virtual Kubelet config from " + providerConfig)
 	data, err := os.ReadFile(providerConfig)
@@ -206,7 +196,7 @@ func loadConfig(providerConfig, nodeName string, ctx context.Context) (config Vi
 	if _, err = resource.ParseQuantity(config.Pods); err != nil {
 		return config, fmt.Errorf("invalid pods value %v", config.Pods)
 	}
-	if _, err = resource.ParseQuantity(config.GPU); err != nil { 
+	if _, err = resource.ParseQuantity(config.GPU); err != nil {
 		return config, fmt.Errorf("invalid GPU value %v", config.GPU)
 	}
 	return config, nil
@@ -307,7 +297,7 @@ func (p *VirtualKubeletProvider) CreatePod(ctx context.Context, pod *v1.Pod) err
 	}
 
 	go func() {
-		err = RemoteExecution(ctx, p.interLinkConfig, p, pod, CREATE)
+		err = RemoteExecution(ctx, p.config, p, pod, CREATE)
 		if err != nil {
 			if err.Error() == "Deleted pod before actual creation" {
 				log.G(ctx).Warn(err)
@@ -388,7 +378,7 @@ func (p *VirtualKubeletProvider) DeletePod(ctx context.Context, pod *v1.Pod) (er
 	pod.Status.Reason = "VKProviderPodDeleted"
 
 	go func() {
-		err = RemoteExecution(ctx, p.interLinkConfig, p, pod, DELETE)
+		err = RemoteExecution(ctx, p.config, p, pod, DELETE)
 		if err != nil {
 			log.G(ctx).Error(err)
 			return
@@ -547,7 +537,7 @@ func (p *VirtualKubeletProvider) statusLoop(ctx context.Context) {
 
 	log.G(ctx).Info("statusLoop")
 
-	_, err := os.ReadFile(p.interLinkConfig.VKTokenFile) // just pass the file name
+	_, err := os.ReadFile(p.config.VKTokenFile) // just pass the file name
 	if err != nil {
 		log.G(context.Background()).Fatal(err)
 	}
@@ -560,11 +550,11 @@ func (p *VirtualKubeletProvider) statusLoop(ctx context.Context) {
 		case <-t.C:
 		}
 
-		b, err := os.ReadFile(p.interLinkConfig.VKTokenFile) // just pass the file name
+		b, err := os.ReadFile(p.config.VKTokenFile) // just pass the file name
 		if err != nil {
 			fmt.Print(err)
 		}
-		err = checkPodsStatus(ctx, p, string(b), p.interLinkConfig)
+		err = checkPodsStatus(ctx, p, string(b), p.config)
 		if err != nil {
 			log.G(ctx).Error(err)
 		}
@@ -609,7 +599,7 @@ func (p *VirtualKubeletProvider) GetLogs(ctx context.Context, namespace, podName
 		Opts:          commonIL.ContainerLogOpts(opts),
 	}
 
-	return LogRetrieval(ctx, p.interLinkConfig, logsRequest)
+	return LogRetrieval(ctx, p.config, logsRequest)
 }
 
 // GetStatsSummary returns dummy stats for all pods known by this provider.

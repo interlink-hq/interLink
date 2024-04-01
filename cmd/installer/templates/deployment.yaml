@@ -44,9 +44,6 @@ spec:
         - name: config
           mountPath: /etc/interlink/kubeconfig
           subPath: kubeconfig
-        - name: config-json
-          mountPath: /etc/interlink/interlink-cfg.json
-          subPath: interlink-cfg.json
         - name: token
           mountPath: /opt/interlink
         resources:
@@ -92,9 +89,5 @@ spec:
         configMap:
           # Provide the name of the ConfigMap you want to mount.
           name: {{.VKName}}-config
-      - name: config-json
-        configMap:
-          # Provide the name of the ConfigMap you want to mount.
-          name: {{.VKName}}-config-json
       - name: token
         emptyDir: {}

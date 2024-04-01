@@ -55,8 +55,7 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/client-go/informers"
 
-	commonIL "github.com/intertwin-eu/interlink/pkg/common"
-	"github.com/intertwin-eu/interlink/pkg/virtualkubelet"
+	commonIL "github.com/intertwin-eu/interlink/pkg/virtualkubelet"
 
 	"go.opentelemetry.io/otel"
 	"go.opentelemetry.io/otel/exporters/otlp/otlptrace/otlptracegrpc"
@@ -93,7 +92,7 @@ type Opts struct {
 }
 
 // NewOpts returns an Opts struct with the default values set.
-func NewOpts(nodename string, configpath string, config commonIL.InterLinkConfig) *Opts {
+func NewOpts(nodename string, configpath string, config commonIL.VirtualKubeletConfig) *Opts {
 
 	if nodename == "" {
 		nodename = os.Getenv("NODENAME")
@@ -170,7 +169,7 @@ func main() {
 	defer cancel()
 	nodename := flag.String("nodename", "", "The name of the node")
 	configpath := flag.String("configpath", "", "Path to the VK config")
-	interLinkConfig, err := commonIL.NewInterLinkConfig()
+	interLinkConfig, err := commonIL.LoadConfig(*configpath, *nodename, ctx)
 	if err != nil {
 		panic(err)
 	}
@@ -248,7 +247,7 @@ func main() {
 
 	localClient := kubernetes.NewForConfigOrDie(kubecfg)
 
-	nodeProvider, err := virtualkubelet.NewProvider(cfg.ConfigPath, cfg.NodeName, cfg.OperatingSystem, cfg.InternalIP, cfg.DaemonPort, ctx, interLinkConfig)
+	nodeProvider, err := commonIL.NewProvider(cfg.ConfigPath, cfg.NodeName, cfg.OperatingSystem, cfg.InternalIP, cfg.DaemonPort, ctx)
 	go func() {
 
 		ILbind := false
@@ -256,7 +255,7 @@ func main() {
 		counter := 0
 
 		for {
-			ILbind, retValue, err = commonIL.PingInterLink(ctx)
+			ILbind, retValue, err = commonIL.PingInterLink(ctx, interLinkConfig)
 
 			if err != nil {
 				log.G(ctx).Error(err)
@@ -370,7 +369,7 @@ func main() {
 	//	log.G(ctx).Fatal("failed to initialize certificate manager: %w", err)
 	//}
 	// TODO: create a csr auto approver https://github.com/liqotech/liqo/blob/master/cmd/liqo-controller-manager/main.go#L498
-	retriever := newSelfSignedCertificateRetriever(cfg.NodeName, parsedIP)
+	retriever := commonIL.NewSelfSignedCertificateRetriever(cfg.NodeName, parsedIP)
 
 	server := &http.Server{
 		Addr:              fmt.Sprintf("0.0.0.0:%d", 10250),
