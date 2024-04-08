@@ -19,7 +19,7 @@ __N.B.__ in the demo the oauth2 proxy authN/Z is disabled. DO NOT USE THIS IN PR
 - Clone interlink repo:
 
 ```bash
-git clone https://github.com/interTwin-eu/interLink.git
+git clone --branch 0.2.3-pre2 https://github.com/interTwin-eu/interLink.git 
 ```
 
 ## Connect a remote machine with Docker 
