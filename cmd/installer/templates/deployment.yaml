@@ -90,4 +90,6 @@ spec:
           # Provide the name of the ConfigMap you want to mount.
           name: {{.VKName}}-config
       - name: token
-        emptyDir: {}
+        hostPath:
+          path: /tmp/token
+          type: Directory
