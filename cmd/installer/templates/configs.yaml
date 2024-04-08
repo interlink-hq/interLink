@@ -9,7 +9,7 @@ data:
     Namespace: {{.Namespace}}
     VKTokenFile: /opt/interlink/token
     CPU: "{{.VKLimits.CPU}}"
-    Memory: "{{.VKLimits.Memory}}",
+    Memory: "{{.VKLimits.Memory}}"
     Pods: "{{.VKLimits.Pods}}"
 kind: ConfigMap
 metadata:
