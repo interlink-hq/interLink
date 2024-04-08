@@ -1,0 +1,16 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: "virtual-kubelet-config"
+  namespace: interlink 
+data:
+  InterLinkConfig.yaml: |
+    InterlinkURL: http://interlink.interlink.svc.cluster
+    InterlinkPort: 3000 
+    ExportPodData: true
+    ServiceAccount: "virtual-kubelet"
+    Namespace: interlink 
+    VKTokenFile: /dev/null 
+    CPU: "100"
+    Memory: "128GiB",
+    Pods: "100"

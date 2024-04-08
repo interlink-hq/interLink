@@ -4,50 +4,80 @@ import (
 	"context"
 	"fmt"
 	"os"
+	"strings"
+	"time"
 
 	"dagger.io/dagger"
-	"github.com/containerd/containerd/log"
-	"github.com/sirupsen/logrus"
 )
-
-func BuildImage(ctx context.Context, client *dagger.Client, dockerfile string, imageName string) (string, error) {
-
-	contextDir := client.Host().Directory(".")
-
-	log.G(ctx).Info(fmt.Sprintf("Building image %s from %s", imageName, dockerfile))
-	return contextDir.
-		DockerBuild(dagger.DirectoryDockerBuildOpts{
-			Dockerfile: dockerfile,
-		}).
-		Publish(ctx, fmt.Sprintf(imageName))
-}
 
 func main() {
 	ctx := context.Background()
-	logger := logrus.StandardLogger()
-	logger.SetLevel(logrus.DebugLevel)
-	log.L = logger.WithContext(ctx)
-	// initialize Dagger client
-	client, err := dagger.Connect(ctx, dagger.WithLogOutput(os.Stdout))
+
+	// create Dagger client
+	client, err := dagger.Connect(ctx, dagger.WithLogOutput(os.Stderr))
 	if err != nil {
 		panic(err)
 	}
 	defer client.Close()
 
-	// Build VK
-	//ref, err := BuildImage(ctx, client, "./docker/Dockerfile.vk", "dciangot/vk:latest")
-	//fmt.Printf("Published image to :%s\n", ref)
-
-	// Initialize k3s server
 	k8s := NewK8sInstance(ctx, client)
 	if err = k8s.start(); err != nil {
 		panic(err)
 	}
 
-	pods, err := k8s.kubectl("get pods -A -o wide")
+	ns, err := k8s.kubectl("create ns interlink")
 	if err != nil {
 		panic(err)
 	}
-	fmt.Println(pods)
+	fmt.Println(ns)
 
+	sa, err := k8s.kubectl("apply -f /tests/manifests/service-account.yaml")
+	if err != nil {
+		panic(err)
+	}
+	fmt.Println(sa)
+
+	vkConfig, err := k8s.kubectl("apply -f /tests/manifests/virtual-kubelet-config.yaml")
+	if err != nil {
+		panic(err)
+	}
+	fmt.Println(vkConfig)
+
+	vk, err := k8s.kubectl("apply -f /tests/manifests/virtual-kubelet.yaml")
+	if err != nil {
+		panic(err)
+	}
+	fmt.Println(vk)
+
+	if err := k8s.waitForVirtualKubelet(); err != nil {
+		panic(err)
+	}
+
+	// build interlink and push
+	// build mock and push
+}
+
+func (k *K8sInstance) waitForVirtualKubelet() (err error) {
+	maxRetries := 5
+	retryBackoff := 15 * time.Second
+	for i := 0; i < maxRetries; i++ {
+		time.Sleep(retryBackoff)
+		kubectlGetPod, err := k.kubectl("get pod -n interlink -l nodeName=virtual-kubelet")
+		if err != nil {
+			fmt.Println(fmt.Errorf("could not fetch pod: %v", err))
+			continue
+		}
+		if strings.Contains(kubectlGetPod, "2/2") {
+			return nil
+		}
+		fmt.Println("waiting for k8s to start:", kubectlGetPod)
+		describePod, err := k.kubectl("describe pod -n interlink -l nodeName=virtual-kubelet")
+		if err != nil {
+			fmt.Println(fmt.Errorf("could not fetch pod description: %v", err))
+			continue
+		}
+		fmt.Println(describePod)
+
+	}
+	return fmt.Errorf("k8s took too long to start")
 }

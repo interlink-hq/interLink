@@ -33,18 +33,8 @@ SidecarURL: "http://localhost"
 SidecarPort: "4000"
 VerboseLogging: true
 ErrorsOnlyLogging: false
-SbatchPath: "NOT NEEDED"
-ScancelPath: "NOT NEEDED"
-SqueuePath: "NOT NEEDED"
-CommandPrefix: "NOT NEEDED"
 ExportPodData: true
-DataRootFolder: "NOT NEEDED"
-ServiceAccount: "NOT NEEDED"
-Namespace: "NOT NEEDED"
-Tsocks: false
-TsocksPath: "NOT NEEDED"
-TsocksLoginNode: "NOT NEEDED"
-BashPath: "NOT NEEDED"
+DataRootFolder: "~/.interlink"
 EOF
 
   echo "=== Configured to reach sidecar service on http://localhost:4000 . You can edit this behavior changing $HOME/.interlink/config/InterLinkConfig.yaml file. ==="

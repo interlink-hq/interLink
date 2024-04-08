@@ -1,9 +1,0 @@
-apiVersion: v1
-kind: ConfigMap
-metadata:
-  name: my-configmap
-data:
-  test: "1"
-  test_properties_file_name: "testing.properties"
-  testing.properties: |
-    dummy.mode=true

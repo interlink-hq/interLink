@@ -8,22 +8,10 @@ data:
     ServiceAccount: "interlink"
     Namespace: {{.Namespace}}
     VKTokenFile: /opt/interlink/token
+    CPU: "{{.VKLimits.CPU}}"
+    Memory: "{{.VKLimits.Memory}}",
+    Pods: "{{.VKLimits.Pods}}"
 kind: ConfigMap
 metadata:
   name: "{{.VKName}}-config"
-  namespace: {{.Namespace}} 
----
-apiVersion: v1
-data:
-  interlink-cfg.json: |
-    {
-      "{{.VKName}}": {
-        "cpu": "{{.VKLimits.CPU}}",
-        "memory": "{{.VKLimits.Memory}}",
-        "pods": "{{.VKLimits.Pods}}"
-      }
-    }
-kind: ConfigMap
-metadata:
-  name: "{{.VKName}}-config-json"
   namespace: {{.Namespace}} 

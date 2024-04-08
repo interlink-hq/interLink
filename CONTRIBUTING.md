@@ -11,7 +11,7 @@ contribute are also welcome.
 ## Feedback and Questions
 
 If you wish to discuss anything related to the project, please open a
-[GitHub issue](https://github.com/interTwin-eu/REPOSITORY/issues/new).
+[GitHub issue](https://github.com/interTwin-eu/interlink/issues/new).
 
 ## Contribution Process
 
@@ -75,6 +75,8 @@ purpose of changes to the code.
     * dropped debian 4 support because all other platforms have the same
       values, and it is older than "old stable" debian release
 ```
+
+__N.B.__ please always check for you commits to be [signed](https://docs.github.com/en/authentication/managing-commit-signature-verification/signing-commits)
 
 ## Release cycle
 

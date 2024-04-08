@@ -37,7 +37,7 @@ Then you are ready to install the python SDK with:
 #pip install "uvicorn[standard]" "git+https://github.com/interTwin-eu/interLink.git@${VERSION}#egg=interlink&subdirectory=examples/sidecar/templates/python"
 
 # Or download the latest one with
-pip install "uvicorn[standard]" "git+https://github.com/interTwin-eu/interLink.git#egg=interlink&subdirectory=examples/sidecar/templates/python"
+pip install "uvicorn[standard]" "git+https://github.com/interTwin-eu/interLink.git#egg=interlink&subdirectory=example"
 
 ```
 
@@ -46,10 +46,10 @@ In the next section we are going to leverage the provider class of SDK to create
 
 ### Sidecar provider
 
-The [provider class](https://github.com/interTwin-eu/interLink/blob/main/examples/sidecar/templates/python/interlink/provider.py) is a FastAPI interface that aims to isolate the developers from all the API provisioning boiler plate.
+The [provider class](https://github.com/interTwin-eu/interLink/blob/main/example/interlink/provider.py) is a FastAPI interface that aims to isolate the developers from all the API provisioning boiler plate.
 
-In fact we are going to need only the creation of a derived class implementing the [interLink core methods](https://github.com/interTwin-eu/interLink/blob/main/examples/sidecar/templates/python/interlink/provider.py#L14-L24),
-and making use of in [request and response API specification](https://github.com/interTwin-eu/interLink/blob/main/examples/sidecar/templates/python/interlink/spec.py) to create our own container lifecycle management plugin.
+In fact we are going to need only the creation of a derived class implementing the [interLink core methods](https://github.com/interTwin-eu/interLink/blob/main/example/provider.py#L14-L24),
+and making use of in [request and response API specification](https://github.com/interTwin-eu/interLink/blob/main/example/interlink/spec.py) to create our own container lifecycle management plugin.
 
 
 :::warning
@@ -61,9 +61,9 @@ Be aware that interLink is a development phase, therefore there is no long term 
 ## Implementing the provider methods
 
 Let's start installing the Docker python bindings, since in this example we want to:
-- convert a [Pod](https://github.com/interTwin-eu/interLink/blob/main/examples/sidecar/templates/python/interlink/spec.py#L65) into a `docker run` execution
-- convert a [Delete or State pod request](https://github.com/interTwin-eu/interLink/blob/main/examples/sidecar/templates/python/interlink/spec.py#L47) into `docker rm` and `docker ps`,
-- convert a [Log request](https://github.com/interTwin-eu/interLink/blob/main/examples/sidecar/templates/python/interlink/spec.py#L103) into a `docker logs`
+- convert a [Pod](https://github.com/interTwin-eu/interLink/blob/main/example/interlink/spec.py#L65) into a `docker run` execution
+- convert a [Delete or State pod request](https://github.com/interTwin-eu/interLink/blob/main/example/interlink/spec.py#L47) into `docker rm` and `docker ps`,
+- convert a [Log request](https://github.com/interTwin-eu/interLink/blob/main/example/interlink/spec.py#L103) into a `docker logs`
 
 ```bash
 pip install docker
@@ -173,7 +173,7 @@ Let's implement the `Create` method of the `MyProvider` class:
 
 As you can see, here we are getting the basic information we needed to launch a container with Docker, updating the status cache dictionary `CONTAINER_POD_MAP` afterwards.
 
-For fields available in `interlink.Pod` request please refer to the [spec file](https://github.com/interTwin-eu/interLink/blob/main/examples/sidecar/templates/python/interlink/spec.py).
+For fields available in `interlink.Pod` request please refer to the [spec file](https://github.com/interTwin-eu/interLink/blob/main/example/interlink/spec.py).
 
 ### The Delete request
 
@@ -193,7 +193,7 @@ At this point there is nothing new anymore. The delete request should indeed tak
 
 ### The Status request
 
-The status request takes care of the returing a proper [PodStatus](https://github.com/interTwin-eu/interLink/blob/main/examples/sidecar/templates/python/interlink/spec.py#L89C1-L93C38)
+The status request takes care of the returing a proper [PodStatus](https://github.com/interTwin-eu/interLink/blob/main/example/interlink/spec.py#L89C1-L93C38)
 response for the pod in the request:
 
 ```python
@@ -307,7 +307,7 @@ When receiving the LogRequest, there are many log options to satisfy, in any cas
 
 ### A more advanced example
 
-If you are interested in a more advanced example, please refer the [full example](https://github.com/interTwin-eu/interLink/blob/main/examples/sidecar/templates/python/main.py)
+If you are interested in a more advanced example, please refer the [full example](https://github.com/interTwin-eu/interLink/blob/main/example/main.py)
 for supporting configMap and secret volumes.
 
 ## Let's test is out
