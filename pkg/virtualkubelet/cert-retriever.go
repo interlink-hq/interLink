@@ -23,8 +23,8 @@ import (
 type crtretriever func(*tls.ClientHelloInfo) (*tls.Certificate, error)
 
 // NewCertificateManager creates a certificate manager for the kubelet when retrieving a server certificate, or returns an error.
-// This function is inspired by the original kubelet implementation:
-// https://github.com/kubernetes/kubernetes/blob/master/pkg/kubelet/certificate/kubelet.go
+// This function is inspired by Liqo implementation:
+// https://github.com/liqotech/liqo/blob/master/cmd/virtual-kubelet/root/http.go#L149
 func NewCertificateRetriever(kubeClient kubernetes.Interface, signer, nodeName string, nodeIP net.IP) (crtretriever, error) {
 	const (
 		vkCertsPath   = "/tmp/certs"

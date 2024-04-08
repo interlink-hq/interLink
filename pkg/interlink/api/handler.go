@@ -9,4 +9,5 @@ import (
 type InterLinkHandler struct {
 	Config interlink.InterLinkConfig
 	Ctx    context.Context
+	// TODO: http client with TLS
 }
