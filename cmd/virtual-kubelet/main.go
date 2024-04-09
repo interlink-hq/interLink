@@ -169,6 +169,7 @@ func main() {
 	defer cancel()
 	nodename := flag.String("nodename", "", "The name of the node")
 	configpath := flag.String("configpath", "", "Path to the VK config")
+	flag.Parse()
 	interLinkConfig, err := commonIL.LoadConfig(*configpath, *nodename, ctx)
 	if err != nil {
 		panic(err)
@@ -185,7 +186,7 @@ func main() {
 	}
 	log.L = logruslogger.FromLogrus(logrus.NewEntry(logger))
 
-	shutdown, err := initProvider()
+	/*shutdown, err := initProvider()
 	if err != nil {
 		log.G(ctx).Fatal(err)
 	}
@@ -193,7 +194,7 @@ func main() {
 		if err := shutdown(ctx); err != nil {
 			log.G(ctx).Fatal("failed to shutdown TracerProvider: %w", err)
 		}
-	}()
+	}()*/
 
 	log.G(ctx).Info("Tracer setup succeeded")
 
