@@ -186,7 +186,7 @@ func main() {
 	}
 	log.L = logruslogger.FromLogrus(logrus.NewEntry(logger))
 
-	/*shutdown, err := initProvider()
+	shutdown, err := initProvider()
 	if err != nil {
 		log.G(ctx).Fatal(err)
 	}
@@ -194,7 +194,7 @@ func main() {
 		if err := shutdown(ctx); err != nil {
 			log.G(ctx).Fatal("failed to shutdown TracerProvider: %w", err)
 		}
-	}()*/
+	}()
 
 	log.G(ctx).Info("Tracer setup succeeded")
 
