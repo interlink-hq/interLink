@@ -169,6 +169,7 @@ func main() {
 	defer cancel()
 	nodename := flag.String("nodename", "", "The name of the node")
 	configpath := flag.String("configpath", "", "Path to the VK config")
+	flag.Parse()
 	interLinkConfig, err := commonIL.LoadConfig(*configpath, *nodename, ctx)
 	if err != nil {
 		panic(err)

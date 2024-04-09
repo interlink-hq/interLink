@@ -15,13 +15,9 @@ import (
 	"github.com/containerd/containerd/log"
 	v1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
-	"k8s.io/client-go/kubernetes"
-	"k8s.io/client-go/tools/clientcmd"
 
 	commonIL "github.com/intertwin-eu/interlink/pkg/interlink"
 )
-
-var ClientSet *kubernetes.Clientset
 
 // PingInterLink pings the InterLink API and returns true if there's an answer. The second return value is given by the answer provided by the API.
 func PingInterLink(ctx context.Context, config VirtualKubeletConfig) (bool, int, error) {
@@ -123,7 +119,6 @@ func createRequest(config VirtualKubeletConfig, pod commonIL.PodCreateRequests, 
 			log.L.Error(err)
 			return nil, err
 		}
-		log.G(context.Background()).Info(string(returnValue))
 	}
 
 	return returnValue, nil
@@ -179,10 +174,6 @@ func deleteRequest(config VirtualKubeletConfig, pod *v1.Pod, token string) ([]by
 func statusRequest(config VirtualKubeletConfig, podsList []*v1.Pod, token string) ([]byte, error) {
 	var returnValue []byte
 
-	if len(podsList) == 0 {
-		log.L.Info("No PODs to monitor")
-		return nil, nil
-	}
 	bodyBytes, err := json.Marshal(podsList)
 	if err != nil {
 		log.L.Error(err)
@@ -281,25 +272,11 @@ func RemoteExecution(ctx context.Context, config VirtualKubeletConfig, p *Virtua
 		for {
 			timeNow := time.Now()
 			if timeNow.Sub(startTime).Seconds() < time.Hour.Minutes()*5 {
-				if ClientSet == nil {
-					kubeconfig := os.Getenv("KUBECONFIG")
 
-					config, err := clientcmd.BuildConfigFromFlags("", kubeconfig)
-					if err != nil {
-						log.G(ctx).Error(err)
-						return err
-					}
-
-					ClientSet, err = kubernetes.NewForConfig(config)
-					if err != nil {
-						log.G(ctx).Error(err)
-						return err
-					}
-				}
-
-				_, err := ClientSet.CoreV1().Pods(pod.Namespace).Get(ctx, pod.Name, metav1.GetOptions{})
+				_, err := p.clientSet.CoreV1().Pods(pod.Namespace).Get(ctx, pod.Name, metav1.GetOptions{})
 				if err != nil {
-					return errors.New("deleted pod before actual creation")
+					log.G(ctx).Warning("Deleted Pod before actual creation")
+					return nil
 				}
 
 				var failed bool
@@ -307,7 +284,7 @@ func RemoteExecution(ctx context.Context, config VirtualKubeletConfig, p *Virtua
 				for _, volume := range pod.Spec.Volumes {
 
 					if volume.ConfigMap != nil {
-						cfgmap, err := ClientSet.CoreV1().ConfigMaps(pod.Namespace).Get(ctx, volume.ConfigMap.Name, metav1.GetOptions{})
+						cfgmap, err := p.clientSet.CoreV1().ConfigMaps(pod.Namespace).Get(ctx, volume.ConfigMap.Name, metav1.GetOptions{})
 						if err != nil {
 							failed = true
 							log.G(ctx).Warning("Unable to find ConfigMap " + volume.ConfigMap.Name + " for pod " + pod.Name + ". Waiting for it to be initialized")
@@ -320,7 +297,7 @@ func RemoteExecution(ctx context.Context, config VirtualKubeletConfig, p *Virtua
 							req.ConfigMaps = append(req.ConfigMaps, *cfgmap)
 						}
 					} else if volume.Secret != nil {
-						scrt, err := ClientSet.CoreV1().Secrets(pod.Namespace).Get(ctx, volume.Secret.SecretName, metav1.GetOptions{})
+						scrt, err := p.clientSet.CoreV1().Secrets(pod.Namespace).Get(ctx, volume.Secret.SecretName, metav1.GetOptions{})
 						if err != nil {
 							failed = true
 							log.G(ctx).Warning("Unable to find Secret " + volume.Secret.SecretName + " for pod " + pod.Name + ". Waiting for it to be initialized")
@@ -356,7 +333,6 @@ func RemoteExecution(ctx context.Context, config VirtualKubeletConfig, p *Virtua
 
 		returnVal, err := createRequest(config, req, token)
 		if err != nil {
-			log.G(ctx).Error(err)
 			return err
 		}
 		log.G(ctx).Info(string(returnVal))
@@ -366,7 +342,6 @@ func RemoteExecution(ctx context.Context, config VirtualKubeletConfig, p *Virtua
 		if pod.Status.Phase != "Initializing" {
 			returnVal, err := deleteRequest(config, req, token)
 			if err != nil {
-				log.G(ctx).Error(err)
 				return err
 			}
 			log.G(ctx).Info(string(returnVal))
@@ -378,37 +353,30 @@ func RemoteExecution(ctx context.Context, config VirtualKubeletConfig, p *Virtua
 // checkPodsStatus is regularly called by the VK itself at regular intervals of time to query InterLink for Pods' status.
 // It basically append all available pods registered to the VK to a slice and passes this slice to the statusRequest function.
 // After the statusRequest returns a response, this function uses that response to update every Pod and Container status.
-func checkPodsStatus(ctx context.Context, p *VirtualKubeletProvider, token string, config VirtualKubeletConfig) error {
-	if len(p.pods) == 0 {
-		return nil
-	}
+func checkPodsStatus(ctx context.Context, p *VirtualKubeletProvider, podsList []*v1.Pod, token string, config VirtualKubeletConfig) ([]commonIL.PodStatus, error) {
 	var returnVal []byte
 	var ret []commonIL.PodStatus
-	var PodsList []*v1.Pod
 	var err error
 
-	for _, pod := range p.pods {
-		PodsList = append(PodsList, pod)
-	}
 	//log.G(ctx).Debug(p.pods) //commented out because it's too verbose. uncomment to see all registered pods
 
-	if PodsList != nil {
-		returnVal, err = statusRequest(config, PodsList, token)
-		if err != nil {
-			return err
-		} else if returnVal != nil {
-			err = json.Unmarshal(returnVal, &ret)
-			if err != nil {
-				return err
-			}
+	returnVal, err = statusRequest(config, podsList, token)
 
+	if err != nil {
+		return nil, err
+	} else if returnVal != nil {
+		err = json.Unmarshal(returnVal, &ret)
+		if err != nil {
+			return nil, err
+		}
+		if podsList != nil {
 			for _, podStatus := range ret {
 
 				pod, err := p.GetPod(ctx, podStatus.PodNamespace, podStatus.PodName)
 				if err != nil {
 					updateCacheRequest(config, podStatus.PodUID, token)
 					log.G(ctx).Warning("Error: " + err.Error() + "while getting statuses. Updating InterLink cache")
-					return err
+					return nil, err
 				}
 
 				if podStatus.PodUID == string(pod.UID) {
@@ -468,15 +436,19 @@ func checkPodsStatus(ctx context.Context, p *VirtualKubeletProvider, token strin
 					err = p.UpdatePod(ctx, pod)
 					if err != nil {
 						log.G(ctx).Error(err)
-						return err
+						return nil, err
 					}
 				}
 			}
 
 			log.G(ctx).Info("No errors while getting statuses")
 			log.G(ctx).Debug(ret)
-			return nil
+			return nil, nil
+		} else {
+			return ret, err
 		}
+
 	}
-	return err
+
+	return nil, err
 }
