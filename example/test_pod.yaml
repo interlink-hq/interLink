@@ -12,7 +12,7 @@ spec:
     - "\"600\"" 
     command:
     - sleep 
-    image: ubuntu 
+    image: "docker://ubuntu" 
     imagePullPolicy: Always
     name: my-container
     resources:

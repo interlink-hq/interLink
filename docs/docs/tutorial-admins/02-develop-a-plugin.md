@@ -34,7 +34,7 @@ Then you are ready to install the python SDK with:
 
 ```bash
 #export VERSION=X.X.X
-#pip install "uvicorn[standard]" "git+https://github.com/interTwin-eu/interLink.git@${VERSION}#egg=interlink&subdirectory=examples/sidecar/templates/python"
+#pip install "uvicorn[standard]" "git+https://github.com/interTwin-eu/interLink.git@${VERSION}#egg=interlink&subdirectory=example"
 
 # Or download the latest one with
 pip install "uvicorn[standard]" "git+https://github.com/interTwin-eu/interLink.git#egg=interlink&subdirectory=example"

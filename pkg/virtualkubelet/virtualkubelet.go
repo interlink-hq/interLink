@@ -2,13 +2,14 @@ package virtualkubelet
 
 import (
 	"context"
-	"encoding/json"
 	"fmt"
 	"io"
 	"math/rand"
 	"os"
 	"strconv"
 	"time"
+
+	"gopkg.in/yaml.v2"
 
 	"github.com/containerd/containerd/log"
 	"github.com/virtual-kubelet/virtual-kubelet/errdefs"
@@ -167,7 +168,7 @@ func LoadConfig(providerConfig, nodeName string, ctx context.Context) (config Vi
 		return config, err
 	}
 	configMap := map[string]VirtualKubeletConfig{}
-	err = json.Unmarshal(data, &configMap)
+	err = yaml.Unmarshal(data, &configMap)
 	if err != nil {
 		return config, err
 	}

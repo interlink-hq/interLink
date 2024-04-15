@@ -25,15 +25,13 @@ spec:
         env:
         - name: NODENAME
           value: {{.VKName}} 
-        - name: CONFIGPATH
-          value: /etc/interlink/interlink-cfg.json
         - name: KUBELET_PORT
           value: "10250"
         - name: POD_IP
           valueFrom:
             fieldRef:
               fieldPath: status.podIP
-        - name: INTERLINKCONFIGPATH
+        - name: CONFIGPATH
           value: "/etc/interlink/InterLinkConfig.yaml"
         - name: VKTOKENFILE
           value: "/opt/interlink/token"
@@ -41,9 +39,6 @@ spec:
         - name: config
           mountPath: /etc/interlink/InterLinkConfig.yaml
           subPath: InterLinkConfig.yaml
-        - name: config
-          mountPath: /etc/interlink/kubeconfig
-          subPath: kubeconfig
         - name: token
           mountPath: /opt/interlink
         resources:
@@ -91,5 +86,5 @@ spec:
           name: {{.VKName}}-config
       - name: token
         hostPath:
-          path: /tmp/token
+          path: /tmp
           type: Directory
