@@ -16,9 +16,12 @@ import (
 	"github.com/virtual-kubelet/virtual-kubelet/node/api"
 	stats "github.com/virtual-kubelet/virtual-kubelet/node/api/statsv1alpha1"
 	"github.com/virtual-kubelet/virtual-kubelet/trace"
+	"gopkg.in/yaml.v2"
 	v1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/api/resource"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/client-go/kubernetes"
+	"k8s.io/client-go/tools/clientcmd"
 
 	commonIL "github.com/intertwin-eu/interlink/pkg/interlink"
 )
@@ -62,6 +65,7 @@ type VirtualKubeletProvider struct {
 	startTime            time.Time
 	notifier             func(*v1.Pod)
 	onNodeChangeCallback func(*v1.Node)
+	clientSet            *kubernetes.Clientset
 }
 
 func NewProviderConfig(
@@ -167,25 +171,26 @@ func LoadConfig(providerConfig, nodeName string, ctx context.Context) (config Vi
 	if err != nil {
 		return config, err
 	}
-	configMap := map[string]VirtualKubeletConfig{}
-	err = yaml.Unmarshal(data, &configMap)
+
+	config = VirtualKubeletConfig{}
+	err = yaml.Unmarshal(data, &config)
+
 	if err != nil {
 		return config, err
 	}
-	if _, exist := configMap[nodeName]; exist {
-		config = configMap[nodeName]
-		if config.CPU == "" {
-			config.CPU = DefaultCPUCapacity
-		}
-		if config.Memory == "" {
-			config.Memory = DefaultMemoryCapacity
-		}
-		if config.Pods == "" {
-			config.Pods = DefaultPodCapacity
-		}
-		if config.GPU == "" {
-			config.GPU = DefaultGPUCapacity
-		}
+
+	//config = configMap
+	if config.CPU == "" {
+		config.CPU = DefaultCPUCapacity
+	}
+	if config.Memory == "" {
+		config.Memory = DefaultMemoryCapacity
+	}
+	if config.Pods == "" {
+		config.Pods = DefaultPodCapacity
+	}
+	if config.GPU == "" {
+		config.GPU = DefaultGPUCapacity
 	}
 
 	if _, err = resource.ParseQuantity(config.CPU); err != nil {
@@ -465,6 +470,9 @@ func (p *VirtualKubeletProvider) GetPods(ctx context.Context) ([]*v1.Pod, error)
 
 	log.G(ctx).Info("receive GetPods")
 
+	p.InitClientSet(ctx)
+	p.RetrievePodsFromInterlink(ctx)
+
 	var pods []*v1.Pod
 
 	for _, pod := range p.pods {
@@ -555,10 +563,19 @@ func (p *VirtualKubeletProvider) statusLoop(ctx context.Context) {
 		if err != nil {
 			fmt.Print(err)
 		}
-		err = checkPodsStatus(ctx, p, string(b), p.config)
-		if err != nil {
-			log.G(ctx).Error(err)
+
+		var podsList []*v1.Pod
+		for _, pod := range p.pods {
+			podsList = append(podsList, pod)
 		}
+
+		if podsList != nil {
+			_, err = checkPodsStatus(ctx, p, podsList, string(b), p.config)
+			if err != nil {
+				log.G(ctx).Error(err)
+			}
+		}
+
 		log.G(ctx).Info("statusLoop=end")
 	}
 }
@@ -679,4 +696,58 @@ func (p *VirtualKubeletProvider) GetStatsSummary(ctx context.Context) (*stats.Su
 
 	// Return the dummy stats.
 	return res, nil
+}
+
+// GetPods returns a list of all pods known to be "running".
+func (p *VirtualKubeletProvider) RetrievePodsFromInterlink(ctx context.Context) error {
+	ctx, span := trace.StartSpan(ctx, "RetrievePodsFromInterlink")
+	defer span.End()
+
+	log.G(ctx).Info("Retrieving ALL cached InterLink Pods")
+
+	b, err := os.ReadFile(p.config.VKTokenFile) // just pass the file name
+	if err != nil {
+		log.G(ctx).Error(err)
+	}
+
+	cached_pods, err := checkPodsStatus(ctx, p, nil, string(b), p.config)
+
+	for _, pod := range cached_pods {
+		retrievedPod, err := p.clientSet.CoreV1().Pods(pod.PodNamespace).Get(ctx, pod.PodName, metav1.GetOptions{})
+		if err != nil {
+			log.G(ctx).Warning("Unable to retrieve pod " + retrievedPod.Name + " from the cluster")
+		} else {
+			key, err := BuildKey(retrievedPod)
+			if err != nil {
+				log.G(ctx).Error(err)
+			}
+			p.pods[key] = retrievedPod
+			p.notifier(retrievedPod)
+		}
+	}
+
+	return err
+}
+
+func (p *VirtualKubeletProvider) InitClientSet(ctx context.Context) error {
+	ctx, span := trace.StartSpan(ctx, "InitClientSet")
+	defer span.End()
+
+	if p.clientSet == nil {
+		kubeconfig := os.Getenv("KUBECONFIG")
+
+		config, err := clientcmd.BuildConfigFromFlags("", kubeconfig)
+		if err != nil {
+			log.G(ctx).Error(err)
+			return err
+		}
+
+		p.clientSet, err = kubernetes.NewForConfig(config)
+		if err != nil {
+			log.G(ctx).Error(err)
+			return err
+		}
+	}
+
+	return nil
 }

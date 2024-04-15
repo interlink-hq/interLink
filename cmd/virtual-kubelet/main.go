@@ -164,6 +164,7 @@ func main() {
 	defer cancel()
 	nodename := flag.String("nodename", "", "The name of the node")
 	configpath := flag.String("configpath", "", "Path to the VK config")
+  flag.Parse()
 	err := NewOpts(*nodename, *configpath)
 	if err != nil {
 		panic(err)

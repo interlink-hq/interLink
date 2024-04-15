@@ -91,15 +91,21 @@ func (h *InterLinkHandler) StatusHandler(w http.ResponseWriter, r *http.Request)
 
 	}
 
-	for _, pod := range pods {
-		PodStatuses.mu.Lock()
-		for _, cached := range PodStatuses.Statuses {
-			if cached.PodUID == string(pod.UID) {
-				returnPods = append(returnPods, cached)
-				break
+	if len(pods) > 0 {
+		for _, pod := range pods {
+			PodStatuses.mu.Lock()
+			for _, cached := range PodStatuses.Statuses {
+				if cached.PodUID == string(pod.UID) {
+					returnPods = append(returnPods, cached)
+					break
+				}
 			}
+			PodStatuses.mu.Unlock()
 		}
-		PodStatuses.mu.Unlock()
+	} else {
+		for _, pod := range PodStatuses.Statuses {
+			returnPods = append(returnPods, pod)
+		}
 	}
 
 	returnValue, err := json.Marshal(returnPods)
