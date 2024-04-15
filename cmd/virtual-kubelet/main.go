@@ -92,7 +92,7 @@ type Opts struct {
 }
 
 // NewOpts returns an Opts struct with the default values set.
-func NewOpts(nodename string, configpath string, config commonIL.VirtualKubeletConfig) *Opts {
+func NewOpts(nodename string, configpath string) error {
 
 	if nodename == "" {
 		nodename = os.Getenv("NODENAME")
@@ -102,12 +102,7 @@ func NewOpts(nodename string, configpath string, config commonIL.VirtualKubeletC
 		configpath = os.Getenv("CONFIGPATH")
 	}
 
-	return &Opts{
-		ConfigPath: configpath,
-		NodeName:   nodename,
-		Verbose:    config.VerboseLogging,
-		ErrorsOnly: config.ErrorsOnlyLogging,
-	}
+	return nil
 }
 
 func initProvider() (func(context.Context) error, error) {
@@ -169,12 +164,16 @@ func main() {
 	defer cancel()
 	nodename := flag.String("nodename", "", "The name of the node")
 	configpath := flag.String("configpath", "", "Path to the VK config")
-	flag.Parse()
+  flag.Parse()
+	err := NewOpts(*nodename, *configpath)
+	if err != nil {
+		panic(err)
+	}
+
 	interLinkConfig, err := commonIL.LoadConfig(*configpath, *nodename, ctx)
 	if err != nil {
 		panic(err)
 	}
-	opts := NewOpts(*nodename, *configpath, interLinkConfig)
 
 	logger := logrus.StandardLogger()
 	if interLinkConfig.VerboseLogging {

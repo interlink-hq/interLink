@@ -9,6 +9,8 @@ import (
 	"strconv"
 	"time"
 
+	"gopkg.in/yaml.v2"
+
 	"github.com/containerd/containerd/log"
 	"github.com/virtual-kubelet/virtual-kubelet/errdefs"
 	"github.com/virtual-kubelet/virtual-kubelet/node/api"
@@ -169,8 +171,10 @@ func LoadConfig(providerConfig, nodeName string, ctx context.Context) (config Vi
 	if err != nil {
 		return config, err
 	}
+
 	config = VirtualKubeletConfig{}
 	err = yaml.Unmarshal(data, &config)
+
 	if err != nil {
 		return config, err
 	}

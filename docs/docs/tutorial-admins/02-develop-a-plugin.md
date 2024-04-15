@@ -34,7 +34,7 @@ Then you are ready to install the python SDK with:
 
 ```bash
 #export VERSION=X.X.X
-#pip install "uvicorn[standard]" "git+https://github.com/interTwin-eu/interLink.git@${VERSION}#egg=interlink&subdirectory=examples/sidecar/templates/python"
+#pip install "uvicorn[standard]" "git+https://github.com/interTwin-eu/interLink.git@${VERSION}#egg=interlink&subdirectory=example"
 
 # Or download the latest one with
 pip install "uvicorn[standard]" "git+https://github.com/interTwin-eu/interLink.git#egg=interlink&subdirectory=example"
@@ -48,7 +48,7 @@ In the next section we are going to leverage the provider class of SDK to create
 
 The [provider class](https://github.com/interTwin-eu/interLink/blob/main/example/interlink/provider.py) is a FastAPI interface that aims to isolate the developers from all the API provisioning boiler plate.
 
-In fact we are going to need only the creation of a derived class implementing the [interLink core methods](https://github.com/interTwin-eu/interLink/blob/main/example/provider.py#L14-L24),
+In fact we are going to need only the creation of a derived class implementing the [interLink core methods](https://github.com/interTwin-eu/interLink/blob/main/example/interlink/provider.py#L14-L24),
 and making use of in [request and response API specification](https://github.com/interTwin-eu/interLink/blob/main/example/interlink/spec.py) to create our own container lifecycle management plugin.
 
 
@@ -307,7 +307,7 @@ When receiving the LogRequest, there are many log options to satisfy, in any cas
 
 ### A more advanced example
 
-If you are interested in a more advanced example, please refer the [full example](https://github.com/interTwin-eu/interLink/blob/main/example/main.py)
+If you are interested in a more advanced example, please refer the [full example](https://github.com/interTwin-eu/interLink/blob/main/example/provider_demo.py)
 for supporting configMap and secret volumes.
 
 ## Let's test is out

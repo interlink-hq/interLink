@@ -19,7 +19,7 @@ __N.B.__ in the demo the oauth2 proxy authN/Z is disabled. DO NOT USE THIS IN PR
 - Clone interlink repo:
 
 ```bash
-git clone --branch 0.2.3-pre2 https://github.com/interTwin-eu/interLink.git 
+git clone https://github.com/interTwin-eu/interLink.git 
 ```
 
 ## Connect a remote machine with Docker 
@@ -27,13 +27,13 @@ git clone --branch 0.2.3-pre2 https://github.com/interTwin-eu/interLink.git
 Move to example location:
 
 ```bash
-cd interLink/examples/interlink-docker
+cd interLink/example/interlink-docker
 ```
 
 ### Setup Kubernetes cluster
 
 ```bash
-minikube start --kubernetes-version=1.26.10
+minikube start --kubernetes-version=1.27.1
 ```
 
 ### Deploy Interlink
@@ -45,7 +45,11 @@ You need to provide the interLink IP address that should be reachable from the k
 ```bash
 export INTERLINK_IP_ADDRESS=XXX.XX.X.XXX
 
-sed -i 's/InterlinkURL:.*/InterlinkURL: "http:\/\/'$INTERLINK_IP_ADDRESS'"/g'  vk/InterLinkConfig.yaml | sed -i 's/SidecarURL:.*/SidecarURL: "http:\/\/'$INTERLINK_IP_ADDRESS'"/g' vk/InterLinkConfig.yaml
+sed -i 's/InterlinkURL:.*/InterlinkURL: "http:\/\/'$INTERLINK_IP_ADDRESS'"/g'  vk/InterLinkConfig.yaml
+
+sed -i 's/InterlinkURL:.*/InterlinkURL: "http:\/\/'$INTERLINK_IP_ADDRESS'"/g'  interlink/InterLinkConfig.yaml | sed -i 's/SidecarURL:.*/SidecarURL: "http:\/\/'$INTERLINK_IP_ADDRESS'"/g' interlink/InterLinkConfig.yaml
+
+sed -i 's/InterlinkURL:.*/InterlinkURL: "http:\/\/'$INTERLINK_IP_ADDRESS'"/g'  interlink/sidecarConfig.yaml | sed -i 's/SidecarURL:.*/SidecarURL: "http:\/\/'$INTERLINK_IP_ADDRESS'"/g' interlink/sidecarConfig.yaml
 ```
 
 #### Deploy virtualKubelet
