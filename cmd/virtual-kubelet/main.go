@@ -164,7 +164,7 @@ func main() {
 	defer cancel()
 	nodename := flag.String("nodename", "", "The name of the node")
 	configpath := flag.String("configpath", "", "Path to the VK config")
-  flag.Parse()
+  	flag.Parse()
 	err := NewOpts(*nodename, *configpath)
 	if err != nil {
 		panic(err)
@@ -205,16 +205,14 @@ func main() {
 
 	http.DefaultTransport.(*http.Transport).TLSClientConfig = &tls.Config{InsecureSkipVerify: true}
 
-	log.G(ctx).Debug(*opts)
-
 	dport, err := strconv.ParseInt(os.Getenv("KUBELET_PORT"), 10, 32)
 	if err != nil {
 		log.G(ctx).Fatal(err)
 	}
 
 	cfg := Config{
-		ConfigPath:      opts.ConfigPath,
-		NodeName:        opts.NodeName,
+		ConfigPath:      configpath,
+		NodeName:        nodename,
 		OperatingSystem: "Linux",
 		// https://github.com/liqotech/liqo/blob/d8798732002abb7452c2ff1c99b3e5098f848c93/deployments/liqo/templates/liqo-gateway-deployment.yaml#L69
 		InternalIP: os.Getenv("POD_IP"),
@@ -296,14 +294,14 @@ func main() {
 
 	eb := record.NewBroadcaster()
 
-	EventRecorder := eb.NewRecorder(scheme.Scheme, v1.EventSource{Component: path.Join(opts.NodeName, "pod-controller")})
+	EventRecorder := eb.NewRecorder(scheme.Scheme, v1.EventSource{Component: path.Join(cfg.NodeName, "pod-controller")})
 
 	resync, err := time.ParseDuration("30s")
 
 	podInformerFactory := informers.NewSharedInformerFactoryWithOptions(
 		localClient,
 		resync,
-		PodInformerFilter(opts.NodeName),
+		PodInformerFilter(cfg.NodeName),
 	)
 
 	scmInformerFactory := informers.NewSharedInformerFactoryWithOptions(
