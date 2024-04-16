@@ -15,6 +15,7 @@ import (
 func (h *InterLinkHandler) CreateHandler(w http.ResponseWriter, r *http.Request) {
 	log.G(h.Ctx).Info("InterLink: received Create call")
 
+	var returnedJID commonIL.CreateStruct
 	statusCode := -1
 
 	bodyBytes, err := io.ReadAll(r.Body)
@@ -35,7 +36,7 @@ func (h *InterLinkHandler) CreateHandler(w http.ResponseWriter, r *http.Request)
 		return
 	}
 
-	var retrievedData []commonIL.RetrievedPodData
+	var retrievedData commonIL.RetrievedPodData
 
 	data := commonIL.RetrievedPodData{}
 	if h.Config.ExportPodData {
@@ -48,51 +49,58 @@ func (h *InterLinkHandler) CreateHandler(w http.ResponseWriter, r *http.Request)
 		}
 	}
 
-	retrievedData = append(retrievedData, data)
+	retrievedData = data
 
-	if retrievedData != nil {
-		bodyBytes, err = json.Marshal(retrievedData)
-		if err != nil {
-			w.WriteHeader(http.StatusInternalServerError)
-			log.G(h.Ctx).Fatal(err)
-			return
-		}
-		log.G(h.Ctx).Debug(string(bodyBytes))
-		reader := bytes.NewReader(bodyBytes)
-
-		log.G(h.Ctx).Info(req)
-		req, err = http.NewRequest(http.MethodPost, h.Config.Sidecarurl+":"+h.Config.Sidecarport+"/create", reader)
-
-		if err != nil {
-			statusCode = http.StatusInternalServerError
-			w.WriteHeader(statusCode)
-			log.G(h.Ctx).Fatal(err)
-			return
-		}
-
-		log.G(h.Ctx).Info("InterLink: forwarding Create call to sidecar")
-		var resp *http.Response
-
-		req.Header.Set("Content-Type", "application/json")
-		resp, err = http.DefaultClient.Do(req)
-		if err != nil {
-			statusCode = http.StatusInternalServerError
-			w.WriteHeader(statusCode)
-			log.G(h.Ctx).Error(err)
-			return
-		}
-
-		if resp.StatusCode == http.StatusOK {
-			statusCode = http.StatusOK
-			log.G(h.Ctx).Debug(statusCode)
-		} else {
-			statusCode = http.StatusInternalServerError
-			log.G(h.Ctx).Error(statusCode)
-		}
-
-		returnValue, _ := io.ReadAll(resp.Body)
-		log.G(h.Ctx).Debug(string(returnValue))
-		w.WriteHeader(statusCode)
-		w.Write(returnValue)
+	bodyBytes, err = json.Marshal(retrievedData)
+	if err != nil {
+		w.WriteHeader(http.StatusInternalServerError)
+		log.G(h.Ctx).Fatal(err)
+		return
 	}
+	log.G(h.Ctx).Debug(string(bodyBytes))
+	reader := bytes.NewReader(bodyBytes)
+
+	req, err = http.NewRequest(http.MethodPost, h.Config.Sidecarurl+":"+h.Config.Sidecarport+"/create", reader)
+
+	if err != nil {
+		statusCode = http.StatusInternalServerError
+		w.WriteHeader(statusCode)
+		log.G(h.Ctx).Fatal(err)
+		return
+	}
+
+	log.G(h.Ctx).Info("InterLink: forwarding Create call to sidecar")
+	var resp *http.Response
+
+	req.Header.Set("Content-Type", "application/json")
+	resp, err = http.DefaultClient.Do(req)
+	if err != nil {
+		statusCode = http.StatusInternalServerError
+		w.WriteHeader(statusCode)
+		log.G(h.Ctx).Error(err)
+		return
+	}
+
+	if resp.StatusCode == http.StatusOK {
+		statusCode = http.StatusOK
+		log.G(h.Ctx).Debug(statusCode)
+	} else {
+		statusCode = http.StatusInternalServerError
+		log.G(h.Ctx).Error(statusCode)
+	}
+
+	returnValue, _ := io.ReadAll(resp.Body)
+	log.G(h.Ctx).Debug(string(returnValue))
+
+	json.Unmarshal(returnValue, &returnedJID)
+
+	PodStatuses.mu.Lock()
+	status := PodStatuses.Statuses[returnedJID.PodUID]
+	status.JobID = returnedJID.PodJID
+	PodStatuses.Statuses[returnedJID.PodUID] = status
+	PodStatuses.mu.Unlock()
+
+	w.WriteHeader(statusCode)
+	w.Write(returnValue)
+
 }

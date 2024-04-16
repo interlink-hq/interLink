@@ -694,7 +694,7 @@ func (p *VirtualKubeletProvider) GetStatsSummary(ctx context.Context) (*stats.Su
 	return res, nil
 }
 
-// GetPods returns a list of all pods known to be "running".
+// RetrievePodsFromCluster scans all pods registered to the K8S cluster and re-assigns the ones with a valid JobID to the Virtual Kubelet.
 func (p *VirtualKubeletProvider) RetrievePodsFromInterlink(ctx context.Context) error {
 	ctx, span := trace.StartSpan(ctx, "RetrievePodsFromInterlink")
 	defer span.End()

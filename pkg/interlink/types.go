@@ -18,6 +18,7 @@ type PodStatus struct {
 	PodName      string               `json:"name"`
 	PodUID       string               `json:"UID"`
 	PodNamespace string               `json:"namespace"`
+	JobID        string               `json:"JID"`
 	Containers   []v1.ContainerStatus `json:"containers"`
 }
 
@@ -53,4 +54,9 @@ type LogStruct struct {
 	PodName       string           `json:"PodName"`
 	ContainerName string           `json:"ContainerName"`
 	Opts          ContainerLogOpts `json:"Opts"`
+}
+
+type CreateStruct struct {
+	PodUID string `json:"PodUID"`
+	PodJID string `json:"PodJID"`
 }
