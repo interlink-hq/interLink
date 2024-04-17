@@ -467,7 +467,7 @@ func (p *VirtualKubeletProvider) GetPods(ctx context.Context) ([]*v1.Pod, error)
 	log.G(ctx).Info("receive GetPods")
 
 	p.InitClientSet(ctx)
-	p.RetrievePodsFromInterlink(ctx)
+	p.RetrievePodsFromCluster(ctx)
 
 	var pods []*v1.Pod
 
@@ -695,36 +695,42 @@ func (p *VirtualKubeletProvider) GetStatsSummary(ctx context.Context) (*stats.Su
 }
 
 // RetrievePodsFromCluster scans all pods registered to the K8S cluster and re-assigns the ones with a valid JobID to the Virtual Kubelet.
-func (p *VirtualKubeletProvider) RetrievePodsFromInterlink(ctx context.Context) error {
+func (p *VirtualKubeletProvider) RetrievePodsFromCluster(ctx context.Context) error {
 	ctx, span := trace.StartSpan(ctx, "RetrievePodsFromInterlink")
 	defer span.End()
 
-	log.G(ctx).Info("Retrieving ALL cached InterLink Pods")
+	log.G(ctx).Info("Retrieving ALL Pods registered to the cluster and owned by VK")
 
-	b, err := os.ReadFile(p.config.VKTokenFile) // just pass the file name
+	namespaces, err := p.clientSet.CoreV1().Namespaces().List(ctx, metav1.ListOptions{})
 	if err != nil {
-		log.G(ctx).Error(err)
+		log.G(ctx).Error("Unable to retrieve all namespaces available in the cluster")
+		return err
 	}
 
-	cached_pods, err := checkPodsStatus(ctx, p, nil, string(b), p.config)
-
-	for _, pod := range cached_pods {
-		retrievedPod, err := p.clientSet.CoreV1().Pods(pod.PodNamespace).Get(ctx, pod.PodName, metav1.GetOptions{})
+	for _, ns := range namespaces.Items {
+		podsList, err := p.clientSet.CoreV1().Pods(ns.Name).List(ctx, metav1.ListOptions{})
 		if err != nil {
-			log.G(ctx).Warning("Unable to retrieve pod " + retrievedPod.Name + " from the cluster")
-		} else {
-			key, err := BuildKey(retrievedPod)
-			if err != nil {
-				log.G(ctx).Error(err)
-			}
-			p.pods[key] = retrievedPod
-			p.notifier(retrievedPod)
+			log.G(ctx).Warning("Unable to retrieve pods from the namespace " + ns.Name)
 		}
+		for _, pod := range podsList.Items {
+			if CheckIfAnnotationExists(&pod, "JobID") && p.nodeName == pod.Spec.NodeName {
+				key, err := BuildKey(&pod)
+				if err != nil {
+					log.G(ctx).Error(err)
+					return err
+				}
+				p.pods[key] = &pod
+				p.notifier(&pod)
+			}
+		}
+
 	}
 
 	return err
 }
 
+// InitClientSet initialize a clientset and assigns it to the VK provider, so it can be used whenever it's necessary
+// without initializing a new one
 func (p *VirtualKubeletProvider) InitClientSet(ctx context.Context) error {
 	ctx, span := trace.StartSpan(ctx, "InitClientSet")
 	defer span.End()
@@ -746,4 +752,15 @@ func (p *VirtualKubeletProvider) InitClientSet(ctx context.Context) error {
 	}
 
 	return nil
+}
+
+// CheckIfAnnotationExists checks if a specific annotation (key) is available between the annotation of a pod
+func CheckIfAnnotationExists(pod *v1.Pod, key string) bool {
+	_, ok := pod.Annotations[key]
+
+	if ok {
+		return true
+	} else {
+		return false
+	}
 }

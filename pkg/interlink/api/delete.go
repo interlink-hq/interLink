@@ -36,7 +36,13 @@ func (h *InterLinkHandler) DeleteHandler(w http.ResponseWriter, r *http.Request)
 		log.G(h.Ctx).Fatal(err)
 	}
 
-	deleteCachedStatus(string(pod.UID))
+	err = deleteCachedStatus(h.Config, string(pod.UID))
+	if err != nil {
+		statusCode = http.StatusInternalServerError
+		w.WriteHeader(statusCode)
+		log.G(h.Ctx).Error(err)
+		return
+	}
 	req, err = http.NewRequest(http.MethodPost, h.Config.Sidecarurl+":"+h.Config.Sidecarport+"/delete", reader)
 	if err != nil {
 		statusCode = http.StatusInternalServerError

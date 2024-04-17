@@ -36,6 +36,11 @@ func main() {
 
 	log.G(ctx).Info(interLinkConfig)
 
+	err = api.LoadCache(ctx, interLinkConfig)
+	if err != nil {
+		log.G(ctx).Error(err)
+	}
+
 	interLinkAPIs := api.InterLinkHandler{
 		Config: interLinkConfig,
 		Ctx:    ctx,

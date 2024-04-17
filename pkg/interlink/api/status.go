@@ -87,21 +87,27 @@ func (h *InterLinkHandler) StatusHandler(w http.ResponseWriter, r *http.Request)
 			return
 		}
 
-		updateStatuses(returnedStatuses)
+		err = updateStatuses(h.Config, returnedStatuses)
+		if err != nil {
+			statusCode = http.StatusInternalServerError
+			w.WriteHeader(statusCode)
+			log.G(h.Ctx).Error(err)
+			return
+		}
 
 	}
 
 	if len(pods) > 0 {
+		PodStatuses.mu.Lock()
 		for _, pod := range pods {
-			PodStatuses.mu.Lock()
 			for _, cached := range PodStatuses.Statuses {
 				if cached.PodUID == string(pod.UID) {
 					returnPods = append(returnPods, cached)
 					break
 				}
 			}
-			PodStatuses.mu.Unlock()
 		}
+		PodStatuses.mu.Unlock()
 	} else {
 		for _, pod := range PodStatuses.Statuses {
 			returnPods = append(returnPods, pod)

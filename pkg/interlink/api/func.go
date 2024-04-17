@@ -2,10 +2,13 @@ package api
 
 import (
 	"context"
+	"io/fs"
+	"os"
 	"path/filepath"
 	"sync"
 
 	"github.com/containerd/containerd/log"
+	"gopkg.in/yaml.v3"
 	v1 "k8s.io/api/core/v1"
 
 	commonIL "github.com/intertwin-eu/interlink/pkg/interlink"
@@ -83,11 +86,17 @@ func retrieveData(ctx context.Context, config commonIL.InterLinkConfig, pod comm
 	return retrievedData, nil
 }
 
-// deleteCachedStatus locks the map PodStatuses and delete the uid key from that map
-func deleteCachedStatus(uid string) {
+// deleteCachedStatus locks the map PodStatuses and delete the uid key from that map.
+// It also deletes the $rootDir/cachedStatuses/podUID.yaml cache file
+func deleteCachedStatus(config commonIL.InterLinkConfig, uid string) error {
 	PodStatuses.mu.Lock()
 	delete(PodStatuses.Statuses, uid)
 	PodStatuses.mu.Unlock()
+	err := os.Remove(config.DataRootFolder + "/cachedStatuses/" + uid + ".yaml")
+	if err != nil {
+		return err
+	}
+	return nil
 }
 
 // checkIfCached checks if the uid key is present in the PodStatuses map and returns a bool
@@ -101,14 +110,56 @@ func checkIfCached(uid string) bool {
 	}
 }
 
-// updateStatuses locks and updates the PodStatuses map with the statuses contained in the returnedStatuses slice
-func updateStatuses(returnedStatuses []commonIL.PodStatus) {
+// updateStatuses locks and updates the PodStatuses map with the statuses contained in the returnedStatuses slice.
+// It also writes the yaml status for each pod into $RootDir/cachedStatuses/podUID.yaml
+func updateStatuses(config commonIL.InterLinkConfig, returnedStatuses []commonIL.PodStatus) error {
 	PodStatuses.mu.Lock()
 
 	for _, new := range returnedStatuses {
+		statusBytes, err := yaml.Marshal(new)
+		if err != nil {
+			return err
+		}
+
+		//TBD: check the size before writing. If the size is too big, replace the oldest
+
+		err = os.WriteFile(config.DataRootFolder+"/cachedStatuses/"+new.PodUID+".yaml", statusBytes, fs.ModePerm)
+		if err != nil {
+			return err
+		}
 		//log.G(ctx).Debug(PodStatuses.Statuses, new)
 		PodStatuses.Statuses[new.PodUID] = new
 	}
 
 	PodStatuses.mu.Unlock()
+	return nil
+}
+
+// LoadCache reads all entries inside $RootDir/cachedStatuses and attempts to load YAMLs to restore the cache
+func LoadCache(ctx context.Context, config commonIL.InterLinkConfig) error {
+	dirs, err := os.ReadDir(config.DataRootFolder + "/cachedStatuses")
+	if err != nil {
+		return err
+	}
+
+	PodStatuses.mu.Lock()
+	for _, entry := range dirs {
+		var cachedPodStatus commonIL.PodStatus
+		file, err := os.ReadFile(entry.Name())
+		if err != nil {
+			log.G(ctx).Error("Unable to read " + entry.Name())
+			return err
+		}
+		err = yaml.Unmarshal(file, &cachedPodStatus)
+		if err != nil {
+			log.G(ctx).Error("Unable to unmarshal cached pod " + entry.Name())
+			return err
+		}
+
+		PodStatuses.Statuses[cachedPodStatus.PodUID] = cachedPodStatus
+
+	}
+	PodStatuses.mu.Unlock()
+
+	return nil
 }
