@@ -106,6 +106,17 @@ start() {
           --https-address 0.0.0.0:{{.InterLinkPort}} \
           --tls-cert-file ${HOME}/.interlink/config/tls.crt \
           --tls-key-file ${HOME}/.interlink/config/tls.key \
+          --tls-cipher-suite=TLS_ECDHE_RSA_WITH_AES_128_CBC_SHA \
+          --tls-cipher-suite=TLS_ECDHE_RSA_WITH_AES_128_CBC_SHA \
+          --tls-cipher-suite=TLS_ECDHE_RSA_WITH_AES_128_GCM_SHA256 \
+          --tls-cipher-suite=TLS_ECDHE_RSA_WITH_AES_256_CBC_SHA \
+          --tls-cipher-suite=TLS_ECDHE_RSA_WITH_AES_256_GCM_SHA384 \
+          --tls-cipher-suite=TLS_ECDHE_RSA_WITH_CHACHA20_POLY1305_SHA256  \
+          --tls-cipher-suite=TLS_RSA_WITH_AES_128_CBC_SHA \
+          --tls-cipher-suite=TLS_RSA_WITH_AES_128_GCM_SHA256 \
+          --tls-cipher-suite=TLS_RSA_WITH_AES_256_CBC_SHA \
+          --tls-cipher-suite=TLS_RSA_WITH_AES_256_GCM_SHA384 \
+          --tls-cipher-suite= TLS_AKE_WITH_AES_128_GCM_SHA256 \
           --skip-jwt-bearer-tokens true > $HOME/.interlink/logs/oauth2-proxy.log 2>&1 &
 
       echo $! > $HOME/.interlink/oauth2-proxy.pid
@@ -127,6 +138,17 @@ start() {
           --https-address 0.0.0.0:{{.InterLinkPort}} \
           --tls-cert-file ${HOME}/.interlink/config/tls.crt \
           --tls-key-file ${HOME}/.interlink/config/tls.key \
+          --tls-cipher-suite=TLS_ECDHE_RSA_WITH_AES_128_CBC_SHA \
+          --tls-cipher-suite=TLS_ECDHE_RSA_WITH_AES_128_CBC_SHA \
+          --tls-cipher-suite=TLS_ECDHE_RSA_WITH_AES_128_GCM_SHA256 \
+          --tls-cipher-suite=TLS_ECDHE_RSA_WITH_AES_256_CBC_SHA \
+          --tls-cipher-suite=TLS_ECDHE_RSA_WITH_AES_256_GCM_SHA384 \
+          --tls-cipher-suite=TLS_ECDHE_RSA_WITH_CHACHA20_POLY1305_SHA256  \
+          --tls-cipher-suite=TLS_RSA_WITH_AES_128_CBC_SHA \
+          --tls-cipher-suite=TLS_RSA_WITH_AES_128_GCM_SHA256 \
+          --tls-cipher-suite=TLS_RSA_WITH_AES_256_CBC_SHA \
+          --tls-cipher-suite=TLS_RSA_WITH_AES_256_GCM_SHA384 \
+          --tls-cipher-suite= TLS_AKE_WITH_AES_128_GCM_SHA256 \
           --skip-jwt-bearer-tokens true > $HOME/.interlink/logs/oauth2-proxy.log 2>&1 &
 
       echo $! > $HOME/.interlink/oauth2-proxy.pid
