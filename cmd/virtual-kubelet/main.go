@@ -360,14 +360,12 @@ func main() {
 
 	api.AttachPodRoutes(podRoutes, mux, true)
 
-	parsedIP := net.ParseIP(interLinkConfig.PodIP)
-
 	//retriever, err := newCertificateRetriever(localClient, certificates.KubeletServingSignerName, cfg.NodeName, parsedIP)
 	//if err != nil {
 	//	log.G(ctx).Fatal("failed to initialize certificate manager: %w", err)
 	//}
 	// TODO: create a csr auto approver https://github.com/liqotech/liqo/blob/master/cmd/liqo-controller-manager/main.go#L498
-	retriever := commonIL.NewSelfSignedCertificateRetriever(cfg.NodeName, parsedIP)
+	retriever := commonIL.NewSelfSignedCertificateRetriever(cfg.NodeName, net.ParseIP(cfg.InternalIP))
 
 	server := &http.Server{
 		Addr:              fmt.Sprintf("0.0.0.0:%d", 10250),
