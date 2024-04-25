@@ -12,5 +12,5 @@ data:
     Namespace: interlink 
     VKTokenFile: /dev/null 
     CPU: "100"
-    Memory: "128GiB",
+    Memory: "128GiB"
     Pods: "100"

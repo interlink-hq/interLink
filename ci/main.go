@@ -59,7 +59,7 @@ func main() {
 
 func (k *K8sInstance) waitForVirtualKubelet() (err error) {
 	maxRetries := 5
-	retryBackoff := 15 * time.Second
+	retryBackoff := 60 * time.Second
 	for i := 0; i < maxRetries; i++ {
 		time.Sleep(retryBackoff)
 		kubectlGetPod, err := k.kubectl("get pod -n interlink -l nodeName=virtual-kubelet")
@@ -71,7 +71,7 @@ func (k *K8sInstance) waitForVirtualKubelet() (err error) {
 			return nil
 		}
 		fmt.Println("waiting for k8s to start:", kubectlGetPod)
-		describePod, err := k.kubectl("describe pod -n interlink -l nodeName=virtual-kubelet")
+		describePod, err := k.kubectl("logs -n interlink -l nodeName=virtual-kubelet -c inttw-vk")
 		if err != nil {
 			fmt.Println(fmt.Errorf("could not fetch pod description: %v", err))
 			continue

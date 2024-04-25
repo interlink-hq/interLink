@@ -88,7 +88,7 @@ func (k *K8sInstance) start() error {
 		WithMountedTemp("/var/lib/kubelet").
 		WithMountedTemp("/var/lib/rancher/k3s").
 		WithMountedTemp("/var/log").
-		WithExec([]string{"sh", "-c", "k3s server --bind-address $(ip route | grep src | awk '{print $NF}') --disable traefik --disable metrics-server --kube-apiserver-arg \"--disable-admission-plugins=ServiceAccount\" --egress-selector-mode=disabled"}, dagger.ContainerWithExecOpts{InsecureRootCapabilities: true}).
+		WithExec([]string{"sh", "-c", "k3s server --bind-address $(ip route | grep src | awk '{print $NF}') --disable traefik --disable metrics-server --egress-selector-mode=disabled"}, dagger.ContainerWithExecOpts{InsecureRootCapabilities: true}).
 		WithExposedPort(6443)
 
 	k.container = k.client.Container().
