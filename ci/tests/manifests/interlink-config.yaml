@@ -1,0 +1,15 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: "interlink-config"
+  namespace: interlink 
+data:
+  InterLinkConfig.yaml: |
+    InterlinkURL: "http://localhost"
+    InterlinkPort: "3000"
+    SidecarURL: "http://mock.interlink.svc.cluster"
+    SidecarPort: "4000"
+    VerboseLogging: true
+    ErrorsOnlyLogging: false
+    ExportPodData: true
+    DataRootFolder: "~/.interlink"

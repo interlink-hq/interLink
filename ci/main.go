@@ -54,6 +54,9 @@ func main() {
 	}
 
 	// build interlink and push
+	// TODO: create pod interlink
+
+	// TODO: generate TLS cert for registry
 	// build mock and push
 }
 

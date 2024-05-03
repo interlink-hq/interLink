@@ -61,7 +61,7 @@ func (h *InterLinkHandler) CreateHandler(w http.ResponseWriter, r *http.Request)
 		reader := bytes.NewReader(bodyBytes)
 
 		log.G(h.Ctx).Info(req)
-		req, err = http.NewRequest(http.MethodPost, h.Config.Sidecarurl+":"+h.Config.Sidecarport+"/create", reader)
+		req, err = http.NewRequest(http.MethodPost, h.SidecarEndpoint+"/create", reader)
 
 		if err != nil {
 			statusCode = http.StatusInternalServerError

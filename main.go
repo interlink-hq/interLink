@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"net/http"
+	"strings"
 
 	"github.com/sirupsen/logrus"
 	"github.com/virtual-kubelet/virtual-kubelet/log"
@@ -36,9 +37,19 @@ func main() {
 
 	log.G(ctx).Info(interLinkConfig)
 
+	sidecarEndpoint := ""
+	if strings.HasPrefix(interLinkConfig.Sidecarurl, "unix://") {
+		sidecarEndpoint = interLinkConfig.Sidecarurl
+	} else if strings.HasPrefix(interLinkConfig.Sidecarurl, "http://") {
+		sidecarEndpoint = interLinkConfig.Sidecarurl + ":" + interLinkConfig.Sidecarport
+	} else {
+		log.G(ctx).Fatal("Sidecar URL should either start per unix:// or http://")
+	}
+
 	interLinkAPIs := api.InterLinkHandler{
-		Config: interLinkConfig,
-		Ctx:    ctx,
+		Config:          interLinkConfig,
+		Ctx:             ctx,
+		SidecarEndpoint: sidecarEndpoint,
 	}
 
 	mutex := http.NewServeMux()

@@ -8,6 +8,8 @@ data:
     InterlinkURL: http://interlink.interlink.svc.cluster
     InterlinkPort: 3000 
     ExportPodData: true
+    VerboseLogging: true
+    ErrorsOnlyLogging: false
     ServiceAccount: "virtual-kubelet"
     Namespace: interlink 
     VKTokenFile: /dev/null 
