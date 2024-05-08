@@ -42,10 +42,9 @@ This guide is specific for the IAM portal <https://iam.cloud.infn.it/> but it sh
 1. Go to the [IAM portal](<https://iam.cloud.infn.it/>) and log in.
 2. After logging in, click on the `My clients` tab on the left side  of the page and then select `New client` as shown in the images below.
 
-<p float="left">
-  <img src="./img/iam-client0.png" width="300" />
-  <img src="./img/iam-client1.png" width="300" /> 
-</p>
+
+![Go to my clients](./img/iam-client0.png)
+![Create a new client](./img/iam-client1.png)
 
 3. Set a name you prefer for the client
 4. Select the `Scopes` tab and add the following scopes: `openid`, `email`, `offline_access`, `profile`, `wlcg`, `wlcg.groups`
@@ -54,7 +53,7 @@ This guide is specific for the IAM portal <https://iam.cloud.infn.it/> but it sh
 
 After creating the client, you will be able to see the new client in the `My clients` page as show in the image below. 
 
-<img src="./img/iam-client2.png" width="300" />
+![Check the created client](./img/iam-client2.png)
 
 You can click on the client to see the client details. You will find the `Client id` under the `Main` tab and the `Client secret` under the `Credentials` tab.
 
