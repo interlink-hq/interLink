@@ -4,7 +4,7 @@ sidebar_position: 4
 
 # Configure OpenID connect identity providers
 
-In alternative of the Github authentication flow, we support any OpenID compliant identity provider. The following are a few examples.
+In alternative of the GitHub authentication flow, we support any OpenID compliant identity provider. The following are a few examples.
 
 ## EGI Check-in
 
@@ -34,12 +34,12 @@ Remember to put your email in the group field!
 
 ## Indigo IAM
 
-If you have an account for [Indigo IAM](https://iam.cloud.infn.it/), you should be able to set it for authenticating the virtual kubelet with the interLink remote components.
+If you have an account for [Indigo IAM](<https://iam.cloud.infn.it/>), you should be able to set it for authenticating the virtual kubelet with the interLink remote components.
 Follow those steps to setup a new client in the IAM portal and get the necessary information to fill the configuration.
 
-This guide is specific for the IAM portal https://iam.cloud.infn.it/ but it should be similar for other IAM portals that are OpenID compliant.
+This guide is specific for the IAM portal <https://iam.cloud.infn.it/> but it should be similar for other IAM portals that are OpenID compliant.
 
-1. Go to the [IAM portal](https://iam.cloud.infn.it/) and log in.
+1. Go to the [IAM portal](<https://iam.cloud.infn.it/>) and log in.
 2. After logging in, click on the `My clients` tab on the left side  of the page and then select `New client` as shown in the images below.
 
 <p float="left">
