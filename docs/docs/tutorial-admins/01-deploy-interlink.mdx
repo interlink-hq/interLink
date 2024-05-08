@@ -212,7 +212,7 @@ In alterative you can start an already supported one.
 ### Remote SLURM job submission
 
 :::warning
-For more details on configuration and installation please refer to the SLURM plugin repository: [github.com/interTwin-eu/interlink-docker-plugin](https://github.com/interTwin-eu/interlink-docker-plugin) 
+Note that the SLURM plugin repository is: [github.com/interTwin-eu/interlink-slurm-plugin](https://github.com/interTwin-eu/interlink-slurm-plugin) 
 :::
 
 #### Requirements
@@ -302,6 +302,12 @@ systemctl --user status slurm-plugin.service
 ```
 
 Logs will be stored at `$HOME/.interlink/logs/plugin.log`.
+
+### Create UNICORE jobs to run on HPC centers
+
+[UNICORE](https://www.unicore.eu/) (Uniform Interface to Computing Resources) offers a ready-to-run system including client and server software. UNICORE makes distributed computing and data resources available in a seamless and secure way in intranets and the internet.
+
+- [UNICORE plugin](https://github.com/interTwin-eu/interlink-unicore-plugin)
 
 ### Remote docker execution
 

@@ -124,7 +124,7 @@ const config: Config = {
           ],
         },
       ],
-      copyright: `Copyright © ${new Date().getFullYear()} interLink  Built with Docusaurus.`,
+      copyright: `Copyright © ${new Date().getFullYear()} Istituto Nazionale di Fisica Nucleare (INFN) - Built with Docusaurus.`,
     },
     prism: {
       theme: prismThemes.github,

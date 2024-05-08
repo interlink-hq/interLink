@@ -384,6 +384,7 @@ func checkPodsStatus(ctx context.Context, p *VirtualKubeletProvider, podsList []
 					podErrored := false
 					podCompleted := false
 					failedReason := ""
+					terminatedContainers := 0
 					for _, containerStatus := range podStatus.Containers {
 						index := 0
 						foundCt := false
@@ -403,7 +404,7 @@ func checkPodsStatus(ctx context.Context, p *VirtualKubeletProvider, podsList []
 
 						if containerStatus.State.Terminated != nil {
 							log.G(ctx).Debug("Pod " + podStatus.PodName + ": Service " + containerStatus.Name + " is not running on Sidecar")
-							podCompleted = true
+							terminatedContainers++
 							pod.Status.ContainerStatuses[index].State.Terminated.Reason = "Completed"
 							if containerStatus.State.Terminated.ExitCode != 0 {
 								podErrored = true
@@ -419,6 +420,10 @@ func checkPodsStatus(ctx context.Context, p *VirtualKubeletProvider, podsList []
 							log.G(ctx).Debug("Pod " + podStatus.PodName + ": Service " + containerStatus.Name + " is running on Sidecar")
 						}
 
+					}
+
+					if terminatedContainers == len(podStatus.Containers) {
+						podCompleted = true
 					}
 
 					if podRunning && pod.Status.Phase != v1.PodRunning {
