@@ -1,4 +1,4 @@
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 import datetime
 from typing import List, Optional
 
@@ -6,21 +6,22 @@ class Metadata(BaseModel):
     name: str
     namespace: str
     uid: str
-    annotations: dict
+    annotations: Optional[dict] = Field({})
 
 class VolumeMount(BaseModel):
     name: str
     mountPath: str
     subPath: Optional[str] = None
+    readOnly: Optional[bool] = False
 
 class Container(BaseModel):
     name: str
     image: str
     tag: str = 'latest'
     command: List[str]
-    args: List[str]
-    resources: dict
-    volumeMounts: Optional[List[VolumeMount]] = None
+    args: Optional[List[str]] = Field([])
+    resources: Optional[dict] = Field({})
+    volumeMounts: Optional[List[VolumeMount]] = Field([])
 
 class SecretSource(BaseModel):
     secretName: str
@@ -68,14 +69,14 @@ class Pod(BaseModel):
 
 class StateTerminated(BaseModel):
     exitCode: int
-    reason: str    
+    reason: Optional[str] = None
 
 class StateRunning(BaseModel):
-    startedAt: str    
+    startedAt: Optional[str] = None
 
 class StateWaiting(BaseModel):
-    message: str
-    reason: str    
+    message: Optional[str] = None
+    reason: Optional[str] = None
 
 class ContainerStates(BaseModel):
     terminated: Optional[StateTerminated] = None 
@@ -93,12 +94,12 @@ class PodStatus(BaseModel):
     containers: List[ContainerStatus]
 
 class LogOpts(BaseModel):
-    Tail: int
+    Tail: Optional[int] = None
     LimitBytes: Optional[int] = None
-    Timestamps: bool
-    Previous: bool
-    SinceSeconds: int
-    SinceTime: datetime.datetime 
+    Timestamps: Optional[bool] = None
+    Previous: Optional[bool] = None
+    SinceSeconds: Optional[int] = None
+    SinceTime: Optional[datetime.datetime] = None
 
 class LogRequest(BaseModel):
     Namespace: str
