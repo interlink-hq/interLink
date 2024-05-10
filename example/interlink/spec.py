@@ -31,14 +31,17 @@ class ConfigMapSource(BaseModel):
     configMapName: str
     items: List[dict] 
 
-class VolumeSource(BaseModel):
-    emptyDir: Optional[dict] = None
-    secret: Optional[SecretSource] = None 
-    configMap: Optional[ConfigMapSource] = None 
+# class VolumeSource(BaseModel):
+#     emptyDir: Optional[dict] = None
+#     secret: Optional[SecretSource] = None
+#     configMap: Optional[ConfigMapSource] = None
 
 class PodVolume(BaseModel):
     name: str
-    volumeSource: Optional[VolumeSource] = None 
+#    volumeSource: Optional[VolumeSource] = None
+    emptyDir: Optional[dict] = None
+    secret: Optional[SecretSource] = None
+    configMap: Optional[ConfigMapSource] = None
 
 class PodSpec(BaseModel):
     containers: List[Container]
