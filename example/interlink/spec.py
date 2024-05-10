@@ -79,6 +79,17 @@ class PodVolume(BaseModel):
     secret: Optional[SecretVolumeSource] = None
     configMap: Optional[ConfigMapVolumeSource] = None
 
+
+class SecurityContext(BaseModel):
+    allowPrivilegeEscaltion: Optional[bool] = None
+    privileged: Optional[bool] = None
+    procMount: Optional[str] = None
+    readOnlyFileSystem: Optional[bool] = None
+    runAsGroup: Optional[int] = None
+    runAsNonRoot: Optional[bool] = None
+    runAsUser: Optional[int] = None
+
+
 class PodSpec(BaseModel):
     containers: List[Container]
     initContainers: Optional[List[Container]] = None
@@ -88,6 +99,7 @@ class PodSpec(BaseModel):
     priority: Optional[int] = None
     restartPolicy: Optional[str] = None
     terminationGracePeriodSeconds: Optional[int] = None
+    securityContext: Optional[SecurityContext] = None
 
 
 class PodRequest(BaseModel):
