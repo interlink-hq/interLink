@@ -76,7 +76,7 @@ class PodVolume(BaseModel):
     name: str
 #    volumeSource: Optional[VolumeSource] = None
     emptyDir: Optional[dict] = None
-    secret: Optional[SecretSource] = None
+    secret: Optional[SecretVolumeSource] = None
     configMap: Optional[ConfigMapVolumeSource] = None
 
 class PodSpec(BaseModel):
