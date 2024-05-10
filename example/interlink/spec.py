@@ -36,6 +36,18 @@ class EnvVar(BaseModel):
     value: Optional[str] = None
     valueFrom: Optional[EnvVarSource] = None
 
+
+class SecurityContext(BaseModel):
+    allowPrivilegeEscalation: Optional[bool] = None
+    privileged: Optional[bool] = None
+    procMount: Optional[str] = None
+    readOnlyFileSystem: Optional[bool] = None
+    runAsGroup: Optional[int] = None
+    runAsNonRoot: Optional[bool] = None
+    runAsUser: Optional[int] = None
+
+
+
 class Container(BaseModel):
     name: str
     image: str
@@ -80,15 +92,6 @@ class PodVolume(BaseModel):
     secret: Optional[SecretVolumeSource] = None
     configMap: Optional[ConfigMapVolumeSource] = None
 
-
-class SecurityContext(BaseModel):
-    allowPrivilegeEscalation: Optional[bool] = None
-    privileged: Optional[bool] = None
-    procMount: Optional[str] = None
-    readOnlyFileSystem: Optional[bool] = None
-    runAsGroup: Optional[int] = None
-    runAsNonRoot: Optional[bool] = None
-    runAsUser: Optional[int] = None
 
 
 class PodSpec(BaseModel):
