@@ -33,8 +33,8 @@ class EnvVarSource(BaseModel):
 
 class EnvVar(BaseModel):
     name: str
-    value: Optional[str]
-    valueFrom: Optional[EnvVarSource]
+    value: Optional[str] = None
+    valueFrom: Optional[EnvVarSource] = None
 
 class Container(BaseModel):
     name: str
