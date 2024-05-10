@@ -27,7 +27,7 @@ class SecretKeySelector(BaseModel):
     name: Optional[str] = None
     optional: Optional[bool] = None
 
-class EnvVarSource:
+class EnvVarSource(BaseModel):
     configMapKeyRef: Optional[ConfigMapKeySelector] = None
     secretKeyRef: Optional[SecretKeySelector] = None
 
