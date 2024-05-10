@@ -54,7 +54,7 @@ class KeyToPath(BaseModel):
 
 
 class SecretVolumeSource(BaseModel):
-    name: str
+    secretName: str
     items: Optional[List[KeyToPath]] = Field([])
     optional: Optional[bool] = None
     defaultMode: Optional[int] = None
