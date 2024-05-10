@@ -83,9 +83,9 @@ class PodSpec(BaseModel):
     containers: List[Container]
     initContainers: Optional[List[Container]] = None
     volumes: Optional[List[PodVolume]] = None
-    preemptionPolicy: Optional[bool] = None
-    priorityClassName: Optional[bool] = None
-    priority: Optional[bool] = None
+    preemptionPolicy: Optional[str] = None
+    priorityClassName: Optional[str] = None
+    priority: Optional[int] = None
     restartPolicy: Optional[str] = None
     terminationGracePeriodSeconds: Optional[int] = None
 
