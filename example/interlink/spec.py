@@ -44,7 +44,7 @@ class Container(BaseModel):
     args: Optional[List[str]] = Field([])
     resources: Optional[dict] = Field({})
     volumeMounts: Optional[List[VolumeMount]] = Field([])
-    envs: Optional[List[EnvVar]]
+    envs: Optional[List[EnvVar]] = None
 
 
 class KeyToPath(BaseModel):
