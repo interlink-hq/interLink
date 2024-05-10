@@ -17,6 +17,16 @@ class VolumeMount(BaseModel):
     subPath: Optional[str] = None
     readOnly: Optional[bool] = False
 
+class ConfigMapKeySelector(BaseModel):
+    key: str
+    name: Optional[str] = None
+    optional: Optional[bool] = None
+
+class SecretKeySelector(BaseModel):
+    key: str
+    name: Optional[str] = None
+    optional: Optional[bool] = None
+
 class EnvVarSource:
     configMapKeyRef: Optional[ConfigMapKeySelector] = None
     secretKeyRef: Optional[SecretKeySelector] = None
