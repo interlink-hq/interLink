@@ -45,6 +45,7 @@ class Container(BaseModel):
     resources: Optional[dict] = Field({})
     volumeMounts: Optional[List[VolumeMount]] = Field([])
     env: Optional[List[EnvVar]] = None
+    securityContext: Optional[SecurityContext] = None
 
 
 class KeyToPath(BaseModel):
@@ -81,7 +82,7 @@ class PodVolume(BaseModel):
 
 
 class SecurityContext(BaseModel):
-    allowPrivilegeEscaltion: Optional[bool] = None
+    allowPrivilegeEscalation: Optional[bool] = None
     privileged: Optional[bool] = None
     procMount: Optional[str] = None
     readOnlyFileSystem: Optional[bool] = None
@@ -99,7 +100,6 @@ class PodSpec(BaseModel):
     priority: Optional[int] = None
     restartPolicy: Optional[str] = None
     terminationGracePeriodSeconds: Optional[int] = None
-    securityContext: Optional[SecurityContext] = None
 
 
 class PodRequest(BaseModel):
