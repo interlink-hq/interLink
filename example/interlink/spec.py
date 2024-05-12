@@ -1,6 +1,6 @@
 from pydantic import BaseModel, Field
 import datetime
-from typing import List, Optional, Dict
+from typing import List, Optional, Dict, Literal
 
 class Metadata(BaseModel):
     name: Optional[str] = None
@@ -16,6 +16,7 @@ class VolumeMount(BaseModel):
     mountPath: str
     subPath: Optional[str] = None
     readOnly: Optional[bool] = False
+    mountPropagation: Optional[str] = None
 
 class ConfigMapKeySelector(BaseModel):
     key: str
