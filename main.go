@@ -59,7 +59,17 @@ func main() {
 	mutex.HandleFunc("/pinglink", interLinkAPIs.Ping)
 	mutex.HandleFunc("/getLogs", interLinkAPIs.GetLogsHandler)
 	mutex.HandleFunc("/updateCache", interLinkAPIs.UpdateCacheHandler)
-	err = http.ListenAndServe(":"+interLinkConfig.Interlinkport, mutex)
+
+	interLinkEndpoint := ""
+	if strings.HasPrefix(interLinkConfig.InterlinkAddress, "unix://") {
+		interLinkEndpoint = interLinkConfig.InterlinkAddress
+	} else if strings.HasPrefix(interLinkConfig.Sidecarurl, "http://") {
+		interLinkEndpoint = interLinkConfig.InterlinkAddress + ":" + interLinkConfig.Interlinkport
+	} else {
+		log.G(ctx).Fatal("Sidecar URL should either start per unix:// or http://")
+	}
+
+	err = http.ListenAndServe(interLinkEndpoint, mutex)
 
 	if err != nil {
 		log.G(ctx).Fatal(err)

@@ -10,6 +10,7 @@ import (
 	"net/http"
 	"os"
 	"strconv"
+	"strings"
 	"time"
 
 	"github.com/containerd/containerd/log"
@@ -19,11 +20,24 @@ import (
 	commonIL "github.com/intertwin-eu/interlink/pkg/interlink"
 )
 
+func getSidecarEndpoint(ctx context.Context, interLinkURL string, interLinkPort string) string {
+	interLinkEndpoint := ""
+	if strings.HasPrefix(interLinkURL, "unix://") {
+		interLinkEndpoint = interLinkURL
+	} else if strings.HasPrefix(interLinkURL, "http://") {
+		interLinkEndpoint = interLinkURL + ":" + interLinkPort
+	} else {
+		log.G(ctx).Fatal("Sidecar URL should either start per unix:// or http://")
+	}
+	return interLinkEndpoint
+}
+
 // PingInterLink pings the InterLink API and returns true if there's an answer. The second return value is given by the answer provided by the API.
 func PingInterLink(ctx context.Context, config VirtualKubeletConfig) (bool, int, error) {
-	log.G(ctx).Info("Pinging: " + config.Interlinkurl + ":" + config.Interlinkport + "/pinglink")
+	interLinkEndpoint := getSidecarEndpoint(ctx, config.Interlinkurl, config.Interlinkport)
+	log.G(ctx).Info("Pinging: " + interLinkEndpoint + "/pinglink")
 	retVal := -1
-	req, err := http.NewRequest(http.MethodPost, config.Interlinkurl+":"+config.Interlinkport+"/pinglink", nil)
+	req, err := http.NewRequest(http.MethodPost, interLinkEndpoint+"/pinglink", nil)
 
 	if err != nil {
 		log.G(ctx).Error(err)
@@ -59,11 +73,12 @@ func PingInterLink(ctx context.Context, config VirtualKubeletConfig) (bool, int,
 }
 
 // updateCacheRequest is called when the VK receives the status of a pod already deleted. It performs a REST call InterLink API to update the cache deleting that pod from the cached structure
-func updateCacheRequest(config VirtualKubeletConfig, uid string, token string) error {
+func updateCacheRequest(ctx context.Context, config VirtualKubeletConfig, uid string, token string) error {
 	bodyBytes := []byte(uid)
 
+	interLinkEndpoint := getSidecarEndpoint(ctx, config.Interlinkurl, config.Interlinkport)
 	reader := bytes.NewReader(bodyBytes)
-	req, err := http.NewRequest(http.MethodPost, config.Interlinkurl+":"+config.Interlinkport+"/updateCache", reader)
+	req, err := http.NewRequest(http.MethodPost, interLinkEndpoint+"/updateCache", reader)
 	if err != nil {
 		log.L.Error(err)
 		return err
@@ -87,7 +102,8 @@ func updateCacheRequest(config VirtualKubeletConfig, uid string, token string) e
 
 // createRequest performs a REST call to the InterLink API when a Pod is registered to the VK. It Marshals the pod with already retrieved ConfigMaps and Secrets and sends it to InterLink.
 // Returns the call response expressed in bytes and/or the first encountered error
-func createRequest(config VirtualKubeletConfig, pod commonIL.PodCreateRequests, token string) ([]byte, error) {
+func createRequest(ctx context.Context, config VirtualKubeletConfig, pod commonIL.PodCreateRequests, token string) ([]byte, error) {
+	interLinkEndpoint := getSidecarEndpoint(ctx, config.Interlinkurl, config.Interlinkport)
 	var returnValue, _ = json.Marshal(commonIL.PodStatus{})
 
 	bodyBytes, err := json.Marshal(pod)
@@ -96,7 +112,7 @@ func createRequest(config VirtualKubeletConfig, pod commonIL.PodCreateRequests, 
 		return nil, err
 	}
 	reader := bytes.NewReader(bodyBytes)
-	req, err := http.NewRequest(http.MethodPost, config.Interlinkurl+":"+config.Interlinkport+"/create", reader)
+	req, err := http.NewRequest(http.MethodPost, interLinkEndpoint+"/create", reader)
 	if err != nil {
 		log.L.Error(err)
 		return nil, err
@@ -126,14 +142,15 @@ func createRequest(config VirtualKubeletConfig, pod commonIL.PodCreateRequests, 
 
 // deleteRequest performs a REST call to the InterLink API when a Pod is deleted from the VK. It Marshals the standard v1.Pod struct and sends it to InterLink.
 // Returns the call response expressed in bytes and/or the first encountered error
-func deleteRequest(config VirtualKubeletConfig, pod *v1.Pod, token string) ([]byte, error) {
+func deleteRequest(ctx context.Context, config VirtualKubeletConfig, pod *v1.Pod, token string) ([]byte, error) {
+	interLinkEndpoint := getSidecarEndpoint(ctx, config.Interlinkurl, config.Interlinkport)
 	bodyBytes, err := json.Marshal(pod)
 	if err != nil {
 		log.G(context.Background()).Error(err)
 		return nil, err
 	}
 	reader := bytes.NewReader(bodyBytes)
-	req, err := http.NewRequest(http.MethodDelete, config.Interlinkurl+":"+config.Interlinkport+"/delete", reader)
+	req, err := http.NewRequest(http.MethodDelete, interLinkEndpoint+"/delete", reader)
 	if err != nil {
 		log.G(context.Background()).Error(err)
 		return nil, err
@@ -171,8 +188,9 @@ func deleteRequest(config VirtualKubeletConfig, pod *v1.Pod, token string) ([]by
 // statusRequest performs a REST call to the InterLink API when the VK needs an update on its Pods' status. A Marshalled slice of v1.Pod is sent to the InterLink API,
 // to query the below plugin for their status.
 // Returns the call response expressed in bytes and/or the first encountered error
-func statusRequest(config VirtualKubeletConfig, podsList []*v1.Pod, token string) ([]byte, error) {
+func statusRequest(ctx context.Context, config VirtualKubeletConfig, podsList []*v1.Pod, token string) ([]byte, error) {
 	var returnValue []byte
+	interLinkEndpoint := getSidecarEndpoint(ctx, config.Interlinkurl, config.Interlinkport)
 
 	bodyBytes, err := json.Marshal(podsList)
 	if err != nil {
@@ -180,7 +198,7 @@ func statusRequest(config VirtualKubeletConfig, podsList []*v1.Pod, token string
 		return nil, err
 	}
 	reader := bytes.NewReader(bodyBytes)
-	req, err := http.NewRequest(http.MethodGet, config.Interlinkurl+":"+config.Interlinkport+"/status", reader)
+	req, err := http.NewRequest(http.MethodGet, interLinkEndpoint+"/status", reader)
 	if err != nil {
 		log.L.Error(err)
 		return nil, err
@@ -213,6 +231,7 @@ func statusRequest(config VirtualKubeletConfig, podsList []*v1.Pod, token string
 // This struct only includes a minimum data set needed to identify the job/container to get the logs from.
 // Returns the call response and/or the first encountered error
 func LogRetrieval(ctx context.Context, config VirtualKubeletConfig, logsRequest commonIL.LogStruct) (io.ReadCloser, error) {
+	interLinkEndpoint := getSidecarEndpoint(ctx, config.Interlinkurl, config.Interlinkport)
 	b, err := os.ReadFile(config.VKTokenFile) // just pass the file name
 	if err != nil {
 		log.G(ctx).Fatal(err)
@@ -225,7 +244,7 @@ func LogRetrieval(ctx context.Context, config VirtualKubeletConfig, logsRequest 
 		return nil, err
 	}
 	reader := bytes.NewReader(bodyBytes)
-	req, err := http.NewRequest(http.MethodGet, config.Interlinkurl+":"+config.Interlinkport+"/getLogs", reader)
+	req, err := http.NewRequest(http.MethodGet, interLinkEndpoint+"/getLogs", reader)
 	if err != nil {
 		log.G(ctx).Error(err)
 		return nil, err
@@ -331,7 +350,7 @@ func RemoteExecution(ctx context.Context, config VirtualKubeletConfig, p *Virtua
 			}
 		}
 
-		returnVal, err := createRequest(config, req, token)
+		returnVal, err := createRequest(ctx, config, req, token)
 		if err != nil {
 			return err
 		}
@@ -340,7 +359,7 @@ func RemoteExecution(ctx context.Context, config VirtualKubeletConfig, p *Virtua
 	case DELETE:
 		req := pod
 		if pod.Status.Phase != "Initializing" {
-			returnVal, err := deleteRequest(config, req, token)
+			returnVal, err := deleteRequest(ctx, config, req, token)
 			if err != nil {
 				return err
 			}
@@ -360,7 +379,7 @@ func checkPodsStatus(ctx context.Context, p *VirtualKubeletProvider, podsList []
 
 	//log.G(ctx).Debug(p.pods) //commented out because it's too verbose. uncomment to see all registered pods
 
-	returnVal, err = statusRequest(config, podsList, token)
+	returnVal, err = statusRequest(ctx, config, podsList, token)
 
 	if err != nil {
 		return nil, err
@@ -374,7 +393,7 @@ func checkPodsStatus(ctx context.Context, p *VirtualKubeletProvider, podsList []
 
 				pod, err := p.GetPod(ctx, podStatus.PodNamespace, podStatus.PodName)
 				if err != nil {
-					updateCacheRequest(config, podStatus.PodUID, token)
+					updateCacheRequest(ctx, config, podStatus.PodUID, token)
 					log.G(ctx).Warning("Error: " + err.Error() + "while getting statuses. Updating InterLink cache")
 					return nil, err
 				}
