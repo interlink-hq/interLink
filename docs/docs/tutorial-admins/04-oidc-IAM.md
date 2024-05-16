@@ -37,17 +37,17 @@ Remember to put your email in the group field!
 
 ## Indigo IAM
 
-If you have an account for [Indigo IAM](<https://iam.cloud.infn.it/>), you should be able to set it
+If you have an account for [Indigo IAM](https://iam.cloud.infn.it/), you should be able to set it
 for authenticating the virtual kubelet with the interLink remote components.
 Follow those steps to setup a new client in the IAM portal and get the necessary information to fill the configuration.
-This guide is specific for the IAM portal <https://iam.cloud.infn.it/> but it should be similar for other IAM portals
+This guide is specific for the IAM portal [https://iam.cloud.infn.it/](https://iam.cloud.infn.it/) but it should be similar for other IAM portals
 that are OpenID compliant.
 
-1. Go to the [IAM portal](<https://iam.cloud.infn.it/>) and log in.
+1. Go to the [IAM portal](https://iam.cloud.infn.it/) and log in.
 2. After logging in, click on the `My clients` tab on the left side of the page and then select `New client`
 as shown in the images below.
 
-  ![Go to my clients](./img/iam-client0.png) ![Create a new client](./img/iam-client1.png)
+![Go to my clients](./img/iam-client0.png) ![Create a new client](./img/iam-client1.png)
 3. Set a name you prefer for the client.
 4. Select the `Scopes` tab and add the following scopes: `openid`, `email`, `offline_access`, `profile`, `wlcg`, `wlcg.groups`.
 5. Select the `Grant types` tab and add the following grant types: `authorization_code`, `client_credentials`,
