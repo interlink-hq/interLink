@@ -197,6 +197,6 @@ async def delete_pod(pod: interlink.PodRequest) -> str:
 async def status_pod(pods: List[interlink.PodRequest]) -> List[interlink.PodStatus]:
     return ProviderNew.get_status(pods)
 
-@app.post("/getLogs", response_class=PlainTextResponse)
+@app.get("/getLogs", response_class=PlainTextResponse)
 async def get_logs(req: interlink.LogRequest) -> bytes:
     return ProviderNew.get_logs(req)
