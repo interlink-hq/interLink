@@ -1,6 +1,6 @@
 from pydantic import BaseModel, Field
 import datetime
-from typing import List, Optional, Dict
+from typing import Dict, List, Optional
 
 
 class Metadata(BaseModel):
