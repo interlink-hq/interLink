@@ -91,25 +91,6 @@ type Opts struct {
 	ErrorsOnly bool
 }
 
-// NewOpts returns an Opts struct with the default values set.
-func NewOpts(nodename string, configpath string, config commonIL.VirtualKubeletConfig) *Opts {
-
-	if nodename == "" {
-		nodename = os.Getenv("NODENAME")
-	}
-
-	if configpath == "" {
-		configpath = os.Getenv("CONFIGPATH")
-	}
-
-	return &Opts{
-		ConfigPath: configpath,
-		NodeName:   nodename,
-		Verbose:    config.VerboseLogging,
-		ErrorsOnly: config.ErrorsOnlyLogging,
-	}
-}
-
 func initProvider() (func(context.Context) error, error) {
 	ctx := context.Background()
 
@@ -167,14 +148,32 @@ func initProvider() (func(context.Context) error, error) {
 func main() {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
-	nodename := flag.String("nodename", "", "The name of the node")
-	configpath := flag.String("configpath", "", "Path to the VK config")
+	flagnodename := flag.String("nodename", "", "The name of the node")
+	flagpath := flag.String("configpath", "", "Path to the VK config")
 	flag.Parse()
-	interLinkConfig, err := commonIL.LoadConfig(*configpath, *nodename, ctx)
+
+	configpath := ""
+	if *flagpath != "" {
+		configpath = *flagpath
+	} else if os.Getenv("CONFIGPATH") != "" {
+		configpath = os.Getenv("CONFIGPATH")
+	} else {
+		configpath = "/etc/interlink/InterLinkConfig.yaml"
+	}
+
+	nodename := ""
+	if *flagnodename != "" {
+		nodename = *flagnodename
+	} else if os.Getenv("NODENAME") != "" {
+		nodename = os.Getenv("NODENAME")
+	} else {
+		panic(fmt.Errorf("You must specify a Node name"))
+	}
+
+	interLinkConfig, err := commonIL.LoadConfig(configpath, nodename, ctx)
 	if err != nil {
 		panic(err)
 	}
-	opts := NewOpts(*nodename, *configpath, interLinkConfig)
 
 	logger := logrus.StandardLogger()
 	if interLinkConfig.VerboseLogging {
@@ -191,7 +190,7 @@ func main() {
 		log.G(ctx).Fatal(err)
 	}
 	defer func() {
-		if err := shutdown(ctx); err != nil {
+		if err = shutdown(ctx); err != nil {
 			log.G(ctx).Fatal("failed to shutdown TracerProvider: %w", err)
 		}
 	}()
@@ -206,16 +205,14 @@ func main() {
 
 	http.DefaultTransport.(*http.Transport).TLSClientConfig = &tls.Config{InsecureSkipVerify: true}
 
-	log.G(ctx).Debug(*opts)
-
 	dport, err := strconv.ParseInt(os.Getenv("KUBELET_PORT"), 10, 32)
 	if err != nil {
 		log.G(ctx).Fatal(err)
 	}
 
 	cfg := Config{
-		ConfigPath:      opts.ConfigPath,
-		NodeName:        opts.NodeName,
+		ConfigPath:      configpath,
+		NodeName:        nodename,
 		OperatingSystem: "Linux",
 		// https://github.com/liqotech/liqo/blob/d8798732002abb7452c2ff1c99b3e5098f848c93/deployments/liqo/templates/liqo-gateway-deployment.yaml#L69
 		InternalIP: os.Getenv("POD_IP"),
@@ -297,14 +294,14 @@ func main() {
 
 	eb := record.NewBroadcaster()
 
-	EventRecorder := eb.NewRecorder(scheme.Scheme, v1.EventSource{Component: path.Join(opts.NodeName, "pod-controller")})
+	EventRecorder := eb.NewRecorder(scheme.Scheme, v1.EventSource{Component: path.Join(cfg.NodeName, "pod-controller")})
 
 	resync, err := time.ParseDuration("30s")
 
 	podInformerFactory := informers.NewSharedInformerFactoryWithOptions(
 		localClient,
 		resync,
-		PodInformerFilter(opts.NodeName),
+		PodInformerFilter(cfg.NodeName),
 	)
 
 	scmInformerFactory := informers.NewSharedInformerFactoryWithOptions(
@@ -363,14 +360,12 @@ func main() {
 
 	api.AttachPodRoutes(podRoutes, mux, true)
 
-	parsedIP := net.ParseIP(interLinkConfig.PodIP)
-
 	//retriever, err := newCertificateRetriever(localClient, certificates.KubeletServingSignerName, cfg.NodeName, parsedIP)
 	//if err != nil {
 	//	log.G(ctx).Fatal("failed to initialize certificate manager: %w", err)
 	//}
 	// TODO: create a csr auto approver https://github.com/liqotech/liqo/blob/master/cmd/liqo-controller-manager/main.go#L498
-	retriever := commonIL.NewSelfSignedCertificateRetriever(cfg.NodeName, parsedIP)
+	retriever := commonIL.NewSelfSignedCertificateRetriever(cfg.NodeName, net.ParseIP(cfg.InternalIP))
 
 	server := &http.Server{
 		Addr:              fmt.Sprintf("0.0.0.0:%d", 10250),
