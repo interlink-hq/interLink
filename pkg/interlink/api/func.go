@@ -25,6 +25,17 @@ func getData(ctx context.Context, config commonIL.InterLinkConfig, pod commonIL.
 	log.G(ctx).Debug(pod.ConfigMaps)
 	var retrievedData commonIL.RetrievedPodData
 	retrievedData.Pod = pod.Pod
+	for _, container := range pod.Pod.Spec.InitContainers {
+		log.G(ctx).Info("- Retrieving Secrets and ConfigMaps for the Docker Sidecar. InitContainer: " + container.Name)
+		log.G(ctx).Debug(container.VolumeMounts)
+		data, err := retrieveData(ctx, config, pod, container)
+		if err != nil {
+			log.G(ctx).Error(err)
+			return commonIL.RetrievedPodData{}, err
+		}
+		retrievedData.Containers = append(retrievedData.Containers, data)
+	}
+
 	for _, container := range pod.Pod.Spec.Containers {
 		log.G(ctx).Info("- Retrieving Secrets and ConfigMaps for the Docker Sidecar. Container: " + container.Name)
 		log.G(ctx).Debug(container.VolumeMounts)

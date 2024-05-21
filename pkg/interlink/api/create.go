@@ -60,7 +60,6 @@ func (h *InterLinkHandler) CreateHandler(w http.ResponseWriter, r *http.Request)
 		log.G(h.Ctx).Debug(string(bodyBytes))
 		reader := bytes.NewReader(bodyBytes)
 
-		log.G(h.Ctx).Info(req)
 		req, err = http.NewRequest(http.MethodPost, h.Config.Sidecarurl+":"+h.Config.Sidecarport+"/create", reader)
 
 		if err != nil {
