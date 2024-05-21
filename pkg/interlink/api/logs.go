@@ -16,6 +16,7 @@ import (
 func (h *InterLinkHandler) GetLogsHandler(w http.ResponseWriter, r *http.Request) {
 	statusCode := http.StatusOK
 	log.G(h.Ctx).Info("InterLink: received GetLogs call")
+
 	bodyBytes, err := io.ReadAll(r.Body)
 	if err != nil {
 		log.G(h.Ctx).Fatal(err)

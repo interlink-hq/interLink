@@ -11,14 +11,15 @@ import (
 
 // InterLinkConfig holds the whole configuration
 type InterLinkConfig struct {
-	InterlinkAddress  string `yaml:"InterlinkAddress"`
-	Interlinkport     string `yaml:"InterlinkPort"`
-	Sidecarurl        string `yaml:"SidecarURL"`
-	Sidecarport       string `yaml:"SidecarPort"`
-	ExportPodData     bool   `yaml:"ExportPodData"`
-	VerboseLogging    bool   `yaml:"VerboseLogging"`
-	ErrorsOnlyLogging bool   `yaml:"ErrorsOnlyLogging"`
-	DataRootFolder    string `yaml:"DataRootFolder"`
+	InterlinkAddress   string `yaml:"InterlinkAddress"`
+	Interlinkport      string `yaml:"InterlinkPort"`
+	InterlinkCacheSize int64  `yaml:"InterlinkCacheSize"`
+	Sidecarurl         string `yaml:"SidecarURL"`
+	Sidecarport        string `yaml:"SidecarPort"`
+	ExportPodData      bool   `yaml:"ExportPodData"`
+	VerboseLogging     bool   `yaml:"VerboseLogging"`
+	ErrorsOnlyLogging  bool   `yaml:"ErrorsOnlyLogging"`
+	DataRootFolder     string `yaml:"DataRootFolder"`
 }
 
 // NewInterLinkConfig returns a variable of type InterLinkConfig, used in many other functions and the first encountered error.

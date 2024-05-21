@@ -13,6 +13,7 @@ import (
 // UpdateCacheHandler is responsible for deleting not-available-anymore Pods on the Virtual Kubelet from the InterLink caching structure
 func (h *InterLinkHandler) UpdateCacheHandler(w http.ResponseWriter, r *http.Request) {
 	log.G(h.Ctx).Info("InterLink: received UpdateCache call")
+
 	var pod v1.Pod
 
 	bodyBytes, err := io.ReadAll(r.Body)

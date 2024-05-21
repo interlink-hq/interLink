@@ -15,6 +15,7 @@ import (
 
 func (h *InterLinkHandler) StatusHandler(w http.ResponseWriter, r *http.Request) {
 	statusCode := http.StatusOK
+
 	var pods []*v1.Pod
 	log.G(h.Ctx).Info("InterLink: received GetStatus call")
 
@@ -32,14 +33,12 @@ func (h *InterLinkHandler) StatusHandler(w http.ResponseWriter, r *http.Request)
 	var returnedStatuses []commonIL.PodStatus //returned from the query to the sidecar
 	var returnPods []commonIL.PodStatus       //returned to the vk
 
-	PodStatuses.mu.Lock()
 	for _, pod := range pods {
 		cached := checkIfCached(string(pod.UID))
 		if pod.Status.Phase == v1.PodRunning || pod.Status.Phase == v1.PodPending || !cached {
 			podsToBeChecked = append(podsToBeChecked, pod)
 		}
 	}
-	PodStatuses.mu.Unlock()
 
 	if len(podsToBeChecked) > 0 {
 

@@ -2,10 +2,12 @@ package api
 
 import (
 	"context"
+	"fmt"
 	"io/fs"
 	"os"
 	"path/filepath"
 	"sync"
+	"time"
 
 	"github.com/containerd/containerd/log"
 	"gopkg.in/yaml.v3"
@@ -14,12 +16,76 @@ import (
 	commonIL "github.com/intertwin-eu/interlink/pkg/interlink"
 )
 
+// MutexDeletePods is a struct holding a mutex and a map of all deleted pods. It used to avoid cache recreation even after a pod is deleted
+type MutexDeletePods struct {
+	mu   sync.Mutex
+	Pods map[string]time.Time
+}
+
+// Init creates a map holding deleted pods and their deletion timestamps. It also starts a goroutine to periodically check pods to delete (older than 1h)
+func (p *MutexDeletePods) Init() {
+	p.Pods = make(map[string]time.Time)
+	go p.DeleteOlderThan()
+}
+
+// Add adds deleted the pods' deletion timestamps to the p.Pods map indexing them through their UID
+func (p *MutexDeletePods) Add(uid string) {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	p.Pods[uid] = time.Now()
+}
+
+// Delete synchronusly removes a deletion timestamp using the pod UID to index it
+func (p *MutexDeletePods) Delete(uid string) {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	delete(p.Pods, uid)
+}
+
+// DeleteOlderThan is thought to be used as a goroutine indefinetely running.
+// Every 1m, it checks for entries older than 1h and removes them calling the Delete function.
+// it runs an endless for loop to avoid exiting
+func (p *MutexDeletePods) DeleteOlderThan() {
+	for {
+		olderThan := time.Now()
+		p.mu.Lock()
+		for key, value := range p.Pods {
+			if olderThan.Sub(value) >= time.Hour {
+				p.Delete(key)
+			}
+		}
+		p.mu.Unlock()
+		time.Sleep(time.Minute)
+	}
+}
+
+// MutexStatuses holds a mutex for synchronous access to the Statuses map, which holds all necessary values to create a cache for interlink
 type MutexStatuses struct {
 	mu       sync.Mutex
 	Statuses map[string]commonIL.PodStatus
 }
 
+// Init creates the Statuses map
+func (s *MutexStatuses) Init() {
+	s.Statuses = make(map[string]commonIL.PodStatus)
+}
+
+// Delete synchronusly removes a key/value pair from the Statuses map using the pod UID to index it
+func (s *MutexStatuses) Delete(uid string) {
+	s.mu.Lock()
+	delete(s.Statuses, uid)
+	s.mu.Unlock()
+}
+
+// Add adds a key/value pair to the Statuses map. It uses the pod UID as key and a commonIL.PodStatus as value.
+func (s *MutexStatuses) Add(status commonIL.PodStatus) {
+	s.mu.Lock()
+	s.Statuses[status.PodUID] = status
+	s.mu.Unlock()
+}
+
 var PodStatuses MutexStatuses
+var DeletedPods MutexDeletePods
 
 // getData retrieves ConfigMaps, Secrets and EmptyDirs from the provided pod by calling the retrieveData function.
 // The config is needed by the retrieveData function.
@@ -87,15 +153,11 @@ func retrieveData(ctx context.Context, config commonIL.InterLinkConfig, pod comm
 }
 
 // deleteCachedStatus locks the map PodStatuses and delete the uid key from that map.
-// It also deletes the $rootDir/cachedStatuses/podUID.yaml cache file
+// It also deletes the $rootDir/.cache/podUID.yaml
 func deleteCachedStatus(config commonIL.InterLinkConfig, uid string) error {
-	PodStatuses.mu.Lock()
-	delete(PodStatuses.Statuses, uid)
-	PodStatuses.mu.Unlock()
-	err := os.Remove(config.DataRootFolder + "/cachedStatuses/" + uid + ".yaml")
-	if err != nil {
-		return err
-	}
+	PodStatuses.Delete(uid)
+	DeletedPods.Add(uid)
+	os.Remove(config.DataRootFolder + ".cache/" + uid + ".yaml")
 	return nil
 }
 
@@ -110,44 +172,79 @@ func checkIfCached(uid string) bool {
 	}
 }
 
+// checkIfDeleted checks if the uid key is present in the DeletedPods map and returns a bool
+func checkIfDeleted(uid string) bool {
+	_, ok := DeletedPods.Pods[uid]
+
+	if ok {
+		return true
+	} else {
+		return false
+	}
+}
+
 // updateStatuses locks and updates the PodStatuses map with the statuses contained in the returnedStatuses slice.
-// It also writes the yaml status for each pod into $RootDir/cachedStatuses/podUID.yaml
+// It also writes the yaml status for each pod into $RootDir/.cache/podUID.yaml upon checking for storage availability
 func updateStatuses(config commonIL.InterLinkConfig, returnedStatuses []commonIL.PodStatus) error {
-	PodStatuses.mu.Lock()
-
 	for _, new := range returnedStatuses {
-		statusBytes, err := yaml.Marshal(new)
-		if err != nil {
-			return err
-		}
+		if !checkIfDeleted(new.PodUID) {
+			_, err := os.Stat(config.DataRootFolder + ".cache")
+			if err != nil {
+				err = os.MkdirAll(config.DataRootFolder+".cache", os.ModePerm)
+				if err != nil {
+					return err
+				}
+			}
 
-		//TBD: check the size before writing. If the size is too big, replace the oldest
+			dirSize, err := dirSize(config.DataRootFolder + ".cache/")
+			dirSize = dirSize / 1024 / 1024
+			if err != nil {
+				return err
+			}
 
-		err = os.WriteFile(config.DataRootFolder+"/cachedStatuses/"+new.PodUID+".yaml", statusBytes, fs.ModePerm)
-		if err != nil {
-			return err
+			if dirSize > config.InterlinkCacheSize {
+				log.L.Fatal("The cache is full")
+			}
+
+			statusBytes, err := yaml.Marshal(new)
+			if err != nil {
+				return err
+			}
+			err = os.WriteFile(config.DataRootFolder+".cache/"+new.PodUID+".yaml", statusBytes, fs.ModePerm)
+			if err != nil {
+				return err
+			}
+
+			PodStatuses.Add(new)
+		} else {
+			deleteCachedStatus(config, new.PodUID)
 		}
-		//log.G(ctx).Debug(PodStatuses.Statuses, new)
-		PodStatuses.Statuses[new.PodUID] = new
 	}
 
-	PodStatuses.mu.Unlock()
 	return nil
 }
 
-// LoadCache reads all entries inside $RootDir/cachedStatuses and attempts to load YAMLs to restore the cache
+// LoadCache reads all entries inside $RootDir/.cache and attempts to load YAMLs to restore the cache
 func LoadCache(ctx context.Context, config commonIL.InterLinkConfig) error {
-	dirs, err := os.ReadDir(config.DataRootFolder + "/cachedStatuses")
+	dirPath := config.DataRootFolder
+	counterPods := 0
+
+	_, err := os.Stat(dirPath + "/.cache")
+	if err != nil {
+		err := os.MkdirAll(dirPath+"/.cache", fs.ModePerm)
+		if err != nil {
+			log.G(ctx).Error("Unable to create directory " + dirPath)
+			return err
+		}
+	}
+	dirs, err := os.ReadDir(dirPath + "/.cache")
 	if err != nil {
 		return err
 	}
-
-	PodStatuses.mu.Lock()
 	for _, entry := range dirs {
 		var cachedPodStatus commonIL.PodStatus
-		file, err := os.ReadFile(entry.Name())
+		file, err := os.ReadFile(dirPath + "/.cache/" + entry.Name())
 		if err != nil {
-			log.G(ctx).Error("Unable to read " + entry.Name())
 			return err
 		}
 		err = yaml.Unmarshal(file, &cachedPodStatus)
@@ -156,10 +253,27 @@ func LoadCache(ctx context.Context, config commonIL.InterLinkConfig) error {
 			return err
 		}
 
-		PodStatuses.Statuses[cachedPodStatus.PodUID] = cachedPodStatus
-
+		PodStatuses.Add(cachedPodStatus)
+		counterPods++
 	}
-	PodStatuses.mu.Unlock()
 
-	return nil
+	log.G(ctx).Info("Restored " + fmt.Sprintf("%d", counterPods) + " cached files from disk")
+
+	log.G(ctx).Info(PodStatuses.Statuses)
+	return err
+}
+
+// DirSize retrieve the whole directory size and returns it in bytes
+func dirSize(path string) (int64, error) {
+	var size int64
+	err := filepath.Walk(path, func(_ string, info os.FileInfo, err error) error {
+		if err != nil {
+			return err
+		}
+		if !info.IsDir() {
+			size += info.Size()
+		}
+		return err
+	})
+	return size, err
 }
