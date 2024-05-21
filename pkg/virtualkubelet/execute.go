@@ -408,6 +408,7 @@ func checkPodsStatus(ctx context.Context, p *VirtualKubeletProvider, podsList []
 						podErrored := false
 						podCompleted := false
 						failedReason := ""
+						terminatedContainers := 0
 						for _, containerStatus := range podStatus.Containers {
 							index := 0
 							foundCt := false
@@ -417,34 +418,37 @@ func checkPodsStatus(ctx context.Context, p *VirtualKubeletProvider, podsList []
 									foundCt = true
 									index = i
 								}
-							}
 
-							if !foundCt {
-								pod.Status.ContainerStatuses = append(pod.Status.ContainerStatuses, containerStatus)
-							} else {
-								pod.Status.ContainerStatuses[index] = containerStatus
-							}
-
-							if containerStatus.State.Terminated != nil {
-								log.G(ctx).Debug("Pod " + podStatus.PodName + ": Service " + containerStatus.Name + " is not running on Sidecar")
-								podCompleted = true
-								pod.Status.ContainerStatuses[index].State.Terminated.Reason = "Completed"
-								if containerStatus.State.Terminated.ExitCode != 0 {
-									podErrored = true
-									failedReason = "Error: " + string(containerStatus.State.Terminated.ExitCode)
-									pod.Status.ContainerStatuses[index].State.Terminated.Reason = failedReason
-									log.G(ctx).Error("Container " + containerStatus.Name + " exited with error: " + string(containerStatus.State.Terminated.ExitCode))
+								if !foundCt {
+									pod.Status.ContainerStatuses = append(pod.Status.ContainerStatuses, containerStatus)
+								} else {
+									pod.Status.ContainerStatuses[index] = containerStatus
 								}
-							} else if containerStatus.State.Waiting != nil {
-								log.G(ctx).Info("Pod " + podStatus.PodName + ": Service " + containerStatus.Name + " is setting up on Sidecar")
-								podRunning = true
-							} else if containerStatus.State.Running != nil {
-								podRunning = true
-								log.G(ctx).Debug("Pod " + podStatus.PodName + ": Service " + containerStatus.Name + " is running on Sidecar")
+
+								if containerStatus.State.Terminated != nil {
+									log.G(ctx).Debug("Pod " + podStatus.PodName + ": Service " + containerStatus.Name + " is not running on Sidecar")
+									terminatedContainers++
+									pod.Status.ContainerStatuses[index].State.Terminated.Reason = "Completed"
+									if containerStatus.State.Terminated.ExitCode != 0 {
+										podErrored = true
+										failedReason = "Error: " + string(containerStatus.State.Terminated.ExitCode)
+										pod.Status.ContainerStatuses[index].State.Terminated.Reason = failedReason
+										log.G(ctx).Error("Container " + containerStatus.Name + " exited with error: " + string(containerStatus.State.Terminated.ExitCode))
+									}
+								} else if containerStatus.State.Waiting != nil {
+									log.G(ctx).Info("Pod " + podStatus.PodName + ": Service " + containerStatus.Name + " is setting up on Sidecar")
+									podRunning = true
+								} else if containerStatus.State.Running != nil {
+									podRunning = true
+									log.G(ctx).Debug("Pod " + podStatus.PodName + ": Service " + containerStatus.Name + " is running on Sidecar")
+								}
+
 							}
 
+							if terminatedContainers == len(podStatus.Containers) {
+								podCompleted = true
+							}
 						}
-
 						if podRunning && pod.Status.Phase != v1.PodRunning {
 							pod.Status.Phase = v1.PodRunning
 							pod.Status.Conditions = append(pod.Status.Conditions, v1.PodCondition{Type: v1.PodReady, Status: v1.ConditionTrue})
@@ -461,27 +465,27 @@ func checkPodsStatus(ctx context.Context, p *VirtualKubeletProvider, podsList []
 						if err != nil {
 							log.G(ctx).Error(err)
 							return nil, err
-						}
-					}
-				} else {
-					list, err := p.clientSet.CoreV1().Pods(podStatus.PodNamespace).List(ctx, metav1.ListOptions{})
-					if err != nil {
-						log.G(ctx).Error(err)
-						return nil, err
-					}
-
-					pods := list.Items
-
-					for _, pod := range pods {
-						if string(pod.UID) == podStatus.PodUID {
-							err = updateCacheRequest(config, pod, token)
+						} else {
+							list, err := p.clientSet.CoreV1().Pods(podStatus.PodNamespace).List(ctx, metav1.ListOptions{})
 							if err != nil {
 								log.G(ctx).Error(err)
-								continue
+								return nil, err
 							}
+
+							pods := list.Items
+
+							for _, pod := range pods {
+								if string(pod.UID) == podStatus.PodUID {
+									err = updateCacheRequest(config, pod, token)
+									if err != nil {
+										log.G(ctx).Error(err)
+										continue
+									}
+								}
+							}
+
 						}
 					}
-
 				}
 			}
 
