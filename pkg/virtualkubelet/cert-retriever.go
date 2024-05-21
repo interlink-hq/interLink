@@ -86,6 +86,7 @@ func NewCertificateRetriever(kubeClient kubernetes.Interface, signer, nodeName s
 
 // newSelfSignedCertificateRetriever creates a new retriever for self-signed certificates.
 func NewSelfSignedCertificateRetriever(nodeName string, nodeIP net.IP) crtretriever {
+
 	creator := func() (*tls.Certificate, time.Time, error) {
 		expiration := time.Now().AddDate(1, 0, 0) // 1 year
 
