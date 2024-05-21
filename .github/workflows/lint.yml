@@ -24,6 +24,7 @@ jobs:
       - name: Run Super-Linter on new changes
         uses: docker://ghcr.io/github/super-linter:slim-v4
         env:
+          FILTER_REGEX_EXCLUDE: ci/.*
           DEFAULT_BRANCH: main
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           MARKDOWN_CONFIG_FILE: .markdownlint.json
