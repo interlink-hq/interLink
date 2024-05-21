@@ -1,7 +1,6 @@
 module github.com/intertwin-eu/interlink
 
-go 1.21
-
+go 1.22.3
 
 require (
 	github.com/containerd/containerd v1.7.6
