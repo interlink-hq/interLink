@@ -24,7 +24,7 @@ The python SDK also produce an openAPI spec through FastAPI, therefore you can u
 
 - The tutorial is done on a Ubuntu VM, but there are not hard requirements around that
 - Python>=3.10 and pip (`sudo apt install -y python3-pip`)
-- Any python IDE will and it is strongly suggested to use one :)
+- Any python IDE will work and it is strongly suggested to use one :)
 - A [docker engine running](https://docs.docker.com/engine/install/)
 
 ### Install the SDK
@@ -44,11 +44,11 @@ pip install "uvicorn[standard]" "git+https://github.com/interTwin-eu/interLink.g
 In the next section we are going to leverage the provider class of SDK to create our own plugin.
 
 
-### Sidecar provider
+### Plugin provider
 
 The [provider class](https://github.com/interTwin-eu/interLink/blob/main/example/interlink/provider.py) is a FastAPI interface that aims to isolate the developers from all the API provisioning boiler plate.
 
-In fact we are going to need only the creation of a derived class implementing the [interLink core methods](https://github.com/interTwin-eu/interLink/blob/main/example/interlink/provider.py#L14-L24),
+In fact, we are going to need only the creation of a derived class implementing the [interLink core methods](https://github.com/interTwin-eu/interLink/blob/main/example/interlink/provider.py#L14-L24),
 and making use of in [request and response API specification](https://github.com/interTwin-eu/interLink/blob/main/example/interlink/spec.py) to create our own container lifecycle management plugin.
 
 
@@ -122,7 +122,7 @@ async def delete_pod(pod: interlink.PodRequest) -> str:
 async def status_pod(pods: List[interlink.PodRequest]) -> List[interlink.PodStatus]:
     return ProviderDocker.get_status(pods)
 
-@app.post("/getLogs")
+@app.get("/getLogs")
 async def get_logs(req: interlink.LogRequest) -> bytes:
     return ProviderDocker.get_logs(req)
 ```

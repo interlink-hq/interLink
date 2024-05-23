@@ -6,9 +6,9 @@ import useBaseUrl from '@docusaurus/useBaseUrl';
 
 # Deploy interLink virtual nodes
 
-Learn how to deploy interLink virtual nodes on your cluster. In this tutorial you are going to setup all the needed components to be able to either __develop__ or __deploy__ the sidecar for container management on a **remote** host via a **local** kubernetes cluster.
+Learn how to deploy interLink virtual nodes on your cluster. In this tutorial you are going to setup all the needed components to be able to either __develop__ or __deploy__ the plugin for container management on a **remote** host via a **local** kubernetes cluster.
 
-The installation script that we are going to configure will take care of providing you with a complete Kubernetes manifest to instatiate the virtual node interface. Also you will get an installation bash script to be executed on the remote host where you want to delegate your container execution. That script is already configured to **automatically** authenticate the incoming request from the virtual node component, and forward the correct instructions to the openAPI interface of the [interLink plugin](./03-api-reference.mdx) (a.k.a. sidecar) of your choice. Thus you can use this setup also for directly [developing a sidecar](./02-develop-a-plugin.md), without caring for anything else. 
+The installation script that we are going to configure will take care of providing you with a complete Kubernetes manifest to instantiate the virtual node interface. Also you will get an installation bash script to be executed on the remote host where you want to delegate your container execution. That script is already configured to **automatically** authenticate the incoming request from the virtual node component, and forward the correct instructions to the openAPI interface of the [interLink plugin](./03-api-reference.mdx) (a.k.a. sidecar) of your choice. Thus you can use this setup also for directly [developing a plugin](./02-develop-a-plugin.md), without caring for anything else.
 
 ## Requirements
 
@@ -23,7 +23,7 @@ In this tutorial, we suppose the remote VM fully owned (not shared) by the user 
 ## Create an OAuth GitHub app
 
 :::warning
-In this tutoria GitHub tokens are just an example of authentication mechanism, any OpenID compliant identity provider is also supported with the very same deployment script, see [examples here](./04-oidc-IAM.md).
+In this tutorial GitHub tokens are just an example of authentication mechanism, any OpenID compliant identity provider is also supported with the very same deployment script, see [examples here](./04-oidc-IAM.md).
 :::
 
 As a first step, you need to create a GitHub OAuth application to allow interLink to make authentication between your Kubernetes cluster and the remote endpoint.
@@ -226,7 +226,7 @@ Note that the SLURM plugin repository is: [github.com/interTwin-eu/interlink-slu
 Create a config file `.interlink/config/slurm.yaml`:
 
 ```yaml
-# Sidecar local endpoint
+# Plugin local endpoint
 SidecarPort: "4000"
 SidecarURL: "http://localhost"
 
@@ -275,7 +275,7 @@ mkdir -p $HOME/.config/systemd/user
 
 cat <<EOF > $HOME/.config/systemd/user/slurm-plugin.service
 [Unit]
-Description=This Unit is needed to automatically start the SLURM sidecar at system startup
+Description=This Unit is needed to automatically start the SLURM plugin at system startup
 After=network.target
 
 [Service]
