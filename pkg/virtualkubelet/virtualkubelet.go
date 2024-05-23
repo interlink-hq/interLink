@@ -565,7 +565,9 @@ func (p *VirtualKubeletProvider) statusLoop(ctx context.Context) {
 
 		var podsList []*v1.Pod
 		for _, pod := range p.pods {
-			podsList = append(podsList, pod)
+			if pod.Status.Phase != "Initializing" {
+				podsList = append(podsList, pod)
+			}
 		}
 
 		if podsList != nil {

@@ -269,20 +269,18 @@ func RemoteExecution(ctx context.Context, config VirtualKubeletConfig, p *Virtua
 		req.Pod = *pod
 		startTime := time.Now()
 
-		for {
-			timeNow := time.Now()
-			if timeNow.Sub(startTime).Seconds() < time.Hour.Minutes()*5 {
+		timeNow := time.Now()
+		_, err := p.clientSet.CoreV1().Pods(pod.Namespace).Get(ctx, pod.Name, metav1.GetOptions{})
+		if err != nil {
+			log.G(ctx).Warning("Deleted Pod before actual creation")
+			return nil
+		}
 
-				_, err := p.clientSet.CoreV1().Pods(pod.Namespace).Get(ctx, pod.Name, metav1.GetOptions{})
-				if err != nil {
-					log.G(ctx).Warning("Deleted Pod before actual creation")
-					return nil
-				}
+		var failed bool
 
-				var failed bool
-
-				for _, volume := range pod.Spec.Volumes {
-
+		for _, volume := range pod.Spec.Volumes {
+			for {
+				if timeNow.Sub(startTime).Seconds() < time.Hour.Minutes()*5 {
 					if volume.ConfigMap != nil {
 						cfgmap, err := p.clientSet.CoreV1().ConfigMaps(pod.Namespace).Get(ctx, volume.ConfigMap.Name, metav1.GetOptions{})
 						if err != nil {
@@ -292,8 +290,8 @@ func RemoteExecution(ctx context.Context, config VirtualKubeletConfig, p *Virtua
 								pod.Status.Phase = "Initializing"
 								p.UpdatePod(ctx, pod)
 							}
-							break
 						} else {
+							failed = false
 							req.ConfigMaps = append(req.ConfigMaps, *cfgmap)
 						}
 					} else if volume.Secret != nil {
@@ -305,29 +303,29 @@ func RemoteExecution(ctx context.Context, config VirtualKubeletConfig, p *Virtua
 								pod.Status.Phase = "Initializing"
 								p.UpdatePod(ctx, pod)
 							}
-							break
 						} else {
+							failed = false
 							req.Secrets = append(req.Secrets, *scrt)
 						}
 					}
-				}
 
-				if failed {
-					time.Sleep(time.Second)
-					continue
+					if failed {
+						time.Sleep(time.Second)
+						continue
+					} else {
+						pod.Status.Phase = v1.PodPending
+						p.UpdatePod(ctx, pod)
+						break
+					}
 				} else {
-					pod.Status.Phase = v1.PodPending
+					pod.Status.Phase = v1.PodFailed
+					pod.Status.Reason = "CFGMaps/Secrets not found"
+					for i, _ := range pod.Status.ContainerStatuses {
+						pod.Status.ContainerStatuses[i].Ready = false
+					}
 					p.UpdatePod(ctx, pod)
-					break
+					return errors.New("unable to retrieve ConfigMaps or Secrets. Check logs")
 				}
-			} else {
-				pod.Status.Phase = v1.PodFailed
-				pod.Status.Reason = "CFGMaps/Secrets not found"
-				for i, _ := range pod.Status.ContainerStatuses {
-					pod.Status.ContainerStatuses[i].Ready = false
-				}
-				p.UpdatePod(ctx, pod)
-				return errors.New("unable to retrieve ConfigMaps or Secrets. Check logs")
 			}
 		}
 
