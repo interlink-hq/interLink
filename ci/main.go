@@ -10,7 +10,9 @@ import (
 	"dagger.io/dagger"
 )
 
-func main() {
+type Interlink struct{}
+
+func (i *Interlink) Start() *dagger.Container {
 	ctx := context.Background()
 
 	// create Dagger client
@@ -31,19 +33,19 @@ func main() {
 	}
 	fmt.Println(ns)
 
-	sa, err := k8s.kubectl("apply -f /tests/manifests/service-account.yaml")
+	sa, err := k8s.kubectl("apply -f /manifests/service-account.yaml")
 	if err != nil {
 		panic(err)
 	}
 	fmt.Println(sa)
 
-	vkConfig, err := k8s.kubectl("apply -f /tests/manifests/virtual-kubelet-config.yaml")
+	vkConfig, err := k8s.kubectl("apply -f /manifests/virtual-kubelet-config.yaml")
 	if err != nil {
 		panic(err)
 	}
 	fmt.Println(vkConfig)
 
-	vk, err := k8s.kubectl("apply -f /tests/manifests/virtual-kubelet.yaml")
+	vk, err := k8s.kubectl("apply -f /manifests/virtual-kubelet.yaml")
 	if err != nil {
 		panic(err)
 	}
@@ -53,11 +55,26 @@ func main() {
 		panic(err)
 	}
 
+	intConfig, err := k8s.kubectl("apply -f /manifests/interlink-config.yaml")
+	if err != nil {
+		panic(err)
+	}
+	fmt.Println(intConfig)
 	// build interlink and push
+	intL, err := k8s.kubectl("apply -f /manifests/interlink.yaml")
+	if err != nil {
+		panic(err)
+	}
+	fmt.Println(intL)
 	// TODO: create pod interlink
 
 	// TODO: generate TLS cert for registry
 	// build mock and push
+	return k8s.container
+}
+
+func (i *Interlink) Test() error {
+	return nil
 }
 
 func (k *K8sInstance) waitForVirtualKubelet() (err error) {

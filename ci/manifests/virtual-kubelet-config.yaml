@@ -5,7 +5,7 @@ metadata:
   namespace: interlink 
 data:
   InterLinkConfig.yaml: |
-    InterlinkURL: http://interlink.interlink.svc.cluster
+    InterlinkURL: http://interlink.interlink.svc.cluster.local
     InterlinkPort: 3000 
     ExportPodData: true
     VerboseLogging: true

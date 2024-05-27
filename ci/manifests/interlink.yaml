@@ -1,14 +1,32 @@
+apiVersion: v1
+kind: Service
+metadata:
+  name: interlink
+  namespace: interlink
+spec:
+  selector:
+    app: interlink
+  ports:
+    - protocol: TCP
+      port: 3000
+      targetPort: 3000
+---
 apiVersion: apps/v1
 kind: Deployment
 metadata:
   name: interlink 
   namespace: interlink
+  labels:
+    app: interlink
 spec:
   replicas: 1
   selector:
     matchLabels:
-      nodeName: interlink 
+      app: interlink 
   template:
+    metadata:
+      labels:
+        app: interlink
     spec:
       containers:
       - name: interlink

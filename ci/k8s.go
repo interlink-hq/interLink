@@ -57,6 +57,7 @@ type K8sInstance struct {
 	ctx         context.Context
 	client      *dagger.Client
 	container   *dagger.Container
+	k3s         *dagger.Container
 	registry    *dagger.Service
 	configCache *dagger.CacheVolume
 }
@@ -72,7 +73,7 @@ func (k *K8sInstance) start() error {
 		})
 
 	// create k3s service container
-	k3s := k.client.Pipeline("k3s init").Container().
+	k.k3s = k.client.Pipeline("k3s init").Container().
 		From("rancher/k3s").
 		WithNewFile("/usr/bin/entrypoint.sh", dagger.ContainerWithNewFileOpts{
 			Contents:    entrypoint,
@@ -94,12 +95,15 @@ func (k *K8sInstance) start() error {
 	k.container = k.client.Container().
 		From("bitnami/kubectl").
 		WithMountedCache("/cache/k3s", k.configCache).
-		WithMountedDirectory("/tests", k.client.Host().Directory("./tests")).
-		WithServiceBinding("k3s", k3s.AsService()).
+		WithMountedDirectory("/manifests", k.client.Host().Directory("/src/ci/manifests")).
+		WithServiceBinding("k3s", k.k3s.AsService()).
 		WithEnvVariable("CACHE", time.Now().String()).
+		WithServiceBinding("registry", registry).
 		WithUser("root").
 		WithExec([]string{"cp", "/cache/k3s/k3s.yaml", "/.kube/config"}, dagger.ContainerWithExecOpts{SkipEntrypoint: true}).
 		WithExec([]string{"chown", "1001:0", "/.kube/config"}, dagger.ContainerWithExecOpts{SkipEntrypoint: true}).
+		WithExec([]string{"apt", "update"}, dagger.ContainerWithExecOpts{SkipEntrypoint: true}).
+		WithExec([]string{"apt", "install", "-y", "curl"}, dagger.ContainerWithExecOpts{SkipEntrypoint: true}).
 		WithUser("1001").
 		WithEntrypoint([]string{"sh", "-c"})
 
