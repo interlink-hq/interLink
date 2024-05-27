@@ -5,7 +5,7 @@ on:
     tags:
       - "*"
 jobs:
-  virtual-kubelet:
+  core-containers:
     runs-on: ubuntu-latest
     #env:
     #  DOCKER_TARGET_PLATFORM: linux/arm64
@@ -27,7 +27,7 @@ jobs:
       - name: Get Repo Owner
         id: get_repo_owner
         run: echo ::set-output name=repo_owner::$(echo ${{ github.repository_owner }} | tr '[:upper:]' '[:lower:]')
-      - name: Build container base image
+      - name: Build container base image vk
         uses: docker/build-push-action@v5
         with:
           context: ./
@@ -37,7 +37,17 @@ jobs:
             ghcr.io/${{ steps.get_repo_owner.outputs.repo_owner }}/virtual-kubelet-inttw:latest
           file: ./docker/Dockerfile.vk
           platforms: linux/amd64, linux/arm64
-
+      - name: Build container base image interlink
+        uses: docker/build-push-action@v5
+        with:
+          context: ./
+          outputs: "type=registry,push=true"
+          tags: |
+            ghcr.io/${{ steps.get_repo_owner.outputs.repo_owner }}/interlink:${{ env.RELEASE_VERSION }}
+            ghcr.io/${{ steps.get_repo_owner.outputs.repo_owner }}/interlink:latest
+          file: ./docker/Dockerfile.interlink
+          platforms: linux/amd64, linux/arm64
+          
   virtual-kubelet-refrest-token:
     runs-on: ubuntu-latest
     #env:
