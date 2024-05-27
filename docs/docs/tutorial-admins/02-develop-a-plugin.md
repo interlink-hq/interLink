@@ -111,8 +111,8 @@ class MyProvider(interlink.provider.Provider):
 ProviderDocker = MyProvider(dockerCLI)
 
 @app.post("/create")
-async def create_pod(pods: List[interlink.Pod]) -> str:
-    return ProviderDocker.create_pod(pods)
+async def create_pod(pod: interlink.Pod) -> CreateStruct:
+    return ProviderDocker.create_pod(pod)
 
 @app.post("/delete")
 async def delete_pod(pod: interlink.PodRequest) -> str:
@@ -149,7 +149,7 @@ For simplicity, we are going to work just with the first container of the pod. F
 Let's implement the `Create` method of the `MyProvider` class:
 
 ```python
-    def Create(self, pod: interlink.Pod) -> None:
+    def Create(self, pod: interlink.Pod) -> CreateStruct:
         # Get the first container of the request
         container = pod.pod.spec.containers[0]
 

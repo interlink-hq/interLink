@@ -190,3 +190,7 @@ class LogRequest(BaseModel):
     PodName: str
     ContainerName: str
     Opts: LogOpts
+
+class CreateStruct (BaseModel):
+	PodUID: str
+	PodJID: str
