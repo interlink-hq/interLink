@@ -1,13 +1,13 @@
 apiVersion: v1
 kind: ConfigMap
 metadata:
-  name: "interlink-config"
+  name: "plugin-config"
   namespace: interlink 
 data:
   InterLinkConfig.yaml: |
     InterlinkURL: "http://localhost"
     InterlinkPort: "3000"
-    SidecarURL: "http://plugin.interlink.svc.cluster.local"
+    SidecarURL: "http://0.0.0.0"
     SidecarPort: "4000"
     VerboseLogging: true
     ErrorsOnlyLogging: false

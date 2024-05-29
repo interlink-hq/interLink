@@ -1,0 +1,48 @@
+apiVersion: v1
+kind: Service
+metadata:
+  name: plugin 
+  namespace: interlink
+spec:
+  selector:
+    app: plugin 
+  ports:
+    - protocol: TCP
+      port: 4000
+      targetPort: 4000
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: plugin 
+  namespace: interlink
+  labels:
+    app: plugin
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: plugin 
+  template:
+    metadata:
+      labels:
+        app: plugin
+    spec:
+      containers:
+      - name: plugin 
+        image: "ghcr.io/intertwin-eu/interlink:latest" 
+        imagePullPolicy: Always
+        env:
+        - name: CONFIGPATH
+          value: "/etc/interlink/InterLinkConfig.yaml"
+        volumeMounts:
+        - name: config
+          mountPath: /etc/interlink/InterLinkConfig.yaml
+          subPath: InterLinkConfig.yaml
+      - name: jaeger
+        image: jaegertracing/all-in-one:1.51
+      volumes:
+      - name: config
+        configMap:
+          # Provide the name of the ConfigMap you want to mount.
+          name: plugin-config

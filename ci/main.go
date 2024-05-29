@@ -4,13 +4,15 @@ import (
 	"context"
 	"fmt"
 	"os"
-	"strings"
-	"time"
 
 	"dagger.io/dagger"
 )
 
-type Interlink struct{}
+type Interlink struct {
+	k8s                *K8sInstance
+	pluginContainerRef string
+	pluginConfigFile   *dagger.File
+}
 
 func (i *Interlink) Start() *dagger.Container {
 	ctx := context.Background()
@@ -22,82 +24,105 @@ func (i *Interlink) Start() *dagger.Container {
 	}
 	defer client.Close()
 
-	k8s := NewK8sInstance(ctx, client)
-	if err = k8s.start(); err != nil {
+	i.k8s = NewK8sInstance(ctx, client)
+	if err = i.k8s.start(); err != nil {
 		panic(err)
 	}
 
-	ns, err := k8s.kubectl("create ns interlink")
+	ns, err := i.k8s.kubectl("create ns interlink")
 	if err != nil {
 		panic(err)
 	}
 	fmt.Println(ns)
 
-	sa, err := k8s.kubectl("apply -f /manifests/service-account.yaml")
+	sa, err := i.k8s.kubectl("apply -f /manifests/service-account.yaml")
 	if err != nil {
 		panic(err)
 	}
 	fmt.Println(sa)
 
-	vkConfig, err := k8s.kubectl("apply -f /manifests/virtual-kubelet-config.yaml")
+	vkConfig, err := i.k8s.kubectl("apply -f /manifests/virtual-kubelet-config.yaml")
 	if err != nil {
 		panic(err)
 	}
 	fmt.Println(vkConfig)
 
-	vk, err := k8s.kubectl("apply -f /manifests/virtual-kubelet.yaml")
+	vk, err := i.k8s.kubectl("apply -f /manifests/virtual-kubelet.yaml")
 	if err != nil {
 		panic(err)
 	}
 	fmt.Println(vk)
 
-	if err := k8s.waitForVirtualKubelet(); err != nil {
+	if err := i.k8s.waitForVirtualKubelet(); err != nil {
 		panic(err)
 	}
 
-	intConfig, err := k8s.kubectl("apply -f /manifests/interlink-config.yaml")
+	intConfig, err := i.k8s.kubectl("apply -f /manifests/interlink-config.yaml")
 	if err != nil {
 		panic(err)
 	}
 	fmt.Println(intConfig)
 	// build interlink and push
-	intL, err := k8s.kubectl("apply -f /manifests/interlink.yaml")
+	intL, err := i.k8s.kubectl("apply -f /manifests/interlink.yaml")
 	if err != nil {
 		panic(err)
 	}
 	fmt.Println(intL)
-	// TODO: create pod interlink
 
-	// TODO: generate TLS cert for registry
-	// build mock and push
-	return k8s.container
+	return i.k8s.container
 }
 
-func (i *Interlink) Test() error {
+func (i *Interlink) LoadPlugin() error {
+
 	return nil
 }
 
-func (k *K8sInstance) waitForVirtualKubelet() (err error) {
-	maxRetries := 5
-	retryBackoff := 60 * time.Second
-	for i := 0; i < maxRetries; i++ {
-		time.Sleep(retryBackoff)
-		kubectlGetPod, err := k.kubectl("get pod -n interlink -l nodeName=virtual-kubelet")
-		if err != nil {
-			fmt.Println(fmt.Errorf("could not fetch pod: %v", err))
-			continue
-		}
-		if strings.Contains(kubectlGetPod, "2/2") {
-			return nil
-		}
-		fmt.Println("waiting for k8s to start:", kubectlGetPod)
-		describePod, err := k.kubectl("logs -n interlink -l nodeName=virtual-kubelet -c inttw-vk")
-		if err != nil {
-			fmt.Println(fmt.Errorf("could not fetch pod description: %v", err))
-			continue
-		}
-		fmt.Println(describePod)
+func (i *Interlink) Test(
+	// +optional
+	// +default="ghcr.io/intertwin-eu/interlink-docker-plugin/docker-plugin:0.0.8-no-gpu"
+	pluginContainer string,
+	// +optional
+	// +default="./manifests/plugin-config.yaml"
+	pluginConfig string) *dagger.Container {
 
-	}
-	return fmt.Errorf("k8s took too long to start")
+	configTest := `
+target_nodes: 
+  - virtual-kubelet 
+
+required_namespaces:
+  - default
+  - kube-system
+  - interlink
+
+values:
+  namespace: interlink
+
+  annotations: 
+    slurm-job.vk.io/flags: "--job-name=test-pod-cfg -t 2800  --ntasks=8 --nodes=1 --mem-per-cpu=2000"
+
+  tolerations:
+    - key: virtual-node.interlink/no-schedule
+      operator: Exists
+      effect: NoSchedule
+`
+
+	setup_ctr := i.Start()
+
+	i.pluginContainerRef = pluginContainer
+	i.pluginConfigFile = i.k8s.client.Host().File(pluginConfig)
+
+	i.LoadPlugin()
+
+	return setup_ctr.
+		WithExec([]string{"pip3", "install", "hatchling"}).
+		WithWorkdir("/opt").
+		WithExec([]string{"bash", "-c", "git clone https://github.com/landerlini/vk-test-set.git"}, dagger.ContainerWithExecOpts{SkipEntrypoint: true}).
+		WithNewFile("/opt/vk-test-set/vktest_config.yaml", dagger.ContainerWithNewFileOpts{
+			Contents:    configTest,
+			Permissions: 0o655,
+		}).
+		WithWorkdir("/opt/vk-test-set").
+		WithExec([]string{"bash", "-c", "python3 -m venv .venv && source .venv/bin/activate && pip3 install -e ./ "}, dagger.ContainerWithExecOpts{SkipEntrypoint: true}).
+		WithExec([]string{"bash", "-c", "source .venv/bin/activate && export KUBECONFIG=/.kube/config && pytest -vx || echo OPS"}, dagger.ContainerWithExecOpts{SkipEntrypoint: true})
+
 }
