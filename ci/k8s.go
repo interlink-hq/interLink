@@ -200,6 +200,7 @@ func (k *K8sInstance) waitForInterlink() (err error) {
 func (k *K8sInstance) waitForPlugin() (err error) {
 	maxRetries := 5
 	retryBackoff := 60 * time.Second
+	time.Sleep(retryBackoff * 2)
 	for i := 0; i < maxRetries; i++ {
 		time.Sleep(retryBackoff)
 		kubectlGetPod, err := k.kubectl("get pod -n interlink -l app=plugin")
