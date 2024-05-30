@@ -9,12 +9,6 @@ import (
 	"dagger.io/dagger"
 )
 
-const registries = `mirrors:
-	"registry:5432":
-    endpoint:
-      - "http://registry:5432"
-`
-
 // entrypoint to setup cgroup nesting since k3s only does it
 // when running as PID 1. This doesn't happen in Dagger given that we're using
 // our custom shim
@@ -66,13 +60,13 @@ type K8sInstance struct {
 
 func (k *K8sInstance) start() error {
 
-	registry := k.client.Host().Service(
-		[]dagger.PortForward{
-			{
-				Backend:  5432,
-				Frontend: 5432,
-			},
-		})
+	// registry := k.client.Host().Service(
+	// 	[]dagger.PortForward{
+	// 		{
+	// 			Backend:  5432,
+	// 			Frontend: 5432,
+	// 		},
+	// 	})
 
 	// create k3s service container
 	k.k3s = k.client.Pipeline("k3s init").Container().
@@ -81,11 +75,7 @@ func (k *K8sInstance) start() error {
 			Contents:    entrypoint,
 			Permissions: 0o755,
 		}).
-		WithNewFile("/etc/rancher/k3s/registries.yaml", dagger.ContainerWithNewFileOpts{
-			Contents: registries,
-		}).
 		WithEntrypoint([]string{"entrypoint.sh"}).
-		WithServiceBinding("registry", registry).
 		WithMountedCache("/etc/rancher/k3s", k.configCache).
 		WithMountedTemp("/etc/lib/cni").
 		WithMountedCache("/etc/lib/containers", k.containersCache).
@@ -105,7 +95,6 @@ func (k *K8sInstance) start() error {
 		WithMountedDirectory("/manifests", k.client.Host().Directory("/src/ci/manifests")).
 		WithServiceBinding("k3s", k.k3s.AsService()).
 		WithEnvVariable("CACHE", time.Now().String()).
-		WithServiceBinding("registry", registry).
 		WithUser("root").
 		WithExec([]string{"cp", "/cache/k3s/k3s.yaml", "/.kube/config"}, dagger.ContainerWithExecOpts{SkipEntrypoint: true}).
 		WithExec([]string{"chown", "1001:0", "/.kube/config"}, dagger.ContainerWithExecOpts{SkipEntrypoint: true}).
@@ -131,7 +120,7 @@ func (k *K8sInstance) exec(name, command string) (string, error) {
 
 func (k *K8sInstance) waitForNodes() (err error) {
 	maxRetries := 10
-	retryBackoff := 15 * time.Second
+	retryBackoff := 60 * time.Second
 	for i := 0; i < maxRetries; i++ {
 		time.Sleep(retryBackoff)
 		kubectlGetNodes, err := k.kubectl("get nodes -o wide")
@@ -200,7 +189,6 @@ func (k *K8sInstance) waitForInterlink() (err error) {
 func (k *K8sInstance) waitForPlugin() (err error) {
 	maxRetries := 5
 	retryBackoff := 60 * time.Second
-	time.Sleep(retryBackoff * 2)
 	for i := 0; i < maxRetries; i++ {
 		time.Sleep(retryBackoff)
 		kubectlGetPod, err := k.kubectl("get pod -n interlink -l app=plugin")
