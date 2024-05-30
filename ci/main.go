@@ -105,6 +105,7 @@ required_namespaces:
   - kube-system
   - interlink
 
+timeout_multiplier: 5.
 values:
   namespace: interlink
 
@@ -127,7 +128,7 @@ values:
 	return setup_ctr.
 		WithExec([]string{"pip3", "install", "hatchling"}).
 		WithWorkdir("/opt").
-		WithExec([]string{"bash", "-c", "git clone https://github.com/landerlini/vk-test-set.git"}, dagger.ContainerWithExecOpts{SkipEntrypoint: true}).
+		WithExec([]string{"bash", "-c", "git clone -b timeout_multiplier https://github.com/landerlini/vk-test-set.git"}, dagger.ContainerWithExecOpts{SkipEntrypoint: true}).
 		WithNewFile("/opt/vk-test-set/vktest_config.yaml", dagger.ContainerWithNewFileOpts{
 			Contents:    configTest,
 			Permissions: 0o655,
