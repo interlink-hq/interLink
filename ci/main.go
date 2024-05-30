@@ -134,6 +134,6 @@ values:
 		}).
 		WithWorkdir("/opt/vk-test-set").
 		WithExec([]string{"bash", "-c", "python3 -m venv .venv && source .venv/bin/activate && pip3 install -e ./ "}, dagger.ContainerWithExecOpts{SkipEntrypoint: true}).
-		WithExec([]string{"bash", "-c", "source .venv/bin/activate && export KUBECONFIG=/.kube/config && pytest -vx || echo OPS"}, dagger.ContainerWithExecOpts{SkipEntrypoint: true})
+		WithExec([]string{"bash", "-c", "source .venv/bin/activate && export KUBECONFIG=/.kube/config && pytest -vx"}, dagger.ContainerWithExecOpts{SkipEntrypoint: true})
 
 }

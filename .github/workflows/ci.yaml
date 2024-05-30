@@ -1,4 +1,4 @@
-name: build-images
+name: integration-tests 
 
 on:
   push:
@@ -16,4 +16,4 @@ jobs:
         with:
           workdir: ci
           verb: call
-          args: test stdout
+          args: -s test stdout
