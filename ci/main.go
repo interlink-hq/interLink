@@ -9,9 +9,7 @@ import (
 )
 
 type Interlink struct {
-	k8s                *K8sInstance
-	pluginContainerRef string
-	pluginConfigFile   *dagger.File
+	k8s *K8sInstance
 }
 
 func (i *Interlink) Start() *dagger.Container {
@@ -69,21 +67,34 @@ func (i *Interlink) Start() *dagger.Container {
 	}
 	fmt.Println(intL)
 
+	if err := i.k8s.waitForInterlink(); err != nil {
+		panic(err)
+	}
+
 	return i.k8s.container
 }
 
 func (i *Interlink) LoadPlugin() error {
+	pluginConfig, err := i.k8s.kubectl("apply -f /manifests/plugin-config.yaml")
+	if err != nil {
+		return err
+	}
+	fmt.Println(pluginConfig)
+
+	plugin, err := i.k8s.kubectl("apply -f /manifests/plugin.yaml")
+	if err != nil {
+		return err
+	}
+	fmt.Println(plugin)
+
+	if err := i.k8s.waitForPlugin(); err != nil {
+		panic(err)
+	}
 
 	return nil
 }
 
-func (i *Interlink) Test(
-	// +optional
-	// +default="ghcr.io/intertwin-eu/interlink-docker-plugin/docker-plugin:0.0.8-no-gpu"
-	pluginContainer string,
-	// +optional
-	// +default="./manifests/plugin-config.yaml"
-	pluginConfig string) *dagger.Container {
+func (i *Interlink) Test() *dagger.Container {
 
 	configTest := `
 target_nodes: 
@@ -108,10 +119,10 @@ values:
 
 	setup_ctr := i.Start()
 
-	i.pluginContainerRef = pluginContainer
-	i.pluginConfigFile = i.k8s.client.Host().File(pluginConfig)
-
-	i.LoadPlugin()
+	err := i.LoadPlugin()
+	if err != nil {
+		panic(err)
+	}
 
 	return setup_ctr.
 		WithExec([]string{"pip3", "install", "hatchling"}).

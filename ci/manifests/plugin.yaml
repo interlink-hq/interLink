@@ -30,17 +30,17 @@ spec:
     spec:
       containers:
       - name: plugin 
-        image: "ghcr.io/intertwin-eu/interlink:latest" 
+        image: "ghcr.io/intertwin-eu/interlink-docker-plugin/docker-plugin:0.0.12-no-gpu" 
         imagePullPolicy: Always
+        securityContext:
+          privileged: true
         env:
-        - name: CONFIGPATH
+        - name: INTERLINKCONFIGPATH
           value: "/etc/interlink/InterLinkConfig.yaml"
         volumeMounts:
         - name: config
           mountPath: /etc/interlink/InterLinkConfig.yaml
           subPath: InterLinkConfig.yaml
-      - name: jaeger
-        image: jaegertracing/all-in-one:1.51
       volumes:
       - name: config
         configMap:

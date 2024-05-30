@@ -171,3 +171,53 @@ func (k *K8sInstance) waitForVirtualKubelet() (err error) {
 	}
 	return fmt.Errorf("k8s took too long to start")
 }
+
+func (k *K8sInstance) waitForInterlink() (err error) {
+	maxRetries := 5
+	retryBackoff := 60 * time.Second
+	for i := 0; i < maxRetries; i++ {
+		time.Sleep(retryBackoff)
+		kubectlGetPod, err := k.kubectl("get pod -n interlink -l app=interlink")
+		if err != nil {
+			fmt.Println(fmt.Errorf("could not fetch pod: %v", err))
+			continue
+		}
+		if strings.Contains(kubectlGetPod, "1/1") {
+			return nil
+		}
+		fmt.Println("waiting for k8s to start:", kubectlGetPod)
+		describePod, err := k.kubectl("logs -n interlink -l app=interlink")
+		if err != nil {
+			fmt.Println(fmt.Errorf("could not fetch pod description: %v", err))
+			continue
+		}
+		fmt.Println(describePod)
+
+	}
+	return fmt.Errorf("interlink took too long to start")
+}
+
+func (k *K8sInstance) waitForPlugin() (err error) {
+	maxRetries := 5
+	retryBackoff := 60 * time.Second
+	for i := 0; i < maxRetries; i++ {
+		time.Sleep(retryBackoff)
+		kubectlGetPod, err := k.kubectl("get pod -n interlink -l app=plugin")
+		if err != nil {
+			fmt.Println(fmt.Errorf("could not fetch pod: %v", err))
+			continue
+		}
+		if strings.Contains(kubectlGetPod, "1/1") {
+			return nil
+		}
+		fmt.Println("waiting for k8s to start:", kubectlGetPod)
+		describePod, err := k.kubectl("logs -n interlink -l app=plugin")
+		if err != nil {
+			fmt.Println(fmt.Errorf("could not fetch pod description: %v", err))
+			continue
+		}
+		fmt.Println(describePod)
+
+	}
+	return fmt.Errorf("plugin took too long to start")
+}
