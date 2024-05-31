@@ -13,3 +13,13 @@ data:
     ErrorsOnlyLogging: false
     ExportPodData: true
     DataRootFolder: "~/.interlink"
+    SbatchPath: "/usr/bin/sbatch"
+    ScancelPath: "/usr/bin/scancel"
+    SqueuePath: "/usr/bin/squeue"
+    CommandPrefix: ""
+    SingularityPrefix: ""
+    Namespace: "vk"
+    Tsocks: false
+    TsocksPath: "$WORK/tsocks-1.8beta5+ds1/libtsocks.so"
+    TsocksLoginNode: "login01"
+    BashPath: /bin/bash
