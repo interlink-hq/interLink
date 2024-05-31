@@ -30,7 +30,7 @@ spec:
     spec:
       containers:
       - name: plugin 
-        image: "ghcr.io/intertwin-eu/interlink-docker-plugin/docker-plugin:0.0.15-no-gpu" 
+        image: "ghcr.io/intertwin-eu/interlink-docker-plugin/docker-plugin:0.0.16-no-gpu" 
         #image: "ghcr.io/intertwin-eu/interlink-sidecar-slurm/interlink-sidecar-slurm:0.2.3"
         imagePullPolicy: Always
         securityContext:
