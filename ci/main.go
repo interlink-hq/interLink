@@ -105,7 +105,7 @@ required_namespaces:
   - kube-system
   - interlink
 
-timeout_multiplier: 5.
+timeout_multiplier: 10.
 values:
   namespace: interlink
 
