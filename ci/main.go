@@ -127,13 +127,13 @@ values:
 
 	return setup_ctr.
 		WithWorkdir("/opt").
-		WithExec([]string{"bash", "-c", "git clone -b timeout_multiplier https://github.com/landerlini/vk-test-set.git"}, dagger.ContainerWithExecOpts{SkipEntrypoint: true}).
+		WithExec([]string{"bash", "-c", "git clone -b init-test-fix-connection https://github.com/landerlini/vk-test-set.git"}, dagger.ContainerWithExecOpts{SkipEntrypoint: true}).
 		WithNewFile("/opt/vk-test-set/vktest_config.yaml", dagger.ContainerWithNewFileOpts{
 			Contents:    configTest,
 			Permissions: 0o655,
 		}).
 		WithWorkdir("/opt/vk-test-set").
 		WithExec([]string{"bash", "-c", "python3 -m venv .venv && source .venv/bin/activate && pip3 install -e ./ "}, dagger.ContainerWithExecOpts{SkipEntrypoint: true}).
-		WithExec([]string{"bash", "-c", "source .venv/bin/activate && export KUBECONFIG=/.kube/config && pytest -vk 'not virtual-kubelet-070-rclone-bind or not virtual-kubelet-060-init-container'  "}, dagger.ContainerWithExecOpts{SkipEntrypoint: true})
+		WithExec([]string{"bash", "-c", "source .venv/bin/activate && export KUBECONFIG=/.kube/config && pytest -vk 'not virtual-kubelet-070-rclone-bind'  "}, dagger.ContainerWithExecOpts{SkipEntrypoint: true})
 
 }
