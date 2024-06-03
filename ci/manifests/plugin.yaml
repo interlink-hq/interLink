@@ -37,7 +37,7 @@ spec:
           - bash
           - -c
         args:
-          - dockerd --mtu 1450 && /sidecar/docker-sidecar
+          - dockerd --mtu 1450 & /sidecar/docker-sidecar
         securityContext:
           privileged: true
         env:
