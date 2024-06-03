@@ -78,5 +78,5 @@ spec:
           name: virtual-kubelet-config
       - name: token
         hostPath:
-          path: /tmp/{{ .Values.nodeName }}
+          path: /tmp
           type: Directory
