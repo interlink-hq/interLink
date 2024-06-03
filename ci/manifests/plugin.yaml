@@ -33,6 +33,11 @@ spec:
         image: "ghcr.io/intertwin-eu/interlink-docker-plugin/docker-plugin:0.0.16-no-gpu" 
         #image: "ghcr.io/intertwin-eu/interlink-sidecar-slurm/interlink-sidecar-slurm:0.2.3"
         imagePullPolicy: Always
+        command:
+          - bash
+          - -c
+        args:
+          - dockerd --mtu 1450 && /sidecar/docker-sidecar
         securityContext:
           privileged: true
         env:
