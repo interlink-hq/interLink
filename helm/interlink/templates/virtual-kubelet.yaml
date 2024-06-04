@@ -2,7 +2,7 @@ apiVersion: apps/v1
 kind: Deployment
 metadata:
   name: {{ .Values.deployment.name}} 
-  namespace: {{ .Release.namespace}} 
+  namespace: {{ .Release.Namespace}} 
   labels:
     nodeName: {{ .Values.nodeName }}
 spec:
@@ -23,7 +23,7 @@ spec:
         imagePullPolicy: Always
         env:
         - name: NODENAME
-          value: virtual-kubelet 
+          value: {{ .Values.nodeName }} 
         - name: KUBELET_PORT
           value: "10250"
         - name: POD_IP

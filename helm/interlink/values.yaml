@@ -18,6 +18,7 @@ virtualNode:
   Pods: 100
 
 OAUTH:
+  TokenURL: DUMMY
   ClientID: DUMMY
   ClientSecret: DUMMY
   RefreshToken: DUMMY
