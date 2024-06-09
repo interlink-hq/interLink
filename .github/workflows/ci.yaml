@@ -17,5 +17,5 @@ jobs:
         with:
           workdir: ci
           verb: call
-          args: -s test stdout
+          args: -s test --manifests ./manifests stdout
           #dagger-flags: -d
