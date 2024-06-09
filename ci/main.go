@@ -130,7 +130,7 @@ func (i *Interlink) Test(
 	result := ctr.
 		WithWorkdir("/opt").
 		WithExec([]string{"bash", "-c", "git clone https://github.com/interTwin-eu/vk-test-set.git"}, ContainerWithExecOpts{SkipEntrypoint: true}).
-		WithExec([]string{"cp", "/manifests/vktest_config.yaml", "/opt/vk-test-set/vktest_config.yaml"}).
+		WithExec([]string{"bash", "-c", "cp /manifests/vktest_config.yaml /opt/vk-test-set/vktest_config.yaml"}, ContainerWithExecOpts{SkipEntrypoint: true}).
 		WithWorkdir("/opt/vk-test-set").
 		WithExec([]string{"bash", "-c", "python3 -m venv .venv && source .venv/bin/activate && pip3 install -e ./ "}, ContainerWithExecOpts{SkipEntrypoint: true}).
 		WithExec([]string{"bash", "-c", "source .venv/bin/activate && export KUBECONFIG=/.kube/config && pytest -vk 'not virtual-kubelet-070-rclone-bind' || echo OPS "}, ContainerWithExecOpts{SkipEntrypoint: true})
