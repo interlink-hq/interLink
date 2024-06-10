@@ -23,12 +23,11 @@ func main() {
 	}
 	logger := logrus.StandardLogger()
 
+	logger.SetLevel(logrus.InfoLevel)
 	if interLinkConfig.VerboseLogging {
 		logger.SetLevel(logrus.DebugLevel)
 	} else if interLinkConfig.ErrorsOnlyLogging {
 		logger.SetLevel(logrus.ErrorLevel)
-	} else {
-		logger.SetLevel(logrus.InfoLevel)
 	}
 
 	log.L = logruslogger.FromLogrus(logrus.NewEntry(logger))

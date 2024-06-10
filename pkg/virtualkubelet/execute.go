@@ -20,6 +20,14 @@ import (
 	commonIL "github.com/intertwin-eu/interlink/pkg/interlink"
 )
 
+func doRequest(req *http.Request, token string) (*http.Response, error) {
+
+	req.Header.Add("Authorization", "Bearer "+token)
+	req.Header.Set("Content-Type", "application/json")
+	return http.DefaultClient.Do(req)
+
+}
+
 func getSidecarEndpoint(ctx context.Context, interLinkURL string, interLinkPort string) string {
 	interLinkEndpoint := ""
 	if strings.HasPrefix(interLinkURL, "unix://") {
@@ -118,9 +126,7 @@ func createRequest(ctx context.Context, config VirtualKubeletConfig, pod commonI
 		return nil, err
 	}
 
-	req.Header.Add("Authorization", "Bearer "+token)
-	req.Header.Set("Content-Type", "application/json")
-	resp, err := http.DefaultClient.Do(req)
+	resp, err := doRequest(req, token)
 	if err != nil {
 		log.L.Error(err)
 		return nil, err
@@ -156,9 +162,7 @@ func deleteRequest(ctx context.Context, config VirtualKubeletConfig, pod *v1.Pod
 		return nil, err
 	}
 
-	req.Header.Add("Authorization", "Bearer "+token)
-	req.Header.Set("Content-Type", "application/json")
-	resp, err := http.DefaultClient.Do(req)
+	resp, err := doRequest(req, token)
 	if err != nil {
 		log.G(context.Background()).Error(err)
 		return nil, err
@@ -206,10 +210,7 @@ func statusRequest(ctx context.Context, config VirtualKubeletConfig, podsList []
 
 	//log.L.Println(string(bodyBytes))
 
-	req.Header.Add("Authorization", "Bearer "+token)
-
-	req.Header.Set("Content-Type", "application/json")
-	resp, err := http.DefaultClient.Do(req)
+	resp, err := doRequest(req, token)
 	if err != nil {
 		return nil, err
 	}
@@ -250,12 +251,9 @@ func LogRetrieval(ctx context.Context, config VirtualKubeletConfig, logsRequest 
 		return nil, err
 	}
 
-	log.G(ctx).Println(string(bodyBytes))
+	//log.G(ctx).Println(string(bodyBytes))
 
-	req.Header.Add("Authorization", "Bearer "+token)
-
-	req.Header.Set("Content-Type", "application/json")
-	resp, err := http.DefaultClient.Do(req)
+	resp, err := doRequest(req, token)
 	if err != nil {
 		log.G(ctx).Error(err)
 		return nil, err
