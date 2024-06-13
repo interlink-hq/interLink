@@ -453,11 +453,6 @@ func checkPodsStatus(ctx context.Context, p *VirtualKubeletProvider, podsList []
 						pod.Status.Reason = "Completed"
 					}
 
-					err = p.UpdatePod(ctx, pod)
-					if err != nil {
-						log.G(ctx).Error(err)
-						return nil, err
-					}
 				}
 			}
 
