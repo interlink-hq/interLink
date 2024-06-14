@@ -3,15 +3,65 @@ package main
 import (
 	"context"
 	"fmt"
+
+	"dagger/interlink/internal/dagger"
 )
 
 type Interlink struct {
-	k8s *K8sInstance
+	K8s               *K8sInstance
+	VirtualKubeletRef string
+	InterlinkRef      string
+	Manifests         *Directory
 	// TODO: services on NodePort?
 	//virtualkubelet bool
 	//interlink      bool
 	//plugin         bool
-	cleanup bool
+	CleanupCluster bool
+}
+
+func (i *Interlink) BuildImages(
+	ctx context.Context,
+	// +optional
+	// +default="ghcr.io/intertwin-eu/virtual-kubelet-inttw"
+	virtualKubeletRef string,
+	// +optional
+	// +default="ghcr.io/intertwin-eu/interlink"
+	interlinkRef string,
+	// +optional
+	// +default="ghcr.io/intertwin-eu/plugin-test"
+	pluginRef string,
+	sourceFolder *Directory,
+) (*Interlink, error) {
+
+	// TODO: get tag
+
+	i.VirtualKubeletRef = virtualKubeletRef
+	i.InterlinkRef = interlinkRef
+
+	workspace := dag.Container().
+		WithDirectory("/src", sourceFolder).
+		WithWorkdir("/src").
+		Directory("/src")
+
+	_, err := dag.Container().
+		Build(workspace, dagger.ContainerBuildOpts{
+			Dockerfile: "docker/Dockerfile.vk",
+		}).
+		Publish(ctx, virtualKubeletRef)
+	if err != nil {
+		return nil, err
+	}
+
+	_, err = dag.Container().
+		Build(workspace, dagger.ContainerBuildOpts{
+			Dockerfile: "docker/Dockerfile.interlink",
+		}).
+		Publish(ctx, interlinkRef)
+	if err != nil {
+		return nil, err
+	}
+
+	return i, nil
 }
 
 func (i *Interlink) NewInterlink(
@@ -21,87 +71,59 @@ func (i *Interlink) NewInterlink(
 	kubeconfig *File,
 	// +optional
 	localCluster *Service,
-) (*Container, error) {
+) (*Interlink, error) {
 
-	i.k8s = NewK8sInstance(ctx)
-	if err := i.k8s.start(manifests, kubeconfig, localCluster); err != nil {
+	if manifests != nil {
+		i.Manifests = manifests
+	}
+
+	i.K8s = NewK8sInstance(ctx)
+	if err := i.K8s.start(ctx, i.Manifests, kubeconfig, localCluster); err != nil {
 		return nil, err
 	}
 
-	err := i.k8s.waitForNodes()
+	err := i.K8s.waitForNodes(ctx)
 	if err != nil {
 		return nil, err
 	}
 
-	ns, _ := i.k8s.kubectl("create ns interlink")
+	ns, _ := i.K8s.kubectl(ctx, "create ns interlink")
 	fmt.Println(ns)
 
-	sa, err := i.k8s.kubectl("apply -f /manifests/service-account.yaml")
+	sa, err := i.K8s.kubectl(ctx, "apply -f /manifests/service-account.yaml")
 	if err != nil {
 		return nil, err
 	}
 	fmt.Println(sa)
 
-	vkConfig, err := i.k8s.kubectl("apply -f /manifests/virtual-kubelet-config.yaml")
+	vkConfig, err := i.K8s.kubectl(ctx, "apply -k /manifests/")
 	if err != nil {
 		return nil, err
 	}
 	fmt.Println(vkConfig)
 
-	vk, err := i.k8s.kubectl("apply -f /manifests/virtual-kubelet.yaml")
-	if err != nil {
-		return nil, err
-	}
-	fmt.Println(vk)
-
-	if err := i.k8s.waitForVirtualKubelet(); err != nil {
-		return nil, err
-	}
-
-	intConfig, err := i.k8s.kubectl("apply -f /manifests/interlink-config.yaml")
-	if err != nil {
-		return nil, err
-	}
-	fmt.Println(intConfig)
-	// build interlink and push
-	intL, err := i.k8s.kubectl("apply -f /manifests/interlink.yaml")
-	if err != nil {
-		return nil, err
-	}
-	fmt.Println(intL)
-
-	if err := i.k8s.waitForInterlink(); err != nil {
-		return nil, err
-	}
-
-	i.LoadPlugin(ctx)
-
-	return i.k8s.container, nil
+	return i, nil
 }
 
 func (i *Interlink) LoadPlugin(ctx context.Context) (*Interlink, error) {
-	pluginConfig, err := i.k8s.kubectl("apply -f /manifests/plugin-config.yaml")
+	pluginConfig, err := i.K8s.kubectl(ctx, "apply -f /manifests/plugin-config.yaml")
 	if err != nil {
 		return nil, err
 	}
 	fmt.Println(pluginConfig)
 
-	plugin, err := i.k8s.kubectl("apply -f /manifests/plugin.yaml")
+	plugin, err := i.K8s.kubectl(ctx, "apply -f /manifests/plugin.yaml")
 	if err != nil {
 		return nil, err
 	}
 	fmt.Println(plugin)
-
-	if err := i.k8s.waitForPlugin(); err != nil {
-		return nil, err
-	}
 
 	return i, nil
 }
 
 func (i *Interlink) Cleanup(ctx context.Context) error {
 
-	cleanup, err := i.k8s.kubectl("delete -f /manifests/")
+	cleanup, err := i.K8s.kubectl(ctx, "delete -f /manifests/")
 	if err != nil {
 		return err
 	}
@@ -112,6 +134,7 @@ func (i *Interlink) Cleanup(ctx context.Context) error {
 
 func (i *Interlink) Test(
 	ctx context.Context,
+	// +optional
 	manifests *Directory,
 	// +optional
 	kubeconfig *File,
@@ -122,21 +145,30 @@ func (i *Interlink) Test(
 	cleanup bool,
 ) (*Container, error) {
 
-	ctr, err := i.NewInterlink(ctx, manifests, kubeconfig, localCluster)
-	if err != nil {
+	if manifests != nil {
+		i.Manifests = manifests
+	}
+
+	if err := i.K8s.waitForVirtualKubelet(ctx); err != nil {
+		return nil, err
+	}
+	if err := i.K8s.waitForInterlink(ctx); err != nil {
+		return nil, err
+	}
+	if err := i.K8s.waitForPlugin(ctx); err != nil {
 		return nil, err
 	}
 
-	result := ctr.
+	result := i.K8s.KContainer.
 		WithWorkdir("/opt").
 		WithExec([]string{"bash", "-c", "git clone https://github.com/interTwin-eu/vk-test-set.git"}, ContainerWithExecOpts{SkipEntrypoint: true}).
 		WithExec([]string{"bash", "-c", "cp /manifests/vktest_config.yaml /opt/vk-test-set/vktest_config.yaml"}, ContainerWithExecOpts{SkipEntrypoint: true}).
 		WithWorkdir("/opt/vk-test-set").
 		WithExec([]string{"bash", "-c", "python3 -m venv .venv && source .venv/bin/activate && pip3 install -e ./ "}, ContainerWithExecOpts{SkipEntrypoint: true}).
-		WithExec([]string{"bash", "-c", "source .venv/bin/activate && export KUBECONFIG=/.kube/config && pytest -vk 'not virtual-kubelet-070-rclone-bind' || echo OPS "}, ContainerWithExecOpts{SkipEntrypoint: true})
+		WithExec([]string{"bash", "-c", "source .venv/bin/activate && export KUBECONFIG=/.kube/config && pytest -vk 'not rclone' || echo OPS "}, ContainerWithExecOpts{SkipEntrypoint: true})
 
-	if i.cleanup {
-		err = i.Cleanup(ctx)
+	if i.CleanupCluster {
+		err := i.Cleanup(ctx)
 		if err != nil {
 			return nil, err
 		}
@@ -148,28 +180,15 @@ func (i *Interlink) Test(
 
 func (i *Interlink) Run(
 	ctx context.Context,
-	manifests *Directory,
-	// +optional
-	kubeconfig *File,
-	// +optional
-	localCluster *Service,
-	// +optional
-	// +default false
-	cleanup bool,
 ) (*Container, error) {
 
-	ctr, err := i.NewInterlink(ctx, manifests, kubeconfig, localCluster)
-	if err != nil {
-		return nil, err
-	}
-
-	if i.cleanup {
-		err = i.Cleanup(ctx)
+	if i.CleanupCluster {
+		err := i.Cleanup(ctx)
 		if err != nil {
 			return nil, err
 		}
 	}
 
-	return ctr, nil
+	return i.K8s.KContainer, nil
 
 }

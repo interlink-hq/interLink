@@ -40,24 +40,23 @@ exec "$@"
 
 func NewK8sInstance(ctx context.Context) *K8sInstance {
 	return &K8sInstance{
-		ctx:             ctx,
-		container:       nil,
-		registry:        nil,
-		configCache:     dag.CacheVolume("k3s_config"),
-		containersCache: dag.CacheVolume("k3s_containers"),
+		KContainer:      nil,
+		Registry:        nil,
+		ConfigCache:     dag.CacheVolume("k3s_config"),
+		ContainersCache: dag.CacheVolume("k3s_containers"),
 	}
 }
 
 type K8sInstance struct {
-	ctx             context.Context
-	container       *Container
-	k3s             *Container
-	registry        *Service
-	configCache     *CacheVolume
-	containersCache *CacheVolume
+	KContainer      *Container
+	K3s             *Container
+	Registry        *Service
+	ConfigCache     *CacheVolume
+	ContainersCache *CacheVolume
 }
 
 func (k *K8sInstance) start(
+	ctx context.Context,
 	manifests *Directory,
 	// +optional
 	kubeconfig *File,
@@ -65,7 +64,7 @@ func (k *K8sInstance) start(
 	localCluster *Service) error {
 
 	// create a Dagger client
-	client, err := dagger.Connect(k.ctx, dagger.WithLogOutput(os.Stdout))
+	client, err := dagger.Connect(ctx, dagger.WithLogOutput(os.Stdout))
 	if err != nil {
 		panic(err)
 	}
@@ -73,31 +72,31 @@ func (k *K8sInstance) start(
 
 	if kubeconfig == nil {
 		// create k3s service container
-		k.k3s = dag.Pipeline("k3s init").Container().
+		k.K3s = dag.Pipeline("k3s init").Container().
 			From("rancher/k3s").
 			WithNewFile("/usr/bin/entrypoint.sh", ContainerWithNewFileOpts{
 				Contents:    entrypoint,
 				Permissions: 0o755,
 			}).
 			WithEntrypoint([]string{"entrypoint.sh"}).
-			WithMountedCache("/etc/rancher/k3s", k.configCache).
+			WithMountedCache("/etc/rancher/k3s", k.ConfigCache).
 			WithMountedTemp("/etc/lib/cni").
-			WithMountedCache("/etc/lib/containers", k.containersCache).
+			WithMountedCache("/etc/lib/containers", k.ContainersCache).
 			WithMountedTemp("/var/lib/kubelet").
 			WithMountedTemp("/var/lib/rancher/k3s").
 			WithMountedTemp("/var/log").
 			WithExec([]string{"sh", "-c", "k3s server --bind-address $(ip route | grep src | awk '{print $NF}') --disable traefik --disable metrics-server --egress-selector-mode=disabled"}, ContainerWithExecOpts{InsecureRootCapabilities: true}).
 			WithExposedPort(6443)
 
-		k.container = dag.Container().
+		k.KContainer = dag.Container().
 			From("bitnami/kubectl").
 			WithUser("root").
 			WithExec([]string{"apt", "update"}, ContainerWithExecOpts{SkipEntrypoint: true}).
 			WithExec([]string{"apt", "install", "-y", "curl", "python3", "python3-pip", "python3-venv", "git"}, ContainerWithExecOpts{SkipEntrypoint: true}).
 			WithUser("1001").
-			WithMountedCache("/cache/k3s", k.configCache).
+			WithMountedCache("/cache/k3s", k.ConfigCache).
 			WithMountedDirectory("/manifests", manifests).
-			WithServiceBinding("k3s", k.k3s.AsService()).
+			WithServiceBinding("k3s", k.K3s.AsService()).
 			WithEnvVariable("CACHE", time.Now().String()).
 			WithUser("root").
 			WithExec([]string{"cp", "/cache/k3s/k3s.yaml", "/.kube/config"}, ContainerWithExecOpts{SkipEntrypoint: true}).
@@ -107,19 +106,19 @@ func (k *K8sInstance) start(
 
 	} else if localCluster != nil {
 
-		// k.container, err = dag.Container().From("ubuntu").
+		// k.KContainer, err = dag.Container().From("ubuntu").
 		// 	WithServiceBinding("localhost", localCluster).
 		// 	WithMountedDirectory("/manifests", manifests).
 		// 	WithExec([]string{"apt", "update"}, ContainerWithExecOpts{SkipEntrypoint: true}).
 		// 	WithExec([]string{"apt", "install", "-y", "curl"}, ContainerWithExecOpts{SkipEntrypoint: true}).
-		// 	WithExec([]string{"curl", "-vvv", "localhost:59127"}).Sync(k.ctx)
+		// 	WithExec([]string{"curl", "-vvv", "localhost:59127"}).Sync(k.Ctx)
 		// if err != nil {
 		// 	return err
 		// }
 
-		fileName, _ := kubeconfig.Name(k.ctx)
+		fileName, _ := kubeconfig.Name(ctx)
 
-		k.container = dag.Container().
+		k.KContainer = dag.Container().
 			From("bitnami/kubectl").
 			WithUser("root").
 			WithExec([]string{"apt", "update"}, ContainerWithExecOpts{SkipEntrypoint: true}).
@@ -136,8 +135,8 @@ func (k *K8sInstance) start(
 			WithEntrypoint([]string{"sh", "-c"})
 	} else if localCluster == nil {
 
-		fileName, _ := kubeconfig.Name(k.ctx)
-		k.container = dag.Container().
+		fileName, _ := kubeconfig.Name(ctx)
+		k.KContainer = dag.Container().
 			From("bitnami/kubectl").
 			WithUser("root").
 			WithExec([]string{"apt", "update"}, ContainerWithExecOpts{SkipEntrypoint: true}).
@@ -156,23 +155,22 @@ func (k *K8sInstance) start(
 	return nil
 }
 
-func (k *K8sInstance) kubectl(command string) (string, error) {
-	return k.exec("kubectl", fmt.Sprintf("kubectl %v", command))
+func (k *K8sInstance) kubectl(ctx context.Context, command string) (string, error) {
+	return k.exec(ctx, "kubectl", fmt.Sprintf("kubectl %v", command))
 }
 
-func (k *K8sInstance) exec(name, command string) (string, error) {
-	return k.container.Pipeline(name).Pipeline(command).
+func (k *K8sInstance) exec(ctx context.Context, name, command string) (string, error) {
+	return k.KContainer.Pipeline(name).Pipeline(command).
 		WithEnvVariable("CACHE", time.Now().String()).
 		WithExec([]string{command}).
-		Stdout(k.ctx)
+		Stdout(ctx)
 }
 
-func (k *K8sInstance) waitForNodes() (err error) {
+func (k *K8sInstance) waitForNodes(ctx context.Context) (err error) {
 	maxRetries := 10
-	retryBackoff := 60 * time.Second
+	retryBackoff := 30 * time.Second
 	for i := 0; i < maxRetries; i++ {
-		time.Sleep(retryBackoff)
-		kubectlGetNodes, err := k.kubectl("get nodes -o wide")
+		kubectlGetNodes, err := k.kubectl(ctx, "get nodes -o wide")
 		if err != nil {
 			fmt.Println(fmt.Errorf("could not fetch nodes: %v", err))
 			continue
@@ -181,16 +179,17 @@ func (k *K8sInstance) waitForNodes() (err error) {
 			return nil
 		}
 		fmt.Println("waiting for k8s to start:", kubectlGetNodes)
+		time.Sleep(retryBackoff)
 	}
 	return fmt.Errorf("k8s took too long to start")
 }
 
-func (k *K8sInstance) waitForVirtualKubelet() (err error) {
-	maxRetries := 5
-	retryBackoff := 60 * time.Second
+func (k *K8sInstance) waitForVirtualKubelet(ctx context.Context) (err error) {
+	maxRetries := 10
+	retryBackoff := 30 * time.Second
 	for i := 0; i < maxRetries; i++ {
 		time.Sleep(retryBackoff)
-		kubectlGetPod, err := k.kubectl("get pod -n interlink -l nodeName=virtual-kubelet")
+		kubectlGetPod, err := k.kubectl(ctx, "get pod -n interlink -l nodeName=virtual-kubelet")
 		if err != nil {
 			fmt.Println(fmt.Errorf("could not fetch pod: %v", err))
 			continue
@@ -199,7 +198,7 @@ func (k *K8sInstance) waitForVirtualKubelet() (err error) {
 			return nil
 		}
 		fmt.Println("waiting for k8s to start:", kubectlGetPod)
-		describePod, err := k.kubectl("logs -n interlink -l nodeName=virtual-kubelet -c inttw-vk")
+		describePod, err := k.kubectl(ctx, "logs -n interlink -l nodeName=virtual-kubelet -c inttw-vk")
 		if err != nil {
 			fmt.Println(fmt.Errorf("could not fetch pod description: %v", err))
 			continue
@@ -210,12 +209,12 @@ func (k *K8sInstance) waitForVirtualKubelet() (err error) {
 	return fmt.Errorf("k8s took too long to start")
 }
 
-func (k *K8sInstance) waitForInterlink() (err error) {
-	maxRetries := 5
-	retryBackoff := 60 * time.Second
+func (k *K8sInstance) waitForInterlink(ctx context.Context) (err error) {
+	maxRetries := 10
+	retryBackoff := 30 * time.Second
 	for i := 0; i < maxRetries; i++ {
 		time.Sleep(retryBackoff)
-		kubectlGetPod, err := k.kubectl("get pod -n interlink -l app=interlink")
+		kubectlGetPod, err := k.kubectl(ctx, "get pod -n interlink -l app=interlink")
 		if err != nil {
 			fmt.Println(fmt.Errorf("could not fetch pod: %v", err))
 			continue
@@ -224,7 +223,7 @@ func (k *K8sInstance) waitForInterlink() (err error) {
 			return nil
 		}
 		fmt.Println("waiting for k8s to start:", kubectlGetPod)
-		describePod, err := k.kubectl("logs -n interlink -l app=interlink")
+		describePod, err := k.kubectl(ctx, "logs -n interlink -l app=interlink")
 		if err != nil {
 			fmt.Println(fmt.Errorf("could not fetch pod description: %v", err))
 			continue
@@ -235,12 +234,12 @@ func (k *K8sInstance) waitForInterlink() (err error) {
 	return fmt.Errorf("interlink took too long to start")
 }
 
-func (k *K8sInstance) waitForPlugin() (err error) {
-	maxRetries := 5
-	retryBackoff := 60 * time.Second
+func (k *K8sInstance) waitForPlugin(ctx context.Context) (err error) {
+	maxRetries := 10
+	retryBackoff := 30 * time.Second
 	for i := 0; i < maxRetries; i++ {
 		time.Sleep(retryBackoff)
-		kubectlGetPod, err := k.kubectl("get pod -n interlink -l app=plugin")
+		kubectlGetPod, err := k.kubectl(ctx, "get pod -n interlink -l app=plugin")
 		if err != nil {
 			fmt.Println(fmt.Errorf("could not fetch pod: %v", err))
 			continue
@@ -249,7 +248,7 @@ func (k *K8sInstance) waitForPlugin() (err error) {
 			return nil
 		}
 		fmt.Println("waiting for k8s to start:", kubectlGetPod)
-		describePod, err := k.kubectl("logs -n interlink -l app=plugin")
+		describePod, err := k.kubectl(ctx, "logs -n interlink -l app=plugin")
 		if err != nil {
 			fmt.Println(fmt.Errorf("could not fetch pod description: %v", err))
 			continue

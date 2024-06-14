@@ -1,0 +1,10 @@
+kind: Deployment
+metadata:
+  name: interlink
+  namespace: interlink
+spec:
+  template:
+    spec:
+      containers:
+      - name: interlink
+        image: "dciangot/vk:latest"

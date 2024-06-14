@@ -30,7 +30,7 @@ spec:
     spec:
       containers:
       - name: interlink
-        image: "ghcr.io/intertwin-eu/interlink:latest" 
+        image: "ghcr.io/intertwin-eu/interlink" 
         imagePullPolicy: Always
         env:
         - name: CONFIGPATH

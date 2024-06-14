@@ -1,0 +1,10 @@
+kind: Deployment
+metadata:
+  name: virtual-kubelet
+  namespace: interlink
+spec:
+  template:
+    spec:
+      containers:
+      - name: inttw-vk
+        image: "dciangot/vk:latest"
