@@ -12,10 +12,19 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v4
+      - name: Set env
+        run: echo "RELEASE_VERSION=${GITHUB_REF#refs/*/}" >> $GITHUB_ENV
+      - name: Login to GitHub Container Registry
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.repository_owner }}
+          password: ${{ secrets.GITHUB_TOKEN }}
       - name: Integration Test
         uses: dagger/dagger-for-github@v5
         with:
           workdir: ci
           verb: call
-          args: -s build-images --source-folder ../ --virtual-kubelet-ref ghcr.io/intertwin-eu/virtual-kubelet-inttw:test --interlink-ref ghcr.io/intertwin-eu/interlink:test  new-interlink --manifests $PWD/manifests load-plugin test stdout
+          args: -s build-images --source-folder ../ --virtual-kubelet-ref ghcr.io/intertwin-eu/virtual-kubelet-inttw:${{ env.RELEASE_VERSION }} --interlink-ref ghcr.io/intertwin-eu/interlink:${{ env.RELEASE_VERSION }}  new-interlink --manifests $PWD/manifests load-plugin test stdout
+          cloud-token: ${{ secrets.DAGGER_CLOUD_TOKEN }}
           #dagger-flags: -d
