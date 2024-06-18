@@ -37,13 +37,15 @@ That means you can test your code **before** any commit, discovering in advance 
 
 First of all, in `ci/manifests/vktest_config.yaml` you will find the pytest configuration file. Please see the [test documentation](https://github.com/interTwin-eu/vk-test-set/tree/main) for understanding how to tweak it. 
 
-The following instructions are thought for building docker images of the virtual-kubelet and interlink api server components at runtime and published on `virtual-kubelet-ref` and `interlink-ref` repositories.
+The following instructions are thought for building docker images of the virtual-kubelet and interlink api server components at runtime and published on `virtual-kubelet-ref` and `interlink-ref` repositories (in this example it will be dockerHUB repository of the dciangot user).
 It basically consists on a chain of Dagger tasks for building core images (`build-images`), creating the kubernetes environment configured with core components (`new-interlink`), installing the plugin of choice indicated in the `manifest` folder (`load-plugin`), and eventually the execution of the tests (`test`)
 
 To run the default tests you can move to `ci` folder and execute the Dagger pipeline with:
 
 ```bash
-dagger  call build-images --source-folder ../ --virtual-kubelet-ref dciangot/vk --interlink-ref dciangot/interlink \
+export YOUR_DOCKERHUB_USER=dciangot
+
+dagger  call build-images --source-folder ../ --virtual-kubelet-ref ${YOUR_DOCKERHUB_USER}/vk --interlink-ref ${YOUR_DOCKERHUB_USER}/interlink \
              new-interlink --manifests $PWD/manifests \
              load-plugin \
              test stdout
