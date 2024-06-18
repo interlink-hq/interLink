@@ -17,5 +17,5 @@ jobs:
         with:
           workdir: ci
           verb: call
-          args: -s test --manifests ./manifests stdout
+          args: -s build-images --source-folder ../ --virtual-kubelet-ref ghcr.io/intertwin-eu/virtual-kubelet-inttw:test --interlink-ref ghcr.io/intertwin-eu/interlink:test  new-interlink --manifests $PWD/manifests load-plugin test stdout
           #dagger-flags: -d
