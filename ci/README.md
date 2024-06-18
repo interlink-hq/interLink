@@ -22,11 +22,6 @@ That means you can test your code **before** any commit, discovering in advance 
 
 ### Run e2e tests
 
-#### Requirements
-
-:danger: **N.B.** You need to have your images for the plugins and components published on a container registry before going ahead. Then set it properly in the manifests as described below.
-
-
 #### Edit manifests with your images
 
 - `service-account.yaml` is the default set of permission needed by the virtualkubelet. Do not touch unless you know what you are doing.
@@ -42,10 +37,16 @@ That means you can test your code **before** any commit, discovering in advance 
 
 First of all, in `ci/manifests/vktest_config.yaml` you will find the pytest configuration file. Please see the [test documentation](https://github.com/interTwin-eu/vk-test-set/tree/main) for understanding how to tweak it. 
 
+The following instructions are thought for building docker images of the virtual-kubelet and interlink api server components at runtime and published on `virtual-kubelet-ref` and `interlink-ref` repositories.
+It basically consists on a chain of Dagger tasks for building core images (`build-images`), creating the kubernetes environment configured with core components (`new-interlink`), installing the plugin of choice indicated in the `manifest` folder (`load-plugin`), and eventually the execution of the tests (`test`)
+
 To run the default tests you can move to `ci` folder and execute the Dagger pipeline with:
 
 ```bash
-dagger call test --manifests $PWD/manifests stdout
+dagger  call build-images --source-folder ../ --virtual-kubelet-ref dciangot/vk --interlink-ref dciangot/interlink \
+             new-interlink --manifests $PWD/manifests \
+             load-plugin \
+             test stdout
 ```
 
 :warning: by default the docker plugin is the one tested and to be referred to for any change as first thing.
@@ -78,7 +79,10 @@ vktestset/basic_test.py::test_manifest[virtual-kubelet-060-init-container.yaml] 
 In case something went wrong, you have the possibility to spawn a session inside the final step of the pipeline to debug things:
 
 ```bash
-dagger call test --manifests $PWD/manifests terminal
+dagger  call build-images --source-folder ../ --virtual-kubelet-ref dciangot/vk --interlink-ref dciangot/interlink \
+             new-interlink --manifests $PWD/manifests \
+             load-plugin \
+             run terminal
 ```
 
 with this command (after some minutes) then you should be able to access a bash session doing the following commands:
@@ -103,13 +107,19 @@ You might want to hijack the test machinery in order to have it instantiating th
 If you have a kubernetes cluster **publically accessible**, you can pass your kubeconfig to the Dagger pipeline and use that instead of the internal one that is "one-shot" for the tests only.
 
 ```bash
-dagger call test --kubeconfig $PWD/kubeconfig.yaml --manifests $PWD/manifests stdout
+dagger  call build-images --source-folder ../ --virtual-kubelet-ref dciangot/vk --interlink-ref dciangot/interlink \
+             new-interlink --manifests $PWD/manifests --kubeconfig $PWD/kubeconfig.yaml \
+             load-plugin \
+             test stdout
 ```
 
 If you have a *local* cluster (e.g. via MiniKube), you need to forward the local port of the Kubernetes API server (look inside the kubeconfig file) inside the Dagger runtime with the following:
 
 ```bash
-dagger call test --local-cluster tcp://localhost:59127 --kubeconfig $PWD/kubeconfig.yaml --manifests $PWD/manifests stdout
+dagger  call build-images --source-folder ../ --virtual-kubelet-ref dciangot/vk --interlink-ref dciangot/interlink \
+             new-interlink --manifests $PWD/manifests --kubeconfig $PWD/kubeconfig.yaml --local-cluster tcp://localhost:59127 \
+             load-plugin \
+             test stdout
 ```
 
 ### Develop Virtual Kubelet code

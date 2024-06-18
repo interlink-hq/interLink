@@ -3,11 +3,8 @@ package main
 import (
 	"context"
 	"fmt"
-	"os"
 	"strings"
 	"time"
-
-	"dagger.io/dagger"
 )
 
 // entrypoint to setup cgroup nesting since k3s only does it
@@ -59,16 +56,13 @@ func (k *K8sInstance) start(
 	ctx context.Context,
 	manifests *Directory,
 	// +optional
+	bufferVK string,
+	// +optional
+	bufferIL string,
+	// +optional
 	kubeconfig *File,
 	// +optional
 	localCluster *Service) error {
-
-	// create a Dagger client
-	client, err := dagger.Connect(ctx, dagger.WithLogOutput(os.Stdout))
-	if err != nil {
-		panic(err)
-	}
-	defer client.Close()
 
 	if kubeconfig == nil {
 		// create k3s service container
@@ -124,7 +118,7 @@ func (k *K8sInstance) start(
 			WithExec([]string{"apt", "update"}, ContainerWithExecOpts{SkipEntrypoint: true}).
 			WithExec([]string{"apt", "install", "-y", "curl", "python3", "python3-pip", "python3-venv", "git"}, ContainerWithExecOpts{SkipEntrypoint: true}).
 			WithUser("1001").
-			WithMountedDirectory("/manifests", manifests).
+			WithDirectory("/manifests", manifests).
 			WithServiceBinding("minikube", localCluster).
 			WithEnvVariable("CACHE", time.Now().String()).
 			WithUser("root").
@@ -142,7 +136,7 @@ func (k *K8sInstance) start(
 			WithExec([]string{"apt", "update"}, ContainerWithExecOpts{SkipEntrypoint: true}).
 			WithExec([]string{"apt", "install", "-y", "curl", "python3", "python3-pip", "python3-venv", "git"}, ContainerWithExecOpts{SkipEntrypoint: true}).
 			WithUser("1001").
-			WithMountedDirectory("/manifests", manifests).
+			WithDirectory("/manifests", manifests).
 			WithEnvVariable("CACHE", time.Now().String()).
 			WithUser("root").
 			WithFile(fmt.Sprintf("/src/%s", fileName), kubeconfig).
@@ -151,6 +145,21 @@ func (k *K8sInstance) start(
 			WithUser("1001").
 			WithEntrypoint([]string{"sh", "-c"})
 
+	}
+
+	if bufferIL != "" {
+		k.KContainer = k.KContainer.
+			WithNewFile("/manifests/virtual-kubelet-merge.yaml", ContainerWithNewFileOpts{
+				Contents:    bufferVK,
+				Permissions: 0o755,
+			})
+	}
+	if bufferIL != "" {
+		k.KContainer = k.KContainer.
+			WithNewFile("/manifests/interlink-merge.yaml", ContainerWithNewFileOpts{
+				Contents:    bufferIL,
+				Permissions: 0o755,
+			})
 	}
 	return nil
 }

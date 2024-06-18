@@ -1,11 +1,46 @@
 package main
 
 import (
+	"bytes"
 	"context"
 	"fmt"
+	"html/template"
 
 	"dagger/interlink/internal/dagger"
 )
+
+var (
+	interLinkPatch = `
+kind: Deployment
+metadata:
+  name: interlink
+  namespace: interlink
+spec:
+  template:
+    spec:
+      containers:
+      - name: interlink
+        image: "{{.InterLinkRef}}"
+
+`
+	virtualKubeletPatch = `
+kind: Deployment
+metadata:
+  name: virtual-kubelet
+  namespace: interlink
+spec:
+  template:
+    spec:
+      containers:
+      - name: inttw-vk
+        image: "{{.VirtualKubeletRef}}"
+`
+)
+
+type patchSchema struct {
+	InterLinkRef      string
+	VirtualKubeletRef string
+}
 
 type Interlink struct {
 	K8s               *K8sInstance
@@ -73,16 +108,58 @@ func (i *Interlink) NewInterlink(
 	localCluster *Service,
 ) (*Interlink, error) {
 
+	// create Kustomize patch for images to be used
+	patch := patchSchema{}
+	if i.InterlinkRef != "" && i.VirtualKubeletRef != "" {
+		patch = patchSchema{
+			InterLinkRef:      i.InterlinkRef,
+			VirtualKubeletRef: i.VirtualKubeletRef,
+		}
+	} else {
+		patch = patchSchema{
+			InterLinkRef:      "ghcr.io/intertwin-eu/interlink",
+			VirtualKubeletRef: "ghcr.io/intertwin-eu/virtual-kubelet-inttw",
+		}
+	}
+
+	interLinkCompiler, err := template.New("interlink").Parse(interLinkPatch)
+	if err != nil {
+		return nil, err
+	}
+
+	bufferIL := new(bytes.Buffer)
+
+	err = interLinkCompiler.Execute(bufferIL, patch)
+	if err != nil {
+		return nil, err
+	}
+
+	virtualKubeletCompiler, err := template.New("vk").Parse(virtualKubeletPatch)
+	if err != nil {
+		return nil, err
+	}
+
+	bufferVK := new(bytes.Buffer)
+
+	err = virtualKubeletCompiler.Execute(bufferVK, patch)
+	if err != nil {
+		return nil, err
+	}
+
+	// use the manifest folder defined in the chain and install components
+
 	if manifests != nil {
 		i.Manifests = manifests
 	}
 
+	fmt.Println(bufferVK.String())
+
 	i.K8s = NewK8sInstance(ctx)
-	if err := i.K8s.start(ctx, i.Manifests, kubeconfig, localCluster); err != nil {
+	if err := i.K8s.start(ctx, i.Manifests, bufferVK.String(), bufferIL.String(), kubeconfig, localCluster); err != nil {
 		return nil, err
 	}
 
-	err := i.K8s.waitForNodes(ctx)
+	err = i.K8s.waitForNodes(ctx)
 	if err != nil {
 		return nil, err
 	}
@@ -189,6 +266,11 @@ func (i *Interlink) Run(
 		}
 	}
 
-	return i.K8s.KContainer, nil
+	return i.K8s.KContainer.
+		WithWorkdir("/opt").
+		WithExec([]string{"bash", "-c", "git clone https://github.com/interTwin-eu/vk-test-set.git"}, ContainerWithExecOpts{SkipEntrypoint: true}).
+		WithExec([]string{"bash", "-c", "cp /manifests/vktest_config.yaml /opt/vk-test-set/vktest_config.yaml"}, ContainerWithExecOpts{SkipEntrypoint: true}).
+		WithWorkdir("/opt/vk-test-set").
+		WithExec([]string{"bash", "-c", "python3 -m venv .venv && source .venv/bin/activate && pip3 install -e ./ "}, ContainerWithExecOpts{SkipEntrypoint: true}), nil
 
 }
