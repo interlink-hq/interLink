@@ -57,13 +57,13 @@ type Interlink struct {
 func (i *Interlink) BuildImages(
 	ctx context.Context,
 	// +optional
-	// +default="ghcr.io/intertwin-eu/virtual-kubelet-inttw"
+	// +default="ghcr.io/intertwin-eu/interlink/virtual-kubelet-inttw"
 	virtualKubeletRef string,
 	// +optional
-	// +default="ghcr.io/intertwin-eu/interlink"
+	// +default="ghcr.io/intertwin-eu/interlink/interlink"
 	interlinkRef string,
 	// +optional
-	// +default="ghcr.io/intertwin-eu/plugin-test"
+	// +default="ghcr.io/intertwin-eu/interlink/plugin-test"
 	pluginRef string,
 	sourceFolder *Directory,
 ) (*Interlink, error) {
@@ -117,8 +117,8 @@ func (i *Interlink) NewInterlink(
 		}
 	} else {
 		patch = patchSchema{
-			InterLinkRef:      "ghcr.io/intertwin-eu/interlink",
-			VirtualKubeletRef: "ghcr.io/intertwin-eu/virtual-kubelet-inttw",
+			InterLinkRef:      "ghcr.io/intertwin-eu/interlink/interlink",
+			VirtualKubeletRef: "ghcr.io/intertwin-eu/interlink/virtual-kubelet-inttw",
 		}
 	}
 
