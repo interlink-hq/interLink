@@ -19,13 +19,6 @@ jobs:
           SUPER_SECRET: ${{ secrets.DAGGER_CLOUD_TOKEN }}
         run: |
           echo "$SUPER_SECRET"
-      - shell: bash 
-        env:
-          SUPER_SECRET: ${{ secrets.GITHUB_TOKEN }}
-        run: |
-          echo "$SUPER_SECRET"
-      - name: Set env
-        run: echo "RELEASE_VERSION=${{ steps.commit.outputs.short }}" >> $GITHUB_ENV
       - name: Login to GitHub Container Registry
         uses: docker/login-action@v3
         with:
@@ -37,6 +30,6 @@ jobs:
         with:
           workdir: ci
           verb: call
-          args: -s build-images --source-folder ../ --virtual-kubelet-ref ghcr.io/intertwin-eu/virtual-kubelet-inttw:$GITHUB_ENV --interlink-ref ghcr.io/intertwin-eu/interlink:$GITHUB_ENV new-interlink --manifests $PWD/manifests load-plugin test stdout
+          args: -s build-images --source-folder ../ --virtual-kubelet-ref ghcr.io/intertwin-eu/virtual-kubelet-inttw:$GITHUB_SHA --interlink-ref ghcr.io/intertwin-eu/interlink:$GITHUB_SHA new-interlink --manifests $PWD/manifests load-plugin test stdout
           cloud-token: ${{ secrets.DAGGER_CLOUD_TOKEN }}
           #dagger-flags: -d
