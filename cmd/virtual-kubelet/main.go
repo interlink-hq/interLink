@@ -32,6 +32,7 @@ import (
 	v1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/fields"
 	"k8s.io/client-go/kubernetes/scheme"
+	lease "k8s.io/client-go/kubernetes/typed/coordination/v1"
 	"k8s.io/client-go/tools/cache"
 	"k8s.io/client-go/tools/clientcmd"
 	"k8s.io/client-go/tools/record"
@@ -145,6 +146,11 @@ func initProvider() (func(context.Context) error, error) {
 	return tracerProvider.Shutdown, nil
 }
 
+func tlsConfig(tls *tls.Config) error {
+	tls.InsecureSkipVerify = true
+	return nil
+}
+
 func main() {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
@@ -246,33 +252,6 @@ func main() {
 	localClient := kubernetes.NewForConfigOrDie(kubecfg)
 
 	nodeProvider, err := commonIL.NewProvider(cfg.ConfigPath, cfg.NodeName, cfg.OperatingSystem, cfg.InternalIP, cfg.DaemonPort, ctx)
-	go func() {
-
-		ILbind := false
-		retValue := -1
-		counter := 0
-
-		for {
-			ILbind, retValue, err = commonIL.PingInterLink(ctx, interLinkConfig)
-
-			if err != nil {
-				log.G(ctx).Error(err)
-			}
-
-			if !ILbind && retValue == 1 {
-				counter++
-			} else if ILbind && retValue == 0 {
-				counter = 0
-			}
-
-			if counter > 10 {
-				log.G(ctx).Fatal("Unable to communicate with the InterLink API, exiting...")
-			}
-
-			time.Sleep(time.Second * 10)
-
-		}
-	}()
 
 	if err != nil {
 		log.G(ctx).Fatal(err)
@@ -280,6 +259,10 @@ func main() {
 
 	nc, _ := node.NewNodeController(
 		nodeProvider, nodeProvider.GetNode(), localClient.CoreV1().Nodes(),
+		node.WithNodeEnableLeaseV1(
+			lease.NewForConfigOrDie(kubecfg).Leases(v1.NamespaceNodeLease),
+			300,
+		),
 	)
 
 	go func() error {
@@ -289,8 +272,6 @@ func main() {
 		}
 		return nil
 	}()
-	// <-nc.Ready()
-	// close(nc)
 
 	eb := record.NewBroadcaster()
 

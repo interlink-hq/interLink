@@ -1,0 +1,15 @@
+resources:
+- virtual-kubelet-config.yaml
+- virtual-kubelet.yaml
+- interlink-config.yaml
+- interlink.yaml
+patches:
+- path: virtual-kubelet-merge.yaml
+  target:
+    kind: Deployment
+    labelSelector: nodeName=virtual-kubelet
+- path: interlink-merge.yaml
+  target:
+    kind: Deployment
+    labelSelector: app=interlink
+

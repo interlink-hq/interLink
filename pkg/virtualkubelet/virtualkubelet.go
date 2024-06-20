@@ -37,11 +37,11 @@ const (
 	DELETE                = 1
 )
 
-func BuildKeyFromNames(namespace string, name string) (string, error) {
+func buildKeyFromNames(namespace string, name string) (string, error) {
 	return fmt.Sprintf("%s-%s", namespace, name), nil
 }
 
-func BuildKey(pod *v1.Pod) (string, error) {
+func buildKey(pod *v1.Pod) (string, error) {
 	if pod.Namespace == "" {
 		return "", fmt.Errorf("pod namespace not found")
 	}
@@ -50,9 +50,10 @@ func BuildKey(pod *v1.Pod) (string, error) {
 		return "", fmt.Errorf("pod name not found")
 	}
 
-	return BuildKeyFromNames(pod.Namespace, pod.Name)
+	return buildKeyFromNames(pod.Namespace, pod.Name)
 }
 
+// VirtualKubeletProvider defines the properties of the virtual kubelet provider
 type VirtualKubeletProvider struct {
 	nodeName             string
 	node                 *v1.Node
@@ -67,6 +68,7 @@ type VirtualKubeletProvider struct {
 	clientSet            *kubernetes.Clientset
 }
 
+// NewProviderConfig takes user-defined configuration and fills the Virtual Kubelet provider struct
 func NewProviderConfig(
 	config VirtualKubeletConfig,
 	nodeName string,
@@ -112,6 +114,8 @@ func NewProviderConfig(
 			}},
 		},
 		Status: v1.NodeStatus{
+			// TODO: set kubelet version!
+
 			// NodeInfo: v1.NodeSystemInfo{
 			// 	KubeletVersion:  Version,
 			// 	Architecture:    architecture,
@@ -144,16 +148,12 @@ func NewProviderConfig(
 		pods:               make(map[string]*v1.Pod),
 		config:             config,
 		startTime:          time.Now(),
-		onNodeChangeCallback: func(node *v1.Node) {
-		},
-		//notifier: func(p *v1.Pod) {
-		//		},
 	}
 
 	return &provider, nil
 }
 
-// NewProvider creates a new Provider, which implements the PodNotifier interface
+// NewProvider creates a new Provider, which implements the PodNotifier and other virtual-kubelet interfaces
 func NewProvider(providerConfig, nodeName, operatingSystem string, internalIP string, daemonEndpointPort int32, ctx context.Context) (*VirtualKubeletProvider, error) {
 	config, err := LoadConfig(providerConfig, nodeName, ctx)
 	if err != nil {
@@ -162,7 +162,7 @@ func NewProvider(providerConfig, nodeName, operatingSystem string, internalIP st
 	return NewProviderConfig(config, nodeName, operatingSystem, internalIP, daemonEndpointPort)
 }
 
-// loadConfig loads the given json configuration files and yaml to communicate with InterLink.
+// LoadConfig loads the given json configuration files and return a VirtualKubeletConfig struct
 func LoadConfig(providerConfig, nodeName string, ctx context.Context) (config VirtualKubeletConfig, err error) {
 
 	log.G(ctx).Info("Loading Virtual Kubelet config from " + providerConfig)
@@ -207,28 +207,154 @@ func LoadConfig(providerConfig, nodeName string, ctx context.Context) (config Vi
 	return config, nil
 }
 
+// GetNode return the Node information at the initiation of a virtual node
 func (p *VirtualKubeletProvider) GetNode() *v1.Node {
 	return p.node
 }
 
+// NotifyNodeStatus runs once at initiation time and set the function to be used for node change notification (native of vk)
+// it also starts a go routine for continously checking the node status and availability
 func (p *VirtualKubeletProvider) NotifyNodeStatus(ctx context.Context, f func(*v1.Node)) {
 	p.onNodeChangeCallback = f
+	go p.nodeUpdate(ctx)
 }
 
+// nodeUpdate continously checks for node status and availability
+func (p *VirtualKubeletProvider) nodeUpdate(ctx context.Context) {
+
+	t := time.NewTimer(5 * time.Second)
+	if !t.Stop() {
+		<-t.C
+	}
+
+	log.G(ctx).Info("nodeLoop")
+
+	_, err := os.ReadFile(p.config.VKTokenFile) // just pass the file name
+	if err != nil {
+		log.G(context.Background()).Fatal(err)
+	}
+
+	for {
+		t.Reset(30 * time.Second)
+		select {
+		case <-ctx.Done():
+			return
+		case <-t.C:
+		}
+		bool, code, err := PingInterLink(ctx, p.config)
+		if err != nil || !bool {
+			p.node.Status.Conditions = []v1.NodeCondition{
+				{
+					Type:               "Ready",
+					Status:             v1.ConditionFalse,
+					LastHeartbeatTime:  metav1.Now(),
+					LastTransitionTime: metav1.Now(),
+					Reason:             "KubeletPending",
+					Message:            "kubelet is pending.",
+				},
+				{
+					Type:               "OutOfDisk",
+					Status:             v1.ConditionFalse,
+					LastHeartbeatTime:  metav1.Now(),
+					LastTransitionTime: metav1.Now(),
+					Reason:             "KubeletHasSufficientDisk",
+					Message:            "kubelet has sufficient disk space available",
+				},
+				{
+					Type:               "MemoryPressure",
+					Status:             v1.ConditionFalse,
+					LastHeartbeatTime:  metav1.Now(),
+					LastTransitionTime: metav1.Now(),
+					Reason:             "KubeletHasSufficientMemory",
+					Message:            "kubelet has sufficient memory available",
+				},
+				{
+					Type:               "DiskPressure",
+					Status:             v1.ConditionFalse,
+					LastHeartbeatTime:  metav1.Now(),
+					LastTransitionTime: metav1.Now(),
+					Reason:             "KubeletHasNoDiskPressure",
+					Message:            "kubelet has no disk pressure",
+				},
+				{
+					Type:               "NetworkUnavailable",
+					Status:             v1.ConditionTrue,
+					LastHeartbeatTime:  metav1.Now(),
+					LastTransitionTime: metav1.Now(),
+					Reason:             "RouteCreated",
+					Message:            "RouteController created a route",
+				},
+			}
+			p.onNodeChangeCallback(p.node)
+			log.G(ctx).Error("Ping Failed with exit code: ", code)
+		} else {
+
+			p.node.Status.Conditions = []v1.NodeCondition{
+				{
+					Type:               "Ready",
+					Status:             v1.ConditionTrue,
+					LastHeartbeatTime:  metav1.Now(),
+					LastTransitionTime: metav1.Now(),
+					Reason:             "KubeletPending",
+					Message:            "kubelet is pending.",
+				},
+				{
+					Type:               "OutOfDisk",
+					Status:             v1.ConditionFalse,
+					LastHeartbeatTime:  metav1.Now(),
+					LastTransitionTime: metav1.Now(),
+					Reason:             "KubeletHasSufficientDisk",
+					Message:            "kubelet has sufficient disk space available",
+				},
+				{
+					Type:               "MemoryPressure",
+					Status:             v1.ConditionFalse,
+					LastHeartbeatTime:  metav1.Now(),
+					LastTransitionTime: metav1.Now(),
+					Reason:             "KubeletHasSufficientMemory",
+					Message:            "kubelet has sufficient memory available",
+				},
+				{
+					Type:               "DiskPressure",
+					Status:             v1.ConditionFalse,
+					LastHeartbeatTime:  metav1.Now(),
+					LastTransitionTime: metav1.Now(),
+					Reason:             "KubeletHasNoDiskPressure",
+					Message:            "kubelet has no disk pressure",
+				},
+				{
+					Type:               "NetworkUnavailable",
+					Status:             v1.ConditionFalse,
+					LastHeartbeatTime:  metav1.Now(),
+					LastTransitionTime: metav1.Now(),
+					Reason:             "RouteCreated",
+					Message:            "RouteController created a route",
+				},
+			}
+
+			log.G(ctx).Info("Ping succeded with exit code: ", code)
+			p.onNodeChangeCallback(p.node)
+		}
+		log.G(ctx).Info("endNodeLoop")
+	}
+
+}
+
+// Ping the kubelet from the cluster, this will always be ok by design probably
 func (p *VirtualKubeletProvider) Ping(ctx context.Context) error {
 	return nil
 }
 
-// CreatePod accepts a Pod definition and stores it in memory.
+// CreatePod accepts a Pod definition and stores it in memory in p.pods
 func (p *VirtualKubeletProvider) CreatePod(ctx context.Context, pod *v1.Pod) error {
 	ctx, span := trace.StartSpan(ctx, "CreatePod")
 	var hasInitContainers = false
 	var state v1.ContainerState
 	defer span.End()
-	//distribution := "docker://"
+
 	// Add the pod's coordinates to the current span.
 	ctx = addAttributes(ctx, span, NamespaceKey, pod.Namespace, NameKey, pod.Name)
-	key, err := BuildKey(pod)
+	key, err := buildKey(pod)
 	if err != nil {
 		return err
 	}
@@ -249,15 +375,8 @@ func (p *VirtualKubeletProvider) CreatePod(ctx context.Context, pod *v1.Pod) err
 	if len(pod.Spec.InitContainers) > 0 {
 		state = waitingState
 		hasInitContainers = true
-		// run init container with remote execution enabled
-		/*for _, container := range pod.Spec.InitContainers {
-			// MUST TODO: Run init containers sequentialy and NOT all-together
-			err = RemoteExecution(p, ctx, CREATE, distribution+container.Image, pod, container)
-			if err != nil {
-				return err
-			}
-		}*/
 
+		// we put the phase in running but initialization phase to false
 		pod.Status = v1.PodStatus{
 			Phase:     v1.PodRunning,
 			HostIP:    p.internalIP,
@@ -279,6 +398,8 @@ func (p *VirtualKubeletProvider) CreatePod(ctx context.Context, pod *v1.Pod) err
 			},
 		}
 	} else {
+
+		// if no init containers are there, go head and set phase to initialized
 		pod.Status = v1.PodStatus{
 			Phase:     v1.PodPending,
 			HostIP:    p.internalIP,
@@ -301,8 +422,10 @@ func (p *VirtualKubeletProvider) CreatePod(ctx context.Context, pod *v1.Pod) err
 		}
 	}
 
+	// Create pod asynchronously on the remote plugin
+	// we don't care, the statusLoop will eventually reconcile the status
 	go func() {
-		err = RemoteExecution(ctx, p.config, p, pod, CREATE)
+		err := RemoteExecution(ctx, p.config, p, pod, CREATE)
 		if err != nil {
 			if err.Error() == "Deleted pod before actual creation" {
 				log.G(ctx).Warn(err)
@@ -313,28 +436,20 @@ func (p *VirtualKubeletProvider) CreatePod(ctx context.Context, pod *v1.Pod) err
 		}
 	}()
 
-	// deploy main containers
+	// set pod containers status to notReady and waiting if there is an initContainer to be executed first
 	for _, container := range pod.Spec.Containers {
-		//var err error
 
-		/*if !hasInitContainers {
-			err = RemoteExecution(p, ctx, CREATE, distribution+container.Image, pod, container)
-			if err != nil {
-				return err
-			}
-		}*/
 		pod.Status.ContainerStatuses = append(pod.Status.ContainerStatuses, v1.ContainerStatus{
 			Name:         container.Name,
 			Image:        container.Image,
 			Ready:        !hasInitContainers,
-			RestartCount: 1,
+			RestartCount: 0,
 			State:        state,
 		})
 
 	}
 
 	p.pods[key] = pod
-	p.notifier(pod)
 
 	return nil
 }
@@ -349,18 +464,12 @@ func (p *VirtualKubeletProvider) UpdatePod(ctx context.Context, pod *v1.Pod) err
 
 	log.G(ctx).Infof("receive UpdatePod %q", pod.Name)
 
-	key, err := BuildKey(pod)
-	if err != nil {
-		return err
-	}
-
-	p.pods[key] = pod
 	p.notifier(pod)
 
 	return nil
 }
 
-// DeletePod deletes the specified pod out of memory.
+// DeletePod deletes the specified pod and drops it out of p.pods
 func (p *VirtualKubeletProvider) DeletePod(ctx context.Context, pod *v1.Pod) (err error) {
 	ctx, span := trace.StartSpan(ctx, "DeletePod")
 	defer span.End()
@@ -370,7 +479,7 @@ func (p *VirtualKubeletProvider) DeletePod(ctx context.Context, pod *v1.Pod) (er
 
 	log.G(ctx).Infof("receive DeletePod %q", pod.Name)
 
-	key, err := BuildKey(pod)
+	key, err := buildKey(pod)
 	if err != nil {
 		return err
 	}
@@ -397,7 +506,6 @@ func (p *VirtualKubeletProvider) DeletePod(ctx context.Context, pod *v1.Pod) (er
 				Message:    "VK provider terminated container upon deletion",
 				FinishedAt: now,
 				Reason:     "VKProviderPodContainerDeleted",
-				// StartedAt:  pod.Status.ContainerStatuses[idx].State.Running.StartedAt,
 			},
 		}
 	}
@@ -408,12 +516,14 @@ func (p *VirtualKubeletProvider) DeletePod(ctx context.Context, pod *v1.Pod) (er
 				Message:    "VK provider terminated container upon deletion",
 				FinishedAt: now,
 				Reason:     "VKProviderPodContainerDeleted",
-				// StartedAt:  pod.Status.InitContainerStatuses[idx].State.Running.StartedAt,
 			},
 		}
 	}
 
-	p.notifier(pod)
+	// tell k8s it's terminated
+	p.UpdatePod(ctx, pod)
+
+	// delete from p.pods
 	delete(p.pods, key)
 
 	return nil
@@ -421,6 +531,7 @@ func (p *VirtualKubeletProvider) DeletePod(ctx context.Context, pod *v1.Pod) (er
 
 // GetPod returns a pod by name that is stored in memory.
 func (p *VirtualKubeletProvider) GetPod(ctx context.Context, namespace, name string) (pod *v1.Pod, err error) {
+
 	ctx, span := trace.StartSpan(ctx, "GetPod")
 	defer func() {
 		span.SetStatus(err)
@@ -432,7 +543,7 @@ func (p *VirtualKubeletProvider) GetPod(ctx context.Context, namespace, name str
 
 	log.G(ctx).Infof("receive GetPod %q", name)
 
-	key, err := BuildKeyFromNames(namespace, name)
+	key, err := buildKeyFromNames(namespace, name)
 	if err != nil {
 		return nil, err
 	}
@@ -469,7 +580,7 @@ func (p *VirtualKubeletProvider) GetPods(ctx context.Context) ([]*v1.Pod, error)
 
 	log.G(ctx).Info("receive GetPods")
 
-	p.InitClientSet(ctx)
+	p.initClientSet(ctx)
 	p.RetrievePodsFromInterlink(ctx)
 
 	var pods []*v1.Pod
@@ -483,8 +594,8 @@ func (p *VirtualKubeletProvider) GetPods(ctx context.Context) ([]*v1.Pod, error)
 
 // NodeConditions returns a list of conditions (Ready, OutOfDisk, etc), for updates to the node status
 // within Kubernetes.
+// TODO: use as var not function
 func nodeConditions() []v1.NodeCondition {
-	// TODO: Make this configurable
 	return []v1.NodeCondition{
 		{
 			Type:               "Ready",
@@ -530,20 +641,18 @@ func nodeConditions() []v1.NodeCondition {
 
 }
 
-// NotifyPods is called to set a pod notifier callback function. This should be called before any operations are done
-// within the provider.
+// NotifyPods is called to set a pod notifier callback function. Also starts the go routine to monitor all vk pods
 func (p *VirtualKubeletProvider) NotifyPods(ctx context.Context, f func(*v1.Pod)) {
 	p.notifier = f
 	go p.statusLoop(ctx)
 }
 
+// statusLoop preiodically monitoring the status of all the pods in p.pods
 func (p *VirtualKubeletProvider) statusLoop(ctx context.Context) {
 	t := time.NewTimer(5 * time.Second)
 	if !t.Stop() {
 		<-t.C
 	}
-
-	log.G(ctx).Info("statusLoop")
 
 	_, err := os.ReadFile(p.config.VKTokenFile) // just pass the file name
 	if err != nil {
@@ -551,6 +660,7 @@ func (p *VirtualKubeletProvider) statusLoop(ctx context.Context) {
 	}
 
 	for {
+		log.G(ctx).Info("statusLoop")
 		t.Reset(5 * time.Second)
 		select {
 		case <-ctx.Done():
@@ -567,6 +677,10 @@ func (p *VirtualKubeletProvider) statusLoop(ctx context.Context) {
 		for _, pod := range p.pods {
 			if pod.Status.Phase != "Initializing" {
 				podsList = append(podsList, pod)
+				err = p.UpdatePod(ctx, pod)
+				if err != nil {
+					log.G(ctx).Error(err)
+				}
 			}
 		}
 
@@ -574,6 +688,13 @@ func (p *VirtualKubeletProvider) statusLoop(ctx context.Context) {
 			_, err = checkPodsStatus(ctx, p, podsList, string(b), p.config)
 			if err != nil {
 				log.G(ctx).Error(err)
+			}
+			for _, pod := range p.pods {
+				key, err := buildKey(pod)
+				if err != nil {
+					log.G(ctx).Error(err)
+				}
+				p.pods[key] = pod
 			}
 		}
 
@@ -595,6 +716,7 @@ func addAttributes(ctx context.Context, span trace.Span, attrs ...string) contex
 	return ctx
 }
 
+// GetLogs implements the logic for interLink pod logs retrieval.
 func (p *VirtualKubeletProvider) GetLogs(ctx context.Context, namespace, podName, containerName string, opts api.ContainerLogOpts) (io.ReadCloser, error) {
 	var span trace.Span
 	ctx, span = trace.StartSpan(ctx, "GetLogs") //nolint: ineffassign,staticcheck
@@ -605,7 +727,7 @@ func (p *VirtualKubeletProvider) GetLogs(ctx context.Context, namespace, podName
 
 	log.G(ctx).Infof("receive GetPodLogs %q", podName)
 
-	key, err := BuildKeyFromNames(namespace, podName)
+	key, err := buildKeyFromNames(namespace, podName)
 	if err != nil {
 		log.G(ctx).Error(err)
 	}
@@ -699,7 +821,8 @@ func (p *VirtualKubeletProvider) GetStatsSummary(ctx context.Context) (*stats.Su
 	return res, nil
 }
 
-// GetPods returns a list of all pods known to be "running".
+// GetPods returns a list of all pods known to be "running" from the local disk cache info
+// This will run at the initiation time only
 func (p *VirtualKubeletProvider) RetrievePodsFromInterlink(ctx context.Context) error {
 	ctx, span := trace.StartSpan(ctx, "RetrievePodsFromInterlink")
 	defer span.End()
@@ -718,19 +841,19 @@ func (p *VirtualKubeletProvider) RetrievePodsFromInterlink(ctx context.Context) 
 		if err != nil {
 			log.G(ctx).Warning("Unable to retrieve pod " + retrievedPod.Name + " from the cluster")
 		} else {
-			key, err := BuildKey(retrievedPod)
+			key, err := buildKey(retrievedPod)
 			if err != nil {
 				log.G(ctx).Error(err)
 			}
 			p.pods[key] = retrievedPod
-			p.notifier(retrievedPod)
+			p.UpdatePod(ctx, retrievedPod)
 		}
 	}
 
 	return err
 }
 
-func (p *VirtualKubeletProvider) InitClientSet(ctx context.Context) error {
+func (p *VirtualKubeletProvider) initClientSet(ctx context.Context) error {
 	ctx, span := trace.StartSpan(ctx, "InitClientSet")
 	defer span.End()
 

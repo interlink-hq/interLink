@@ -1,0 +1,82 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ .Values.deployment.name}} 
+  namespace: {{ .Release.Namespace}} 
+  labels:
+    nodeName: {{ .Values.nodeName }}
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      nodeName: {{ .Values.nodeName }}
+  template:
+    metadata:
+      labels:
+        nodeName: {{ .Values.nodeName }} 
+    spec:
+      automountServiceAccountToken: true
+      serviceAccountName: {{ .Values.deployment.name }} 
+      containers:
+      - name: inttw-vk
+        image: {{ .Values.deployment.image }} 
+        imagePullPolicy: Always
+        env:
+        - name: NODENAME
+          value: {{ .Values.nodeName }} 
+        - name: KUBELET_PORT
+          value: "10250"
+        - name: POD_IP
+          valueFrom:
+            fieldRef:
+              fieldPath: status.podIP
+        - name: CONFIGPATH
+          value: "/etc/interlink/InterLinkConfig.yaml"
+        - name: VKTOKENFILE
+          value: "/opt/interlink/token"
+        volumeMounts:
+        - name: config
+          mountPath: /etc/interlink/InterLinkConfig.yaml
+          subPath: InterLinkConfig.yaml
+        - name: token
+          mountPath: /opt/interlink
+      - name: jaeger
+        image: jaegertracing/all-in-one:1.51
+      - name: refresh-token
+        image: ghcr.io/intertwin-eu/virtual-kubelet-inttw-refresh:latest
+        imagePullPolicy: Always
+        env:
+        - name: IAM_TOKEN_ENDPOINT 
+          value: {{.Values.OAUTH.TokenURL}} 
+        # TODO load env IAM client from secret
+        - name: IAM_CLIENT_ID
+          value: {{.Values.OAUTH.ClientID}}
+        - name: IAM_CLIENT_SECRET
+          value: {{.Values.OAUTH.ClientSecret}} 
+        - name: IAM_REFRESH_TOKEN
+          value: {{.Values.OAUTH.RefreshToken}}
+        - name: IAM_VK_AUD
+          value: {{.Values.OAUTH.Audience}}
+        - name: TOKEN_PATH
+          value: /opt/interlink/token
+        command: 
+        - python3
+        - /opt/refresh.py
+        resources:
+          limits:
+            cpu: 200m
+            memory: 500Mi
+          requests:
+            cpu: 100m
+            memory: 300Mi
+        volumeMounts:
+        - name: token
+          mountPath: /opt/interlink
+      volumes:
+      - name: config
+        configMap:
+          name: virtual-kubelet-config
+      - name: token
+        hostPath:
+          path: /tmp
+          type: Directory

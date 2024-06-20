@@ -15,23 +15,22 @@ spec:
       labels:
         nodeName: virtual-kubelet 
     spec:
+      automountServiceAccountToken: true
       serviceAccountName: virtual-kubelet 
       containers:
       - name: inttw-vk
-        image: "registry:5432/virtual-kubelet:latest"
+        image: "ghcr.io/intertwin-eu/virtual-kubelet-inttw" 
         imagePullPolicy: Always
         env:
         - name: NODENAME
           value: virtual-kubelet 
-        - name: CONFIGPATH
-          value: /etc/interlink/interlink-cfg.json
         - name: KUBELET_PORT
           value: "10250"
         - name: POD_IP
           valueFrom:
             fieldRef:
               fieldPath: status.podIP
-        - name: INTERLINKCONFIGPATH
+        - name: CONFIGPATH
           value: "/etc/interlink/InterLinkConfig.yaml"
         volumeMounts:
         - name: config

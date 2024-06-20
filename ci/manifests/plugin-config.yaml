@@ -1,0 +1,25 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: "plugin-config"
+  namespace: interlink 
+data:
+  InterLinkConfig.yaml: |
+    InterlinkURL: "http://localhost"
+    InterlinkPort: "3000"
+    SidecarURL: "http://0.0.0.0"
+    SidecarPort: "4000"
+    VerboseLogging: true
+    ErrorsOnlyLogging: false
+    ExportPodData: true
+    DataRootFolder: "~/.interlink"
+    SbatchPath: "/usr/bin/sbatch"
+    ScancelPath: "/usr/bin/scancel"
+    SqueuePath: "/usr/bin/squeue"
+    CommandPrefix: ""
+    SingularityPrefix: ""
+    Namespace: "vk"
+    Tsocks: false
+    TsocksPath: "$WORK/tsocks-1.8beta5+ds1/libtsocks.so"
+    TsocksLoginNode: "login01"
+    BashPath: /bin/bash

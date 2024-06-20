@@ -49,7 +49,7 @@ func (h *InterLinkHandler) StatusHandler(w http.ResponseWriter, r *http.Request)
 		}
 
 		reader := bytes.NewReader(bodyBytes)
-		req, err := http.NewRequest(http.MethodGet, h.Config.Sidecarurl+":"+h.Config.Sidecarport+"/status", reader)
+		req, err := http.NewRequest(http.MethodGet, h.SidecarEndpoint+"/status", reader)
 		if err != nil {
 			log.G(h.Ctx).Fatal(err)
 		}
