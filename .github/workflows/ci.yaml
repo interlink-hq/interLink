@@ -37,6 +37,6 @@ jobs:
         with:
           workdir: ci
           verb: call
-          args: -s build-images --source-folder ../ --virtual-kubelet-ref ghcr.io/intertwin-eu/virtual-kubelet-inttw:$GITHUB_ENV --interlink-ref ghcr.io/intertwin-eu/interlink:$GITHUB_ENV --manifests $PWD/manifests load-plugin test stdout
+          args: -s build-images --source-folder ../ --virtual-kubelet-ref ghcr.io/intertwin-eu/virtual-kubelet-inttw:$GITHUB_ENV --interlink-ref ghcr.io/intertwin-eu/interlink:$GITHUB_ENV new-interlink --manifests $PWD/manifests load-plugin test stdout
           cloud-token: ${{ secrets.DAGGER_CLOUD_TOKEN }}
           #dagger-flags: -d
