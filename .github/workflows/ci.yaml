@@ -22,7 +22,8 @@ jobs:
         with:
           registry: ghcr.io
           username: ${{ github.repository_owner }}
-          password: ${{ secrets.GITHUB_TOKEN }}
+          #password: ${{ secrets.GITHUB_TOKEN }}
+          password: ${{ secrets.GH_CR_TOKEN }}
       - name: Integration Test
         uses: dagger/dagger-for-github@v5
         with:
