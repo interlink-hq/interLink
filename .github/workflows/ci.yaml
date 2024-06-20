@@ -2,7 +2,7 @@ name: integration-tests
 
 on:
   push:
-    branches: [main,next,next2next]
+    #branches: [main,next,next2next]
   pull_request:
 
 jobs:
@@ -19,11 +19,14 @@ jobs:
           username: ${{ github.repository_owner }}
           #password: ${{ secrets.GITHUB_TOKEN }}
           password: ${{ secrets.GH_CR_TOKEN }}
+      - name: Get Repo Owner
+        id: get_repo_owner
+        run: echo ::set-output name=repo_owner::$(echo ${{ github.repository_owner }} | tr '[:upper:]' '[:lower:]')
       - name: Integration Test
         uses: dagger/dagger-for-github@v5
         with:
           workdir: ci
           verb: call
-          args: -s build-images --source-folder ../ --virtual-kubelet-ref ghcr.io/intertwin-eu/virtual-kubelet-inttw:$GITHUB_SHA --interlink-ref ghcr.io/intertwin-eu/interlink:$GITHUB_SHA new-interlink --manifests $PWD/manifests load-plugin test stdout
+          args: -s build-images --source-folder ../ --virtual-kubelet-ref ghcr.io/${{ steps.get_repo_owner.outputs.repo_owner }}/interlink/virtual-kubelet-inttw:$GITHUB_SHA --interlink-ref ghcr.io/${{ steps.get_repo_owner.outputs.repo_owner }}/interlink/interlink:$GITHUB_SHA new-interlink --manifests $PWD/manifests load-plugin test stdout
           cloud-token: ${{ secrets.DAGGER_CLOUD_TOKEN }}
           #dagger-flags: -d
