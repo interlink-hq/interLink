@@ -20,7 +20,7 @@ spec:
       - name: jaeger
         image: jaegertracing/all-in-one:1.51
       - name: inttw-vk
-        image: ghcr.io/intertwin-eu/virtual-kubelet-inttw:latest
+        image: ghcr.io/intertwin-eu/interlink/virtual-kubelet-inttw:latest
         imagePullPolicy: Always
         env:
         - name: NODENAME

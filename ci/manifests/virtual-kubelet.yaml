@@ -19,7 +19,7 @@ spec:
       serviceAccountName: virtual-kubelet 
       containers:
       - name: inttw-vk
-        image: "ghcr.io/intertwin-eu/virtual-kubelet-inttw" 
+        image: "ghcr.io/intertwin-eu/interlink/virtual-kubelet-inttw" 
         imagePullPolicy: Always
         env:
         - name: NODENAME

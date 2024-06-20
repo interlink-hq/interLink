@@ -14,7 +14,7 @@ spec:
 apiVersion: apps/v1
 kind: Deployment
 metadata:
-  name: interlink 
+  name: interlink
   namespace: interlink
   labels:
     app: interlink
@@ -22,25 +22,25 @@ spec:
   replicas: 1
   selector:
     matchLabels:
-      app: interlink 
+      app: interlink
   template:
     metadata:
       labels:
         app: interlink
     spec:
       containers:
-      - name: interlink
-        image: "ghcr.io/intertwin-eu/interlink" 
-        imagePullPolicy: Always
-        env:
-        - name: CONFIGPATH
-          value: "/etc/interlink/InterLinkConfig.yaml"
-        volumeMounts:
-        - name: config
-          mountPath: /etc/interlink/InterLinkConfig.yaml
-          subPath: InterLinkConfig.yaml
+        - name: interlink
+          image: "ghcr.io/intertwin-eu/interlink/interlink"
+          imagePullPolicy: Always
+          env:
+            - name: CONFIGPATH
+              value: "/etc/interlink/InterLinkConfig.yaml"
+          volumeMounts:
+            - name: config
+              mountPath: /etc/interlink/InterLinkConfig.yaml
+              subPath: InterLinkConfig.yaml
       volumes:
-      - name: config
-        configMap:
-          # Provide the name of the ConfigMap you want to mount.
-          name: interlink-config
+        - name: config
+          configMap:
+            # Provide the name of the ConfigMap you want to mount.
+            name: interlink-config

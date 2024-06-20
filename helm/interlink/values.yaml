@@ -5,7 +5,7 @@
 nodeName: default-vk
 
 deployment:
-  image: ghcr.io/intertwin-eu/virtual-kubelet-inttw:latest 
+  image: ghcr.io/intertwin-eu/interlink/virtual-kubelet-inttw:latest 
   name: default-vk
 
 interlink:
