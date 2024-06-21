@@ -5,6 +5,7 @@ import (
 	"context"
 	"fmt"
 	"html/template"
+	"strings"
 
 	"dagger/interlink/internal/dagger"
 )
@@ -78,9 +79,23 @@ func (i *Interlink) BuildImages(
 		WithWorkdir("/src").
 		Directory("/src")
 
+	vkVersionSplits := strings.Split(virtualKubeletRef, ":")
+
+	vkVersion := vkVersionSplits[len(vkVersionSplits)-1]
+	if vkVersion == "" {
+		return nil, fmt.Errorf("no tag specified on the image for VK")
+	}
+
+	modulesCache := dag.CacheVolume("go-mod-122")
+
 	_, err := dag.Container().
+		WithMountedCache("/go/pkg/mod", modulesCache).
+		WithMountedCache("/go/build-cache", dag.CacheVolume("go-build-122")).
 		Build(workspace, dagger.ContainerBuildOpts{
 			Dockerfile: "docker/Dockerfile.vk",
+			BuildArgs: []dagger.BuildArg{
+				{"VERSION", vkVersion},
+			},
 		}).
 		Publish(ctx, virtualKubeletRef)
 	if err != nil {
@@ -88,6 +103,8 @@ func (i *Interlink) BuildImages(
 	}
 
 	_, err = dag.Container().
+		WithMountedCache("/go/pkg/mod", modulesCache).
+		WithMountedCache("/go/build-cache", dag.CacheVolume("go-build-122")).
 		Build(workspace, dagger.ContainerBuildOpts{
 			Dockerfile: "docker/Dockerfile.interlink",
 		}).

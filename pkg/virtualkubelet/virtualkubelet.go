@@ -72,6 +72,7 @@ type VirtualKubeletProvider struct {
 func NewProviderConfig(
 	config VirtualKubeletConfig,
 	nodeName string,
+	nodeVersion string,
 	operatingSystem string,
 	internalIP string,
 	daemonEndpointPort int32,
@@ -114,13 +115,11 @@ func NewProviderConfig(
 			}},
 		},
 		Status: v1.NodeStatus{
-			// TODO: set kubelet version!
-
-			// NodeInfo: v1.NodeSystemInfo{
-			// 	KubeletVersion:  Version,
-			// 	Architecture:    architecture,
-			// 	OperatingSystem: linuxos,
-			// },
+			NodeInfo: v1.NodeSystemInfo{
+				KubeletVersion:  nodeVersion,
+				Architecture:    "virtual-kubelet",
+				OperatingSystem: "linux",
+			},
 			Addresses:       []v1.NodeAddress{{Type: v1.NodeInternalIP, Address: internalIP}},
 			DaemonEndpoints: v1.NodeDaemonEndpoints{KubeletEndpoint: v1.DaemonEndpoint{Port: int32(daemonEndpointPort)}},
 			Capacity: v1.ResourceList{
@@ -154,12 +153,12 @@ func NewProviderConfig(
 }
 
 // NewProvider creates a new Provider, which implements the PodNotifier and other virtual-kubelet interfaces
-func NewProvider(providerConfig, nodeName, operatingSystem string, internalIP string, daemonEndpointPort int32, ctx context.Context) (*VirtualKubeletProvider, error) {
+func NewProvider(providerConfig, nodeName, nodeVersion, operatingSystem string, internalIP string, daemonEndpointPort int32, ctx context.Context) (*VirtualKubeletProvider, error) {
 	config, err := LoadConfig(providerConfig, nodeName, ctx)
 	if err != nil {
 		return nil, err
 	}
-	return NewProviderConfig(config, nodeName, operatingSystem, internalIP, daemonEndpointPort)
+	return NewProviderConfig(config, nodeName, nodeVersion, operatingSystem, internalIP, daemonEndpointPort)
 }
 
 // LoadConfig loads the given json configuration files and return a VirtualKubeletConfig struct

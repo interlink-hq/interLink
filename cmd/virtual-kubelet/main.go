@@ -75,6 +75,7 @@ func PodInformerFilter(node string) informers.SharedInformerOption {
 type Config struct {
 	ConfigPath        string
 	NodeName          string
+	NodeVersion       string
 	OperatingSystem   string
 	InternalIP        string
 	DaemonPort        int32
@@ -191,20 +192,22 @@ func main() {
 	}
 	log.L = logruslogger.FromLogrus(logrus.NewEntry(logger))
 
-	shutdown, err := initProvider()
-	if err != nil {
-		log.G(ctx).Fatal(err)
-	}
-	defer func() {
-		if err = shutdown(ctx); err != nil {
-			log.G(ctx).Fatal("failed to shutdown TracerProvider: %w", err)
+	if os.Getenv("ENABLE_TRACING") == "1" {
+		shutdown, err := initProvider()
+		if err != nil {
+			log.G(ctx).Fatal(err)
 		}
-	}()
+		defer func() {
+			if err = shutdown(ctx); err != nil {
+				log.G(ctx).Fatal("failed to shutdown TracerProvider: %w", err)
+			}
+		}()
 
-	log.G(ctx).Info("Tracer setup succeeded")
+		log.G(ctx).Info("Tracer setup succeeded")
 
-	// TODO: disable this through options
-	trace.T = opentelemetry.Adapter{}
+		// TODO: disable this through options
+		trace.T = opentelemetry.Adapter{}
+	}
 
 	// TODO: if token specified http.DefaultClient = ...
 	// and remove reading from file
@@ -219,6 +222,7 @@ func main() {
 	cfg := Config{
 		ConfigPath:      configpath,
 		NodeName:        nodename,
+		NodeVersion:     commonIL.KubeletVersion,
 		OperatingSystem: "Linux",
 		// https://github.com/liqotech/liqo/blob/d8798732002abb7452c2ff1c99b3e5098f848c93/deployments/liqo/templates/liqo-gateway-deployment.yaml#L69
 		InternalIP: os.Getenv("POD_IP"),
@@ -251,7 +255,14 @@ func main() {
 
 	localClient := kubernetes.NewForConfigOrDie(kubecfg)
 
-	nodeProvider, err := commonIL.NewProvider(cfg.ConfigPath, cfg.NodeName, cfg.OperatingSystem, cfg.InternalIP, cfg.DaemonPort, ctx)
+	nodeProvider, err := commonIL.NewProvider(
+		cfg.ConfigPath,
+		cfg.NodeName,
+		cfg.NodeVersion,
+		cfg.OperatingSystem,
+		cfg.InternalIP,
+		cfg.DaemonPort,
+		ctx)
 
 	if err != nil {
 		log.G(ctx).Fatal(err)

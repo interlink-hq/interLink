@@ -4,6 +4,14 @@ WORKDIR /app
 
 COPY .. .
 
+ENV GOMODCACHE="/go/pkg/mod"
+
+ENV GOCACHE="/go/build-cache"
+
+RUN mkdir -p $GOMODCACHE && mkdir -p $GOCACHE
+
+
+RUN go mod tidy
 RUN CGO_ENABLED=0 GOOS=linux go build -o bin/interlink
 
 # Deploy the application binary into a lean image
