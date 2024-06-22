@@ -5,12 +5,14 @@ metadata:
   namespace: interlink 
 data:
   InterLinkConfig.yaml: |
-    InterlinkURL: http://interlink.interlink.svc.cluster
+    InterlinkURL: http://interlink.interlink.svc.cluster.local
     InterlinkPort: 3000 
     ExportPodData: true
+    VerboseLogging: true
+    ErrorsOnlyLogging: false
     ServiceAccount: "virtual-kubelet"
     Namespace: interlink 
     VKTokenFile: /dev/null 
     CPU: "100"
-    Memory: "128GiB",
+    Memory: "128GiB"
     Pods: "100"

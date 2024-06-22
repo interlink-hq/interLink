@@ -1,30 +1,29 @@
 apiVersion: apps/v1
 kind: Deployment
 metadata:
-  name: {{.VKName}} 
-  namespace: {{.Namespace}}
+  name: {{ .Values.deployment.name}} 
+  namespace: {{ .Release.Namespace}} 
   labels:
-    nodeName: {{.VKName}}
+    nodeName: {{ .Values.nodeName }}
 spec:
   replicas: 1
   selector:
     matchLabels:
-      nodeName: {{.VKName}}
+      nodeName: {{ .Values.nodeName }}
   template:
     metadata:
       labels:
-        nodeName: {{.VKName}}
+        nodeName: {{ .Values.nodeName }} 
     spec:
-      #hostNetwork: true
+      automountServiceAccountToken: true
+      serviceAccountName: {{ .Values.deployment.name }} 
       containers:
-      - name: jaeger
-        image: jaegertracing/all-in-one:1.51
       - name: inttw-vk
-        image: ghcr.io/intertwin-eu/interlink/virtual-kubelet-inttw:latest
+        image: {{ .Values.deployment.image }} 
         imagePullPolicy: Always
         env:
         - name: NODENAME
-          value: {{.VKName}} 
+          value: {{ .Values.nodeName }} 
         - name: KUBELET_PORT
           value: "10250"
         - name: POD_IP
@@ -41,28 +40,23 @@ spec:
           subPath: InterLinkConfig.yaml
         - name: token
           mountPath: /opt/interlink
-        resources:
-          limits:
-            cpu: 2000m
-            memory: 2Gi
-          requests:
-            cpu: 100m
-            memory: 200Mi
+      - name: jaeger
+        image: jaegertracing/all-in-one:1.51
       - name: refresh-token
         image: ghcr.io/intertwin-eu/virtual-kubelet-inttw-refresh:latest
         imagePullPolicy: Always
         env:
         - name: IAM_TOKEN_ENDPOINT 
-          value: {{.OAUTH.TokenURL}} 
+          value: {{.Values.OAUTH.TokenURL}} 
         # TODO load env IAM client from secret
         - name: IAM_CLIENT_ID
-          value: {{.OAUTH.ClientID}}
+          value: {{.Values.OAUTH.ClientID}}
         - name: IAM_CLIENT_SECRET
-          value: {{.OAUTH.ClientSecret}} 
+          value: {{.Values.OAUTH.ClientSecret}} 
         - name: IAM_REFRESH_TOKEN
-          value: {{.OAUTH.RefreshToken}}
+          value: {{.Values.OAUTH.RefreshToken}}
         - name: IAM_VK_AUD
-          value: {{.OAUTH.Audience}}
+          value: {{.Values.OAUTH.Audience}}
         - name: TOKEN_PATH
           value: /opt/interlink/token
         command: 
@@ -78,12 +72,10 @@ spec:
         volumeMounts:
         - name: token
           mountPath: /opt/interlink
-      serviceAccountName: {{.VKName}} 
       volumes:
       - name: config
         configMap:
-          # Provide the name of the ConfigMap you want to mount.
-          name: {{.VKName}}-config
+          name: virtual-kubelet-config
       - name: token
         hostPath:
           path: /tmp

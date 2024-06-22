@@ -32,6 +32,7 @@ import (
 	v1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/fields"
 	"k8s.io/client-go/kubernetes/scheme"
+	lease "k8s.io/client-go/kubernetes/typed/coordination/v1"
 	"k8s.io/client-go/tools/cache"
 	"k8s.io/client-go/tools/clientcmd"
 	"k8s.io/client-go/tools/record"
@@ -74,6 +75,7 @@ func PodInformerFilter(node string) informers.SharedInformerOption {
 type Config struct {
 	ConfigPath        string
 	NodeName          string
+	NodeVersion       string
 	OperatingSystem   string
 	InternalIP        string
 	DaemonPort        int32
@@ -145,6 +147,11 @@ func initProvider() (func(context.Context) error, error) {
 	return tracerProvider.Shutdown, nil
 }
 
+func tlsConfig(tls *tls.Config) error {
+	tls.InsecureSkipVerify = true
+	return nil
+}
+
 func main() {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
@@ -185,20 +192,22 @@ func main() {
 	}
 	log.L = logruslogger.FromLogrus(logrus.NewEntry(logger))
 
-	shutdown, err := initProvider()
-	if err != nil {
-		log.G(ctx).Fatal(err)
-	}
-	defer func() {
-		if err = shutdown(ctx); err != nil {
-			log.G(ctx).Fatal("failed to shutdown TracerProvider: %w", err)
+	if os.Getenv("ENABLE_TRACING") == "1" {
+		shutdown, err := initProvider()
+		if err != nil {
+			log.G(ctx).Fatal(err)
 		}
-	}()
+		defer func() {
+			if err = shutdown(ctx); err != nil {
+				log.G(ctx).Fatal("failed to shutdown TracerProvider: %w", err)
+			}
+		}()
 
-	log.G(ctx).Info("Tracer setup succeeded")
+		log.G(ctx).Info("Tracer setup succeeded")
 
-	// TODO: disable this through options
-	trace.T = opentelemetry.Adapter{}
+		// TODO: disable this through options
+		trace.T = opentelemetry.Adapter{}
+	}
 
 	// TODO: if token specified http.DefaultClient = ...
 	// and remove reading from file
@@ -213,6 +222,7 @@ func main() {
 	cfg := Config{
 		ConfigPath:      configpath,
 		NodeName:        nodename,
+		NodeVersion:     commonIL.KubeletVersion,
 		OperatingSystem: "Linux",
 		// https://github.com/liqotech/liqo/blob/d8798732002abb7452c2ff1c99b3e5098f848c93/deployments/liqo/templates/liqo-gateway-deployment.yaml#L69
 		InternalIP: os.Getenv("POD_IP"),
@@ -245,34 +255,14 @@ func main() {
 
 	localClient := kubernetes.NewForConfigOrDie(kubecfg)
 
-	nodeProvider, err := commonIL.NewProvider(cfg.ConfigPath, cfg.NodeName, cfg.OperatingSystem, cfg.InternalIP, cfg.DaemonPort, ctx)
-	go func() {
-
-		ILbind := false
-		retValue := -1
-		counter := 0
-
-		for {
-			ILbind, retValue, err = commonIL.PingInterLink(ctx, interLinkConfig)
-
-			if err != nil {
-				log.G(ctx).Error(err)
-			}
-
-			if !ILbind && retValue == 1 {
-				counter++
-			} else if ILbind && retValue == 0 {
-				counter = 0
-			}
-
-			if counter > 10 {
-				log.G(ctx).Fatal("Unable to communicate with the InterLink API, exiting...")
-			}
-
-			time.Sleep(time.Second * 10)
-
-		}
-	}()
+	nodeProvider, err := commonIL.NewProvider(
+		cfg.ConfigPath,
+		cfg.NodeName,
+		cfg.NodeVersion,
+		cfg.OperatingSystem,
+		cfg.InternalIP,
+		cfg.DaemonPort,
+		ctx)
 
 	if err != nil {
 		log.G(ctx).Fatal(err)
@@ -280,6 +270,10 @@ func main() {
 
 	nc, _ := node.NewNodeController(
 		nodeProvider, nodeProvider.GetNode(), localClient.CoreV1().Nodes(),
+		node.WithNodeEnableLeaseV1(
+			lease.NewForConfigOrDie(kubecfg).Leases(v1.NamespaceNodeLease),
+			300,
+		),
 	)
 
 	go func() error {
@@ -289,8 +283,6 @@ func main() {
 		}
 		return nil
 	}()
-	// <-nc.Ready()
-	// close(nc)
 
 	eb := record.NewBroadcaster()
 

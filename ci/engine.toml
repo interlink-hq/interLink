@@ -1,5 +1,0 @@
-# debug = true
-insecure-entitlements = ["security.insecure"]
-
-[registry."registry:5432"]
-        http = true

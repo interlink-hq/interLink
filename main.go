@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"net/http"
+	"strings"
 
 	"github.com/sirupsen/logrus"
 	"github.com/virtual-kubelet/virtual-kubelet/log"
@@ -22,12 +23,11 @@ func main() {
 	}
 	logger := logrus.StandardLogger()
 
+	logger.SetLevel(logrus.InfoLevel)
 	if interLinkConfig.VerboseLogging {
 		logger.SetLevel(logrus.DebugLevel)
 	} else if interLinkConfig.ErrorsOnlyLogging {
 		logger.SetLevel(logrus.ErrorLevel)
-	} else {
-		logger.SetLevel(logrus.InfoLevel)
 	}
 
 	log.L = logruslogger.FromLogrus(logrus.NewEntry(logger))
@@ -36,9 +36,19 @@ func main() {
 
 	log.G(ctx).Info(interLinkConfig)
 
+	sidecarEndpoint := ""
+	if strings.HasPrefix(interLinkConfig.Sidecarurl, "unix://") {
+		sidecarEndpoint = interLinkConfig.Sidecarurl
+	} else if strings.HasPrefix(interLinkConfig.Sidecarurl, "http://") {
+		sidecarEndpoint = interLinkConfig.Sidecarurl + ":" + interLinkConfig.Sidecarport
+	} else {
+		log.G(ctx).Fatal("Sidecar URL should either start per unix:// or http://")
+	}
+
 	interLinkAPIs := api.InterLinkHandler{
-		Config: interLinkConfig,
-		Ctx:    ctx,
+		Config:          interLinkConfig,
+		Ctx:             ctx,
+		SidecarEndpoint: sidecarEndpoint,
 	}
 
 	mutex := http.NewServeMux()
@@ -48,7 +58,17 @@ func main() {
 	mutex.HandleFunc("/pinglink", interLinkAPIs.Ping)
 	mutex.HandleFunc("/getLogs", interLinkAPIs.GetLogsHandler)
 	mutex.HandleFunc("/updateCache", interLinkAPIs.UpdateCacheHandler)
-	err = http.ListenAndServe(":"+interLinkConfig.Interlinkport, mutex)
+
+	interLinkEndpoint := ""
+	if strings.HasPrefix(interLinkConfig.InterlinkAddress, "unix://") {
+		interLinkEndpoint = interLinkConfig.InterlinkAddress
+	} else if strings.HasPrefix(interLinkConfig.Sidecarurl, "http://") {
+		interLinkEndpoint = interLinkConfig.InterlinkAddress + ":" + interLinkConfig.Interlinkport
+	} else {
+		log.G(ctx).Fatal("Sidecar URL should either start per unix:// or http://")
+	}
+
+	err = http.ListenAndServe(interLinkEndpoint, mutex)
 
 	if err != nil {
 		log.G(ctx).Fatal(err)
