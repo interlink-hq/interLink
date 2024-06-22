@@ -36,8 +36,6 @@ spec:
         - name: config
           mountPath: /etc/interlink/InterLinkConfig.yaml
           subPath: InterLinkConfig.yaml
-      - name: jaeger
-        image: jaegertracing/all-in-one:1.51
       volumes:
       - name: config
         configMap:

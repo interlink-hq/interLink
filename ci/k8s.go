@@ -203,7 +203,7 @@ func (k *K8sInstance) waitForVirtualKubelet(ctx context.Context) (err error) {
 			fmt.Println(fmt.Errorf("could not fetch pod: %v", err))
 			continue
 		}
-		if strings.Contains(kubectlGetPod, "2/2") {
+		if strings.Contains(kubectlGetPod, "1/1") || strings.Contains(kubectlGetPod, "2/2") {
 			return nil
 		}
 		fmt.Println("waiting for k8s to start:", kubectlGetPod)
