@@ -431,9 +431,9 @@ func checkPodsStatus(ctx context.Context, p *VirtualKubeletProvider, podsList []
 									pod.Status.ContainerStatuses[index].State.Terminated.Reason = "Completed"
 									if containerStatus.State.Terminated.ExitCode != 0 {
 										podErrored = true
-										failedReason = "Error: " + string(containerStatus.State.Terminated.ExitCode)
+										failedReason = "Error: " + strconv.Itoa(int(containerStatus.State.Terminated.ExitCode))
 										pod.Status.ContainerStatuses[index].State.Terminated.Reason = failedReason
-										log.G(ctx).Error("Container " + containerStatus.Name + " exited with error: " + string(containerStatus.State.Terminated.ExitCode))
+										log.G(ctx).Error("Container " + containerStatus.Name + " exited with error: " + strconv.Itoa(int(containerStatus.State.Terminated.ExitCode)))
 									}
 								} else if containerStatus.State.Waiting != nil {
 									log.G(ctx).Info("Pod " + podStatus.PodName + ": Service " + containerStatus.Name + " is setting up on Sidecar")
