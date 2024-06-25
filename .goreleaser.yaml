@@ -29,6 +29,7 @@ builds:
       - arm64
       - amd64
       - ppc64le
+    main: ./cmd/interlink
   - id: "interlink-install"
     binary: interlink-install
     env:

@@ -52,6 +52,7 @@ type oauthStruct struct {
 	ClientSecret  string   `yaml:"client_secret"`
 }
 
+// TODO: insert in-cluster and socket option e.g. --> no need OAUTH
 type dataStruct struct {
 	InterLinkIP      string      `yaml:"interlink_ip"`
 	InterLinkPort    int         `yaml:"interlink_port"`

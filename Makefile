@@ -1,7 +1,7 @@
 all: interlink vk installer
 
 interlink:
-	CGO_ENABLED=0 OOS=linux go build -o bin/interlink
+	CGO_ENABLED=0 OOS=linux go build -o bin/interlink cmd/interlink/main.go
 
 vk:
 	CGO_ENABLED=0 OOS=linux go build -o bin/vk cmd/virtual-kubelet/main.go
