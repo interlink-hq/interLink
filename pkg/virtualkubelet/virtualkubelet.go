@@ -580,7 +580,7 @@ func (p *VirtualKubeletProvider) GetPods(ctx context.Context) ([]*v1.Pod, error)
 	log.G(ctx).Info("receive GetPods")
 
 	p.initClientSet(ctx)
-	p.RetrievePodsFromInterlink(ctx)
+	p.RetrievePodsFromCluster(ctx)
 
 	var pods []*v1.Pod
 
@@ -820,36 +820,51 @@ func (p *VirtualKubeletProvider) GetStatsSummary(ctx context.Context) (*stats.Su
 	return res, nil
 }
 
-// GetPods returns a list of all pods known to be "running" from the local disk cache info
+// RetrievePodsFromCluster scans all pods registered to the K8S cluster and re-assigns the ones with a valid JobID to the Virtual Kubelet.
 // This will run at the initiation time only
-func (p *VirtualKubeletProvider) RetrievePodsFromInterlink(ctx context.Context) error {
-	ctx, span := trace.StartSpan(ctx, "RetrievePodsFromInterlink")
+func (p *VirtualKubeletProvider) RetrievePodsFromCluster(ctx context.Context) error {
+	ctx, span := trace.StartSpan(ctx, "RetrievePodsFromCluster")
 	defer span.End()
 
-	log.G(ctx).Info("Retrieving ALL cached InterLink Pods")
+	log.G(ctx).Info("Retrieving ALL Pods registered to the cluster and owned by VK")
 
-	b, err := os.ReadFile(p.config.VKTokenFile) // just pass the file name
+	namespaces, err := p.clientSet.CoreV1().Namespaces().List(ctx, metav1.ListOptions{})
 	if err != nil {
-		log.G(ctx).Error(err)
+		log.G(ctx).Error("Unable to retrieve all namespaces available in the cluster")
+		return err
 	}
 
-	cached_pods, err := checkPodsStatus(ctx, p, nil, string(b), p.config)
-
-	for _, pod := range cached_pods {
-		retrievedPod, err := p.clientSet.CoreV1().Pods(pod.PodNamespace).Get(ctx, pod.PodName, metav1.GetOptions{})
+	for _, ns := range namespaces.Items {
+		podsList, err := p.clientSet.CoreV1().Pods(ns.Name).List(ctx, metav1.ListOptions{})
 		if err != nil {
-			log.G(ctx).Warning("Unable to retrieve pod " + retrievedPod.Name + " from the cluster")
-		} else {
-			key, err := buildKey(retrievedPod)
-			if err != nil {
-				log.G(ctx).Error(err)
-			}
-			p.pods[key] = retrievedPod
-			p.UpdatePod(ctx, retrievedPod)
+			log.G(ctx).Warning("Unable to retrieve pods from the namespace " + ns.Name)
 		}
+		for _, pod := range podsList.Items {
+			if CheckIfAnnotationExists(&pod, "JobID") && p.nodeName == pod.Spec.NodeName {
+				key, err := buildKeyFromNames(pod.Namespace, pod.Name)
+				if err != nil {
+					log.G(ctx).Error(err)
+					return err
+				}
+				p.pods[key] = &pod
+				p.notifier(&pod)
+			}
+		}
+
 	}
 
 	return err
+}
+
+// CheckIfAnnotationExists checks if a specific annotation (key) is available between the annotation of a pod
+func CheckIfAnnotationExists(pod *v1.Pod, key string) bool {
+	_, ok := pod.Annotations[key]
+
+	if ok {
+		return true
+	} else {
+		return false
+	}
 }
 
 func (p *VirtualKubeletProvider) initClientSet(ctx context.Context) error {

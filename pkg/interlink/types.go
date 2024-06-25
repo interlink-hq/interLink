@@ -18,7 +18,14 @@ type PodStatus struct {
 	PodName      string               `json:"name"`
 	PodUID       string               `json:"UID"`
 	PodNamespace string               `json:"namespace"`
+	JobID        string               `json:"JID"`
 	Containers   []v1.ContainerStatus `json:"containers"`
+}
+
+// CreateStruct is the response to be received from interLink whenever asked to create a pod. It will allow for mapping remote ID with the pod UUID
+type CreateStruct struct {
+	PodUID string `json:"PodUID"`
+	PodJID string `json:"PodJID"`
 }
 
 // RetrievedContainer is used in InterLink to rearrange data structure in a suitable way for the sidecar
