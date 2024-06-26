@@ -214,7 +214,7 @@ func statusRequest(ctx context.Context, config VirtualKubeletConfig, podsList []
 		return nil, err
 	}
 
-	//log.L.Println(string(bodyBytes))
+	log.L.Println(string(bodyBytes))
 
 	resp, err := doRequest(req, token)
 	if err != nil {
@@ -505,11 +505,10 @@ func checkPodsStatus(ctx context.Context, p *VirtualKubeletProvider, podsList []
 
 					}
 				}
-
-				log.G(ctx).Info("No errors while getting statuses")
-				log.G(ctx).Debug(ret)
-				return nil, nil
 			}
+			log.G(ctx).Info("No errors while getting statuses")
+			log.G(ctx).Debug(ret)
+			return nil, nil
 		}
 
 	}
