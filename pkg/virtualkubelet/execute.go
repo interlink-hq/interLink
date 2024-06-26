@@ -214,7 +214,7 @@ func statusRequest(ctx context.Context, config VirtualKubeletConfig, podsList []
 		return nil, err
 	}
 
-	log.L.Println(string(bodyBytes))
+	//log.L.Println(string(bodyBytes))
 
 	resp, err := doRequest(req, token)
 	if err != nil {
