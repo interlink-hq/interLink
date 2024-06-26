@@ -34,8 +34,10 @@ func getSidecarEndpoint(ctx context.Context, interLinkURL string, interLinkPort 
 		interLinkEndpoint = interLinkURL
 	} else if strings.HasPrefix(interLinkURL, "http://") {
 		interLinkEndpoint = interLinkURL + ":" + interLinkPort
+	} else if strings.HasPrefix(interLinkURL, "https://") {
+		interLinkEndpoint = interLinkURL + ":" + interLinkPort
 	} else {
-		log.G(ctx).Fatal("Sidecar URL should either start per unix:// or http://")
+		log.G(ctx).Fatal("InterLink URL should either start per unix:// or http(s)://")
 	}
 	return interLinkEndpoint
 }
