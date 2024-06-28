@@ -430,6 +430,29 @@ func (p *VirtualKubeletProvider) CreatePod(ctx context.Context, pod *v1.Pod) err
 				log.G(ctx).Warn(err)
 			} else {
 				log.G(ctx).Error(err)
+				pod.Status = v1.PodStatus{
+					Phase:     v1.PodFailed,
+					HostIP:    p.internalIP,
+					PodIP:     p.internalIP,
+					StartTime: &now,
+					Conditions: []v1.PodCondition{
+						{
+							Type:   v1.PodInitialized,
+							Status: v1.ConditionFalse,
+						},
+						{
+							Type:   v1.PodReady,
+							Status: v1.ConditionFalse,
+						},
+						{
+							Type:   v1.PodScheduled,
+							Status: v1.ConditionFalse,
+						},
+					},
+				}
+
+				p.UpdatePod(ctx, pod)
+
 			}
 			return
 		}
