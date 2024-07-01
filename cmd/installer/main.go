@@ -219,6 +219,9 @@ func root(cmd *cobra.Command, args []string) error {
 		//fmt.Println(token.Expiry)
 		//fmt.Println(token.TokenType)
 
+	} else {
+
+		panic(fmt.Errorf("wrong grant type specified in the configuration. Only client_credentials and authorization_code are supported"))
 	}
 	configCLI.OAUTH.RefreshToken = token.RefreshToken
 
