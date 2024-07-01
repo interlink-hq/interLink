@@ -11,7 +11,7 @@ class Provider(FastAPI):
         self.DOCKER = docker_client
         self.CONTAINER_POD_MAP = {}
 
-    def Create(self, pod: Pod) -> None:
+    def Create(self, pod: Pod) -> CreateStruct:
         raise HTTPException(status_code=500, detail="NOT IMPLEMENTED YET")
 
     def Delete(self, pod: PodRequest) -> None:
@@ -23,9 +23,7 @@ class Provider(FastAPI):
     def Logs(self, req: LogRequest) -> bytes:  
         raise HTTPException(status_code=500, detail="NOT IMPLEMENTED YET")
 
-    def create_pod(self, pods: List[Pod]) -> str:
-        pod = pods[0]
-
+    def create_pod(self, pod: Pod) -> CreateStruct:
         try:
             self.Create(pod)
         except Exception as ex:

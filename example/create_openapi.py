@@ -12,7 +12,7 @@ app = FastAPI()
 
 
 @app.post("/create")
-async def create_pod(pods: List[interlink.Pod]) -> str:
+async def create_pod(pod: interlink.Pod) -> interlink.CreateStruct:
     raise NotImplementedError
 
 
