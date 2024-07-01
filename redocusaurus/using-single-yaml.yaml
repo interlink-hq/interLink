@@ -12,10 +12,7 @@ paths:
         content:
           application/json:
             schema:
-              items:
-                $ref: '#/components/schemas/Pod'
-              type: array
-              title: Pods
+              $ref: '#/components/schemas/Pod'
         required: true
       responses:
         '200':
@@ -23,8 +20,7 @@ paths:
           content:
             application/json:
               schema:
-                type: string
-                title: Response Create Pod Create Post
+                $ref: '#/components/schemas/CreateStruct'
         '422':
           description: Validation Error
           content:
@@ -268,6 +264,19 @@ components:
         - name
         - state
       title: ContainerStatus
+    CreateStruct:
+      properties:
+        PodUID:
+          type: string
+          title: Poduid
+        PodJID:
+          type: string
+          title: Podjid
+      type: object
+      required:
+        - PodUID
+        - PodJID
+      title: CreateStruct
     EnvVar:
       properties:
         name:
