@@ -12,6 +12,7 @@ import (
 
 	"github.com/spf13/cobra"
 	"golang.org/x/oauth2"
+	"golang.org/x/oauth2/clientcredentials"
 	"gopkg.in/yaml.v3"
 )
 
@@ -39,6 +40,7 @@ type Resources struct {
 
 type oauthStruct struct {
 	Provider      string   `yaml:"provider"`
+	GrantType     string   `default:"authorization_code" yaml:"grant_type"`
 	Issuer        string   `yaml:"issuer,omitempty"`
 	RefreshToken  string   `yaml:"refresh_token,omitempty"`
 	Audience      string   `yaml:"audience,omitempty"`
@@ -171,33 +173,53 @@ func root(cmd *cobra.Command, args []string) error {
 		return err
 	}
 
+	var token *oauth2.Token
+
 	ctx := context.Background()
-	cfg := oauth2.Config{
-		ClientID:     configCLI.OAUTH.ClientID,
-		ClientSecret: configCLI.OAUTH.ClientSecret,
-		Endpoint: oauth2.Endpoint{
-			TokenURL:      configCLI.OAUTH.TokenURL,
-			DeviceAuthURL: configCLI.OAUTH.DeviceCodeURL,
-		},
-		RedirectURL: "http://localhost:8080",
-		Scopes:      configCLI.OAUTH.Scopes,
-	}
+	if configCLI.OAUTH.GrantType == "authorization_code" {
+		cfg := oauth2.Config{
+			ClientID:     configCLI.OAUTH.ClientID,
+			ClientSecret: configCLI.OAUTH.ClientSecret,
+			Endpoint: oauth2.Endpoint{
+				TokenURL:      configCLI.OAUTH.TokenURL,
+				DeviceAuthURL: configCLI.OAUTH.DeviceCodeURL,
+			},
+			RedirectURL: "http://localhost:8080",
+			Scopes:      configCLI.OAUTH.Scopes,
+		}
 
-	response, err := cfg.DeviceAuth(ctx, oauth2.AccessTypeOffline)
-	if err != nil {
-		panic(err)
-	}
+		response, err := cfg.DeviceAuth(ctx, oauth2.AccessTypeOffline)
+		if err != nil {
+			panic(err)
+		}
 
-	fmt.Printf("please enter code %s at %s\n", response.UserCode, response.VerificationURI)
-	token, err := cfg.DeviceAccessToken(ctx, response, oauth2.AccessTypeOffline)
-	if err != nil {
-		panic(err)
-	}
-	//fmt.Println(token.AccessToken)
-	//fmt.Println(token.RefreshToken)
-	//fmt.Println(token.Expiry)
-	//fmt.Println(token.TokenType)
+		fmt.Printf("please enter code %s at %s\n", response.UserCode, response.VerificationURI)
+		token, err = cfg.DeviceAccessToken(ctx, response, oauth2.AccessTypeOffline)
+		if err != nil {
+			panic(err)
+		}
+		//fmt.Println(token.AccessToken)
+		//fmt.Println(token.RefreshToken)
+		//fmt.Println(token.Expiry)
+		//fmt.Println(token.TokenType)
+	} else if configCLI.OAUTH.GrantType == "client_credentials" {
+		cfg := clientcredentials.Config{
+			ClientID:     configCLI.OAUTH.ClientID,
+			ClientSecret: configCLI.OAUTH.ClientSecret,
+			TokenURL:     configCLI.OAUTH.TokenURL,
+			Scopes:       configCLI.OAUTH.Scopes,
+		}
 
+		token, err = cfg.Token(ctx)
+		if err != nil {
+			panic(err)
+		}
+		//fmt.Println(token.AccessToken)
+		//fmt.Println(token.RefreshToken)
+		//fmt.Println(token.Expiry)
+		//fmt.Println(token.TokenType)
+
+	}
 	configCLI.OAUTH.RefreshToken = token.RefreshToken
 
 	namespaceYAML, err := evalManifest("templates/namespace.yaml", configCLI)
