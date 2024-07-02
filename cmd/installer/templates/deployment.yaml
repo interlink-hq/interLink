@@ -49,7 +49,8 @@ spec:
             cpu: 100m
             memory: 200Mi
       - name: refresh-token
-        image: ghcr.io/intertwin-eu/virtual-kubelet-inttw-refresh:latest
+        #image: ghcr.io/intertwin-eu/virtual-kubelet-inttw-refresh:latest
+        image: dciangot/refresh:test_dciangot2 
         imagePullPolicy: Always
         env:
         - name: IAM_TOKEN_ENDPOINT 
@@ -58,7 +59,9 @@ spec:
         - name: IAM_CLIENT_ID
           value: {{.OAUTH.ClientID}}
         - name: IAM_CLIENT_SECRET
-          value: {{.OAUTH.ClientSecret}} 
+          value: "{{.OAUTH.ClientSecret}}"
+        - name: IAM_GRANT_TYPE
+          value: {{.OAUTH.GrantType}}
         - name: IAM_REFRESH_TOKEN
           value: {{.OAUTH.RefreshToken}}
         - name: IAM_VK_AUD

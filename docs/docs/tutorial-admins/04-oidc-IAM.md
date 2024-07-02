@@ -23,6 +23,7 @@ oauth:
     - "offline_access"
     - "profile"
   audience: interlink
+  grant_type: authorization_code
   group_claim: email
   group: "YOUR EMAIL HERE"
   token_url: "https://aai.egi.eu/auth/realms/egi/protocol/openid-connect/token"
@@ -72,6 +73,7 @@ oauth:
       - "offline_access"
       - "profile"
     audience: users
+    grant_type: authorization_code
     group_claim: email
     group: "YOUR EMAIL HERE"
     token_url: "https://iam.cloud.infn.it/token"

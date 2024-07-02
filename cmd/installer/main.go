@@ -12,7 +12,6 @@ import (
 
 	"github.com/spf13/cobra"
 	"golang.org/x/oauth2"
-	"golang.org/x/oauth2/clientcredentials"
 	"gopkg.in/yaml.v3"
 )
 
@@ -45,7 +44,7 @@ type oauthStruct struct {
 	RefreshToken  string   `yaml:"refresh_token,omitempty"`
 	Audience      string   `yaml:"audience,omitempty"`
 	Group         string   `yaml:"group,omitempty"`
-	GroupClaim    string   `yaml:"groupClaim,omitempty"`
+	GroupClaim    string   `default:"groups" yaml:"group_claim"`
 	Scopes        []string `yaml:"scopes"`
 	GitHUBUser    string   `yaml:"github_user"`
 	TokenURL      string   `yaml:"token_url"`
@@ -202,28 +201,15 @@ func root(cmd *cobra.Command, args []string) error {
 		//fmt.Println(token.RefreshToken)
 		//fmt.Println(token.Expiry)
 		//fmt.Println(token.TokenType)
+		configCLI.OAUTH.RefreshToken = token.RefreshToken
 	} else if configCLI.OAUTH.GrantType == "client_credentials" {
-		cfg := clientcredentials.Config{
-			ClientID:     configCLI.OAUTH.ClientID,
-			ClientSecret: configCLI.OAUTH.ClientSecret,
-			TokenURL:     configCLI.OAUTH.TokenURL,
-			Scopes:       configCLI.OAUTH.Scopes,
-		}
 
-		token, err = cfg.Token(ctx)
-		if err != nil {
-			panic(err)
-		}
-		//fmt.Println(token.AccessToken)
-		//fmt.Println(token.RefreshToken)
-		//fmt.Println(token.Expiry)
-		//fmt.Println(token.TokenType)
+		fmt.Println("Client_credentials set, I won't try to get any refresh token.")
 
 	} else {
 
 		panic(fmt.Errorf("wrong grant type specified in the configuration. Only client_credentials and authorization_code are supported"))
 	}
-	configCLI.OAUTH.RefreshToken = token.RefreshToken
 
 	namespaceYAML, err := evalManifest("templates/namespace.yaml", configCLI)
 	if err != nil {
