@@ -2,7 +2,7 @@
 
 if [ -n ${KUBELET_VERSION} ]; then
 cat << EOF > pkg/virtualkubelet/version.go
-package main
+package virtualkubelet
 
 var (
 	kubeletVersion = "$KUBELET_VERSION"
