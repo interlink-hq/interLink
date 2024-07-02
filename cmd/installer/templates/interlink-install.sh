@@ -87,10 +87,10 @@ start() {
   case "{{.OAUTH.Provider}}" in 
     oidc)
       $HOME/.interlink/bin/oauth2-proxy \
-          --client-id DUMMY \
-          --client-secret DUMMY \
+          --client-id "{{.OAUTH.ClientID}}" \
+          --client-secret "\"{{.OAUTH.ClientSecret}}\"" \
           --http-address 0.0.0.0:{{.InterLinkPort}} \
-          --oidc-issuer-url {{.OAUTH.Issuer}} \
+          --oidc-issuer-url "{{.OAUTH.Issuer}}" \
           --pass-authorization-header true \
           --provider oidc \
           --redirect-url http://localhost:8081 \
