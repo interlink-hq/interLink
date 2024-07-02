@@ -20,7 +20,7 @@ spec:
       - name: jaeger
         image: jaegertracing/all-in-one:1.51
       - name: inttw-vk
-        image: ghcr.io/intertwin-eu/interlink/virtual-kubelet-inttw:latest
+        image: ghcr.io/intertwin-eu/interlink/virtual-kubelet-inttw:{{.InterLinkVersion}}
         imagePullPolicy: Always
         env:
         - name: NODENAME
@@ -49,8 +49,7 @@ spec:
             cpu: 100m
             memory: 200Mi
       - name: refresh-token
-        #image: ghcr.io/intertwin-eu/virtual-kubelet-inttw-refresh:latest
-        image: dciangot/refresh:test_dciangot2 
+        image: ghcr.io/intertwin-eu/virtual-kubelet-inttw-refresh:{{.InterLinkVersion}}
         imagePullPolicy: Always
         env:
         - name: IAM_TOKEN_ENDPOINT 
