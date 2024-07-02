@@ -224,7 +224,7 @@ Note that the SLURM plugin repository is: [github.com/interTwin-eu/interlink-slu
 
 #### Configuration
 
-Create a config file `.interlink/config/slurm.yaml`:
+Create a config file `$HOME/.interlink/config/slurm.yaml`:
 
 ```yaml
 # Plugin local endpoint
@@ -264,7 +264,7 @@ To get the latest version of the plugin, please visit the [release](https://gith
 Download the latest release with:
 
 ```bash
-VERSION=0.2.2
+VERSION=0.3.1
 wget -O $HOME/.interlink/bin/slurm-plugin https://github.com/interTwin-eu/interlink-slurm-plugin/releases/download/$VERSION/interlink-sidecar-slurm_Linux_x86_64
 chmod +x $HOME/.interlink/bin/slurm-plugin
 ```
@@ -282,7 +282,7 @@ After=network.target
 [Service]
 Type=simple
 ExecStart=$HOME/.interlink/bin/slurm-plugin
-Environment="INTERLINKCONFIGPATH=$HOME/.interlink/config/InterLinkConfig.yaml"
+Environment="SLURMCONFIGPATH=$HOME/.interlink/config/slurm.yaml"
 Environment="SHARED_FS=true"
 StandardOutput=file:$HOME/.interlink/logs/plugin.log
 StandardError=file:$HOME/.interlink/logs/plugin.log
