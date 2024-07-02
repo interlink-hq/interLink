@@ -141,4 +141,4 @@ if __name__ == '__main__':
         else:
             logging.error(f"Invalid grant type {iam_grant_type}" )
             exit(1)
-        time.sleep(1000)
+        time.sleep(200)
