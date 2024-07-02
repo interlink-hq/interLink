@@ -40,7 +40,6 @@ if __name__ == '__main__':
 
     while True:
         if iam_grant_type == "client_credentials": 
-        #curl -X POST "http://10.150.20.11:8080/realms/nunet/protocol/openid-connect/token"     -H "Content-Type: application/x-www-form-urlencoded"     -d "grant_type=client_credentials"     -d "client_id=oidc-interlink-vk"     -d "client_secret=WoppXMPFPoh7zzb7Q8B22F82iFh5A6EX"
             try:
                 request_data = {
                     "audience": audience,
