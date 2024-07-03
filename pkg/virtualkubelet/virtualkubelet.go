@@ -706,7 +706,7 @@ func (p *VirtualKubeletProvider) statusLoop(ctx context.Context) {
 			}
 		}
 
-		if podsList != nil {
+		if len(podsList) > 0 {
 			_, err = checkPodsStatus(ctx, p, podsList, string(b), p.config)
 			if err != nil {
 				log.G(ctx).Error(err)
@@ -718,6 +718,8 @@ func (p *VirtualKubeletProvider) statusLoop(ctx context.Context) {
 				}
 				p.pods[key] = pod
 			}
+		} else {
+			log.G(ctx).Info("No pods to monitor, waiting for the next loop to start")
 		}
 
 		log.G(ctx).Info("statusLoop=end")
