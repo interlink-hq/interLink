@@ -323,6 +323,9 @@ kind: Pod
 metadata:
   name: interlink-quickstart
   namespace: default
+  # # Uncomment this if you are using SLURM
+  # annotations:
+  #  slurm-job.vk.io/image-root: "docker://"
 spec:
   nodeSelector:
     # The name of the virtual node HERE
