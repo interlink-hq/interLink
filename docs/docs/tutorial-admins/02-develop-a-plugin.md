@@ -325,14 +325,15 @@ metadata:
   namespace: default
 spec:
   nodeSelector:
-    kubernetes.io/hostname: my-civo-node 
+    # The name of the virtual node HERE
+    kubernetes.io/hostname: civo-node
   automountServiceAccountToken: false
   containers:
   - args:
-    - -c
-    - 'sleep 600 && echo "FINISHED!"'
+    - sleep 100 && echo "FINISHED!"
     command:
     - /bin/sh
+    - -c
     image: busybox
     imagePullPolicy: Always
     name: my-container
