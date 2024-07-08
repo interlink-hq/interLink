@@ -22,7 +22,7 @@ import (
 	"k8s.io/client-go/kubernetes"
 	"k8s.io/client-go/tools/clientcmd"
 
-	commonIL "github.com/intertwin-eu/interlink/pkg/interlink"
+	types "github.com/intertwin-eu/interlink/pkg/interlink"
 )
 
 const (
@@ -756,12 +756,12 @@ func (p *VirtualKubeletProvider) GetLogs(ctx context.Context, namespace, podName
 		log.G(ctx).Error(err)
 	}
 
-	logsRequest := commonIL.LogStruct{
+	logsRequest := types.LogStruct{
 		Namespace:     namespace,
 		PodUID:        string(p.pods[key].UID),
 		PodName:       podName,
 		ContainerName: containerName,
-		Opts:          commonIL.ContainerLogOpts(opts),
+		Opts:          types.ContainerLogOpts(opts),
 	}
 
 	return LogRetrieval(ctx, p.config, logsRequest)

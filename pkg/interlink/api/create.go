@@ -8,7 +8,7 @@ import (
 
 	"github.com/containerd/containerd/log"
 
-	commonIL "github.com/intertwin-eu/interlink/pkg/interlink"
+	types "github.com/intertwin-eu/interlink/pkg/interlink"
 )
 
 // CreateHandler collects and rearranges all needed ConfigMaps/Secrets/EmptyDirs to ship them to the sidecar, then sends a response to the client
@@ -25,8 +25,8 @@ func (h *InterLinkHandler) CreateHandler(w http.ResponseWriter, r *http.Request)
 		return
 	}
 
-	var req *http.Request              //request to forward to sidecar
-	var pod commonIL.PodCreateRequests //request for interlink
+	var req *http.Request           //request to forward to sidecar
+	var pod types.PodCreateRequests //request for interlink
 	err = json.Unmarshal(bodyBytes, &pod)
 	if err != nil {
 		statusCode = http.StatusInternalServerError
@@ -35,9 +35,9 @@ func (h *InterLinkHandler) CreateHandler(w http.ResponseWriter, r *http.Request)
 		return
 	}
 
-	var retrievedData []commonIL.RetrievedPodData
+	var retrievedData []types.RetrievedPodData
 
-	data := commonIL.RetrievedPodData{}
+	data := types.RetrievedPodData{}
 	if h.Config.ExportPodData {
 		data, err = getData(h.Ctx, h.Config, pod)
 		if err != nil {

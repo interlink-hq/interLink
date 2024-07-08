@@ -10,7 +10,7 @@ import (
 
 	"github.com/containerd/containerd/log"
 
-	commonIL "github.com/intertwin-eu/interlink/pkg/interlink"
+	types "github.com/intertwin-eu/interlink/pkg/interlink"
 )
 
 func (h *InterLinkHandler) GetLogsHandler(w http.ResponseWriter, r *http.Request) {
@@ -22,7 +22,7 @@ func (h *InterLinkHandler) GetLogsHandler(w http.ResponseWriter, r *http.Request
 	}
 
 	log.G(h.Ctx).Info("InterLink: unmarshal GetLogs request")
-	var req2 commonIL.LogStruct //incoming request. To be used in interlink API. req is directly forwarded to sidecar
+	var req2 types.LogStruct //incoming request. To be used in interlink API. req is directly forwarded to sidecar
 	err = json.Unmarshal(bodyBytes, &req2)
 	if err != nil {
 		statusCode = http.StatusInternalServerError

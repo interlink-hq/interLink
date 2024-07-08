@@ -9,7 +9,7 @@ import (
 	"github.com/containerd/containerd/log"
 	v1 "k8s.io/api/core/v1"
 
-	commonIL "github.com/intertwin-eu/interlink/pkg/interlink"
+	types "github.com/intertwin-eu/interlink/pkg/interlink"
 )
 
 // DeleteHandler deletes the cached status for the provided Pod and forwards the request to the sidecar
@@ -64,8 +64,8 @@ func (h *InterLinkHandler) DeleteHandler(w http.ResponseWriter, r *http.Request)
 		w.WriteHeader(http.StatusOK)
 	}
 	log.G(h.Ctx).Debug("InterLink: " + string(returnValue))
-	var returnJson []commonIL.PodStatus
-	returnJson = append(returnJson, commonIL.PodStatus{PodName: pod.Name, PodUID: string(pod.UID), PodNamespace: pod.Namespace})
+	var returnJson []types.PodStatus
+	returnJson = append(returnJson, types.PodStatus{PodName: pod.Name, PodUID: string(pod.UID), PodNamespace: pod.Namespace})
 
 	bodyBytes, err = json.Marshal(returnJson)
 	if err != nil {
