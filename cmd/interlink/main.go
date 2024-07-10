@@ -46,6 +46,8 @@ func main() {
 
 	log.G(ctx).Info(interLinkConfig)
 
+	log.G(ctx).Info("interLink version: ", virtualkubelet.KubeletVersion)
+
 	sidecarEndpoint := ""
 	if strings.HasPrefix(interLinkConfig.Sidecarurl, "unix://") {
 		sidecarEndpoint = interLinkConfig.Sidecarurl
