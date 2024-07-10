@@ -115,7 +115,14 @@ func initProvider() (func(context.Context) error, error) {
 	// probably connect directly to the service through dns.
 	ctx, cancel := context.WithTimeout(ctx, time.Second)
 	defer cancel()
-	conn, err := grpc.DialContext(ctx, "localhost:4317",
+
+	otlpEndpoint := os.Getenv("TELEMETRY_ENDPOINT")
+
+	if otlpEndpoint == "" {
+		otlpEndpoint = "localhost:4317"
+	}
+
+	conn, err := grpc.DialContext(ctx, otlpEndpoint,
 		// Note the use of insecure transport here. TLS is recommended in production.
 		grpc.WithTransportCredentials(insecure.NewCredentials()),
 		grpc.WithBlock(),

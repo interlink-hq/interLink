@@ -15,10 +15,10 @@ spec:
       labels:
         nodeName: {{.VKName}}
     spec:
-      #hostNetwork: true
+      dnsConfig:
+        nameservers:
+        - 8.8.8.8 
       containers:
-      - name: jaeger
-        image: jaegertracing/all-in-one:1.51
       - name: inttw-vk
         image: ghcr.io/intertwin-eu/interlink/virtual-kubelet-inttw:{{.InterLinkVersion}}
         imagePullPolicy: Always
@@ -54,7 +54,6 @@ spec:
         env:
         - name: IAM_TOKEN_ENDPOINT 
           value: {{.OAUTH.TokenURL}} 
-        # TODO load env IAM client from secret
         - name: IAM_CLIENT_ID
           value: {{.OAUTH.ClientID}}
         - name: IAM_CLIENT_SECRET
@@ -87,6 +86,4 @@ spec:
           # Provide the name of the ConfigMap you want to mount.
           name: {{.VKName}}-config
       - name: token
-        hostPath:
-          path: /tmp
-          type: Directory
+        emptyDir: {}

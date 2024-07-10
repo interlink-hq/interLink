@@ -10,7 +10,7 @@ import (
 	"github.com/containerd/containerd/log"
 	v1 "k8s.io/api/core/v1"
 
-	commonIL "github.com/intertwin-eu/interlink/pkg/interlink"
+	types "github.com/intertwin-eu/interlink/pkg/interlink"
 )
 
 func (h *InterLinkHandler) StatusHandler(w http.ResponseWriter, r *http.Request) {
@@ -29,8 +29,8 @@ func (h *InterLinkHandler) StatusHandler(w http.ResponseWriter, r *http.Request)
 	}
 
 	var podsToBeChecked []*v1.Pod
-	var returnedStatuses []commonIL.PodStatus //returned from the query to the sidecar
-	var returnPods []commonIL.PodStatus       //returned to the vk
+	var returnedStatuses []types.PodStatus //returned from the query to the sidecar
+	var returnPods []types.PodStatus       //returned to the vk
 
 	PodStatuses.mu.Lock()
 	for _, pod := range pods {

@@ -10,6 +10,8 @@ ENV GOCACHE="/go/build-cache"
 
 RUN mkdir -p $GOMODCACHE && mkdir -p $GOCACHE
 
+ARG VERSION
+RUN bash -c "KUBELET_VERSION=${VERSION} ./cmd/virtual-kubelet/set-version.sh"
 
 RUN go mod tidy
 RUN CGO_ENABLED=0 GOOS=linux go build -o bin/interlink cmd/interlink/main.go
