@@ -401,6 +401,7 @@ func checkPodsStatus(ctx context.Context, p *VirtualKubeletProvider, podsList []
 	//commented out because it's too verbose. uncomment to see all registered pods
 	//log.G(ctx).Debug(p.pods)
 
+	// retrieve pod status from remote interlink
 	returnVal, err := statusRequest(ctx, config, podsList, token)
 	if err != nil {
 		return nil, err
@@ -413,79 +414,88 @@ func checkPodsStatus(ctx context.Context, p *VirtualKubeletProvider, podsList []
 			return nil, err
 		}
 
+		// if there is a pod status available go ahead to match with the latest state available in etcd
 		if podsList != nil {
-			for _, podStatus := range ret {
+			for _, podRemoteStatus := range ret {
 
+				log.G(ctx).Debug(fmt.Sprintln("Get status from remote status len: ", len(podRemoteStatus.Containers)))
 				// avoid asking for status too early, when etcd as not been updated
-				if podStatus.PodName != "" {
+				if podRemoteStatus.PodName != "" {
 
-					pod, err := p.GetPod(ctx, podStatus.PodNamespace, podStatus.PodName)
+					// get pod reference from cluster etcd
+					podRefInCluster, err := p.GetPod(ctx, podRemoteStatus.PodNamespace, podRemoteStatus.PodName)
 					if err != nil {
 						log.G(ctx).Warning(err)
 						continue
 					}
+					log.G(ctx).Debug(fmt.Sprintln("Get pod from k8s cluster status: ", podRefInCluster.Status.ContainerStatuses))
 
-					if podStatus.PodUID == string(pod.UID) {
+					// if the PodUID match with the one in etcd we are talking of the same thing. GOOD
+					if podRemoteStatus.PodUID == string(podRefInCluster.UID) {
 						podRunning := false
 						podErrored := false
 						podCompleted := false
 						failedReason := ""
-						for _, containerStatus := range podStatus.Containers {
+
+						// For each container of the pod we check if there is a previous state known by K8s
+						for _, containerRemoteStatus := range podRemoteStatus.Containers {
 							index := 0
 							foundCt := false
 
-							for i, checkedContainer := range pod.Status.ContainerStatuses {
-								if checkedContainer.Name == containerStatus.Name {
+							for i, checkedContainer := range podRefInCluster.Status.ContainerStatuses {
+								if checkedContainer.Name == containerRemoteStatus.Name {
 									foundCt = true
 									index = i
 								}
 							}
 
+							// if it is the first time checking the container, append it to the pod containers, otherwise just update the correct item
 							if !foundCt {
-								pod.Status.ContainerStatuses = append(pod.Status.ContainerStatuses, containerStatus)
+								podRefInCluster.Status.ContainerStatuses = append(podRefInCluster.Status.ContainerStatuses, containerRemoteStatus)
 							} else {
-								pod.Status.ContainerStatuses[index] = containerStatus
+								podRefInCluster.Status.ContainerStatuses[index] = containerRemoteStatus
 							}
 
-							// if plugin cannot return any running container set the status to terminated
-							// if the exit code is != 0 get the error  and set error reason + rememeber to set pod to failed
-							if containerStatus.State.Terminated != nil {
-								log.G(ctx).Debug("Pod " + podStatus.PodName + ": Service " + containerStatus.Name + " is not running on Plugin side")
-								podCompleted = true
-								pod.Status.ContainerStatuses[index].State.Terminated.Reason = "Completed"
-								if containerStatus.State.Terminated.ExitCode != 0 {
-									podErrored = true
-									failedReason = "Error: " + strconv.Itoa(int(containerStatus.State.Terminated.ExitCode))
-									pod.Status.ContainerStatuses[index].State.Terminated.Reason = failedReason
-									log.G(ctx).Error("Container " + containerStatus.Name + " exited with error: " + strconv.Itoa(int(containerStatus.State.Terminated.ExitCode)))
-								}
-							} else if containerStatus.State.Waiting != nil {
-								log.G(ctx).Info("Pod " + podStatus.PodName + ": Service " + containerStatus.Name + " is setting up on Sidecar")
-								podRunning = true
-							} else if containerStatus.State.Running != nil {
-								podRunning = true
-								log.G(ctx).Debug("Pod " + podStatus.PodName + ": Service " + containerStatus.Name + " is running on Sidecar")
+							log.G(ctx).Debug(containerRemoteStatus.State.Running)
 
+							// if plugin cannot return any non-terminated container set the status to terminated
+							// if the exit code is != 0 get the error  and set error reason + rememeber to set pod to failed
+							if containerRemoteStatus.State.Terminated != nil {
+								log.G(ctx).Debug("Pod " + podRemoteStatus.PodName + ": Service " + containerRemoteStatus.Name + " is not running on Plugin side")
+								podCompleted = true
+								podRefInCluster.Status.ContainerStatuses[index].State.Terminated.Reason = "Completed"
+								if containerRemoteStatus.State.Terminated.ExitCode != 0 {
+									podErrored = true
+									failedReason = "Error: " + strconv.Itoa(int(containerRemoteStatus.State.Terminated.ExitCode))
+									podRefInCluster.Status.ContainerStatuses[index].State.Terminated.Reason = failedReason
+									log.G(ctx).Error("Container " + containerRemoteStatus.Name + " exited with error: " + strconv.Itoa(int(containerRemoteStatus.State.Terminated.ExitCode)))
+								}
+							} else if containerRemoteStatus.State.Waiting != nil {
+								log.G(ctx).Info("Pod " + podRemoteStatus.PodName + ": Service " + containerRemoteStatus.Name + " is setting up on Sidecar")
+								podRunning = true
+							} else if containerRemoteStatus.State.Running != nil {
+								podRunning = true
+								log.G(ctx).Debug("Pod " + podRemoteStatus.PodName + ": Service " + containerRemoteStatus.Name + " is running on Sidecar")
 							}
 
 							// if this is the first time you see a container running/errored/completed, update the status of the pod.
-							if podRunning && pod.Status.Phase != v1.PodRunning {
-								pod.Status.Phase = v1.PodRunning
-								pod.Status.Conditions = append(pod.Status.Conditions, v1.PodCondition{Type: v1.PodReady, Status: v1.ConditionTrue})
-							} else if podErrored && pod.Status.Phase != v1.PodFailed {
-								pod.Status.Phase = v1.PodFailed
-								pod.Status.Reason = failedReason
-							} else if podCompleted && pod.Status.Phase != v1.PodSucceeded {
-								pod.Status.Conditions = append(pod.Status.Conditions, v1.PodCondition{Type: v1.PodReady, Status: v1.ConditionFalse})
-								pod.Status.Phase = v1.PodSucceeded
-								pod.Status.Reason = "Completed"
+							if podRunning && podRefInCluster.Status.Phase != v1.PodRunning {
+								podRefInCluster.Status.Phase = v1.PodRunning
+								podRefInCluster.Status.Conditions = append(podRefInCluster.Status.Conditions, v1.PodCondition{Type: v1.PodReady, Status: v1.ConditionTrue})
+							} else if podErrored && podRefInCluster.Status.Phase != v1.PodFailed {
+								podRefInCluster.Status.Phase = v1.PodFailed
+								podRefInCluster.Status.Reason = failedReason
+							} else if podCompleted && podRefInCluster.Status.Phase != v1.PodSucceeded {
+								podRefInCluster.Status.Conditions = append(podRefInCluster.Status.Conditions, v1.PodCondition{Type: v1.PodReady, Status: v1.ConditionFalse})
+								podRefInCluster.Status.Phase = v1.PodSucceeded
+								podRefInCluster.Status.Reason = "Completed"
 							}
 
 						}
 					} else {
 
 						// if you don't now any UID yet, collect the status and updated the status cache
-						list, err := p.clientSet.CoreV1().Pods(podStatus.PodNamespace).List(ctx, metav1.ListOptions{})
+						list, err := p.clientSet.CoreV1().Pods(podRemoteStatus.PodNamespace).List(ctx, metav1.ListOptions{})
 						if err != nil {
 							log.G(ctx).Error(err)
 							return nil, err
@@ -494,7 +504,7 @@ func checkPodsStatus(ctx context.Context, p *VirtualKubeletProvider, podsList []
 						pods := list.Items
 
 						for _, pod := range pods {
-							if string(pod.UID) == podStatus.PodUID {
+							if string(pod.UID) == podRemoteStatus.PodUID {
 								err = updateCacheRequest(ctx, config, pod, token)
 								if err != nil {
 									log.G(ctx).Error(err)
