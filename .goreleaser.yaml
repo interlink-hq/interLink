@@ -20,6 +20,8 @@ builds:
     main: ./cmd/virtual-kubelet
   - id: "interlink"
     binary: interlink
+    hooks:
+      pre: bash -c "KUBELET_VERSION={{.Version}} ./cmd/virtual-kubelet/set-version.sh" 
     env:
       - CGO_ENABLED=0
     goos:

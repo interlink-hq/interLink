@@ -2,6 +2,8 @@ package main
 
 import (
 	"context"
+	"flag"
+	"fmt"
 	"net/http"
 	"strings"
 
@@ -9,15 +11,23 @@ import (
 	"github.com/virtual-kubelet/virtual-kubelet/log"
 	logruslogger "github.com/virtual-kubelet/virtual-kubelet/log/logrus"
 
-	commonIL "github.com/intertwin-eu/interlink/pkg/interlink"
+	types "github.com/intertwin-eu/interlink/pkg/interlink"
 	"github.com/intertwin-eu/interlink/pkg/interlink/api"
+	"github.com/intertwin-eu/interlink/pkg/virtualkubelet"
 )
 
 func main() {
-	var cancel context.CancelFunc
-	api.PodStatuses.Statuses = make(map[string]commonIL.PodStatus)
+	printVersion := flag.Bool("version", false, "show version")
+	flag.Parse()
 
-	interLinkConfig, err := commonIL.NewInterLinkConfig()
+	if *printVersion {
+		fmt.Println(virtualkubelet.KubeletVersion)
+		return
+	}
+	var cancel context.CancelFunc
+	api.PodStatuses.Statuses = make(map[string]types.PodStatus)
+
+	interLinkConfig, err := types.NewInterLinkConfig()
 	if err != nil {
 		panic(err)
 	}
