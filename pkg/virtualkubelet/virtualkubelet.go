@@ -429,6 +429,7 @@ func (p *VirtualKubeletProvider) CreatePod(ctx context.Context, pod *v1.Pod) err
 			if err.Error() == "Deleted pod before actual creation" {
 				log.G(ctx).Warn(err)
 			} else {
+				// TODO if node in NotReady put it to Unknown/pending?
 				log.G(ctx).Error(err)
 				pod.Status = v1.PodStatus{
 					Phase:     v1.PodFailed,

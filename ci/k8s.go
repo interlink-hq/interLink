@@ -193,6 +193,24 @@ func (k *K8sInstance) waitForNodes(ctx context.Context) (err error) {
 	return fmt.Errorf("k8s took too long to start")
 }
 
+func (k *K8sInstance) waitForVirtualNodes(ctx context.Context) (err error) {
+	maxRetries := 10
+	retryBackoff := 30 * time.Second
+	for i := 0; i < maxRetries; i++ {
+		kubectlGetNodes, err := k.kubectl(ctx, "get nodes -o wide virtual-kubelet")
+		if err != nil {
+			fmt.Println(fmt.Errorf("could not fetch nodes: %v", err))
+			continue
+		}
+		if strings.Contains(kubectlGetNodes, "Ready") {
+			return nil
+		}
+		fmt.Println("waiting for k8s to start:", kubectlGetNodes)
+		time.Sleep(retryBackoff)
+	}
+	return fmt.Errorf("k8s took too long to start")
+}
+
 func (k *K8sInstance) waitForVirtualKubelet(ctx context.Context) (err error) {
 	maxRetries := 10
 	retryBackoff := 30 * time.Second

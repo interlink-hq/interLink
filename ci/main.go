@@ -252,6 +252,9 @@ func (i *Interlink) Test(
 	if err := i.K8s.waitForPlugin(ctx); err != nil {
 		return nil, err
 	}
+	if err := i.K8s.waitForVirtualNodes(ctx); err != nil {
+		return nil, err
+	}
 
 	result := i.K8s.KContainer.
 		WithWorkdir("/opt").
@@ -259,7 +262,7 @@ func (i *Interlink) Test(
 		WithExec([]string{"bash", "-c", "cp /manifests/vktest_config.yaml /opt/vk-test-set/vktest_config.yaml"}, ContainerWithExecOpts{SkipEntrypoint: true}).
 		WithWorkdir("/opt/vk-test-set").
 		WithExec([]string{"bash", "-c", "python3 -m venv .venv && source .venv/bin/activate && pip3 install -e ./ "}, ContainerWithExecOpts{SkipEntrypoint: true}).
-		WithExec([]string{"bash", "-c", "source .venv/bin/activate && export KUBECONFIG=/.kube/config && pytest -vk 'not rclone' || echo OPS "}, ContainerWithExecOpts{SkipEntrypoint: true})
+		WithExec([]string{"bash", "-c", "source .venv/bin/activate && export KUBECONFIG=/.kube/config && pytest -vk 'not rclone'"}, ContainerWithExecOpts{SkipEntrypoint: true})
 
 	if i.CleanupCluster {
 		err := i.Cleanup(ctx)
