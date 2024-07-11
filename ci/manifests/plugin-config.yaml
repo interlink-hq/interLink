@@ -12,7 +12,7 @@ data:
     VerboseLogging: true
     ErrorsOnlyLogging: false
     ExportPodData: true
-    DataRootFolder: "~/.interlink"
+    DataRootFolder: "/root/.interlink/"
     SbatchPath: "/usr/bin/sbatch"
     ScancelPath: "/usr/bin/scancel"
     SqueuePath: "/usr/bin/squeue"

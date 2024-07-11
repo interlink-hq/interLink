@@ -29,10 +29,17 @@ func (h *InterLinkHandler) Ping(w http.ResponseWriter, r *http.Request) {
 	log.G(h.Ctx).Info("InterLink: forwarding GetStatus call to sidecar")
 	req.Header.Set("Content-Type", "application/json")
 	log.G(h.Ctx).Debug(req)
-	_, err = http.DefaultClient.Do(req)
+	reqPlugin, err := http.DefaultClient.Do(req)
 	if err != nil {
 		log.G(h.Ctx).Error(err)
 		w.WriteHeader(http.StatusServiceUnavailable)
+		w.Write([]byte(strconv.Itoa(http.StatusServiceUnavailable)))
+		return
+	}
+
+	if reqPlugin.StatusCode != http.StatusOK {
+		log.G(h.Ctx).Error("error pinging plugin")
+		w.WriteHeader(reqPlugin.StatusCode)
 		w.Write([]byte(strconv.Itoa(http.StatusServiceUnavailable)))
 		return
 	}
