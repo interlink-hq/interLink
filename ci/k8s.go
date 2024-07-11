@@ -203,6 +203,7 @@ func (k *K8sInstance) waitForVirtualNodes(ctx context.Context) (err error) {
 			continue
 		}
 		if strings.Contains(kubectlGetNodes, "Ready") {
+			time.Sleep(60*time.Second)
 			return nil
 		}
 		fmt.Println("waiting for k8s to start:", kubectlGetNodes)
