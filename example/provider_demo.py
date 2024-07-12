@@ -8,11 +8,41 @@ import re
 import os
 
 
-dockerCLI = docker.DockerClient()
+class MockRuntime():
+    def __init__(self):
+        self.CONTAINERS = {}
+
+    def create(container,cmds, args, volumes) -> str:
+
+        print(f"image: {container.image}:{container.tag}")
+        print(f"command: {cmds}\nargs: {args}")
+        print(f"volumes: {volumes}") 
+        print(f"env: {container.env}") 
+
+        container_id = uuid()
+
+        self.CONTAINERS.update(
+            {
+                "id": container_id,
+                "start_time": now(), 
+                "status": "Pending"
+            }
+        )
+        return container_id 
+
+    def status(container_id) -> str:
+        return self.CONTAINERS[container_id]
+
+    def delete(container_id) -> bool:
+        return true
+
+
+#dockerCLI = docker.DockerClient()
 # dockerCLI = docker.DockerClient(base_url="unix:///Users/dciangot/.docker/run/docker.sock")
 
 app = FastAPI()
 
+runtime = MockRuntime()
 
 class MyProvider(interlink.provider.Provider):
     def __init__(self, DOCKER):
@@ -20,13 +50,6 @@ class MyProvider(interlink.provider.Provider):
 
         # Recover already running containers refs
         self.CONTAINER_POD_MAP = {}
-        statuses = self.DOCKER.api.containers(all=True)
-        for status in statuses:
-            name = status["Names"][0]
-            if len(name.split("-")) > 1:
-                uid = "-".join(name.split("-")[-5:])
-                self.CONTAINER_POD_MAP.update({uid: [status["Id"]]})
-        print(self.CONTAINER_POD_MAP)
 
     def DumpVolumes(
         self, pods: List[interlink.PodVolume], volumes: List[interlink.Volume]
@@ -85,18 +108,12 @@ class MyProvider(interlink.provider.Provider):
         try:
             cmds = " ".join(container.command)
             args = " ".join(container.args)
-            dockerContainer = self.DOCKER.containers.run(
-                f"{container.image}:{container.tag}",
-                f"{cmds} {args}",
-                name=f"{container.name}-{pod.pod.metadata.uid}",
-                detach=True,
+            docker_run_id = self.DOCKER.run(
+                container,
+                cmds,
+                args,
                 volumes=volumes,
-                # runtime="nvidia",
-                # device_requests=[
-                #           docker.types.DeviceRequest(device_ids=["0"], capabilities=[['gpu']])]
             )
-            print(dockerContainer)
-            docker_run_id = dockerContainer.id
         except Exception as ex:
             raise HTTPException(status_code=500, detail=ex)
 
@@ -108,35 +125,25 @@ class MyProvider(interlink.provider.Provider):
     def Delete(self, pod: interlink.PodRequest) -> None:
         try:
             print(f"docker rm -f {self.CONTAINER_POD_MAP[pod.metadata.uid][0]}")
-            container = self.DOCKER.containers.get(
-                self.CONTAINER_POD_MAP[pod.metadata.uid][0]
-            )
-            container.remove(force=True)
+            container.remove(self.CONTAINER_POD_MAP[pod.metadata.uid][0])
             self.CONTAINER_POD_MAP.pop(pod.metadata.uid)
         except:
             raise HTTPException(status_code=404, detail="No containers found for UUID")
-        print(pod)
         return
 
     def Status(self, pod: interlink.PodRequest) -> interlink.PodStatus:
         print(self.CONTAINER_POD_MAP)
         print(pod.metadata.uid)
         try:
-            container = self.DOCKER.containers.get(
+            status = self.DOCKER.containers.status(
                 self.CONTAINER_POD_MAP[pod.metadata.uid][0]
             )
             status = container.status
         except:
             raise HTTPException(status_code=404, detail="No containers found for UUID")
 
-        print(status)
-
         if status == "running":
             try:
-                statuses = self.DOCKER.api.containers(
-                    filters={"status": "running", "id": container.id}
-                )
-                print(statuses)
                 startedAt = statuses[0]["Created"]
             except Exception as ex:
                 raise HTTPException(status_code=500, detail=ex)
@@ -159,9 +166,6 @@ class MyProvider(interlink.provider.Provider):
         elif status == "exited":
 
             try:
-                statuses = self.DOCKER.api.containers(
-                    filters={"status": "exited", "id": container.id}
-                )
                 print(statuses)
                 reason = statuses[0]["Status"]
                 pattern = re.compile(r"Exited \((.*?)\)")
@@ -225,7 +229,7 @@ class MyProvider(interlink.provider.Provider):
         return log
 
 
-ProviderNew = MyProvider(dockerCLI)
+ProviderNew = MyProvider(MockRuntime)
 
 
 @app.post("/create")

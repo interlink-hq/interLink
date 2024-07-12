@@ -45,6 +45,7 @@ type patchSchema struct {
 
 type Interlink struct {
 	K8s               *K8sInstance
+	Plugin            *Container
 	VirtualKubeletRef string
 	InterlinkRef      string
 	Manifests         *Directory
@@ -199,18 +200,24 @@ func (i *Interlink) NewInterlink(
 	return i, nil
 }
 
-func (i *Interlink) LoadPlugin(ctx context.Context) (*Interlink, error) {
-	pluginConfig, err := i.K8s.kubectl(ctx, "apply -f /manifests/plugin-config.yaml")
-	if err != nil {
-		return nil, err
-	}
-	fmt.Println(pluginConfig)
+func (i *Interlink) LoadPlugin(ctx context.Context, config *File) (*Interlink, error) {
 
-	plugin, err := i.K8s.kubectl(ctx, "apply -f /manifests/plugin.yaml")
-	if err != nil {
-		return nil, err
-	}
-	fmt.Println(plugin)
+	i.Plugin = dag.Container().From("dciangot/docker-plugin:v1").
+		WithFile("/etc/interlink/InterLinkConfig.yaml", config).
+		WithExec([]string{"bash", "-c", "dockerd --mtu 1450 /sidecar/docker-sidecar"}, ContainerWithExecOpts{InsecureRootCapabilities: true})
+
+	i.K8s.K3s = i.K8s.K3s.WithServiceBinding("plugin", i.Plugin.AsService())
+	// pluginConfig, err := i.K8s.kubectl(ctx, "apply -f /manifests/plugin-config.yaml")
+	// if err != nil {
+	// 	return nil, err
+	// }
+	// fmt.Println(pluginConfig)
+	//
+	// plugin, err := i.K8s.kubectl(ctx, "apply -f /manifests/plugin.yaml")
+	// if err != nil {
+	// 	return nil, err
+	// }
+	// fmt.Println(plugin)
 
 	return i, nil
 }
@@ -249,9 +256,9 @@ func (i *Interlink) Test(
 	if err := i.K8s.waitForInterlink(ctx); err != nil {
 		return nil, err
 	}
-	if err := i.K8s.waitForPlugin(ctx); err != nil {
-		return nil, err
-	}
+	// if err := i.K8s.waitForPlugin(ctx); err != nil {
+	// 	return nil, err
+	// }
 	if err := i.K8s.waitForVirtualNodes(ctx); err != nil {
 		return nil, err
 	}

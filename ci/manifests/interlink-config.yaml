@@ -7,7 +7,8 @@ data:
   InterLinkConfig.yaml: |
     InterlinkAddress: "http://0.0.0.0"
     InterlinkPort: "3000"
-    SidecarURL: "http://plugin.interlink.svc.cluster.local"
+    #SidecarURL: "http://plugin.interlink.svc.cluster.local"
+    SidecarURL: "http://plugin"
     SidecarPort: "4000"
     VerboseLogging: true
     ErrorsOnlyLogging: false
