@@ -5,7 +5,7 @@ metadata:
   namespace: interlink 
 data:
   InterLinkConfig.yaml: |
-    InterlinkURL: "http://localhost"
+    InterlinkAddress: "http://0.0.0.0"
     InterlinkPort: "3000"
     SidecarURL: "http://plugin.interlink.svc.cluster.local"
     SidecarPort: "4000"

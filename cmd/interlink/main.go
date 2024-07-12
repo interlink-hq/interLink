@@ -74,8 +74,8 @@ func main() {
 	interLinkEndpoint := ""
 	if strings.HasPrefix(interLinkConfig.InterlinkAddress, "unix://") {
 		interLinkEndpoint = interLinkConfig.InterlinkAddress
-	} else if strings.HasPrefix(interLinkConfig.Sidecarurl, "http://") {
-		interLinkEndpoint = interLinkConfig.InterlinkAddress + ":" + interLinkConfig.Interlinkport
+	} else if strings.HasPrefix(interLinkConfig.InterlinkAddress, "http://") {
+		interLinkEndpoint = strings.Replace(interLinkConfig.InterlinkAddress, "http://", "", -1) + ":" + interLinkConfig.Interlinkport
 	} else {
 		log.G(ctx).Fatal("Sidecar URL should either start per unix:// or http://")
 	}
