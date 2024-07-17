@@ -27,18 +27,18 @@ if __name__ == '__main__':
         print(ex)
         exit(1)
 
-    try:
-        with open(output_file+"-refresh", "r") as text_file:
-            rt = text_file.readline()
-        if rt != "": 
-            iam_refresh_token = rt
-    except:
-        logging.info("No cache for refresh token, starting from ENV value")
-
-    print(iam_refresh_token)
-    token = None
-
     while True:
+        try:
+            with open(output_file+"-refresh", "r") as text_file:
+                rt = text_file.readline()
+            if rt != "": 
+                iam_refresh_token = rt
+        except:
+            logging.info("No cache for refresh token, starting from ENV value")
+    
+        print(iam_refresh_token)
+        token = None
+
         if iam_grant_type == "client_credentials": 
             try:
                 request_data = {
