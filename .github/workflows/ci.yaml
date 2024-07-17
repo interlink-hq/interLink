@@ -23,6 +23,7 @@ jobs:
         run: |
           wget https://github.com/interTwin-eu/interlink-docker-plugin/releases/download/0.0.22-no-gpu/docker-plugin_Linux_x86_64 -O docker-plugin \
           && chmod +x docker-plugin \
+          && docker ps \
           && export INTERLINKCONFIGPATH=$PWD/ci/manifests/plugin-config.yaml \
           && ./docker-plugin &
       - name: Get Repo Owner
