@@ -28,6 +28,7 @@ spec:
       labels:
         app: interlink
     spec:
+      hostNetwork: true
       containers:
         - name: interlink
           image: "ghcr.io/intertwin-eu/interlink/interlink"
