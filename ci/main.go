@@ -45,6 +45,7 @@ type patchSchema struct {
 
 type Interlink struct {
 	K8s               *K8sInstance
+	Plugin            *Container
 	VirtualKubeletRef string
 	InterlinkRef      string
 	Manifests         *Directory
@@ -123,6 +124,8 @@ func (i *Interlink) NewInterlink(
 	kubeconfig *File,
 	// +optional
 	localCluster *Service,
+	// +optional
+	pluginLocalService *Service,
 ) (*Interlink, error) {
 
 	// create Kustomize patch for images to be used
@@ -171,9 +174,16 @@ func (i *Interlink) NewInterlink(
 
 	fmt.Println(bufferVK.String())
 
-	i.K8s = NewK8sInstance(ctx)
-	if err := i.K8s.start(ctx, i.Manifests, bufferVK.String(), bufferIL.String(), kubeconfig, localCluster); err != nil {
-		return nil, err
+	if pluginLocalService == nil {
+		i.K8s = NewK8sInstance(ctx, i.Plugin.AsService())
+		if err := i.K8s.start(ctx, i.Manifests, bufferVK.String(), bufferIL.String(), kubeconfig, localCluster); err != nil {
+			return nil, err
+		}
+	} else {
+		i.K8s = NewK8sInstance(ctx, pluginLocalService)
+		if err := i.K8s.start(ctx, i.Manifests, bufferVK.String(), bufferIL.String(), kubeconfig, localCluster); err != nil {
+			return nil, err
+		}
 	}
 
 	err = i.K8s.waitForNodes(ctx)
@@ -199,18 +209,27 @@ func (i *Interlink) NewInterlink(
 	return i, nil
 }
 
-func (i *Interlink) LoadPlugin(ctx context.Context) (*Interlink, error) {
-	pluginConfig, err := i.K8s.kubectl(ctx, "apply -f /manifests/plugin-config.yaml")
-	if err != nil {
-		return nil, err
-	}
-	fmt.Println(pluginConfig)
+func (i *Interlink) LoadPlugin(ctx context.Context, config *File) (*Interlink, error) {
 
-	plugin, err := i.K8s.kubectl(ctx, "apply -f /manifests/plugin.yaml")
-	if err != nil {
-		return nil, err
-	}
-	fmt.Println(plugin)
+	ctr := dag.Container().From("dciangot/docker-plugin:v1").
+		WithFile("/etc/interlink/InterLinkConfig.yaml", config).
+		WithEnvVariable("INTERLINKCONFIGPATH", "/etc/interlink/InterLinkConfig.yaml").
+		WithExec([]string{"bash", "-c", "dockerd --mtu 1450 & /sidecar/docker-sidecar"}, ContainerWithExecOpts{InsecureRootCapabilities: true}).
+		WithExposedPort(4000)
+
+	i.Plugin = ctr
+
+	// pluginConfig, err := i.K8s.kubectl(ctx, "apply -f /manifests/plugin-config.yaml")
+	// if err != nil {
+	// 	return nil, err
+	// }
+	// fmt.Println(pluginConfig)
+	//
+	// plugin, err := i.K8s.kubectl(ctx, "apply -f /manifests/plugin.yaml")
+	// if err != nil {
+	// 	return nil, err
+	// }
+	// fmt.Println(plugin)
 
 	return i, nil
 }
@@ -249,9 +268,9 @@ func (i *Interlink) Test(
 	if err := i.K8s.waitForInterlink(ctx); err != nil {
 		return nil, err
 	}
-	if err := i.K8s.waitForPlugin(ctx); err != nil {
-		return nil, err
-	}
+	// if err := i.K8s.waitForPlugin(ctx); err != nil {
+	// 	return nil, err
+	// }
 	if err := i.K8s.waitForVirtualNodes(ctx); err != nil {
 		return nil, err
 	}
@@ -292,5 +311,20 @@ func (i *Interlink) Run(
 		WithExec([]string{"bash", "-c", "cp /manifests/vktest_config.yaml /opt/vk-test-set/vktest_config.yaml"}, ContainerWithExecOpts{SkipEntrypoint: true}).
 		WithWorkdir("/opt/vk-test-set").
 		WithExec([]string{"bash", "-c", "python3 -m venv .venv && source .venv/bin/activate && pip3 install -e ./ "}, ContainerWithExecOpts{SkipEntrypoint: true}), nil
+
+}
+
+func (i *Interlink) Cluster(
+	ctx context.Context,
+) (*Container, error) {
+
+	if i.CleanupCluster {
+		err := i.Cleanup(ctx)
+		if err != nil {
+			return nil, err
+		}
+	}
+
+	return i.K8s.K3s, nil
 
 }

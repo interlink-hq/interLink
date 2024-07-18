@@ -35,9 +35,10 @@ fi
 exec "$@"
 `
 
-func NewK8sInstance(ctx context.Context) *K8sInstance {
+func NewK8sInstance(ctx context.Context, pluginService *Service) *K8sInstance {
 	return &K8sInstance{
 		KContainer:      nil,
+		PluginService:   pluginService,
 		Registry:        nil,
 		ConfigCache:     dag.CacheVolume("k3s_config"),
 		ContainersCache: dag.CacheVolume("k3s_containers"),
@@ -48,6 +49,7 @@ type K8sInstance struct {
 	KContainer      *Container
 	K3s             *Container
 	Registry        *Service
+	PluginService   *Service
 	ConfigCache     *CacheVolume
 	ContainersCache *CacheVolume
 }
@@ -72,6 +74,7 @@ func (k *K8sInstance) start(
 				Contents:    entrypoint,
 				Permissions: 0o755,
 			}).
+			WithServiceBinding("plugin", k.PluginService).
 			WithEntrypoint([]string{"entrypoint.sh"}).
 			WithMountedCache("/etc/rancher/k3s", k.ConfigCache).
 			WithMountedTemp("/etc/lib/cni").
@@ -203,6 +206,7 @@ func (k *K8sInstance) waitForVirtualNodes(ctx context.Context) (err error) {
 			continue
 		}
 		if strings.Contains(kubectlGetNodes, "Ready") {
+			time.Sleep(60 * time.Second)
 			return nil
 		}
 		fmt.Println("waiting for k8s to start:", kubectlGetNodes)
