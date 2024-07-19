@@ -45,11 +45,11 @@ You need to provide the interLink IP address that should be reachable from the k
 ```bash
 export INTERLINK_IP_ADDRESS=XXX.XX.X.XXX
 
-sed -i 's/InterlinkURL:.*/InterlinkURL: "http:\/\/'$INTERLINK_IP_ADDRESS'"/g'  vk/InterLinkConfig.yaml
+sed -i 's/InterlinkAddress:.*/InterlinkAddress: "http:\/\/'$INTERLINK_IP_ADDRESS'"/g'  vk/InterLinkConfig.yaml
 
-sed -i 's/InterlinkURL:.*/InterlinkURL: "http:\/\/'$INTERLINK_IP_ADDRESS'"/g'  interlink/InterLinkConfig.yaml | sed -i 's/SidecarURL:.*/SidecarURL: "http:\/\/'$INTERLINK_IP_ADDRESS'"/g' interlink/InterLinkConfig.yaml
+sed -i 's/InterlinkAddres:.*/InterlinkAddress: "http:\/\/'$INTERLINK_IP_ADDRESS'"/g'  interlink/InterLinkConfig.yaml | sed -i 's/SidecarURL:.*/SidecarURL: "http:\/\/'$INTERLINK_IP_ADDRESS'"/g' interlink/InterLinkConfig.yaml
 
-sed -i 's/InterlinkURL:.*/InterlinkURL: "http:\/\/'$INTERLINK_IP_ADDRESS'"/g'  interlink/sidecarConfig.yaml | sed -i 's/SidecarURL:.*/SidecarURL: "http:\/\/'$INTERLINK_IP_ADDRESS'"/g' interlink/sidecarConfig.yaml
+sed -i 's/InterlinkAddress:.*/InterlinkAddress: "http:\/\/'$INTERLINK_IP_ADDRESS'"/g'  interlink/sidecarConfig.yaml | sed -i 's/SidecarURL:.*/SidecarURL: "http:\/\/'$INTERLINK_IP_ADDRESS'"/g' interlink/sidecarConfig.yaml
 ```
 
 #### Deploy virtualKubelet
