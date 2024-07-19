@@ -27,7 +27,7 @@ install () {
   # set $HOME/.interlink/config/InterLinkConfig.yaml
 
   cat <<EOF >>$HOME/.interlink/config/InterLinkConfig.yaml
-InterlinkURL: "http://localhost"
+InterlinkAddress: "http://localhost"
 InterlinkPort: "30080"
 SidecarURL: "http://localhost"
 SidecarPort: "4000"

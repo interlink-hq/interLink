@@ -5,7 +5,7 @@ metadata:
   namespace: {{ .Release.Namespace }}
 data:
   InterLinkConfig.yaml: |
-    InterlinkURL: {{ .Values.interlink.URL }}
+    InterlinkAddress: {{ .Values.interlink.URL }}
     InterlinkPort: {{ .Values.interlink.port }}
     ExportPodData: true
     VerboseLogging: true

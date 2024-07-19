@@ -1,5 +1,5 @@
 VKTokenFile: "$HOME/interLink/token"
-InterlinkURL: "http://XXX.XXX.XXX.XXX"
+InterlinkAddress: "http://XXX.XXX.XXX.XXX"
 CommandPrefix: ""
 ExportPodData: true
 ServiceAccount: "interlink"
