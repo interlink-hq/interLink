@@ -14,6 +14,9 @@ import (
 	"time"
 
 	"github.com/containerd/containerd/log"
+	"go.opentelemetry.io/otel"
+	"go.opentelemetry.io/otel/attribute"
+	trace "go.opentelemetry.io/otel/trace"
 	v1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 
@@ -44,6 +47,7 @@ func getSidecarEndpoint(ctx context.Context, interLinkURL string, interLinkPort 
 
 // PingInterLink pings the InterLink API and returns true if there's an answer. The second return value is given by the answer provided by the API.
 func PingInterLink(ctx context.Context, config VirtualKubeletConfig) (bool, int, error) {
+	tracer := otel.Tracer("interlink-service")
 	interLinkEndpoint := getSidecarEndpoint(ctx, config.InterlinkURL, config.Interlinkport)
 	log.G(ctx).Info("Pinging: " + interLinkEndpoint + "/pinglink")
 	retVal := -1
@@ -59,12 +63,22 @@ func PingInterLink(ctx context.Context, config VirtualKubeletConfig) (bool, int,
 		return false, retVal, err
 	}
 	req.Header.Add("Authorization", "Bearer "+string(token))
+
+	startHttpCall := time.Now().UnixMicro()
+	_, spanHttp := tracer.Start(ctx, "PingHttpCall", trace.WithAttributes(
+		attribute.Int64("start.timestamp", startHttpCall),
+	))
+	defer spanHttp.End()
 	resp, err := http.DefaultClient.Do(req)
+	setDurationSpan(startHttpCall, spanHttp)
+
 	if err != nil {
+		spanHttp.SetAttributes(attribute.Int("exit.code", http.StatusInternalServerError))
 		return false, retVal, err
 	}
 
-	if resp.StatusCode == http.StatusOK {
+	if resp != nil {
+		spanHttp.SetAttributes(attribute.Int("exit.code", resp.StatusCode))
 		retBytes, err := io.ReadAll(resp.Body)
 		if err != nil {
 			log.G(ctx).Error(err)
@@ -75,15 +89,18 @@ func PingInterLink(ctx context.Context, config VirtualKubeletConfig) (bool, int,
 			log.G(ctx).Error(err)
 			return false, retVal, err
 		}
-		return true, retVal, nil
-	} else {
-		log.G(ctx).Error("server error: " + fmt.Sprint(resp.StatusCode))
-		return false, retVal, nil
+
+		if resp.StatusCode != http.StatusOK {
+			log.G(ctx).Error("server error: " + fmt.Sprint(resp.StatusCode))
+			return false, retVal, nil
+		}
 	}
+	return true, retVal, nil
 }
 
 // updateCacheRequest is called when the VK receives the status of a pod already deleted. It performs a REST call InterLink API to update the cache deleting that pod from the cached structure
 func updateCacheRequest(ctx context.Context, config VirtualKubeletConfig, pod v1.Pod, token string) error {
+	tracer := otel.Tracer("interlink-service")
 	bodyBytes, err := json.Marshal(pod)
 	if err != nil {
 		log.L.Error(err)
@@ -100,15 +117,28 @@ func updateCacheRequest(ctx context.Context, config VirtualKubeletConfig, pod v1
 
 	req.Header.Add("Authorization", "Bearer "+token)
 	req.Header.Set("Content-Type", "application/json")
+
+	startHttpCall := time.Now().UnixMicro()
+	_, spanHttp := tracer.Start(ctx, "UpdateCacheHttpCall", trace.WithAttributes(
+		attribute.String("pod.name", pod.Name),
+		attribute.String("pod.namespace", pod.Namespace),
+		attribute.String("pod.uid", string(pod.UID)),
+		attribute.Int64("start.timestamp", startHttpCall),
+	))
+	defer spanHttp.End()
 	resp, err := http.DefaultClient.Do(req)
+	setDurationSpan(startHttpCall, spanHttp)
 	if err != nil {
 		log.L.Error(err)
 		return err
 	}
-	statusCode := resp.StatusCode
+	if resp != nil {
+		statusCode := resp.StatusCode
+		spanHttp.SetAttributes(attribute.Int("exit.code", resp.StatusCode))
 
-	if statusCode != http.StatusOK {
-		return errors.New("Unexpected error occured while updating InterLink cache. Status code: " + strconv.Itoa(resp.StatusCode) + ". Check InterLink's logs for further informations")
+		if statusCode != http.StatusOK {
+			return errors.New("Unexpected error occured while updating InterLink cache. Status code: " + strconv.Itoa(resp.StatusCode) + ". Check InterLink's logs for further informations")
+		}
 	}
 
 	return err
@@ -117,8 +147,9 @@ func updateCacheRequest(ctx context.Context, config VirtualKubeletConfig, pod v1
 // createRequest performs a REST call to the InterLink API when a Pod is registered to the VK. It Marshals the pod with already retrieved ConfigMaps and Secrets and sends it to InterLink.
 // Returns the call response expressed in bytes and/or the first encountered error
 func createRequest(ctx context.Context, config VirtualKubeletConfig, pod types.PodCreateRequests, token string) ([]byte, error) {
+	tracer := otel.Tracer("interlink-service")
 	interLinkEndpoint := getSidecarEndpoint(ctx, config.InterlinkURL, config.Interlinkport)
-	var returnValue, _ = json.Marshal(types.PodStatus{})
+	var returnValue, _ = json.Marshal(types.CreateStruct{})
 
 	bodyBytes, err := json.Marshal(pod)
 	if err != nil {
@@ -132,20 +163,33 @@ func createRequest(ctx context.Context, config VirtualKubeletConfig, pod types.P
 		return nil, err
 	}
 
+	startHttpCall := time.Now().UnixMicro()
+	_, spanHttp := tracer.Start(ctx, "CreateHttpCall", trace.WithAttributes(
+		attribute.String("pod.name", pod.Pod.Name),
+		attribute.String("pod.namespace", pod.Pod.Namespace),
+		attribute.String("pod.uid", string(pod.Pod.UID)),
+		attribute.Int64("start.timestamp", startHttpCall),
+	))
+	defer spanHttp.End()
 	resp, err := doRequest(req, token)
+	setDurationSpan(startHttpCall, spanHttp)
 	if err != nil {
 		log.L.Error(err)
 		return nil, err
 	}
-	statusCode := resp.StatusCode
 
-	if statusCode != http.StatusOK {
-		return nil, errors.New("Unexpected error occured while creating Pods. Status code: " + strconv.Itoa(resp.StatusCode) + ". Check InterLink's logs for further informations")
-	} else {
-		returnValue, err = io.ReadAll(resp.Body)
-		if err != nil {
-			log.L.Error(err)
-			return nil, err
+	if resp != nil {
+		statusCode := resp.StatusCode
+		spanHttp.SetAttributes(attribute.Int("exit.code", resp.StatusCode))
+
+		if statusCode != http.StatusOK {
+			return nil, errors.New("Unexpected error occured while creating Pods. Status code: " + strconv.Itoa(resp.StatusCode) + ". Check InterLink's logs for further informations")
+		} else {
+			returnValue, err = io.ReadAll(resp.Body)
+			if err != nil {
+				log.L.Error(err)
+				return nil, err
+			}
 		}
 	}
 
@@ -155,7 +199,9 @@ func createRequest(ctx context.Context, config VirtualKubeletConfig, pod types.P
 // deleteRequest performs a REST call to the InterLink API when a Pod is deleted from the VK. It Marshals the standard v1.Pod struct and sends it to InterLink.
 // Returns the call response expressed in bytes and/or the first encountered error
 func deleteRequest(ctx context.Context, config VirtualKubeletConfig, pod *v1.Pod, token string) ([]byte, error) {
+	tracer := otel.Tracer("interlink-service")
 	interLinkEndpoint := getSidecarEndpoint(ctx, config.InterlinkURL, config.Interlinkport)
+	var returnValue []byte
 	bodyBytes, err := json.Marshal(pod)
 	if err != nil {
 		log.G(context.Background()).Error(err)
@@ -168,38 +214,51 @@ func deleteRequest(ctx context.Context, config VirtualKubeletConfig, pod *v1.Pod
 		return nil, err
 	}
 
+	startHttpCall := time.Now().UnixMicro()
+	_, spanHttp := tracer.Start(ctx, "DeleteHttpCall", trace.WithAttributes(
+		attribute.String("pod.name", pod.Name),
+		attribute.String("pod.namespace", pod.Namespace),
+		attribute.String("pod.uid", string(pod.UID)),
+		attribute.Int64("start.timestamp", startHttpCall),
+	))
+	defer spanHttp.End()
 	resp, err := doRequest(req, token)
+	setDurationSpan(startHttpCall, spanHttp)
 	if err != nil {
 		log.G(context.Background()).Error(err)
 		return nil, err
 	}
 
-	statusCode := resp.StatusCode
+	if resp != nil {
+		statusCode := resp.StatusCode
+		spanHttp.SetAttributes(attribute.Int("exit.code", resp.StatusCode))
 
-	if statusCode != http.StatusOK {
-		return nil, errors.New("Unexpected error occured while deleting Pods. Status code: " + strconv.Itoa(resp.StatusCode) + ". Check InterLink's logs for further informations")
-	} else {
-		returnValue, err := io.ReadAll(resp.Body)
-		if err != nil {
-			log.G(context.Background()).Error(err)
-			return nil, err
+		if statusCode != http.StatusOK {
+			return nil, errors.New("Unexpected error occured while deleting Pods. Status code: " + strconv.Itoa(resp.StatusCode) + ". Check InterLink's logs for further informations")
+		} else {
+			returnValue, err := io.ReadAll(resp.Body)
+			if err != nil {
+				log.G(context.Background()).Error(err)
+				return nil, err
+			}
+			log.G(context.Background()).Info(string(returnValue))
+			var response []types.PodStatus
+			err = json.Unmarshal(returnValue, &response)
+			if err != nil {
+				log.G(context.Background()).Error(err)
+				return nil, err
+			}
 		}
-		log.G(context.Background()).Info(string(returnValue))
-		var response []types.PodStatus
-		err = json.Unmarshal(returnValue, &response)
-		if err != nil {
-			log.G(context.Background()).Error(err)
-			return nil, err
-		}
-		return returnValue, nil
 	}
+	return returnValue, nil
 }
 
 // statusRequest performs a REST call to the InterLink API when the VK needs an update on its Pods' status. A Marshalled slice of v1.Pod is sent to the InterLink API,
 // to query the below plugin for their status.
 // Returns the call response expressed in bytes and/or the first encountered error
 func statusRequest(ctx context.Context, config VirtualKubeletConfig, podsList []*v1.Pod, token string) ([]byte, error) {
-	var returnValue []byte
+	tracer := otel.Tracer("interlink-service")
+	returnValue, _ := json.Marshal(types.PodStatus{})
 	interLinkEndpoint := getSidecarEndpoint(ctx, config.InterlinkURL, config.Interlinkport)
 
 	bodyBytes, err := json.Marshal(podsList)
@@ -216,18 +275,27 @@ func statusRequest(ctx context.Context, config VirtualKubeletConfig, podsList []
 
 	//log.L.Println(string(bodyBytes))
 
+	startHttpCall := time.Now().UnixMicro()
+	_, spanHttp := tracer.Start(ctx, "StatusHttpCall", trace.WithAttributes(
+		attribute.Int64("start.timestamp", startHttpCall),
+	))
+	defer spanHttp.End()
 	resp, err := doRequest(req, token)
+	setDurationSpan(startHttpCall, spanHttp)
 	if err != nil {
 		return nil, err
 	}
 
-	if resp.StatusCode != http.StatusOK {
-		return nil, errors.New("Unexpected error occured while getting status. Status code: " + strconv.Itoa(resp.StatusCode) + ". Check InterLink's logs for further informations")
-	} else {
-		returnValue, err = io.ReadAll(resp.Body)
-		if err != nil {
-			log.L.Error(err)
-			return nil, err
+	if resp != nil {
+		spanHttp.SetAttributes(attribute.Int("exit.code", resp.StatusCode))
+		if resp.StatusCode != http.StatusOK {
+			return nil, errors.New("Unexpected error occured while getting status. Status code: " + strconv.Itoa(resp.StatusCode) + ". Check InterLink's logs for further informations")
+		} else {
+			returnValue, err = io.ReadAll(resp.Body)
+			if err != nil {
+				log.L.Error(err)
+				return nil, err
+			}
 		}
 	}
 
@@ -238,6 +306,8 @@ func statusRequest(ctx context.Context, config VirtualKubeletConfig, podsList []
 // This struct only includes a minimum data set needed to identify the job/container to get the logs from.
 // Returns the call response and/or the first encountered error
 func LogRetrieval(ctx context.Context, config VirtualKubeletConfig, logsRequest types.LogStruct) (io.ReadCloser, error) {
+	tracer := otel.Tracer("interlink-service")
+	var returnValue io.ReadCloser
 	interLinkEndpoint := getSidecarEndpoint(ctx, config.InterlinkURL, config.Interlinkport)
 	b, err := os.ReadFile(config.VKTokenFile) // just pass the file name
 	if err != nil {
@@ -259,18 +329,30 @@ func LogRetrieval(ctx context.Context, config VirtualKubeletConfig, logsRequest 
 
 	//log.G(ctx).Println(string(bodyBytes))
 
+	startHttpCall := time.Now().UnixMicro()
+	_, spanHttp := tracer.Start(ctx, "LogHttpCall", trace.WithAttributes(
+		attribute.String("pod.name", logsRequest.PodName),
+		attribute.String("pod.namespace", logsRequest.Namespace),
+		attribute.String("pod.uid", logsRequest.PodUID),
+		attribute.Int64("start.timestamp", startHttpCall),
+	))
+	defer spanHttp.End()
 	resp, err := doRequest(req, token)
+	setDurationSpan(startHttpCall, spanHttp)
 	if err != nil {
 		log.G(ctx).Error(err)
 		return nil, err
 	}
 
-	if resp.StatusCode != http.StatusOK {
-		log.G(ctx).Info(resp.Body)
-		return nil, errors.New("Unexpected error occured while getting logs. Status code: " + strconv.Itoa(resp.StatusCode) + ". Check InterLink's logs for further informations")
-	} else {
-		return resp.Body, nil
+	if resp != nil {
+		spanHttp.SetAttributes(attribute.Int("exit.code", resp.StatusCode))
+		if resp.StatusCode != http.StatusOK {
+			err = errors.New("Unexpected error occured while getting logs. Status code: " + strconv.Itoa(resp.StatusCode) + ". Check InterLink's logs for further informations")
+		} else {
+			returnValue = resp.Body
+		}
 	}
+	return returnValue, err
 }
 
 // RemoteExecution is called by the VK everytime a Pod is being registered or deleted to/from the VK.
@@ -524,4 +606,11 @@ func checkPodsStatus(ctx context.Context, p *VirtualKubeletProvider, podsList []
 	}
 
 	return nil, err
+}
+
+func setDurationSpan(startTime int64, span trace.Span) {
+	endTime := time.Now().UnixMicro()
+	duration := endTime - startTime
+	span.SetAttributes(attribute.Int64("end.timestamp", endTime))
+	span.SetAttributes(attribute.Int64("duration", duration))
 }

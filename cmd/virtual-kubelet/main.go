@@ -18,8 +18,10 @@ package main
 import (
 	"context"
 	"crypto/tls"
+	"crypto/x509"
 	"flag"
 	"fmt"
+	"io/ioutil"
 	"net"
 	"os"
 	"path"
@@ -28,7 +30,7 @@ import (
 
 	// "k8s.io/client-go/rest"
 	"google.golang.org/grpc"
-	"google.golang.org/grpc/credentials/insecure"
+	"google.golang.org/grpc/credentials"
 	v1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/fields"
 	"k8s.io/client-go/kubernetes/scheme"
@@ -106,13 +108,6 @@ func initProvider() (func(context.Context) error, error) {
 		return nil, fmt.Errorf("failed to create resource: %w", err)
 	}
 
-	// TODO: disable is telemetry is disabled
-
-	// If the OpenTelemetry Collector is running on a local cluster (minikube or
-	// microk8s), it should be accessible through the NodePort service at the
-	// `localhost:30080` endpoint. Otherwise, replace `localhost` with the
-	// endpoint of your cluster. If you run the app inside k8s, then you can
-	// probably connect directly to the service through dns.
 	ctx, cancel := context.WithTimeout(ctx, time.Second)
 	defer cancel()
 
@@ -122,11 +117,35 @@ func initProvider() (func(context.Context) error, error) {
 		otlpEndpoint = "localhost:4317"
 	}
 
-	conn, err := grpc.DialContext(ctx, otlpEndpoint,
-		// Note the use of insecure transport here. TLS is recommended in production.
-		grpc.WithTransportCredentials(insecure.NewCredentials()),
-		grpc.WithBlock(),
-	)
+	fmt.Println("TELEMETRY_ENDPOINT: ", otlpEndpoint)
+
+	crtFilePath := os.Getenv("TELEMETRY_CRTFILEPATH")
+
+	conn := &grpc.ClientConn{}
+
+	if crtFilePath != "" {
+		cert, err := ioutil.ReadFile(crtFilePath)
+		if err != nil {
+			return nil, fmt.Errorf("failed to create resource: %w", err)
+		}
+
+		roots := x509.NewCertPool()
+		if !roots.AppendCertsFromPEM(cert) {
+			return nil, fmt.Errorf("failed to create resource: %w", err)
+		}
+
+		creds := credentials.NewTLS(&tls.Config{
+			RootCAs: roots,
+		})
+
+		conn, err = grpc.DialContext(ctx, otlpEndpoint,
+			grpc.WithTransportCredentials(creds),
+			grpc.WithBlock(),
+		)
+	} else {
+		conn, err = grpc.DialContext(ctx, otlpEndpoint, grpc.WithInsecure(), grpc.WithBlock())
+	}
+
 	if err != nil {
 		return nil, fmt.Errorf("failed to create gRPC connection to collector: %w", err)
 	}
@@ -150,13 +169,7 @@ func initProvider() (func(context.Context) error, error) {
 	// set global propagator to tracecontext (the default is no-op).
 	otel.SetTextMapPropagator(propagation.TraceContext{})
 
-	// Shutdown will flush any remaining spans and shut down the exporter.
 	return tracerProvider.Shutdown, nil
-}
-
-func tlsConfig(tls *tls.Config) error {
-	tls.InsecureSkipVerify = true
-	return nil
 }
 
 func main() {
