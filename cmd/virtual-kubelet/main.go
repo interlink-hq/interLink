@@ -308,6 +308,9 @@ func main() {
 		resync,
 	)
 
+	scmInformer := scmInformerFactory.Core().V1().Secrets().Informer()
+	podInformer := podInformerFactory.Core().V1().Secrets().Informer()
+
 	podControllerConfig := node.PodControllerConfig{
 		PodClient:         localClient.CoreV1(),
 		Provider:          nodeProvider,
@@ -325,6 +328,8 @@ func main() {
 	// start informers ->
 	go podInformerFactory.Start(stopper)
 	go scmInformerFactory.Start(stopper)
+	go scmInformer.Run(stopper)
+	go podInformer.Run(stopper)
 
 	// start to sync and call list
 	if !cache.WaitForCacheSync(stopper, podInformerFactory.Core().V1().Pods().Informer().HasSynced) {
