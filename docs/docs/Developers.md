@@ -41,11 +41,11 @@ That means you can test your code **before** any commit, discovering in advance 
 For a simple demonstration, you can use the plugin that we actually use in are Github Actions:
 
 ```bash
-git clone -b 2-light-version-no-gpu https://github.com/interTwin-eu/interlink-docker-plugin.git
-cd interlink-docker-plugin/
-make
-export INTERLINKCONFIGPATH=$PATH_TO_MAY_PLUGINCONFIG/plugin-config.yaml
-./bin/docker-sd
+wget https://github.com/interTwin-eu/interlink-docker-plugin/releases/download/0.0.22-no-gpu/docker-plugin_Linux_x86_64 -O docker-plugin \
+  && chmod +x docker-plugin \
+  && docker ps \
+  && export INTERLINKCONFIGPATH=$PWD/ci/manifests/plugin-config.yaml \
+  && ./docker-plugin
 ```
 
 #### Run the tests
