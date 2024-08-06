@@ -15,7 +15,9 @@ import (
 	"github.com/virtual-kubelet/virtual-kubelet/errdefs"
 	"github.com/virtual-kubelet/virtual-kubelet/node/api"
 	stats "github.com/virtual-kubelet/virtual-kubelet/node/api/statsv1alpha1"
-	"github.com/virtual-kubelet/virtual-kubelet/trace"
+	"go.opentelemetry.io/otel"
+	"go.opentelemetry.io/otel/attribute"
+	trace "go.opentelemetry.io/otel/trace"
 	v1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/api/resource"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -346,15 +348,22 @@ func (p *VirtualKubeletProvider) Ping(ctx context.Context) error {
 
 // CreatePod accepts a Pod definition and stores it in memory in p.pods
 func (p *VirtualKubeletProvider) CreatePod(ctx context.Context, pod *v1.Pod) error {
-	ctx, span := trace.StartSpan(ctx, "CreatePod")
+	start := time.Now().Unix()
+	tracer := otel.Tracer("interlink-service")
+	ctx, span := tracer.Start(ctx, "CreatePodVK", trace.WithAttributes(
+		attribute.String("pod.name", pod.Name),
+		attribute.String("pod.namespace", pod.Namespace),
+		attribute.Int64("start.timestamp", start),
+	))
+	defer span.End()
+
 	var hasInitContainers = false
 	var state v1.ContainerState
 	defer span.End()
 
-	// Add the pod's coordinates to the current span.
-	ctx = addAttributes(ctx, span, NamespaceKey, pod.Namespace, NameKey, pod.Name)
 	key, err := buildKey(pod)
 	if err != nil {
+		setDurationSpan(start, span)
 		return err
 	}
 	now := metav1.NewTime(time.Now())
@@ -427,6 +436,7 @@ func (p *VirtualKubeletProvider) CreatePod(ctx context.Context, pod *v1.Pod) err
 		err := RemoteExecution(ctx, p.config, p, pod, CREATE)
 		if err != nil {
 			if err.Error() == "Deleted pod before actual creation" {
+				setDurationSpan(start, span)
 				log.G(ctx).Warn(err)
 			} else {
 				// TODO if node in NotReady put it to Unknown/pending?
@@ -455,6 +465,7 @@ func (p *VirtualKubeletProvider) CreatePod(ctx context.Context, pod *v1.Pod) err
 				p.UpdatePod(ctx, pod)
 
 			}
+			setDurationSpan(start, span)
 			return
 		}
 	}()
@@ -474,40 +485,52 @@ func (p *VirtualKubeletProvider) CreatePod(ctx context.Context, pod *v1.Pod) err
 
 	p.pods[key] = pod
 
+	setDurationSpan(start, span)
+
 	return nil
 }
 
 // UpdatePod accepts a Pod definition and updates its reference.
 func (p *VirtualKubeletProvider) UpdatePod(ctx context.Context, pod *v1.Pod) error {
-	ctx, span := trace.StartSpan(ctx, "UpdatePod")
+	start := time.Now().Unix()
+	tracer := otel.Tracer("interlink-service")
+	ctx, span := tracer.Start(ctx, "UpdatePodVK", trace.WithAttributes(
+		attribute.String("pod.name", pod.Name),
+		attribute.String("pod.namespace", pod.Namespace),
+		attribute.Int64("start.timestamp", start),
+	))
 	defer span.End()
-
-	// Add the pod's coordinates to the current span.
-	ctx = addAttributes(ctx, span, NamespaceKey, pod.Namespace, NameKey, pod.Name)
 
 	log.G(ctx).Infof("receive UpdatePod %q", pod.Name)
 
 	p.notifier(pod)
+
+	setDurationSpan(start, span)
 
 	return nil
 }
 
 // DeletePod deletes the specified pod and drops it out of p.pods
 func (p *VirtualKubeletProvider) DeletePod(ctx context.Context, pod *v1.Pod) (err error) {
-	ctx, span := trace.StartSpan(ctx, "DeletePod")
+	start := time.Now().Unix()
+	tracer := otel.Tracer("interlink-service")
+	ctx, span := tracer.Start(ctx, "DeletePodVK", trace.WithAttributes(
+		attribute.String("pod.name", pod.Name),
+		attribute.String("pod.namespace", pod.Namespace),
+		attribute.Int64("start.timestamp", start),
+	))
 	defer span.End()
-
-	// Add the pod's coordinates to the current span.
-	ctx = addAttributes(ctx, span, NamespaceKey, pod.Namespace, NameKey, pod.Name)
 
 	log.G(ctx).Infof("receive DeletePod %q", pod.Name)
 
 	key, err := buildKey(pod)
 	if err != nil {
+		setDurationSpan(start, span)
 		return err
 	}
 
 	if _, exists := p.pods[key]; !exists {
+		setDurationSpan(start, span)
 		return errdefs.NotFound("pod not found")
 	}
 
@@ -518,6 +541,7 @@ func (p *VirtualKubeletProvider) DeletePod(ctx context.Context, pod *v1.Pod) (er
 		err = RemoteExecution(ctx, p.config, p, pod, DELETE)
 		if err != nil {
 			log.G(ctx).Error(err)
+			setDurationSpan(start, span)
 			return
 		}
 	}()
@@ -549,56 +573,72 @@ func (p *VirtualKubeletProvider) DeletePod(ctx context.Context, pod *v1.Pod) (er
 	// delete from p.pods
 	delete(p.pods, key)
 
+	setDurationSpan(start, span)
+
 	return nil
 }
 
 // GetPod returns a pod by name that is stored in memory.
 func (p *VirtualKubeletProvider) GetPod(ctx context.Context, namespace, name string) (pod *v1.Pod, err error) {
-
-	ctx, span := trace.StartSpan(ctx, "GetPod")
-	defer func() {
-		span.SetStatus(err)
-		span.End()
-	}()
-
-	// Add the pod's coordinates to the current span.
-	ctx = addAttributes(ctx, span, NamespaceKey, namespace, NameKey, name)
+	start := time.Now().Unix()
+	tracer := otel.Tracer("interlink-service")
+	ctx, span := tracer.Start(ctx, "GetPodVK", trace.WithAttributes(
+		attribute.String("pod.name", name),
+		attribute.String("pod.namespace", namespace),
+		attribute.Int64("start.timestamp", start),
+	))
+	defer span.End()
 
 	log.G(ctx).Infof("receive GetPod %q", name)
 
 	key, err := buildKeyFromNames(namespace, name)
 	if err != nil {
+		setDurationSpan(start, span)
 		return nil, err
 	}
 
 	if pod, ok := p.pods[key]; ok {
+		setDurationSpan(start, span)
 		return pod, nil
 	}
+
+	setDurationSpan(start, span)
+
 	return nil, errdefs.NotFoundf("pod \"%s/%s\" is not known to the provider", namespace, name)
 }
 
 // GetPodStatus returns the status of a pod by name that is "running".
 // returns nil if a pod by that name is not found.
 func (p *VirtualKubeletProvider) GetPodStatus(ctx context.Context, namespace, name string) (*v1.PodStatus, error) {
-	ctx, span := trace.StartSpan(ctx, "GetPodStatus")
+	start := time.Now().Unix()
+	tracer := otel.Tracer("interlink-service")
+	ctx, span := tracer.Start(ctx, "GetPodStatusVK", trace.WithAttributes(
+		attribute.String("pod.name", name),
+		attribute.String("pod.namespace", namespace),
+		attribute.Int64("start.timestamp", start),
+	))
 	defer span.End()
-
-	// Add namespace and name as attributes to the current span.
-	ctx = addAttributes(ctx, span, NamespaceKey, namespace, NameKey, name)
 
 	log.G(ctx).Infof("receive GetPodStatus %q", name)
 
 	pod, err := p.GetPod(ctx, namespace, name)
 	if err != nil {
+		setDurationSpan(start, span)
 		return nil, err
 	}
+
+	setDurationSpan(start, span)
 
 	return &pod.Status, nil
 }
 
 // GetPods returns a list of all pods known to be "running".
 func (p *VirtualKubeletProvider) GetPods(ctx context.Context) ([]*v1.Pod, error) {
-	ctx, span := trace.StartSpan(ctx, "GetPods")
+	start := time.Now().Unix()
+	tracer := otel.Tracer("interlink-service")
+	ctx, span := tracer.Start(ctx, "GetPodsVK", trace.WithAttributes(
+		attribute.Int64("start.timestamp", start),
+	))
 	defer span.End()
 
 	log.G(ctx).Info("receive GetPods")
@@ -612,6 +652,7 @@ func (p *VirtualKubeletProvider) GetPods(ctx context.Context) ([]*v1.Pod, error)
 		pods = append(pods, pod)
 	}
 
+	setDurationSpan(start, span)
 	return pods, nil
 }
 
@@ -727,28 +768,14 @@ func (p *VirtualKubeletProvider) statusLoop(ctx context.Context) {
 	}
 }
 
-// addAttributes adds the specified attributes to the provided span.
-// attrs must be an even-sized list of string arguments.
-// Otherwise, the span won't be modified.
-// TODO: Refactor and move to a "tracing utilities" package.
-func addAttributes(ctx context.Context, span trace.Span, attrs ...string) context.Context {
-	if len(attrs)%2 == 1 {
-		return ctx
-	}
-	for i := 0; i < len(attrs); i += 2 {
-		ctx = span.WithField(ctx, attrs[i], attrs[i+1])
-	}
-	return ctx
-}
-
 // GetLogs implements the logic for interLink pod logs retrieval.
 func (p *VirtualKubeletProvider) GetLogs(ctx context.Context, namespace, podName, containerName string, opts api.ContainerLogOpts) (io.ReadCloser, error) {
-	var span trace.Span
-	ctx, span = trace.StartSpan(ctx, "GetLogs") //nolint: ineffassign,staticcheck
+	start := time.Now().Unix()
+	tracer := otel.Tracer("interlink-service")
+	ctx, span := tracer.Start(ctx, "GetLogsVK", trace.WithAttributes(
+		attribute.Int64("start.timestamp", start),
+	))
 	defer span.End()
-
-	// Add namespace and name as attributes to the current span.
-	ctx = addAttributes(ctx, span, NamespaceKey, namespace, NameKey, podName)
 
 	log.G(ctx).Infof("receive GetPodLogs %q", podName)
 
@@ -765,13 +792,17 @@ func (p *VirtualKubeletProvider) GetLogs(ctx context.Context, namespace, podName
 		Opts:          types.ContainerLogOpts(opts),
 	}
 
+	setDurationSpan(start, span)
 	return LogRetrieval(ctx, p.config, logsRequest)
 }
 
 // GetStatsSummary returns dummy stats for all pods known by this provider.
 func (p *VirtualKubeletProvider) GetStatsSummary(ctx context.Context) (*stats.Summary, error) {
-	var span trace.Span
-	_, span = trace.StartSpan(ctx, "GetStatsSummary") //nolint: ineffassign,staticcheck
+	start := time.Now().Unix()
+	tracer := otel.Tracer("interlink-service")
+	_, span := tracer.Start(ctx, "GetStatsSummaryVK", trace.WithAttributes(
+		attribute.Int64("start.timestamp", start),
+	))
 	defer span.End()
 
 	// Grab the current timestamp so we can report it as the time the stats were generated.
@@ -843,13 +874,18 @@ func (p *VirtualKubeletProvider) GetStatsSummary(ctx context.Context) (*stats.Su
 	}
 
 	// Return the dummy stats.
+	setDurationSpan(start, span)
 	return res, nil
 }
 
 // RetrievePodsFromCluster scans all pods registered to the K8S cluster and re-assigns the ones with a valid JobID to the Virtual Kubelet.
 // This will run at the initiation time only
 func (p *VirtualKubeletProvider) RetrievePodsFromCluster(ctx context.Context) error {
-	ctx, span := trace.StartSpan(ctx, "RetrievePodsFromCluster")
+	start := time.Now().Unix()
+	tracer := otel.Tracer("interlink-service")
+	ctx, span := tracer.Start(ctx, "RetrievePodsFromCluster", trace.WithAttributes(
+		attribute.Int64("start.timestamp", start),
+	))
 	defer span.End()
 
 	log.G(ctx).Info("Retrieving ALL Pods registered to the cluster and owned by VK")
@@ -879,6 +915,7 @@ func (p *VirtualKubeletProvider) RetrievePodsFromCluster(ctx context.Context) er
 
 	}
 
+	setDurationSpan(start, span)
 	return err
 }
 
@@ -894,7 +931,11 @@ func CheckIfAnnotationExists(pod *v1.Pod, key string) bool {
 }
 
 func (p *VirtualKubeletProvider) initClientSet(ctx context.Context) error {
-	ctx, span := trace.StartSpan(ctx, "InitClientSet")
+	start := time.Now().Unix()
+	tracer := otel.Tracer("interlink-service")
+	ctx, span := tracer.Start(ctx, "InitClientSet", trace.WithAttributes(
+		attribute.Int64("start.timestamp", start),
+	))
 	defer span.End()
 
 	if p.clientSet == nil {
@@ -913,5 +954,6 @@ func (p *VirtualKubeletProvider) initClientSet(ctx context.Context) error {
 		}
 	}
 
+	setDurationSpan(start, span)
 	return nil
 }
