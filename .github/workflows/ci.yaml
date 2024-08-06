@@ -23,10 +23,11 @@ jobs:
         id: get_repo_owner
         run: echo ::set-output name=repo_owner::$(echo ${{ github.repository_owner }} | tr '[:upper:]' '[:lower:]')
       - name: Integration Test
-        uses: dagger/dagger-for-github@v5
+        uses: dagger/dagger-for-github@v6
         with:
           workdir: ci
           verb: call
-          args: -s  --plugin-endpoint tcp://localhost:4000 --name $GITHUB_SHA --manifests $PWD/manifests build-images --source-folder ../ new-interlink test stdout
+          args: -s --name my-test build-images --source-folder ../ new-interlink --plugin-endpoint tcp://localhost:4000 --manifests ./manifests test stdout
           cloud-token: ${{ secrets.DAGGER_CLOUD_TOKEN }}
-          #dagger-flags: -d
+          version: "0.11.9"
+          dagger-flags: -d

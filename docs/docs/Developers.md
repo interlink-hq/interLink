@@ -61,12 +61,12 @@ To run the default tests you can move to `ci` folder and execute the Dagger pipe
 
 ```bash
 dagger call \
-    --plugin-endpoint tcp://localhost:4000 \
     --name my-tests \
-    --manifests ./manifests \
   build-images \
     --source-folder ../ \
   new-interlink \
+    --plugin-endpoint tcp://localhost:4000 \
+    --manifests ./manifests \
   test stdout
 ```
 
@@ -101,12 +101,12 @@ In case something went wrong, you have the possibility to spawn a session inside
 
 ```bash
 dagger call \
-    --plugin-endpoint tcp://localhost:4000 \
     --name my-tests \
-    --manifests ./manifests \
   build-images \
     --source-folder ../ \
   new-interlink \
+    --manifests ./manifests \
+    --plugin-endpoint tcp://localhost:4000 \
   run terminal
 
 ```
@@ -131,11 +131,11 @@ You can get the Kubernetes service running with:
 
 ```bash
 dagger call \
-    --plugin-endpoint tcp://localhost:4000 \
     --name my-tests \
-    --manifests ./manifests \
   build-images \
     --source-folder ../ \
+    --plugin-endpoint tcp://localhost:4000 \
+    --manifests ./manifests \
   new-interlink \
   kube up 
 ```
@@ -144,9 +144,7 @@ and then from another session, you can get the kubeconfig with:
 
 ```bash
 dagger call \
-    --plugin-endpoint tcp://localhost:4000 \
     --name my-tests \
-    --manifests ./manifests \
   config export --path ./kubeconfig.yaml
 ```
 
