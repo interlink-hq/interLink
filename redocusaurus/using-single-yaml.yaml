@@ -12,7 +12,10 @@ paths:
         content:
           application/json:
             schema:
-              $ref: '#/components/schemas/Pod'
+              items:
+                $ref: '#/components/schemas/Pod'
+              type: array
+              title: Pod
         required: true
       responses:
         '200':
@@ -114,11 +117,11 @@ components:
             - type: object
             - type: 'null'
           title: Data
-        binaryData:
+        binary_data:
           anyOf:
             - type: object
             - type: 'null'
-          title: Binarydata
+          title: Binary Data
         type:
           anyOf:
             - type: string
@@ -171,11 +174,11 @@ components:
             - type: boolean
             - type: 'null'
           title: Optional
-        defaultMode:
+        default_mode:
           anyOf:
             - type: integer
             - type: 'null'
-          title: Defaultmode
+          title: Default Mode
       type: object
       required:
         - name
@@ -211,13 +214,13 @@ components:
             - type: 'null'
           title: Resources
           default: {}
-        volumeMounts:
+        volume_mounts:
           anyOf:
             - items:
                 $ref: '#/components/schemas/VolumeMount'
               type: array
             - type: 'null'
-          title: Volumemounts
+          title: Volume Mounts
           default: []
         env:
           anyOf:
@@ -226,7 +229,7 @@ components:
               type: array
             - type: 'null'
           title: Env
-        securityContext:
+        security_context:
           anyOf:
             - $ref: '#/components/schemas/SecurityContext'
             - type: 'null'
@@ -266,16 +269,16 @@ components:
       title: ContainerStatus
     CreateStruct:
       properties:
-        PodUID:
+        pod_uid:
           type: string
-          title: Poduid
-        PodJID:
+          title: Pod Uid
+        pod_jid:
           type: string
-          title: Podjid
+          title: Pod Jid
       type: object
       required:
-        - PodUID
-        - PodJID
+        - pod_uid
+        - pod_jid
       title: CreateStruct
     EnvVar:
       properties:
@@ -287,7 +290,7 @@ components:
             - type: string
             - type: 'null'
           title: Value
-        valueFrom:
+        value_from:
           anyOf:
             - $ref: '#/components/schemas/EnvVarSource'
             - type: 'null'
@@ -297,11 +300,11 @@ components:
       title: EnvVar
     EnvVarSource:
       properties:
-        configMapKeyRef:
+        config_map_key_ref:
           anyOf:
             - $ref: '#/components/schemas/ConfigMapKeySelector'
             - type: 'null'
-        secretKeyRef:
+        secret_key_ref:
           anyOf:
             - $ref: '#/components/schemas/SecretKeySelector'
             - type: 'null'
@@ -338,62 +341,62 @@ components:
       title: KeyToPath
     LogOpts:
       properties:
-        Tail:
+        tail:
           anyOf:
             - type: integer
             - type: 'null'
           title: Tail
-        LimitBytes:
+        limit_bytes:
           anyOf:
             - type: integer
             - type: 'null'
-          title: Limitbytes
-        Timestamps:
+          title: Limit Bytes
+        timestamps:
           anyOf:
             - type: boolean
             - type: 'null'
           title: Timestamps
-        Previous:
+        previous:
           anyOf:
             - type: boolean
             - type: 'null'
           title: Previous
-        SinceSeconds:
+        since_seconds:
           anyOf:
             - type: integer
             - type: 'null'
-          title: Sinceseconds
-        SinceTime:
+          title: Since Seconds
+        since_time:
           anyOf:
             - type: string
               format: date-time
             - type: 'null'
-          title: Sincetime
+          title: Since Time
       type: object
       title: LogOpts
     LogRequest:
       properties:
-        Namespace:
+        namespace:
           type: string
           title: Namespace
-        PodUID:
+        pod_uid:
           type: string
-          title: Poduid
-        PodName:
+          title: Pod Uid
+        pod_name:
           type: string
-          title: Podname
-        ContainerName:
+          title: Pod Name
+        container_name:
           type: string
-          title: Containername
-        Opts:
+          title: Container Name
+        opts:
           $ref: '#/components/schemas/LogOpts'
       type: object
       required:
-        - Namespace
-        - PodUID
-        - PodName
-        - ContainerName
-        - Opts
+        - namespace
+        - pod_uid
+        - pod_name
+        - container_name
+        - opts
       title: LogRequest
     Metadata:
       properties:
@@ -428,11 +431,11 @@ components:
             - type: 'null'
           title: Labels
           default: {}
-        generateName:
+        generate_name:
           anyOf:
             - type: string
             - type: 'null'
-          title: Generatename
+          title: Generate Name
       type: object
       title: Metadata
     Pod:
@@ -467,13 +470,13 @@ components:
             $ref: '#/components/schemas/Container'
           type: array
           title: Containers
-        initContainers:
+        init_containers:
           anyOf:
             - items:
                 $ref: '#/components/schemas/Container'
               type: array
             - type: 'null'
-          title: Initcontainers
+          title: Init Containers
         volumes:
           anyOf:
             - items:
@@ -481,31 +484,31 @@ components:
               type: array
             - type: 'null'
           title: Volumes
-        preemptionPolicy:
+        preemption_policy:
           anyOf:
             - type: string
             - type: 'null'
-          title: Preemptionpolicy
-        priorityClassName:
+          title: Preemption Policy
+        priority_class_name:
           anyOf:
             - type: string
             - type: 'null'
-          title: Priorityclassname
+          title: Priority Class Name
         priority:
           anyOf:
             - type: integer
             - type: 'null'
           title: Priority
-        restartPolicy:
+        restart_policy:
           anyOf:
             - type: string
             - type: 'null'
-          title: Restartpolicy
-        terminationGracePeriodSeconds:
+          title: Restart Policy
+        termination_grace_period_seconds:
           anyOf:
             - type: integer
             - type: 'null'
-          title: Terminationgraceperiodseconds
+          title: Termination Grace Period Seconds
       type: object
       required:
         - containers
@@ -515,7 +518,7 @@ components:
         name:
           type: string
           title: Name
-        UID:
+        uid:
           type: string
           title: Uid
         namespace:
@@ -529,7 +532,7 @@ components:
       type: object
       required:
         - name
-        - UID
+        - uid
         - namespace
         - containers
       title: PodStatus
@@ -538,16 +541,16 @@ components:
         name:
           type: string
           title: Name
-        emptyDir:
+        empty_dir:
           anyOf:
             - type: object
             - type: 'null'
-          title: Emptydir
+          title: Empty Dir
         secret:
           anyOf:
             - $ref: '#/components/schemas/SecretVolumeSource'
             - type: 'null'
-        configMap:
+        config_map:
           anyOf:
             - $ref: '#/components/schemas/ConfigMapVolumeSource'
             - type: 'null'
@@ -564,11 +567,11 @@ components:
             - type: object
             - type: 'null'
           title: Data
-        stringData:
+        string_data:
           anyOf:
             - type: object
             - type: 'null'
-          title: Stringdata
+          title: String Data
         type:
           anyOf:
             - type: string
@@ -604,9 +607,9 @@ components:
       title: SecretKeySelector
     SecretVolumeSource:
       properties:
-        secretName:
+        secret_name:
           type: string
-          title: Secretname
+          title: Secret Name
         items:
           anyOf:
             - items:
@@ -620,68 +623,68 @@ components:
             - type: boolean
             - type: 'null'
           title: Optional
-        defaultMode:
+        default_mode:
           anyOf:
             - type: integer
             - type: 'null'
-          title: Defaultmode
+          title: Default Mode
       type: object
       required:
-        - secretName
+        - secret_name
       title: SecretVolumeSource
     SecurityContext:
       properties:
-        allowPrivilegeEscalation:
+        allow_privilege_escalation:
           anyOf:
             - type: boolean
             - type: 'null'
-          title: Allowprivilegeescalation
+          title: Allow Privilege Escalation
         privileged:
           anyOf:
             - type: boolean
             - type: 'null'
           title: Privileged
-        procMount:
+        proc_mount:
           anyOf:
             - type: string
             - type: 'null'
-          title: Procmount
-        readOnlyFileSystem:
+          title: Proc Mount
+        read_only_file_system:
           anyOf:
             - type: boolean
             - type: 'null'
-          title: Readonlyfilesystem
-        runAsGroup:
+          title: Read Only File System
+        run_as_group:
           anyOf:
             - type: integer
             - type: 'null'
-          title: Runasgroup
-        runAsNonRoot:
+          title: Run As Group
+        run_as_non_root:
           anyOf:
             - type: boolean
             - type: 'null'
-          title: Runasnonroot
-        runAsUser:
+          title: Run As Non Root
+        run_as_user:
           anyOf:
             - type: integer
             - type: 'null'
-          title: Runasuser
+          title: Run As User
       type: object
       title: SecurityContext
     StateRunning:
       properties:
-        startedAt:
+        started_at:
           anyOf:
             - type: string
             - type: 'null'
-          title: Startedat
+          title: Started At
       type: object
       title: StateRunning
     StateTerminated:
       properties:
-        exitCode:
+        exit_code:
           type: integer
-          title: Exitcode
+          title: Exit Code
         reason:
           anyOf:
             - type: string
@@ -689,7 +692,7 @@ components:
           title: Reason
       type: object
       required:
-        - exitCode
+        - exit_code
       title: StateTerminated
     StateWaiting:
       properties:
@@ -731,13 +734,13 @@ components:
         name:
           type: string
           title: Name
-        configMaps:
+        config_maps:
           anyOf:
             - items:
                 $ref: '#/components/schemas/ConfigMap'
               type: array
             - type: 'null'
-          title: Configmaps
+          title: Config Maps
         secrets:
           anyOf:
             - items:
@@ -745,13 +748,13 @@ components:
               type: array
             - type: 'null'
           title: Secrets
-        emptyDirs:
+        empty_dirs:
           anyOf:
             - items:
                 type: string
               type: array
             - type: 'null'
-          title: Emptydirs
+          title: Empty Dirs
       type: object
       required:
         - name
@@ -761,27 +764,27 @@ components:
         name:
           type: string
           title: Name
-        mountPath:
+        mount_path:
           type: string
-          title: Mountpath
-        subPath:
+          title: Mount Path
+        sub_path:
           anyOf:
             - type: string
             - type: 'null'
-          title: Subpath
-        readOnly:
+          title: Sub Path
+        read_only:
           anyOf:
             - type: boolean
             - type: 'null'
-          title: Readonly
+          title: Read Only
           default: false
-        mountPropagation:
+        mount_propagation:
           anyOf:
             - type: string
             - type: 'null'
-          title: Mountpropagation
+          title: Mount Propagation
       type: object
       required:
         - name
-        - mountPath
+        - mount_path
       title: VolumeMount
