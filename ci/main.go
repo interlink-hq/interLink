@@ -1,3 +1,8 @@
+// A module to instantiate and tests interLink components
+//
+// Visit the interLink documentation for more info: https://intertwin-eu.github.io/interLink/docs/intro/
+//
+
 package main
 
 import (
@@ -6,8 +11,7 @@ import (
 	"fmt"
 	"html/template"
 	"strings"
-
-	"dagger/interlink/internal/dagger"
+	"time"
 )
 
 var (
@@ -43,37 +47,135 @@ type patchSchema struct {
 	VirtualKubeletRef string
 }
 
+// Interlink struct for initialization and internal variables
 type Interlink struct {
-	K8s               *K8sInstance
-	Plugin            *Container
+	Name              string
+	Registry          *Service
+	K3sService        *Service
+	Manifests         *Directory
 	VirtualKubeletRef string
 	InterlinkRef      string
-	Manifests         *Directory
-	// TODO: services on NodePort?
-	//virtualkubelet bool
-	//interlink      bool
-	//plugin         bool
-	CleanupCluster bool
+	// +private
+	Kubectl *Container
 }
 
-func (i *Interlink) BuildImages(
+// New initializes the Dagger module at each call
+func New(name string,
+	// +optional
+	// +default="dciangot/docker-plugin:v1"
+	pluginImage string,
+	// +optional
+	pluginEndpoint *Service,
+	// +optional
+	pluginConfig *File,
+	manifests *Directory,
+) *Interlink {
+
+	regSvc := dag.Container().From("registry").
+		WithExposedPort(5000).AsService()
+
+	if pluginEndpoint == nil {
+		plugin := dag.Container().From(pluginImage).
+			WithFile("/etc/interlink/InterLinkConfig.yaml", pluginConfig).
+			WithEnvVariable("INTERLINKCONFIGPATH", "/etc/interlink/InterLinkConfig.yaml").
+			WithExec([]string{"bash", "-c", "dockerd --mtu 1450 & /sidecar/docker-sidecar & sleep infinity"}, ContainerWithExecOpts{InsecureRootCapabilities: true}).
+			WithExposedPort(4000)
+
+		pluginEndpoint = plugin.AsService()
+	}
+
+	K3s := dag.K3S(name).With(func(k *K3S) *K3S {
+		return k.WithContainer(
+			k.Container().
+				WithEnvVariable("BUST", time.Now().String()).
+				WithMountedDirectory("/manifests", manifests).
+				WithExec([]string{"sh", "-c", `
+cat <<EOF > /etc/rancher/k3s/registries.yaml
+mirrors:
+  "registry:5000":
+    endpoint:
+      - "http://registry:5000"
+EOF`}, ContainerWithExecOpts{SkipEntrypoint: true}).
+				WithServiceBinding("registry", regSvc).
+				WithServiceBinding("plugin", pluginEndpoint),
+		)
+	})
+
+	return &Interlink{
+		Name:       name,
+		Registry:   regSvc,
+		K3sService: K3s.Server(),
+		Manifests:  manifests,
+	}
+}
+
+// Returns the kubeconfig file of the k3s cluster
+func (m *Interlink) Config() *File {
+	K3s := dag.K3S(m.Name)
+	return K3s.Config(true)
+}
+
+// Utility to wait for nodes to be ready
+func (m *Interlink) waitForNodes(ctx context.Context) (err error) {
+	K3s := dag.K3S(m.Name)
+	maxRetries := 10
+	retryBackoff := 30 * time.Second
+	for i := 0; i < maxRetries; i++ {
+		kubectlGetNodes, err := K3s.Kubectl(ctx, "get nodes -o wide")
+		if err != nil {
+			fmt.Println(fmt.Errorf("could not fetch nodes: %v", err))
+			continue
+		}
+		if strings.Contains(kubectlGetNodes, "Ready") {
+			return nil
+		}
+		fmt.Println("waiting for k8s to start:", kubectlGetNodes)
+		time.Sleep(retryBackoff)
+	}
+	return fmt.Errorf("k8s took too long to start")
+}
+
+// Utility that waits for virtual node to be ready
+func (m *Interlink) waitForVirtualNodes(ctx context.Context) (err error) {
+	K3s := dag.K3S(m.Name)
+	maxRetries := 10
+	retryBackoff := 30 * time.Second
+	for i := 0; i < maxRetries; i++ {
+		kubectlGetNodes, err := K3s.Kubectl(ctx, "get nodes -o wide virtual-kubelet")
+		if err != nil {
+			fmt.Println(fmt.Errorf("could not fetch nodes: %v", err))
+			continue
+		}
+		if strings.Contains(kubectlGetNodes, "Ready") {
+			time.Sleep(60 * time.Second)
+			return nil
+		}
+		fmt.Println("waiting for k8s to start:", kubectlGetNodes)
+		time.Sleep(retryBackoff)
+	}
+	return fmt.Errorf("k8s took too long to start")
+}
+
+// Build interLink and virtual kubelet docker images from source
+// and publish them in registry service
+func (m *Interlink) BuildImages(
 	ctx context.Context,
 	// +optional
-	// +default="ghcr.io/intertwin-eu/interlink/virtual-kubelet-inttw"
+	// +default="registry:5000/virtual-kubelet-inttw"
 	virtualKubeletRef string,
 	// +optional
-	// +default="ghcr.io/intertwin-eu/interlink/interlink"
+	// +default="registry:5000/interlink"
 	interlinkRef string,
 	// +optional
-	// +default="ghcr.io/intertwin-eu/interlink/plugin-test"
+	// +default="registry:5000/plugin-test"
 	pluginRef string,
 	sourceFolder *Directory,
 ) (*Interlink, error) {
 
 	// TODO: get tag
 
-	i.VirtualKubeletRef = virtualKubeletRef
-	i.InterlinkRef = interlinkRef
+	m.VirtualKubeletRef = virtualKubeletRef
+	m.InterlinkRef = interlinkRef
 
 	workspace := dag.Container().
 		WithDirectory("/src", sourceFolder).
@@ -87,39 +189,42 @@ func (i *Interlink) BuildImages(
 		return nil, fmt.Errorf("no tag specified on the image for VK")
 	}
 
-	modulesCache := dag.CacheVolume("go-mod-122")
-
-	_, err := dag.Container().
-		WithMountedCache("/go/pkg/mod", modulesCache).
-		WithMountedCache("/go/build-cache", dag.CacheVolume("go-build-122")).
-		Build(workspace, dagger.ContainerBuildOpts{
-			Dockerfile: "docker/Dockerfile.vk",
-			BuildArgs: []dagger.BuildArg{
-				{"VERSION", vkVersion},
-			},
-		}).
-		Publish(ctx, virtualKubeletRef)
+	_, err := dag.Container().From("quay.io/skopeo/stable").
+		WithServiceBinding("registry", m.Registry).
+		WithMountedFile("image.tar", dag.Container().
+			Build(workspace, ContainerBuildOpts{
+				Dockerfile: "docker/Dockerfile.vk",
+				BuildArgs: []BuildArg{
+					{"VERSION", vkVersion},
+				},
+			}).AsTarball()).
+		WithExec([]string{"copy", "--dest-tls-verify=false", "docker-archive:image.tar", "docker://" + m.VirtualKubeletRef}).
+		Sync(ctx)
 	if err != nil {
 		return nil, err
 	}
 
-	_, err = dag.Container().
-		WithMountedCache("/go/pkg/mod", modulesCache).
-		WithMountedCache("/go/build-cache", dag.CacheVolume("go-build-122")).
-		Build(workspace, dagger.ContainerBuildOpts{
-			Dockerfile: "docker/Dockerfile.interlink",
-		}).
-		Publish(ctx, interlinkRef)
+	_, err = dag.Container().From("quay.io/skopeo/stable").
+		WithServiceBinding("registry", m.Registry).
+		WithMountedFile("image.tar", dag.Container().
+			Build(workspace, ContainerBuildOpts{
+				Dockerfile: "docker/Dockerfile.interlink",
+				BuildArgs: []BuildArg{
+					{"VERSION", vkVersion},
+				},
+			}).AsTarball()).
+		WithExec([]string{"copy", "--dest-tls-verify=false", "docker-archive:image.tar", "docker://" + m.InterlinkRef}).
+		Sync(ctx)
 	if err != nil {
 		return nil, err
 	}
-
-	return i, nil
+	return m, nil
 }
 
-func (i *Interlink) NewInterlink(
+// Setup interlink components:
+// virtual kubelet and interlink API server
+func (m *Interlink) NewInterlink(
 	ctx context.Context,
-	manifests *Directory,
 	// +optional
 	kubeconfig *File,
 	// +optional
@@ -128,18 +233,12 @@ func (i *Interlink) NewInterlink(
 	pluginLocalService *Service,
 ) (*Interlink, error) {
 
+	m.K3sService.Start(ctx)
+
 	// create Kustomize patch for images to be used
-	patch := patchSchema{}
-	if i.InterlinkRef != "" && i.VirtualKubeletRef != "" {
-		patch = patchSchema{
-			InterLinkRef:      i.InterlinkRef,
-			VirtualKubeletRef: i.VirtualKubeletRef,
-		}
-	} else {
-		patch = patchSchema{
-			InterLinkRef:      "ghcr.io/intertwin-eu/interlink/interlink",
-			VirtualKubeletRef: "ghcr.io/intertwin-eu/interlink/virtual-kubelet-inttw",
-		}
+	patch := patchSchema{
+		InterLinkRef:      m.InterlinkRef,
+		VirtualKubeletRef: m.VirtualKubeletRef,
 	}
 
 	interLinkCompiler, err := template.New("interlink").Parse(interLinkPatch)
@@ -166,116 +265,95 @@ func (i *Interlink) NewInterlink(
 		return nil, err
 	}
 
-	// use the manifest folder defined in the chain and install components
-
-	if manifests != nil {
-		i.Manifests = manifests
-	}
-
 	fmt.Println(bufferVK.String())
 
-	if pluginLocalService == nil {
-		i.K8s = NewK8sInstance(ctx, i.Plugin.AsService())
-		if err := i.K8s.start(ctx, i.Manifests, bufferVK.String(), bufferIL.String(), kubeconfig, localCluster); err != nil {
-			return nil, err
-		}
-	} else {
-		i.K8s = NewK8sInstance(ctx, pluginLocalService)
-		if err := i.K8s.start(ctx, i.Manifests, bufferVK.String(), bufferIL.String(), kubeconfig, localCluster); err != nil {
-			return nil, err
-		}
-	}
+	K3s := dag.K3S(m.Name)
+	kubectl := dag.Container().From("bitnami/kubectl").
+		WithUser("root").
+		WithExec([]string{"apt", "update"}, ContainerWithExecOpts{SkipEntrypoint: true}).
+		WithExec([]string{"apt", "install", "-y", "curl", "python3", "python3-pip", "python3-venv", "git"}, ContainerWithExecOpts{SkipEntrypoint: true}).
+		WithMountedFile("/.kube/config", K3s.Config(false)).
+		WithExec([]string{"chown", "1001:0", "/.kube/config"}, ContainerWithExecOpts{SkipEntrypoint: true}).
+		WithUser("1001").
+		WithDirectory("/manifests", m.Manifests).
+		WithNewFile("/manifests/virtual-kubelet-merge.yaml", ContainerWithNewFileOpts{
+			Contents:    bufferVK.String(),
+			Permissions: 0o755,
+		}).
+		WithNewFile("/manifests/interlink-merge.yaml", ContainerWithNewFileOpts{
+			Contents:    bufferIL.String(),
+			Permissions: 0o755,
+		}).
+		WithEntrypoint([]string{"kubectl"})
 
-	err = i.K8s.waitForNodes(ctx)
-	if err != nil {
-		return nil, err
-	}
+	m.Kubectl = kubectl
 
-	ns, _ := i.K8s.kubectl(ctx, "create ns interlink")
+	ns, _ := kubectl.WithExec([]string{"create", "ns", "interlink"}).Stdout(ctx)
 	fmt.Println(ns)
 
-	sa, err := i.K8s.kubectl(ctx, "apply -f /manifests/service-account.yaml")
+	sa, err := kubectl.WithExec([]string{"apply", "-f", "/manifests/service-account.yaml"}).Stdout(ctx)
 	if err != nil {
 		return nil, err
 	}
 	fmt.Println(sa)
 
-	vkConfig, err := i.K8s.kubectl(ctx, "apply -k /manifests/")
+	vkConfig, err := kubectl.WithExec([]string{"apply", "-k", "/manifests/"}).Stdout(ctx)
 	if err != nil {
 		return nil, err
 	}
 	fmt.Println(vkConfig)
 
-	return i, nil
+	return m, nil
 }
 
-func (i *Interlink) LoadPlugin(ctx context.Context, config *File) (*Interlink, error) {
-
-	ctr := dag.Container().From("dciangot/docker-plugin:v1").
-		WithFile("/etc/interlink/InterLinkConfig.yaml", config).
-		WithEnvVariable("INTERLINKCONFIGPATH", "/etc/interlink/InterLinkConfig.yaml").
-		WithExec([]string{"bash", "-c", "dockerd --mtu 1450 & /sidecar/docker-sidecar"}, ContainerWithExecOpts{InsecureRootCapabilities: true}).
-		WithExposedPort(4000)
-
-	i.Plugin = ctr
-
-	// pluginConfig, err := i.K8s.kubectl(ctx, "apply -f /manifests/plugin-config.yaml")
-	// if err != nil {
-	// 	return nil, err
-	// }
-	// fmt.Println(pluginConfig)
-	//
-	// plugin, err := i.K8s.kubectl(ctx, "apply -f /manifests/plugin.yaml")
-	// if err != nil {
-	// 	return nil, err
-	// }
-	// fmt.Println(plugin)
-
-	return i, nil
-}
-
-func (i *Interlink) Cleanup(ctx context.Context) error {
-
-	cleanup, err := i.K8s.kubectl(ctx, "delete -f /manifests/")
-	if err != nil {
-		return err
-	}
-	fmt.Println(cleanup)
-
-	return nil
-}
-
-func (i *Interlink) Test(
+// Wait for virtual node to be ready and expose the k8s endpoint as a service
+func (m *Interlink) Kube(
 	ctx context.Context,
-	// +optional
-	manifests *Directory,
-	// +optional
-	kubeconfig *File,
+) (*Service, error) {
+
+	if err := m.waitForVirtualNodes(ctx); err != nil {
+		return nil, err
+	}
+	return m.K3sService, nil
+
+}
+
+// Wait for cluster to be ready, then setup the test container
+func (m *Interlink) Run(
+	ctx context.Context,
+) (*Container, error) {
+
+	if err := m.waitForVirtualNodes(ctx); err != nil {
+		return nil, err
+	}
+
+	result := m.Kubectl.
+		WithWorkdir("/opt").
+		WithExec([]string{"bash", "-c", "git clone https://github.com/interTwin-eu/vk-test-set.git"}, ContainerWithExecOpts{SkipEntrypoint: true}).
+		WithExec([]string{"bash", "-c", "cp /manifests/vktest_config.yaml /opt/vk-test-set/vktest_config.yaml"}, ContainerWithExecOpts{SkipEntrypoint: true}).
+		WithWorkdir("/opt/vk-test-set").
+		WithExec([]string{"bash", "-c", "python3 -m venv .venv && source .venv/bin/activate && pip3 install -e ./ "}, ContainerWithExecOpts{SkipEntrypoint: true}).
+		WithExec([]string{"bash", "-c", "source .venv/bin/activate && export KUBECONFIG=/.kube/config"}, ContainerWithExecOpts{SkipEntrypoint: true})
+
+	return result, nil
+
+}
+
+// Wait for cluster to be ready, setup the test container, run all tests
+func (m *Interlink) Test(
+	ctx context.Context,
 	// +optional
 	localCluster *Service,
 	// +optional
 	// +default false
-	cleanup bool,
+	//cleanup bool,
 ) (*Container, error) {
 
-	if manifests != nil {
-		i.Manifests = manifests
-	}
-
-	if err := i.K8s.waitForVirtualKubelet(ctx); err != nil {
-		return nil, err
-	}
-	if err := i.K8s.waitForInterlink(ctx); err != nil {
-		return nil, err
-	}
-	// if err := i.K8s.waitForPlugin(ctx); err != nil {
-	// 	return nil, err
-	// }
-	if err := i.K8s.waitForVirtualNodes(ctx); err != nil {
+	if err := m.waitForVirtualNodes(ctx); err != nil {
 		return nil, err
 	}
 
-	result := i.K8s.KContainer.
+	result := m.Kubectl.
 		WithWorkdir("/opt").
 		WithExec([]string{"bash", "-c", "git clone https://github.com/interTwin-eu/vk-test-set.git"}, ContainerWithExecOpts{SkipEntrypoint: true}).
 		WithExec([]string{"bash", "-c", "cp /manifests/vktest_config.yaml /opt/vk-test-set/vktest_config.yaml"}, ContainerWithExecOpts{SkipEntrypoint: true}).
@@ -283,48 +361,6 @@ func (i *Interlink) Test(
 		WithExec([]string{"bash", "-c", "python3 -m venv .venv && source .venv/bin/activate && pip3 install -e ./ "}, ContainerWithExecOpts{SkipEntrypoint: true}).
 		WithExec([]string{"bash", "-c", "source .venv/bin/activate && export KUBECONFIG=/.kube/config && pytest -vk 'not rclone'"}, ContainerWithExecOpts{SkipEntrypoint: true})
 
-	if i.CleanupCluster {
-		err := i.Cleanup(ctx)
-		if err != nil {
-			return nil, err
-		}
-	}
-
 	return result, nil
-
-}
-
-func (i *Interlink) Run(
-	ctx context.Context,
-) (*Container, error) {
-
-	if i.CleanupCluster {
-		err := i.Cleanup(ctx)
-		if err != nil {
-			return nil, err
-		}
-	}
-
-	return i.K8s.KContainer.
-		WithWorkdir("/opt").
-		WithExec([]string{"bash", "-c", "git clone https://github.com/interTwin-eu/vk-test-set.git"}, ContainerWithExecOpts{SkipEntrypoint: true}).
-		WithExec([]string{"bash", "-c", "cp /manifests/vktest_config.yaml /opt/vk-test-set/vktest_config.yaml"}, ContainerWithExecOpts{SkipEntrypoint: true}).
-		WithWorkdir("/opt/vk-test-set").
-		WithExec([]string{"bash", "-c", "python3 -m venv .venv && source .venv/bin/activate && pip3 install -e ./ "}, ContainerWithExecOpts{SkipEntrypoint: true}), nil
-
-}
-
-func (i *Interlink) Cluster(
-	ctx context.Context,
-) (*Container, error) {
-
-	if i.CleanupCluster {
-		err := i.Cleanup(ctx)
-		if err != nil {
-			return nil, err
-		}
-	}
-
-	return i.K8s.K3s, nil
 
 }

@@ -3,6 +3,8 @@ resources:
 - virtual-kubelet.yaml
 - interlink-config.yaml
 - interlink.yaml
+#- plugin-k8s-config.yaml
+#- plugin.yaml
 patches:
 - path: virtual-kubelet-merge.yaml
   target:

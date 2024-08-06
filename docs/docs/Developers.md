@@ -1,4 +1,8 @@
-# INTERLINK E2E INTEGRATION TESTS
+---
+sidebar_position: 4
+---
+
+# E2E integration tests 
 
 Here you can find how to test a virtual kubelet implementation against the main pod use cases we mean to support. 
 
