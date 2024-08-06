@@ -1,0 +1,82 @@
+name: Update OpenAPI
+
+on:
+  push:
+    tags:
+      - '*'
+
+jobs:
+  update-openapi:
+    runs-on: ubuntu-latest
+
+    steps:
+    - name: Checkout repository
+      uses: actions/checkout@v4
+
+    - name: Set up Python
+      uses: actions/setup-python@v5
+      with:
+        python-version: '3.x'  # specify the Python version you need
+
+    - name: Install dependencies
+      run: |
+        python -m pip install --upgrade pip
+        pip install -r example/requirements.txt  # if you have a requirements file
+
+    - name: Run script to generate OpenAPI JSON
+      run: python example/create_openapi.py
+
+    - name: Create a new release
+      id: create_release
+      uses: softprops/action-gh-release@v2
+      with:
+        files: docs/openapi/openapi.json
+        tag_name: ${{ github.ref_name }}
+        release_name: 'Release ${{ github.ref_name }}'
+        draft: false
+        prerelease: false
+      env:
+        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+    - name: Upload OpenAPI JSON as an artifact
+      uses: actions/upload-artifact@v4
+      with:
+        name: openapi.json
+        path: ./docs/openapi/openapi.json
+  
+  update-doc:
+    needs: update-openapi
+    runs-on: ubuntu-latest
+
+    steps:
+    - name: Checkout repository
+      uses: actions/checkout@v4
+
+    - name: Install dependencies
+      run: |
+        rm ./docs/openapi/openapi.json
+
+    - name: Download artifact from the latest workflow run
+      uses: actions/download-artifact@v4
+      with:
+        name: openapi.json  # Name of the artifact you want to download
+        path: ./docs/openapi  # Directory where the artifact will be downloaded
+
+    - name: Set up Node.js
+      uses: actions/setup-node@v3
+      with:
+        node-version: '22'  # Ensure this matches the Node.js version required by Docusaurus
+
+    - name: Install dependencies
+      working-directory: ./docs  # Change to the directory where package.json is located
+      run: npm install
+
+    - name: Build Docusaurus site
+      working-directory: ./docs  # Change to the directory where package.json is located
+      run: npm run build
+
+    - name: Deploy to GitHub Pages
+      uses: peaceiris/actions-gh-pages@v3
+      with:
+        github_token: ${{ secrets.GITHUB_TOKEN }}
+        publish_dir: ./docs/build   # Ensure this matches the build output directory of Docusaurus
