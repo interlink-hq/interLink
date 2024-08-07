@@ -26,18 +26,6 @@ jobs:
     - name: Run script to generate OpenAPI JSON
       run: python example/create_openapi.py
 
-    - name: Create a new release
-      id: create_release
-      uses: softprops/action-gh-release@v2
-      with:
-        files: docs/openapi/openapi.json
-        tag_name: ${{ github.ref_name }}
-        release_name: 'Release ${{ github.ref_name }}'
-        draft: false
-        prerelease: false
-      env:
-        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-
     - name: Upload OpenAPI JSON as an artifact
       uses: actions/upload-artifact@v4
       with:
