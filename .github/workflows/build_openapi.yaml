@@ -31,6 +31,15 @@ jobs:
       with:
         name: openapi.json
         path: ./docs/openapi/openapi.json
+    - name: Upload json to release
+      uses: svenstaro/upload-release-action@v2
+      with:
+        repo_token: ${{ secrets.GITHUB_TOKEN }}
+        file: ./docs/openapi/openapi.json
+        asset_name: openAPISpec
+        tag: ${{ github.ref }}
+        overwrite: true
+        body: "OpenAPI spec for plugin REST" 
   
   update-doc:
     needs: update-openapi
