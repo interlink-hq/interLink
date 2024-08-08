@@ -134,9 +134,9 @@ dagger call \
     --name my-tests \
   build-images \
     --source-folder ../ \
-    --plugin-endpoint tcp://localhost:4000 \
-    --manifests ./manifests \
   new-interlink \
+    --manifests ./manifests \
+    --plugin-endpoint tcp://localhost:4000 \
   kube up 
 ```
 
