@@ -92,7 +92,7 @@ helm upgrade --install helm-vk-monitoring-release interlink-monitoring-stack/ -n
 ```
 
 5. Deploy (or re-deploy) your Virtual Kubelet stack setting the ```TELEMETRY_ENDPOINT``` Environment Variable to your actual endpoint. 
-If not set, it defaults to ```localhost:4317```
+If not set, it defaults to ```localhost:4317```. Remember to enable the monitoring by also setting ```ENABLE_TRACING``` to 1.
 
 6. Access Grafana dashboard through the domain you defined in the `values.yaml` file with the credentials you defined in the `values.yaml` file. 
 
