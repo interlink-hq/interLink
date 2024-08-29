@@ -4,8 +4,11 @@ import (
 	"context"
 	"path/filepath"
 	"sync"
+	"time"
 
 	"github.com/containerd/containerd/log"
+	"go.opentelemetry.io/otel/attribute"
+	trace "go.opentelemetry.io/otel/trace"
 	v1 "k8s.io/api/core/v1"
 
 	types "github.com/intertwin-eu/interlink/pkg/interlink"
@@ -21,12 +24,15 @@ var PodStatuses MutexStatuses
 // getData retrieves ConfigMaps, Secrets and EmptyDirs from the provided pod by calling the retrieveData function.
 // The config is needed by the retrieveData function.
 // The function aggregates the return values of retrieveData function in a commonIL.RetrievedPodData variable and returns it, along with the first encountered error.
-func getData(ctx context.Context, config types.InterLinkConfig, pod types.PodCreateRequests) (types.RetrievedPodData, error) {
+func getData(ctx context.Context, config types.InterLinkConfig, pod types.PodCreateRequests, span trace.Span) (types.RetrievedPodData, error) {
+	start := time.Now().UnixMicro()
+	span.AddEvent("Retrieving data for pod " + pod.Pod.Name)
 	log.G(ctx).Debug(pod.ConfigMaps)
 	var retrievedData types.RetrievedPodData
 	retrievedData.Pod = pod.Pod
 
 	for _, container := range pod.Pod.Spec.InitContainers {
+		startContainer := time.Now().UnixMicro()
 		log.G(ctx).Info("- Retrieving Secrets and ConfigMaps for the Docker Sidecar. InitContainer: " + container.Name)
 		log.G(ctx).Debug(container.VolumeMounts)
 		data, InterlinkIP := retrieveData(ctx, config, pod, container)
@@ -35,9 +41,15 @@ func getData(ctx context.Context, config types.InterLinkConfig, pod types.PodCre
 			return types.RetrievedPodData{}, InterlinkIP
 		}
 		retrievedData.Containers = append(retrievedData.Containers, data)
+
+		durationContainer := time.Now().UnixMicro() - startContainer
+		span.AddEvent("Init Container "+container.Name, trace.WithAttributes(
+			attribute.Int64("initcontainer.getdata.duration", durationContainer),
+			attribute.String("pod.name", pod.Pod.Name)))
 	}
 
 	for _, container := range pod.Pod.Spec.Containers {
+		startContainer := time.Now().UnixMicro()
 		log.G(ctx).Info("- Retrieving Secrets and ConfigMaps for the Docker Sidecar. Container: " + container.Name)
 		log.G(ctx).Debug(container.VolumeMounts)
 		data, err := retrieveData(ctx, config, pod, container)
@@ -46,8 +58,15 @@ func getData(ctx context.Context, config types.InterLinkConfig, pod types.PodCre
 			return types.RetrievedPodData{}, err
 		}
 		retrievedData.Containers = append(retrievedData.Containers, data)
+
+		durationContainer := time.Now().UnixMicro() - startContainer
+		span.AddEvent("Container "+container.Name, trace.WithAttributes(
+			attribute.Int64("container.getdata.duration", durationContainer),
+			attribute.String("pod.name", pod.Pod.Name)))
 	}
 
+	duration := time.Now().UnixMicro() - start
+	span.SetAttributes(attribute.Int64("getdata.duration", duration))
 	return retrievedData, nil
 }
 

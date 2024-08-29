@@ -356,14 +356,13 @@ func (p *VirtualKubeletProvider) CreatePod(ctx context.Context, pod *v1.Pod) err
 		attribute.Int64("start.timestamp", start),
 	))
 	defer span.End()
+	defer types.SetDurationSpan(start, span)
 
 	var hasInitContainers = false
 	var state v1.ContainerState
-	defer span.End()
 
 	key, err := buildKey(pod)
 	if err != nil {
-		setDurationSpan(start, span)
 		return err
 	}
 	now := metav1.NewTime(time.Now())
@@ -436,7 +435,6 @@ func (p *VirtualKubeletProvider) CreatePod(ctx context.Context, pod *v1.Pod) err
 		err := RemoteExecution(ctx, p.config, p, pod, CREATE)
 		if err != nil {
 			if err.Error() == "Deleted pod before actual creation" {
-				setDurationSpan(start, span)
 				log.G(ctx).Warn(err)
 			} else {
 				// TODO if node in NotReady put it to Unknown/pending?
@@ -465,7 +463,6 @@ func (p *VirtualKubeletProvider) CreatePod(ctx context.Context, pod *v1.Pod) err
 				p.UpdatePod(ctx, pod)
 
 			}
-			setDurationSpan(start, span)
 			return
 		}
 	}()
@@ -485,8 +482,6 @@ func (p *VirtualKubeletProvider) CreatePod(ctx context.Context, pod *v1.Pod) err
 
 	p.pods[key] = pod
 
-	setDurationSpan(start, span)
-
 	return nil
 }
 
@@ -500,12 +495,11 @@ func (p *VirtualKubeletProvider) UpdatePod(ctx context.Context, pod *v1.Pod) err
 		attribute.Int64("start.timestamp", start),
 	))
 	defer span.End()
+	defer types.SetDurationSpan(start, span)
 
 	log.G(ctx).Infof("receive UpdatePod %q", pod.Name)
 
 	p.notifier(pod)
-
-	setDurationSpan(start, span)
 
 	return nil
 }
@@ -520,17 +514,16 @@ func (p *VirtualKubeletProvider) DeletePod(ctx context.Context, pod *v1.Pod) (er
 		attribute.Int64("start.timestamp", start),
 	))
 	defer span.End()
+	defer types.SetDurationSpan(start, span)
 
 	log.G(ctx).Infof("receive DeletePod %q", pod.Name)
 
 	key, err := buildKey(pod)
 	if err != nil {
-		setDurationSpan(start, span)
 		return err
 	}
 
 	if _, exists := p.pods[key]; !exists {
-		setDurationSpan(start, span)
 		return errdefs.NotFound("pod not found")
 	}
 
@@ -541,7 +534,6 @@ func (p *VirtualKubeletProvider) DeletePod(ctx context.Context, pod *v1.Pod) (er
 		err = RemoteExecution(ctx, p.config, p, pod, DELETE)
 		if err != nil {
 			log.G(ctx).Error(err)
-			setDurationSpan(start, span)
 			return
 		}
 	}()
@@ -573,8 +565,6 @@ func (p *VirtualKubeletProvider) DeletePod(ctx context.Context, pod *v1.Pod) (er
 	// delete from p.pods
 	delete(p.pods, key)
 
-	setDurationSpan(start, span)
-
 	return nil
 }
 
@@ -588,21 +578,18 @@ func (p *VirtualKubeletProvider) GetPod(ctx context.Context, namespace, name str
 		attribute.Int64("start.timestamp", start),
 	))
 	defer span.End()
+	defer types.SetDurationSpan(start, span)
 
 	log.G(ctx).Infof("receive GetPod %q", name)
 
 	key, err := buildKeyFromNames(namespace, name)
 	if err != nil {
-		setDurationSpan(start, span)
 		return nil, err
 	}
 
 	if pod, ok := p.pods[key]; ok {
-		setDurationSpan(start, span)
 		return pod, nil
 	}
-
-	setDurationSpan(start, span)
 
 	return nil, errdefs.NotFoundf("pod \"%s/%s\" is not known to the provider", namespace, name)
 }
@@ -618,16 +605,14 @@ func (p *VirtualKubeletProvider) GetPodStatus(ctx context.Context, namespace, na
 		attribute.Int64("start.timestamp", start),
 	))
 	defer span.End()
+	defer types.SetDurationSpan(start, span)
 
 	log.G(ctx).Infof("receive GetPodStatus %q", name)
 
 	pod, err := p.GetPod(ctx, namespace, name)
 	if err != nil {
-		setDurationSpan(start, span)
 		return nil, err
 	}
-
-	setDurationSpan(start, span)
 
 	return &pod.Status, nil
 }
@@ -640,6 +625,7 @@ func (p *VirtualKubeletProvider) GetPods(ctx context.Context) ([]*v1.Pod, error)
 		attribute.Int64("start.timestamp", start),
 	))
 	defer span.End()
+	defer types.SetDurationSpan(start, span)
 
 	log.G(ctx).Info("receive GetPods")
 
@@ -652,7 +638,6 @@ func (p *VirtualKubeletProvider) GetPods(ctx context.Context) ([]*v1.Pod, error)
 		pods = append(pods, pod)
 	}
 
-	setDurationSpan(start, span)
 	return pods, nil
 }
 
@@ -776,6 +761,7 @@ func (p *VirtualKubeletProvider) GetLogs(ctx context.Context, namespace, podName
 		attribute.Int64("start.timestamp", start),
 	))
 	defer span.End()
+	defer types.SetDurationSpan(start, span)
 
 	log.G(ctx).Infof("receive GetPodLogs %q", podName)
 
@@ -792,7 +778,6 @@ func (p *VirtualKubeletProvider) GetLogs(ctx context.Context, namespace, podName
 		Opts:          types.ContainerLogOpts(opts),
 	}
 
-	setDurationSpan(start, span)
 	return LogRetrieval(ctx, p.config, logsRequest)
 }
 
@@ -804,6 +789,7 @@ func (p *VirtualKubeletProvider) GetStatsSummary(ctx context.Context) (*stats.Su
 		attribute.Int64("start.timestamp", start),
 	))
 	defer span.End()
+	defer types.SetDurationSpan(start, span)
 
 	// Grab the current timestamp so we can report it as the time the stats were generated.
 	time := metav1.NewTime(time.Now())
@@ -874,7 +860,6 @@ func (p *VirtualKubeletProvider) GetStatsSummary(ctx context.Context) (*stats.Su
 	}
 
 	// Return the dummy stats.
-	setDurationSpan(start, span)
 	return res, nil
 }
 
@@ -887,6 +872,7 @@ func (p *VirtualKubeletProvider) RetrievePodsFromCluster(ctx context.Context) er
 		attribute.Int64("start.timestamp", start),
 	))
 	defer span.End()
+	defer types.SetDurationSpan(start, span)
 
 	log.G(ctx).Info("Retrieving ALL Pods registered to the cluster and owned by VK")
 
@@ -915,7 +901,6 @@ func (p *VirtualKubeletProvider) RetrievePodsFromCluster(ctx context.Context) er
 
 	}
 
-	setDurationSpan(start, span)
 	return err
 }
 
@@ -937,6 +922,7 @@ func (p *VirtualKubeletProvider) initClientSet(ctx context.Context) error {
 		attribute.Int64("start.timestamp", start),
 	))
 	defer span.End()
+	defer types.SetDurationSpan(start, span)
 
 	if p.clientSet == nil {
 		kubeconfig := os.Getenv("KUBECONFIG")
@@ -954,6 +940,5 @@ func (p *VirtualKubeletProvider) initClientSet(ctx context.Context) error {
 		}
 	}
 
-	setDurationSpan(start, span)
 	return nil
 }

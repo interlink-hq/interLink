@@ -69,8 +69,9 @@ func PingInterLink(ctx context.Context, config VirtualKubeletConfig) (bool, int,
 		attribute.Int64("start.timestamp", startHttpCall),
 	))
 	defer spanHttp.End()
+	defer types.SetDurationSpan(startHttpCall, spanHttp)
+
 	resp, err := http.DefaultClient.Do(req)
-	setDurationSpan(startHttpCall, spanHttp)
 
 	if err != nil {
 		spanHttp.SetAttributes(attribute.Int("exit.code", http.StatusInternalServerError))
@@ -78,7 +79,7 @@ func PingInterLink(ctx context.Context, config VirtualKubeletConfig) (bool, int,
 	}
 
 	if resp != nil {
-		spanHttp.SetAttributes(attribute.Int("exit.code", resp.StatusCode))
+		types.SetDurationSpan(startHttpCall, spanHttp, types.WithHTTPReturnCode(resp.StatusCode))
 		retBytes, err := io.ReadAll(resp.Body)
 		if err != nil {
 			log.G(ctx).Error(err)
@@ -95,6 +96,7 @@ func PingInterLink(ctx context.Context, config VirtualKubeletConfig) (bool, int,
 			return false, retVal, nil
 		}
 	}
+
 	return true, retVal, nil
 }
 
@@ -126,17 +128,16 @@ func updateCacheRequest(ctx context.Context, config VirtualKubeletConfig, pod v1
 		attribute.Int64("start.timestamp", startHttpCall),
 	))
 	defer spanHttp.End()
+	defer types.SetDurationSpan(startHttpCall, spanHttp)
+
 	resp, err := http.DefaultClient.Do(req)
-	setDurationSpan(startHttpCall, spanHttp)
 	if err != nil {
 		log.L.Error(err)
 		return err
 	}
 	if resp != nil {
-		statusCode := resp.StatusCode
-		spanHttp.SetAttributes(attribute.Int("exit.code", resp.StatusCode))
-
-		if statusCode != http.StatusOK {
+		types.SetDurationSpan(startHttpCall, spanHttp, types.WithHTTPReturnCode(resp.StatusCode))
+		if resp.StatusCode != http.StatusOK {
 			return errors.New("Unexpected error occured while updating InterLink cache. Status code: " + strconv.Itoa(resp.StatusCode) + ". Check InterLink's logs for further informations")
 		}
 	}
@@ -171,18 +172,18 @@ func createRequest(ctx context.Context, config VirtualKubeletConfig, pod types.P
 		attribute.Int64("start.timestamp", startHttpCall),
 	))
 	defer spanHttp.End()
+	defer types.SetDurationSpan(startHttpCall, spanHttp)
+
 	resp, err := doRequest(req, token)
-	setDurationSpan(startHttpCall, spanHttp)
 	if err != nil {
 		log.L.Error(err)
 		return nil, err
 	}
 
 	if resp != nil {
-		statusCode := resp.StatusCode
-		spanHttp.SetAttributes(attribute.Int("exit.code", resp.StatusCode))
+		types.SetDurationSpan(startHttpCall, spanHttp, types.WithHTTPReturnCode(resp.StatusCode))
 
-		if statusCode != http.StatusOK {
+		if resp.StatusCode != http.StatusOK {
 			return nil, errors.New("Unexpected error occured while creating Pods. Status code: " + strconv.Itoa(resp.StatusCode) + ". Check InterLink's logs for further informations")
 		} else {
 			returnValue, err = io.ReadAll(resp.Body)
@@ -222,8 +223,9 @@ func deleteRequest(ctx context.Context, config VirtualKubeletConfig, pod *v1.Pod
 		attribute.Int64("start.timestamp", startHttpCall),
 	))
 	defer spanHttp.End()
+	defer types.SetDurationSpan(startHttpCall, spanHttp)
+
 	resp, err := doRequest(req, token)
-	setDurationSpan(startHttpCall, spanHttp)
 	if err != nil {
 		log.G(context.Background()).Error(err)
 		return nil, err
@@ -231,8 +233,7 @@ func deleteRequest(ctx context.Context, config VirtualKubeletConfig, pod *v1.Pod
 
 	if resp != nil {
 		statusCode := resp.StatusCode
-		spanHttp.SetAttributes(attribute.Int("exit.code", resp.StatusCode))
-
+		types.SetDurationSpan(startHttpCall, spanHttp, types.WithHTTPReturnCode(resp.StatusCode))
 		if statusCode != http.StatusOK {
 			return nil, errors.New("Unexpected error occured while deleting Pods. Status code: " + strconv.Itoa(resp.StatusCode) + ". Check InterLink's logs for further informations")
 		} else {
@@ -250,6 +251,7 @@ func deleteRequest(ctx context.Context, config VirtualKubeletConfig, pod *v1.Pod
 			}
 		}
 	}
+
 	return returnValue, nil
 }
 
@@ -280,14 +282,15 @@ func statusRequest(ctx context.Context, config VirtualKubeletConfig, podsList []
 		attribute.Int64("start.timestamp", startHttpCall),
 	))
 	defer spanHttp.End()
+	defer types.SetDurationSpan(startHttpCall, spanHttp)
+
 	resp, err := doRequest(req, token)
-	setDurationSpan(startHttpCall, spanHttp)
 	if err != nil {
 		return nil, err
 	}
 
 	if resp != nil {
-		spanHttp.SetAttributes(attribute.Int("exit.code", resp.StatusCode))
+		types.SetDurationSpan(startHttpCall, spanHttp, types.WithHTTPReturnCode(resp.StatusCode))
 		if resp.StatusCode != http.StatusOK {
 			return nil, errors.New("Unexpected error occured while getting status. Status code: " + strconv.Itoa(resp.StatusCode) + ". Check InterLink's logs for further informations")
 		} else {
@@ -337,21 +340,23 @@ func LogRetrieval(ctx context.Context, config VirtualKubeletConfig, logsRequest 
 		attribute.Int64("start.timestamp", startHttpCall),
 	))
 	defer spanHttp.End()
+	defer types.SetDurationSpan(startHttpCall, spanHttp)
+
 	resp, err := doRequest(req, token)
-	setDurationSpan(startHttpCall, spanHttp)
 	if err != nil {
 		log.G(ctx).Error(err)
 		return nil, err
 	}
 
 	if resp != nil {
-		spanHttp.SetAttributes(attribute.Int("exit.code", resp.StatusCode))
+		types.SetDurationSpan(startHttpCall, spanHttp, types.WithHTTPReturnCode(resp.StatusCode))
 		if resp.StatusCode != http.StatusOK {
 			err = errors.New("Unexpected error occured while getting logs. Status code: " + strconv.Itoa(resp.StatusCode) + ". Check InterLink's logs for further informations")
 		} else {
 			returnValue = resp.Body
 		}
 	}
+
 	return returnValue, err
 }
 
@@ -427,7 +432,7 @@ func RemoteExecution(ctx context.Context, config VirtualKubeletConfig, p *Virtua
 				} else {
 					pod.Status.Phase = v1.PodFailed
 					pod.Status.Reason = "CFGMaps/Secrets not found"
-					for i, _ := range pod.Status.ContainerStatuses {
+					for i := range pod.Status.ContainerStatuses {
 						pod.Status.ContainerStatuses[i].Ready = false
 					}
 					p.UpdatePod(ctx, pod)
@@ -606,11 +611,4 @@ func checkPodsStatus(ctx context.Context, p *VirtualKubeletProvider, podsList []
 	}
 
 	return nil, err
-}
-
-func setDurationSpan(startTime int64, span trace.Span) {
-	endTime := time.Now().UnixMicro()
-	duration := endTime - startTime
-	span.SetAttributes(attribute.Int64("end.timestamp", endTime))
-	span.SetAttributes(attribute.Int64("duration", duration))
 }

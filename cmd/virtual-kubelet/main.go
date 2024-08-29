@@ -18,10 +18,8 @@ package main
 import (
 	"context"
 	"crypto/tls"
-	"crypto/x509"
 	"flag"
 	"fmt"
-	"io/ioutil"
 	"net"
 	"os"
 	"path"
@@ -95,13 +93,11 @@ type Opts struct {
 	ErrorsOnly bool
 }
 
-func initProvider() (func(context.Context) error, error) {
-	ctx := context.Background()
-
+func initProvider(ctx context.Context) (func(context.Context) error, error) {
 	res, err := resource.New(ctx,
 		resource.WithAttributes(
 			// the service name used to display traces in backends
-			semconv.ServiceName("InterLink-service"),
+			semconv.ServiceName("InterLink-VK"),
 		),
 	)
 	if err != nil {
@@ -119,32 +115,9 @@ func initProvider() (func(context.Context) error, error) {
 
 	fmt.Println("TELEMETRY_ENDPOINT: ", otlpEndpoint)
 
-	crtFilePath := os.Getenv("TELEMETRY_CRTFILEPATH")
-
 	conn := &grpc.ClientConn{}
-
-	if crtFilePath != "" {
-		cert, err := ioutil.ReadFile(crtFilePath)
-		if err != nil {
-			return nil, fmt.Errorf("failed to create resource: %w", err)
-		}
-
-		roots := x509.NewCertPool()
-		if !roots.AppendCertsFromPEM(cert) {
-			return nil, fmt.Errorf("failed to create resource: %w", err)
-		}
-
-		creds := credentials.NewTLS(&tls.Config{
-			RootCAs: roots,
-		})
-
-		conn, err = grpc.DialContext(ctx, otlpEndpoint,
-			grpc.WithTransportCredentials(creds),
-			grpc.WithBlock(),
-		)
-	} else {
-		conn, err = grpc.DialContext(ctx, otlpEndpoint, grpc.WithInsecure(), grpc.WithBlock())
-	}
+	creds := credentials.NewTLS(&tls.Config{InsecureSkipVerify: true})
+	conn, err = grpc.DialContext(ctx, otlpEndpoint, grpc.WithTransportCredentials(creds), grpc.WithBlock())
 
 	if err != nil {
 		return nil, fmt.Errorf("failed to create gRPC connection to collector: %w", err)
@@ -213,7 +186,7 @@ func main() {
 	log.L = logruslogger.FromLogrus(logrus.NewEntry(logger))
 
 	if os.Getenv("ENABLE_TRACING") == "1" {
-		shutdown, err := initProvider()
+		shutdown, err := initProvider(ctx)
 		if err != nil {
 			log.G(ctx).Fatal(err)
 		}

@@ -61,3 +61,10 @@ type LogStruct struct {
 	ContainerName string           `json:"ContainerName"`
 	Opts          ContainerLogOpts `json:"Opts"`
 }
+
+type SpanConfig struct {
+	HTTPReturnCode int
+	SetHTTPCode    bool
+}
+
+type SpanOption func(*SpanConfig)
