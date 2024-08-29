@@ -52,7 +52,7 @@ jobs:
           file: ./docker/Dockerfile.interlink
           platforms: linux/amd64, linux/arm64
           
-  virtual-kubelet-refrest-token:
+  virtual-kubelet-refresh-token:
     runs-on: ubuntu-latest
     #env:
     #  DOCKER_TARGET_PLATFORM: linux/arm64

@@ -1,0 +1,50 @@
+name: Update Docusaurus
+
+on:
+  push:
+    branches:
+      -  main
+    tags-ignore:
+      - "*"
+  workflow_call:
+
+jobs:
+  update-doc:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Remove existing openapi.json
+        run: rm ./docs/openapi/openapi.json
+
+      - name: Download openapi.json
+        uses: robinraju/release-downloader@v1
+        with:
+          latest: true
+          preRelease: false
+          fileName: 'openAPISpec'
+          out-file-path: 'docs/openapi'
+      
+      - name: Rename openAPISpec to openapi.json
+        run: mv ./docs/openapi/openAPISpec ./docs/openapi/openapi.json
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v3
+        with:
+          node-version: '22'  # Ensure this matches the Node.js version required by Docusaurus
+
+      - name: Install dependencies
+        working-directory: ./docs  # Change to the directory where package.json is located
+        run: npm install
+
+      - name: Build Docusaurus site
+        working-directory: ./docs  # Change to the directory where package.json is located
+        run: npm run build
+
+      - name: Deploy to GitHub Pages
+        uses: peaceiris/actions-gh-pages@v3
+        with:
+          github_token: ${{ secrets.GITHUB_TOKEN }}
+          publish_dir: ./docs/build   # Ensure this matches the build output directory of Docusaurus#

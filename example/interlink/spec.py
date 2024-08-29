@@ -9,15 +9,15 @@ class Metadata(BaseModel):
     uid: Optional[str] = None
     annotations: Optional[Dict[str, str]] = Field({})
     labels: Optional[Dict[str, str]] = Field({})
-    generateName: Optional[str] = None
+    generate_name: Optional[str] = None
 
 
 class VolumeMount(BaseModel):
     name: str
-    mountPath: str
-    subPath: Optional[str] = None
-    readOnly: Optional[bool] = False
-    mountPropagation: Optional[str] = None
+    mount_path: str
+    sub_path: Optional[str] = None
+    read_only: Optional[bool] = False
+    mount_propagation: Optional[str] = None
 
 
 class ConfigMapKeySelector(BaseModel):
@@ -33,24 +33,24 @@ class SecretKeySelector(BaseModel):
 
 
 class EnvVarSource(BaseModel):
-    configMapKeyRef: Optional[ConfigMapKeySelector] = None
-    secretKeyRef: Optional[SecretKeySelector] = None
+    config_map_key_ref: Optional[ConfigMapKeySelector] = None
+    secret_key_ref: Optional[SecretKeySelector] = None
 
 
 class EnvVar(BaseModel):
     name: str
     value: Optional[str] = None
-    valueFrom: Optional[EnvVarSource] = None
+    value_from: Optional[EnvVarSource] = None
 
 
 class SecurityContext(BaseModel):
-    allowPrivilegeEscalation: Optional[bool] = None
+    allow_privilege_escalation: Optional[bool] = None
     privileged: Optional[bool] = None
-    procMount: Optional[str] = None
-    readOnlyFileSystem: Optional[bool] = None
-    runAsGroup: Optional[int] = None
-    runAsNonRoot: Optional[bool] = None
-    runAsUser: Optional[int] = None
+    proc_mount: Optional[str] = None
+    read_only_file_system: Optional[bool] = None
+    run_as_group: Optional[int] = None
+    run_as_non_root: Optional[bool] = None
+    run_as_user: Optional[int] = None
 
 
 class Container(BaseModel):
@@ -60,9 +60,9 @@ class Container(BaseModel):
     command: List[str]
     args: Optional[List[str]] = Field([])
     resources: Optional[dict] = Field({})
-    volumeMounts: Optional[List[VolumeMount]] = Field([])
+    volume_mounts: Optional[List[VolumeMount]] = Field([])
     env: Optional[List[EnvVar]] = None
-    securityContext: Optional[SecurityContext] = None
+    security_context: Optional[SecurityContext] = None
 
 
 class KeyToPath(BaseModel):
@@ -72,17 +72,17 @@ class KeyToPath(BaseModel):
 
 
 class SecretVolumeSource(BaseModel):
-    secretName: str
+    secret_name: str
     items: Optional[List[KeyToPath]] = Field([])
     optional: Optional[bool] = None
-    defaultMode: Optional[int] = None
+    default_mode: Optional[int] = None
 
 
 class ConfigMapVolumeSource(BaseModel):
     name: str
     items: Optional[List[KeyToPath]] = Field([])
     optional: Optional[bool] = None
-    defaultMode: Optional[int] = None
+    default_mode: Optional[int] = None
 
 
 # class VolumeSource(BaseModel):
@@ -94,20 +94,20 @@ class ConfigMapVolumeSource(BaseModel):
 class PodVolume(BaseModel):
     name: str
     #    volumeSource: Optional[VolumeSource] = None
-    emptyDir: Optional[dict] = None
+    empty_dir: Optional[dict] = None
     secret: Optional[SecretVolumeSource] = None
-    configMap: Optional[ConfigMapVolumeSource] = None
+    config_map: Optional[ConfigMapVolumeSource] = None
 
 
 class PodSpec(BaseModel):
     containers: List[Container]
-    initContainers: Optional[List[Container]] = None
+    init_containers: Optional[List[Container]] = None
     volumes: Optional[List[PodVolume]] = None
-    preemptionPolicy: Optional[str] = None
-    priorityClassName: Optional[str] = None
+    preemption_policy: Optional[str] = None
+    priority_class_name: Optional[str] = None
     priority: Optional[int] = None
-    restartPolicy: Optional[str] = None
-    terminationGracePeriodSeconds: Optional[int] = None
+    restart_policy: Optional[str] = None
+    termination_grace_period_seconds: Optional[int] = None
 
 
 class PodRequest(BaseModel):
@@ -118,7 +118,7 @@ class PodRequest(BaseModel):
 class ConfigMap(BaseModel):
     metadata: Metadata
     data: Optional[dict]
-    binaryData: Optional[dict] = None
+    binary_data: Optional[dict] = None
     type: Optional[str] = None
     immutable: Optional[bool] = None
 
@@ -126,16 +126,16 @@ class ConfigMap(BaseModel):
 class Secret(BaseModel):
     metadata: Metadata
     data: Optional[dict] = None
-    stringData: Optional[dict] = None
+    string_data: Optional[dict] = None
     type: Optional[str] = None
     immutable: Optional[bool] = None
 
 
 class Volume(BaseModel):
     name: str
-    configMaps: Optional[List[ConfigMap]] = None
+    config_maps: Optional[List[ConfigMap]] = None
     secrets: Optional[List[Secret]] = None
-    emptyDirs: Optional[List[str]] = None
+    empty_dirs: Optional[List[str]] = None
 
 
 class Pod(BaseModel):
@@ -144,12 +144,12 @@ class Pod(BaseModel):
 
 
 class StateTerminated(BaseModel):
-    exitCode: int
+    exit_code: int
     reason: Optional[str] = None
 
 
 class StateRunning(BaseModel):
-    startedAt: Optional[str] = None
+    started_at: Optional[str] = None
 
 
 class StateWaiting(BaseModel):
@@ -170,27 +170,27 @@ class ContainerStatus(BaseModel):
 
 class PodStatus(BaseModel):
     name: str
-    UID: str
+    uid: str
     namespace: str
     containers: List[ContainerStatus]
 
 
 class LogOpts(BaseModel):
-    Tail: Optional[int] = None
-    LimitBytes: Optional[int] = None
-    Timestamps: Optional[bool] = None
-    Previous: Optional[bool] = None
-    SinceSeconds: Optional[int] = None
-    SinceTime: Optional[datetime.datetime] = None
+    tail: Optional[int] = None
+    limit_bytes: Optional[int] = None
+    timestamps: Optional[bool] = None
+    previous: Optional[bool] = None
+    since_seconds: Optional[int] = None
+    since_time: Optional[datetime.datetime] = None
 
 
 class LogRequest(BaseModel):
-    Namespace: str
-    PodUID: str
-    PodName: str
-    ContainerName: str
-    Opts: LogOpts
+    namespace: str
+    pod_uid: str
+    pod_name: str
+    container_name: str
+    opts: LogOpts
 
 class CreateStruct(BaseModel):
-	PodUID: str
-	PodJID: str
+	pod_uid: str
+	pod_jid: str
