@@ -1,5 +1,0 @@
-Check node status with:
-
-```
-kubectl get node {{ .Values.nodeName }}
-```

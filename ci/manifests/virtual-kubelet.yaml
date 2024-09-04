@@ -18,6 +18,18 @@ spec:
       automountServiceAccountToken: true
       serviceAccountName: virtual-kubelet 
       containers:
+      - name: interlink
+        image: "ghcr.io/intertwin-eu/interlink/interlink"
+        imagePullPolicy: Always
+        env:
+          - name: INTERLINKCONFIGPATH
+            value: "/etc/interlink/InterLinkConfig.yaml"
+        volumeMounts:
+          - name: il-config
+            mountPath: /etc/interlink/InterLinkConfig.yaml
+            subPath: InterLinkConfig.yaml
+          - name: sockets
+            mountPath: /var/run/
       - name: inttw-vk
         image: "ghcr.io/intertwin-eu/interlink/virtual-kubelet-inttw" 
         imagePullPolicy: Always
@@ -36,8 +48,20 @@ spec:
         - name: config
           mountPath: /etc/interlink/InterLinkConfig.yaml
           subPath: InterLinkConfig.yaml
+        - name: sockets 
+          mountPath: /var/run/
       volumes:
       - name: config
         configMap:
           # Provide the name of the ConfigMap you want to mount.
           name: virtual-kubelet-config
+      - name: sockets
+        hostPath: 
+          path: /var/run
+          type: Directory
+      - name: il-config
+        configMap:
+          # Provide the name of the ConfigMap you want to mount.
+          name: interlink-config
+      - name: sockets
+        emptyDir: {}  

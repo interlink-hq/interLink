@@ -160,6 +160,7 @@ func NewProvider(providerConfig, nodeName, nodeVersion, operatingSystem string, 
 	if err != nil {
 		return nil, err
 	}
+	log.G(ctx).Info("Init server with config:", config)
 	return NewProviderConfig(config, nodeName, nodeVersion, operatingSystem, internalIP, daemonEndpointPort)
 }
 
@@ -176,6 +177,7 @@ func LoadConfig(providerConfig, nodeName string, ctx context.Context) (config Vi
 	err = yaml.Unmarshal(data, &config)
 
 	if err != nil {
+		log.G(ctx).Fatal(err)
 		return config, err
 	}
 
@@ -230,9 +232,11 @@ func (p *VirtualKubeletProvider) nodeUpdate(ctx context.Context) {
 
 	log.G(ctx).Info("nodeLoop")
 
-	_, err := os.ReadFile(p.config.VKTokenFile) // just pass the file name
-	if err != nil {
-		log.G(context.Background()).Fatal(err)
+	if p.config.VKTokenFile != "" {
+		_, err := os.ReadFile(p.config.VKTokenFile) // just pass the file name
+		if err != nil {
+			log.G(context.Background()).Fatal(err)
+		}
 	}
 
 	for {
@@ -703,11 +707,6 @@ func (p *VirtualKubeletProvider) statusLoop(ctx context.Context) {
 		<-t.C
 	}
 
-	_, err := os.ReadFile(p.config.VKTokenFile) // just pass the file name
-	if err != nil {
-		log.G(context.Background()).Fatal(err)
-	}
-
 	for {
 		log.G(ctx).Info("statusLoop")
 		t.Reset(5 * time.Second)
@@ -717,16 +716,20 @@ func (p *VirtualKubeletProvider) statusLoop(ctx context.Context) {
 		case <-t.C:
 		}
 
-		b, err := os.ReadFile(p.config.VKTokenFile) // just pass the file name
-		if err != nil {
-			fmt.Print(err)
+		token := ""
+		if p.config.VKTokenFile != "" {
+			b, err := os.ReadFile(p.config.VKTokenFile) // just pass the file name
+			if err != nil {
+				fmt.Print(err)
+			}
+			token = string(b)
 		}
 
 		var podsList []*v1.Pod
 		for _, pod := range p.pods {
 			if pod.Status.Phase != "Initializing" {
 				podsList = append(podsList, pod)
-				err = p.UpdatePod(ctx, pod)
+				err := p.UpdatePod(ctx, pod)
 				if err != nil {
 					log.G(ctx).Error(err)
 				}
@@ -734,7 +737,7 @@ func (p *VirtualKubeletProvider) statusLoop(ctx context.Context) {
 		}
 
 		if len(podsList) > 0 {
-			_, err = checkPodsStatus(ctx, p, podsList, string(b), p.config)
+			_, err := checkPodsStatus(ctx, p, podsList, token, p.config)
 			if err != nil {
 				log.G(ctx).Error(err)
 			}

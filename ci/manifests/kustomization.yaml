@@ -2,7 +2,7 @@ resources:
 - virtual-kubelet-config.yaml
 - virtual-kubelet.yaml
 - interlink-config.yaml
-- interlink.yaml
+#- interlink.yaml
 #- plugin-k8s-config.yaml
 #- plugin.yaml
 patches:
@@ -10,8 +10,4 @@ patches:
   target:
     kind: Deployment
     labelSelector: nodeName=virtual-kubelet
-- path: interlink-merge.yaml
-  target:
-    kind: Deployment
-    labelSelector: app=interlink
 

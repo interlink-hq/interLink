@@ -15,19 +15,6 @@ import (
 )
 
 var (
-	interLinkPatch = `
-kind: Deployment
-metadata:
-  name: interlink
-  namespace: interlink
-spec:
-  template:
-    spec:
-      containers:
-      - name: interlink
-        image: "{{.InterLinkRef}}"
-
-`
 	virtualKubeletPatch = `
 kind: Deployment
 metadata:
@@ -39,6 +26,8 @@ spec:
       containers:
       - name: inttw-vk
         image: "{{.VirtualKubeletRef}}"
+      - name: interlink
+        image: "{{.InterLinkRef}}"
 `
 )
 
@@ -144,17 +133,7 @@ EOF`}, ContainerWithExecOpts{SkipEntrypoint: true}).
 		VirtualKubeletRef: m.VirtualKubeletRef,
 	}
 
-	interLinkCompiler, err := template.New("interlink").Parse(interLinkPatch)
-	if err != nil {
-		return nil, err
-	}
-
 	bufferIL := new(bytes.Buffer)
-
-	err = interLinkCompiler.Execute(bufferIL, patch)
-	if err != nil {
-		return nil, err
-	}
 
 	virtualKubeletCompiler, err := template.New("vk").Parse(virtualKubeletPatch)
 	if err != nil {
@@ -209,34 +188,11 @@ EOF`}, ContainerWithExecOpts{SkipEntrypoint: true}).
 	fmt.Println(vkConfig)
 
 	return m, nil
-	//maxRetries := 10
-	//retryBackoff := 10 * time.Second
-	// for i := 0; i < maxRetries; i++ {
-	// 	kubectlGetNodes, err := kubectl.WithExec([]string{"get", "nodes", "-o", "wide", "virtual-kubelet"}).Stdout(ctx)
-	// 	if err != nil {
-	// 		fmt.Println(fmt.Errorf("could not fetch nodes: %v", err))
-	// 		fmt.Println("waiting for k8s to start:", kubectlGetNodes)
-	// 		time.Sleep(retryBackoff)
-	// 		continue
-	// 	}
-	// 	if strings.Contains(kubectlGetNodes, " Ready") {
-	// 		time.Sleep(30 * time.Second)
-	// 		return m, nil
-	// 	}
-	// 	time.Sleep(retryBackoff)
-	// }
-	// kubectlAll, err := kubectl.WithExec([]string{"logs", "-n", "interlink", "-l", "nodeName=virtual-kubelet"}).Stdout(ctx)
-	// if err != nil {
-	// 	return nil, err
-	// }
-	// fmt.Println(kubectlAll)
-	//
-	// return nil, fmt.Errorf("k8s took too long to start")
 }
 
 // Returns the kubeconfig file of the k3s cluster
 func (m *Interlink) Config() *File {
-	return m.KubeConfigHost
+	return dag.K3S(m.Name).Config(true)
 }
 
 // Build interLink and virtual kubelet docker images from source

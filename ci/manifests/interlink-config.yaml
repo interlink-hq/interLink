@@ -5,7 +5,8 @@ metadata:
   namespace: interlink 
 data:
   InterLinkConfig.yaml: |
-    InterlinkAddress: "http://0.0.0.0"
+    InterlinkAddress: "unix:///var/run/interlink.socket"
+    #InterlinkAddress: "http://0.0.0.0"
     InterlinkPort: "3000"
     #SidecarURL: "http://plugin.interlink.svc.cluster.local"
     SidecarURL: "http://plugin"

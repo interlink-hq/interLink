@@ -24,6 +24,7 @@ import (
 	"os"
 	"path"
 	"strconv"
+	"strings"
 	"time"
 
 	// "k8s.io/client-go/rest"
@@ -185,6 +186,8 @@ func main() {
 	}
 	log.L = logruslogger.FromLogrus(logrus.NewEntry(logger))
 
+	log.G(ctx).Info("Config dump", interLinkConfig)
+
 	if os.Getenv("ENABLE_TRACING") == "1" {
 		shutdown, err := initProvider(ctx)
 		if err != nil {
@@ -206,6 +209,19 @@ func main() {
 	// and remove reading from file
 
 	http.DefaultTransport.(*http.Transport).TLSClientConfig = &tls.Config{InsecureSkipVerify: true}
+
+	if strings.HasPrefix(interLinkConfig.InterlinkURL, "unix://") {
+		// Dial the Unix socket
+		interLinkEndpoint := strings.Replace(interLinkConfig.InterlinkURL, "unix://", "", -1)
+		conn, err := net.Dial("unix", interLinkEndpoint)
+		if err != nil {
+			panic(err)
+		}
+
+		http.DefaultTransport.(*http.Transport).DialContext = func(_ context.Context, _, _ string) (net.Conn, error) {
+			return conn, nil
+		}
+	}
 
 	dport, err := strconv.ParseInt(os.Getenv("KUBELET_PORT"), 10, 32)
 	if err != nil {

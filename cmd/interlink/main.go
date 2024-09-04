@@ -5,9 +5,12 @@ import (
 	"crypto/tls"
 	"flag"
 	"fmt"
+	"net"
 	"net/http"
 	"os"
+	"os/signal"
 	"strings"
+	"syscall"
 	"time"
 
 	"github.com/sirupsen/logrus"
@@ -157,15 +160,39 @@ func main() {
 	interLinkEndpoint := ""
 	if strings.HasPrefix(interLinkConfig.InterlinkAddress, "unix://") {
 		interLinkEndpoint = interLinkConfig.InterlinkAddress
+
+		// Create a Unix domain socket and listen for incoming connections.
+		socket, err := net.Listen("unix", strings.Replace(interLinkEndpoint, "unix://", "", -1))
+		if err != nil {
+			panic(err)
+		}
+
+		// Cleanup the sockfile.
+		c := make(chan os.Signal, 1)
+		signal.Notify(c, os.Interrupt, syscall.SIGTERM)
+		go func() {
+			<-c
+			os.Remove(interLinkEndpoint)
+			os.Exit(1)
+		}()
+		server := http.Server{
+			Handler: mutex,
+		}
+
+		log.G(ctx).Info(socket)
+
+		if err := server.Serve(socket); err != nil {
+			log.G(ctx).Fatal(err)
+		}
 	} else if strings.HasPrefix(interLinkConfig.InterlinkAddress, "http://") {
 		interLinkEndpoint = strings.Replace(interLinkConfig.InterlinkAddress, "http://", "", -1) + ":" + interLinkConfig.Interlinkport
+
+		err = http.ListenAndServe(interLinkEndpoint, mutex)
+
+		if err != nil {
+			log.G(ctx).Fatal(err)
+		}
 	} else {
 		log.G(ctx).Fatal("Sidecar URL should either start per unix:// or http://")
-	}
-
-	err = http.ListenAndServe(interLinkEndpoint, mutex)
-
-	if err != nil {
-		log.G(ctx).Fatal(err)
 	}
 }
