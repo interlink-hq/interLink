@@ -27,6 +27,8 @@ spec:
       containers:
       - name: inttw-vk
         image: "{{.VirtualKubeletRef}}"
+      - name: interlink
+        image: "{{.InterLinkRef}}"
 `
 
 //	#- name: interlink
