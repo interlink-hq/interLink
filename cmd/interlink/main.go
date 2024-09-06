@@ -3,13 +3,16 @@ package main
 import (
 	"context"
 	"crypto/tls"
+	"crypto/x509"
 	"flag"
 	"fmt"
+	"io/ioutil"
 	"net/http"
 	"os"
 	"strings"
 	"time"
 
+	"github.com/google/uuid"
 	"github.com/sirupsen/logrus"
 	"github.com/virtual-kubelet/virtual-kubelet/log"
 	logruslogger "github.com/virtual-kubelet/virtual-kubelet/log/logrus"
@@ -17,6 +20,7 @@ import (
 	"github.com/virtual-kubelet/virtual-kubelet/trace/opentelemetry"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/credentials"
+	"google.golang.org/grpc/credentials/insecure"
 
 	types "github.com/intertwin-eu/interlink/pkg/interlink"
 	"github.com/intertwin-eu/interlink/pkg/interlink/api"
@@ -31,10 +35,23 @@ import (
 )
 
 func initProvider(ctx context.Context) (func(context.Context) error, error) {
+	log.G(ctx).Info("Tracing is enabled, setting up the TracerProvider")
+
+	// Get the TELEMETRY_UNIQUE_ID from the environment, if it is not set, use the hostname
+	uniqueID := os.Getenv("TELEMETRY_UNIQUE_ID")
+	if uniqueID == "" {
+		log.G(ctx).Info("No TELEMETRY_UNIQUE_ID set, generating a new one")
+		newUUID := uuid.New()
+		uniqueID = newUUID.String()
+		log.G(ctx).Info("Generated unique ID: ", uniqueID, " use InterLink-Plugin-"+uniqueID+" as service name from Grafana")
+	}
+
+	serviceName := "InterLink-Plugin-" + uniqueID
+
 	res, err := resource.New(ctx,
 		resource.WithAttributes(
 			// the service name used to display traces in backends
-			semconv.ServiceName("InterLink-API"),
+			semconv.ServiceName(serviceName),
 		),
 	)
 	if err != nil {
@@ -50,11 +67,54 @@ func initProvider(ctx context.Context) (func(context.Context) error, error) {
 		otlpEndpoint = "localhost:4317"
 	}
 
-	fmt.Println("TELEMETRY_ENDPOINT: ", otlpEndpoint)
+	log.G(ctx).Info("TELEMETRY_ENDPOINT: ", otlpEndpoint)
+
+	caCrtFilePath := os.Getenv("TELEMETRY_CA_CRT_FILEPATH")
 
 	conn := &grpc.ClientConn{}
-	creds := credentials.NewTLS(&tls.Config{InsecureSkipVerify: true})
-	conn, err = grpc.DialContext(ctx, otlpEndpoint, grpc.WithTransportCredentials(creds), grpc.WithBlock())
+	if caCrtFilePath != "" {
+
+		// if the CA certificate is provided, set up mutual TLS
+
+		log.G(ctx).Info("CA certificate provided, setting up mutual TLS")
+
+		caCert, err := ioutil.ReadFile(caCrtFilePath)
+		if err != nil {
+			return nil, fmt.Errorf("failed to load CA certificate: %w", err)
+		}
+
+		clientKeyFilePath := os.Getenv("TELEMETRY_CLIENT_KEY_FILEPATH")
+		if clientKeyFilePath == "" {
+			return nil, fmt.Errorf("client key file path not provided. Since a CA certificate is provided, a client key is required for mutual TLS")
+		}
+
+		clientCrtFilePath := os.Getenv("TELEMETRY_CLIENT_CRT_FILEPATH")
+		if clientCrtFilePath == "" {
+			return nil, fmt.Errorf("client certificate file path not provided. Since a CA certificate is provided, a client certificate is required for mutual TLS")
+		}
+
+		certPool := x509.NewCertPool()
+		if !certPool.AppendCertsFromPEM(caCert) {
+			return nil, fmt.Errorf("failed to append CA certificate")
+		}
+
+		cert, err := tls.LoadX509KeyPair(clientCrtFilePath, clientKeyFilePath)
+		if err != nil {
+			return nil, fmt.Errorf("failed to load client certificate: %w", err)
+		}
+
+		tlsConfig := &tls.Config{
+			Certificates:       []tls.Certificate{cert},
+			RootCAs:            certPool,
+			MinVersion:         tls.VersionTLS12,
+			InsecureSkipVerify: true,
+		}
+		creds := credentials.NewTLS(tlsConfig)
+		conn, err = grpc.NewClient(otlpEndpoint, grpc.WithTransportCredentials(creds), grpc.WithBlock())
+
+	} else {
+		conn, err = grpc.NewClient(otlpEndpoint, grpc.WithTransportCredentials(insecure.NewCredentials()))
+	}
 
 	if err != nil {
 		return nil, fmt.Errorf("failed to create gRPC connection to collector: %w", err)

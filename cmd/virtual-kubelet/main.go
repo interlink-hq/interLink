@@ -30,7 +30,9 @@ import (
 
 	// "k8s.io/client-go/rest"
 	"google.golang.org/grpc"
+	"google.golang.org/grpc/connectivity"
 	"google.golang.org/grpc/credentials"
+	"google.golang.org/grpc/credentials/insecure"
 	v1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/fields"
 	"k8s.io/client-go/kubernetes/scheme"
@@ -179,17 +181,15 @@ func initProvider(ctx context.Context) (func(context.Context) error, error) {
 			InsecureSkipVerify: true,
 		}
 		creds := credentials.NewTLS(tlsConfig)
-
-		conn, err = grpc.DialContext(ctx,
-			otlpEndpoint,
-			grpc.WithTransportCredentials(creds),
-			grpc.WithBlock())
+		conn, err = grpc.NewClient(otlpEndpoint, grpc.WithTransportCredentials(creds), grpc.WithBlock())
 
 	} else {
 		// if the CA certificate is not provided, use an insecure connection
 		// this means that the telemetry collector is not using a certificate, i.e. is inside the k8s cluster
-		conn, err = grpc.DialContext(ctx, otlpEndpoint, grpc.WithInsecure(), grpc.WithBlock())
+		conn, err = grpc.NewClient(otlpEndpoint, grpc.WithTransportCredentials(insecure.NewCredentials()))
 	}
+
+	conn.WaitForStateChange(ctx, connectivity.Ready)
 
 	if err != nil {
 		return nil, fmt.Errorf("failed to create gRPC connection to collector: %w", err)
