@@ -3,6 +3,7 @@ from typing import Annotated, Dict, List, Optional
 
 from pydantic import BaseModel, ConfigDict, Field
 
+
 class Metadata(BaseModel):
     name: Optional[str] = None
     namespace: Optional[str] = None
@@ -35,8 +36,12 @@ class SecretKeySelector(BaseModel):
 
 
 class EnvVarSource(BaseModel):
-    config_map_key_ref: Annotated[ConfigMapKeySelector | None, Field(alias="configMapKeyRef")] = None
-    secret_key_ref: Annotated[SecretKeySelector | None, Field(alias="secretKeyRef")] = None
+    config_map_key_ref: Annotated[
+        ConfigMapKeySelector | None, Field(alias="configMapKeyRef")
+    ] = None
+    secret_key_ref: Annotated[
+        SecretKeySelector | None, Field(alias="secretKeyRef")
+    ] = None
     model_config = ConfigDict(populate_by_name=True)
 
 
@@ -48,10 +53,14 @@ class EnvVar(BaseModel):
 
 
 class SecurityContext(BaseModel):
-    allow_privilege_escalation: Annotated[bool | None, Field(alias="allowPrivilegeEscalation")] = None
+    allow_privilege_escalation: Annotated[
+        bool | None, Field(alias="allowPrivilegeEscalation")
+    ] = None
     privileged: Optional[bool] = None
     proc_mount: Annotated[str | None, Field(alias="procMount")] = None
-    read_only_file_system: Annotated[bool | None, Field(alias="readOnlyFileSystem")] = None
+    read_only_file_system: Annotated[
+        bool | None, Field(alias="readOnlyFileSystem")
+    ] = None
     run_as_group: Annotated[int | None, Field(alias="runAsGroup")] = None
     run_as_non_root: Annotated[bool | None, Field(alias="runAsNonRoot")] = None
     run_as_user: Annotated[int | None, Field(alias="runAsUser")] = None
@@ -76,7 +85,9 @@ class Container(BaseModel):
     resources: Optional[dict] = Field({})
     volume_mounts: Annotated[List[VolumeMount] | None, Field(alias="volumeMounts")] = []
     env: Optional[List[EnvVar]] = None
-    security_context: Annotated[SecurityContext | None, Field(alias="securityContext")] = None
+    security_context: Annotated[
+        SecurityContext | None, Field(alias="securityContext")
+    ] = None
     ports: Optional[List[ContainerPort]] = None
     model_config = ConfigDict(populate_by_name=True)
 
@@ -120,13 +131,17 @@ class PodVolume(BaseModel):
 
 class PodSpec(BaseModel):
     containers: List[Container]
-    init_containers: Annotated[List[Container] | None, Field(alias="initContainers")] = None
+    init_containers: Annotated[
+        List[Container] | None, Field(alias="initContainers")
+    ] = None
     volumes: Optional[List[PodVolume]] = None
     preemption_policy: Annotated[str | None, Field(alias="preemptionPolicy")] = None
     priority_class_name: Annotated[str | None, Field(alias="priorityClassName")] = None
     priority: Optional[int] = None
     restart_policy: Annotated[str | None, Field(alias="restartPolicy")] = None
-    termination_grace_period_seconds: Annotated[int | None, Field(alias="terminationGracePeriodSeconds")] = None
+    termination_grace_period_seconds: Annotated[
+        int | None, Field(alias="terminationGracePeriodSeconds")
+    ] = None
     model_config = ConfigDict(populate_by_name=True)
 
 
@@ -219,6 +234,7 @@ class LogRequest(BaseModel):
     container_name: Annotated[str, Field(alias="ContainerName")]
     opts: Annotated[LogOpts, Field(alias="Opts")]
     model_config = ConfigDict(populate_by_name=True)
+
 
 class CreateStruct(BaseModel):
     pod_uid: Annotated[str, Field(alias="PodUID")]
