@@ -28,8 +28,6 @@ spec:
       containers:
       - name: inttw-vk
         image: "{{.VirtualKubeletRef}}"
-      - name: interlink
-        image: "{{.InterLinkRef}}"
 `
 
 //	#- name: interlink
@@ -81,6 +79,15 @@ func New(name string,
 		InterlinkContainer: dag.Container().From(InterlinkRef),
 		PluginRef:          pluginRef,
 	}
+}
+
+func (m *Interlink) TestIL(ctx context.Context,
+	manifests *dagger.Directory) (*dagger.Container, error) {
+	return m.InterlinkContainer.
+		WithMountedDirectory("/etc/interlink/", manifests).
+		WithEnvVariable("INTERLINKCONFIGPATH", "/etc/interlink/interlink-config.yaml").
+		WithExposedPort(3000).
+		WithExec([]string{}, dagger.ContainerWithExecOpts{UseEntrypoint: true, InsecureRootCapabilities: true}).Sync(ctx)
 }
 
 // Setup k8s e interlink components:
