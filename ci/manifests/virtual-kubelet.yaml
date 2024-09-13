@@ -15,6 +15,7 @@ spec:
       labels:
         nodeName: virtual-kubelet 
     spec:
+      hostNetwork: true
       automountServiceAccountToken: true
       serviceAccountName: virtual-kubelet 
       containers:
@@ -37,7 +38,7 @@ spec:
         - name: NODENAME
           value: virtual-kubelet 
         - name: KUBELET_PORT
-          value: "10250"
+          value: "10255"
         - name: POD_IP
           valueFrom:
             fieldRef:

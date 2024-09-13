@@ -373,8 +373,10 @@ func main() {
 	// TODO: create a csr auto approver https://github.com/liqotech/liqo/blob/master/cmd/liqo-controller-manager/main.go#L498
 	retriever := commonIL.NewSelfSignedCertificateRetriever(cfg.NodeName, net.ParseIP(cfg.InternalIP))
 
+	kubeletPort := os.Getenv("KUBELET_PORT")
+
 	server := &http.Server{
-		Addr:              fmt.Sprintf("0.0.0.0:%d", 10250),
+		Addr:              fmt.Sprintf("0.0.0.0:%s", kubeletPort),
 		Handler:           mux,
 		ReadHeaderTimeout: 10 * time.Second, // Required to limit the effects of the Slowloris attack.
 		TLSConfig: &tls.Config{

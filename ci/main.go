@@ -81,15 +81,6 @@ func New(name string,
 	}
 }
 
-func (m *Interlink) TestIL(ctx context.Context,
-	manifests *dagger.Directory) (*dagger.Container, error) {
-	return m.InterlinkContainer.
-		WithMountedDirectory("/etc/interlink/", manifests).
-		WithEnvVariable("INTERLINKCONFIGPATH", "/etc/interlink/interlink-config.yaml").
-		WithExposedPort(3000).
-		WithExec([]string{}, dagger.ContainerWithExecOpts{UseEntrypoint: true, InsecureRootCapabilities: true}).Sync(ctx)
-}
-
 // Setup k8s e interlink components:
 // virtual kubelet and interlink API server
 func (m *Interlink) NewInterlink(
@@ -113,9 +104,6 @@ func (m *Interlink) NewInterlink(
 	// +optional
 	// +defaultPath="./manifests/plugin-config.yaml"
 	pluginConfig *dagger.File,
-	// +optional
-	// +defaultPath="./manifests/coredns-config.yaml"
-	coreDNSConfig *dagger.File,
 ) (*Interlink, error) {
 
 	if localRegistry != nil {
@@ -150,13 +138,10 @@ func (m *Interlink) NewInterlink(
 		}
 	}
 
-	//K3s := dag.K3S(m.Name, dagger.K3SOpts{Image: "rancher/k3s:v1.28.1-k3s1"}).With(func(k *dagger.K3S) *dagger.K3S {
 	K3s := dag.K3S(m.Name).With(func(k *dagger.K3S) *dagger.K3S {
 		return k.WithContainer(
 			k.Container().
 				WithEnvVariable("BUST", time.Now().String()).
-				//WithFile("/var/lib/rancher/k3s/server/manifests/coredns.override.yaml", coreDNSConfig).
-				//WithDirectory("/manifests", manifests).
 				WithExec([]string{"sh", "-c", `
 cat <<EOF > /etc/rancher/k3s/registries.yaml
 mirrors:
