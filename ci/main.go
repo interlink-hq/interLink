@@ -81,15 +81,6 @@ func New(name string,
 	}
 }
 
-func (m *Interlink) TestIL(ctx context.Context,
-	manifests *dagger.Directory) (*dagger.Container, error) {
-	return m.InterlinkContainer.
-		WithMountedDirectory("/etc/interlink/", manifests).
-		WithEnvVariable("INTERLINKCONFIGPATH", "/etc/interlink/interlink-config.yaml").
-		WithExposedPort(3000).
-		WithExec([]string{}, dagger.ContainerWithExecOpts{UseEntrypoint: true, InsecureRootCapabilities: true}).Sync(ctx)
-}
-
 // Setup k8s e interlink components:
 // virtual kubelet and interlink API server
 func (m *Interlink) NewInterlink(
