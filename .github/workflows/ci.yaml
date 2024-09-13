@@ -28,4 +28,3 @@ jobs:
           args: -s --name slurm-test build-images new-interlink --plugin-endpoint tcp://localhost:4000 test stdout
           cloud-token: ${{ secrets.DAGGER_CLOUD_TOKEN }}
           version: "0.13.0"
-          #dagger-flags: -d
