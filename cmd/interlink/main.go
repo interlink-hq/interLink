@@ -137,10 +137,19 @@ func main() {
 	sidecarEndpoint := ""
 	if strings.HasPrefix(interLinkConfig.Sidecarurl, "unix://") {
 		sidecarEndpoint = interLinkConfig.Sidecarurl
+		// Dial the Unix socket
+		conn, err := net.Dial("unix", sidecarEndpoint)
+		if err != nil {
+			panic(err)
+		}
+
+		http.DefaultTransport.(*http.Transport).DialContext = func(_ context.Context, _, _ string) (net.Conn, error) {
+			return conn, nil
+		}
 	} else if strings.HasPrefix(interLinkConfig.Sidecarurl, "http://") {
 		sidecarEndpoint = interLinkConfig.Sidecarurl + ":" + interLinkConfig.Sidecarport
 	} else {
-		log.G(ctx).Fatal("Sidecar URL should either start per unix:// or http://")
+		log.G(ctx).Fatal("Sidecar URL should either start per unix:// or http://: getting ", interLinkConfig.Sidecarurl)
 	}
 
 	interLinkAPIs := api.InterLinkHandler{
@@ -162,7 +171,7 @@ func main() {
 		interLinkEndpoint = interLinkConfig.InterlinkAddress
 
 		// Create a Unix domain socket and listen for incoming connections.
-		socket, err := net.Listen("unix", strings.Replace(interLinkEndpoint, "unix://", "", -1))
+		socket, err := net.Listen("unix", strings.ReplaceAll(interLinkEndpoint, "unix://", ""))
 		if err != nil {
 			panic(err)
 		}
@@ -193,6 +202,6 @@ func main() {
 			log.G(ctx).Fatal(err)
 		}
 	} else {
-		log.G(ctx).Fatal("Sidecar URL should either start per unix:// or http://")
+		log.G(ctx).Fatal("Interlink URL should either start per unix:// or http://. Getting: ", interLinkConfig.InterlinkAddress)
 	}
 }

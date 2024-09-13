@@ -1,4 +1,4 @@
-InterlinkURL: "http://localhost"
+InterlinkURL: "http://interlink"
 InterlinkPort: "3000"
 SidecarURL: "http://0.0.0.0"
 SidecarPort: "4000"

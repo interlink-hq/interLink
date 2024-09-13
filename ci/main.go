@@ -8,6 +8,7 @@ package main
 import (
 	"bytes"
 	"context"
+	"dagger/interlink/internal/dagger"
 	"fmt"
 	"html/template"
 	"strings"
@@ -26,9 +27,12 @@ spec:
       containers:
       - name: inttw-vk
         image: "{{.VirtualKubeletRef}}"
-      - name: interlink
-        image: "{{.InterLinkRef}}"
 `
+
+//	#- name: interlink
+//	#  image: "{{.InterLinkRef}}"
+//
+// `
 )
 
 type patchSchema struct {
@@ -39,93 +43,142 @@ type patchSchema struct {
 // Interlink struct for initialization and internal variables
 type Interlink struct {
 	Name              string
-	Registry          *Service
-	Manifests         *Directory
+	Registry          *dagger.Service
+	Manifests         *dagger.Directory
 	VirtualKubeletRef string
 	InterlinkRef      string
+	PluginRef         string
 	// +private
-	Kubectl *Container
+	Kubectl *dagger.Container
 	// +private
-	KubeAPIs *Service
+	KubeAPIs *dagger.Service
 	// +private
-	KubeConfig *File
+	KubeConfig *dagger.File
 	// +private
-	KubeConfigHost *File
+	KubeConfigHost     *dagger.File
+	InterlinkContainer *dagger.Container
+	VKContainer        *dagger.Container
 }
 
 // New initializes the Dagger module at each call
 func New(name string,
 	// +optional
+	// +default="ghcr.io/intertwin-eu/interlink/virtual-kubelet-inttw:0.3.1-rc1"
 	VirtualKubeletRef string,
 	// +optional
+	// +default="ghcr.io/intertwin-eu/interlink/interlink:0.3.1-rc1"
 	InterlinkRef string,
+	// +optional
+	// +default="ghcr.io/intertwin-eu/interlink-docker-plugin/docker-plugin:0.0.24-no-gpu"
+	pluginRef string,
 ) *Interlink {
 
 	return &Interlink{
 		Name:              name,
 		VirtualKubeletRef: VirtualKubeletRef,
 		InterlinkRef:      InterlinkRef,
+		PluginRef:         pluginRef,
 	}
+}
+
+func (m *Interlink) TestIL(ctx context.Context,
+	manifests *dagger.Directory) (*dagger.Container, error) {
+	return m.InterlinkContainer.
+		WithMountedDirectory("/etc/interlink/", manifests).
+		WithEnvVariable("INTERLINKCONFIGPATH", "/etc/interlink/interlink-config.yaml").
+		WithExposedPort(3000).
+		WithExec([]string{}, dagger.ContainerWithExecOpts{UseEntrypoint: true, InsecureRootCapabilities: true}).Sync(ctx)
 }
 
 // Setup k8s e interlink components:
 // virtual kubelet and interlink API server
 func (m *Interlink) NewInterlink(
 	ctx context.Context,
-	manifests *Directory,
 	// +optional
-	kubeconfig *File,
+	// +defaultPath="./manifests"
+	manifests *dagger.Directory,
 	// +optional
-	localRegistry *Service,
+	kubeconfig *dagger.File,
 	// +optional
-	localCluster *Service,
+	localRegistry *dagger.Service,
 	// +optional
-	// +default="dciangot/docker-plugin:v1"
-	pluginImage string,
+	localCluster *dagger.Service,
 	// +optional
-	pluginEndpoint *Service,
+	interlinkEndpoint *dagger.Service,
 	// +optional
-	pluginConfig *File,
+	// +defaultPath="./manifests/interlink-config.yaml"
+	interlinkConfig *dagger.File,
+	// +optional
+	pluginEndpoint *dagger.Service,
+	// +optional
+	// +defaultPath="./manifests/plugin-config.yaml"
+	pluginConfig *dagger.File,
+	// +optional
+	// +defaultPath="./manifests/coredns-config.yaml"
+	coreDNSConfig *dagger.File,
 ) (*Interlink, error) {
 
 	if localRegistry != nil {
 		m.Registry = localRegistry
 	}
 
+	var err error
 	if pluginEndpoint == nil {
-		plugin := dag.Container().From(pluginImage).
+		plugin := dag.Container().From(m.PluginRef).
 			WithFile("/etc/interlink/InterLinkConfig.yaml", pluginConfig).
 			WithEnvVariable("INTERLINKCONFIGPATH", "/etc/interlink/InterLinkConfig.yaml").
-			WithExec([]string{"bash", "-c", "dockerd --mtu 1450 & /sidecar/docker-sidecar"}, ContainerWithExecOpts{InsecureRootCapabilities: true}).
-			WithExposedPort(4000)
+			WithExposedPort(4000).
+			WithExec([]string{"bash", "-c", "dockerd --mtu 1450 & /sidecar/docker-sidecar"}, dagger.ContainerWithExecOpts{UseEntrypoint: false, InsecureRootCapabilities: true})
 
-		pluginEndpoint = plugin.AsService()
+		pluginEndpoint, err = plugin.AsService().Start(ctx)
+		if err != nil {
+			return nil, err
+		}
 	}
 
-	//K3s := dag.K3S(m.Name, K3SOpts{Image: "rancher/k3s:v1.28.1-k3s1"}).With(func(k *K3S) *K3S {
-	K3s := dag.K3S(m.Name).With(func(k *K3S) *K3S {
+	if interlinkEndpoint == nil {
+		interlink := m.InterlinkContainer.
+			WithFile("/etc/interlink/InterLinkConfig.yaml", interlinkConfig).
+			WithServiceBinding("plugin", pluginEndpoint).
+			WithEnvVariable("INTERLINKCONFIGPATH", "/etc/interlink/InterLinkConfig.yaml").
+			WithExposedPort(3000).
+			WithExec([]string{}, dagger.ContainerWithExecOpts{UseEntrypoint: true, InsecureRootCapabilities: true})
+
+		interlinkEndpoint, err = interlink.AsService().Start(ctx)
+		if err != nil {
+			return nil, err
+		}
+	}
+
+	//K3s := dag.K3S(m.Name, dagger.K3SOpts{Image: "rancher/k3s:v1.28.1-k3s1"}).With(func(k *dagger.K3S) *dagger.K3S {
+	K3s := dag.K3S(m.Name).With(func(k *dagger.K3S) *dagger.K3S {
 		return k.WithContainer(
 			k.Container().
 				WithEnvVariable("BUST", time.Now().String()).
-				WithMountedDirectory("/manifests", manifests).
+				//WithFile("/var/lib/rancher/k3s/server/manifests/coredns.override.yaml", coreDNSConfig).
+				//WithDirectory("/manifests", manifests).
 				WithExec([]string{"sh", "-c", `
 cat <<EOF > /etc/rancher/k3s/registries.yaml
 mirrors:
   "registry:5000":
     endpoint:
       - "http://registry:5000"
-EOF`}, ContainerWithExecOpts{SkipEntrypoint: true}).
+EOF`}).
 				WithServiceBinding("registry", m.Registry).
-				WithServiceBinding("plugin", pluginEndpoint),
+				WithServiceBinding("interlink", interlinkEndpoint),
 		)
+
 	})
 
-	K3s.Server().Start(ctx)
+	_, err = K3s.Server().Start(ctx)
+	if err != nil {
+		return nil, err
+	}
 
 	m.Manifests = manifests
 	m.KubeAPIs = K3s.Server()
-	m.KubeConfig = K3s.Config(false)
-	m.KubeConfigHost = K3s.Config(true)
+	m.KubeConfig = K3s.Config(dagger.K3SConfigOpts{Local: false})
+	m.KubeConfigHost = K3s.Config(dagger.K3SConfigOpts{Local: true})
 
 	// create Kustomize patch for images to be used
 	patch := patchSchema{
@@ -150,38 +203,39 @@ EOF`}, ContainerWithExecOpts{SkipEntrypoint: true}).
 	fmt.Println(bufferVK.String())
 
 	kubectl := dag.Container().From("bitnami/kubectl:1.29.7-debian-12-r3").
+		WithServiceBinding("registry", m.Registry).
+		WithServiceBinding("plugin", pluginEndpoint).
+		WithServiceBinding("interlink", interlinkEndpoint).
 		WithUser("root").
-		WithExec([]string{"mkdir", "-p", "/opt/user"}, ContainerWithExecOpts{SkipEntrypoint: true}).
-		WithExec([]string{"chown", "-R", "1001:0", "/opt/user"}, ContainerWithExecOpts{SkipEntrypoint: true}).
-		WithExec([]string{"apt", "update"}, ContainerWithExecOpts{SkipEntrypoint: true}).
-		WithExec([]string{"apt", "update"}, ContainerWithExecOpts{SkipEntrypoint: true}).
-		WithExec([]string{"apt", "install", "-y", "curl", "python3", "python3-pip", "python3-venv", "git"}, ContainerWithExecOpts{SkipEntrypoint: true}).
+		WithExec([]string{"mkdir", "-p", "/opt/user"}).
+		WithExec([]string{"chown", "-R", "1001:0", "/opt/user"}).
+		WithExec([]string{"apt", "update"}).
+		WithExec([]string{"apt", "update"}).
+		WithExec([]string{"apt", "install", "-y", "curl", "python3", "python3-pip", "python3-venv", "git"}).
 		WithMountedFile("/.kube/config", m.KubeConfig).
-		WithExec([]string{"chown", "1001:0", "/.kube/config"}, ContainerWithExecOpts{SkipEntrypoint: true}).
+		WithExec([]string{"chown", "1001:0", "/.kube/config"}).
 		WithUser("1001").
 		WithDirectory("/manifests", m.Manifests).
-		WithNewFile("/manifests/virtual-kubelet-merge.yaml", ContainerWithNewFileOpts{
-			Contents:    bufferVK.String(),
+		WithNewFile("/manifests/virtual-kubelet-merge.yaml", bufferVK.String(), dagger.ContainerWithNewFileOpts{
 			Permissions: 0o755,
 		}).
-		WithNewFile("/manifests/interlink-merge.yaml", ContainerWithNewFileOpts{
-			Contents:    bufferIL.String(),
+		WithNewFile("/manifests/interlink-merge.yaml", bufferIL.String(), dagger.ContainerWithNewFileOpts{
 			Permissions: 0o755,
 		}).
 		WithEntrypoint([]string{"kubectl"})
 
 	m.Kubectl = kubectl
 
-	ns, _ := kubectl.WithExec([]string{"create", "ns", "interlink"}).Stdout(ctx)
+	ns, _ := kubectl.WithExec([]string{"create", "ns", "interlink"}, dagger.ContainerWithExecOpts{UseEntrypoint: true}).Stdout(ctx)
 	fmt.Println(ns)
 
-	sa, err := kubectl.WithExec([]string{"apply", "-f", "/manifests/service-account.yaml"}).Stdout(ctx)
+	sa, err := kubectl.WithExec([]string{"apply", "-f", "/manifests/service-account.yaml"}, dagger.ContainerWithExecOpts{UseEntrypoint: true}).Stdout(ctx)
 	if err != nil {
 		return nil, err
 	}
 	fmt.Println(sa)
 
-	vkConfig, err := kubectl.WithExec([]string{"apply", "-k", "/manifests/"}).Stdout(ctx)
+	vkConfig, err := kubectl.WithExec([]string{"apply", "-k", "/manifests/"}, dagger.ContainerWithExecOpts{UseEntrypoint: true}).Stdout(ctx)
 	if err != nil {
 		return nil, err
 	}
@@ -191,8 +245,8 @@ EOF`}, ContainerWithExecOpts{SkipEntrypoint: true}).
 }
 
 // Returns the kubeconfig file of the k3s cluster
-func (m *Interlink) Config() *File {
-	return dag.K3S(m.Name).Config(true)
+func (m *Interlink) Config() *dagger.File {
+	return dag.K3S(m.Name).Config(dagger.K3SConfigOpts{Local: true})
 }
 
 // Build interLink and virtual kubelet docker images from source
@@ -208,7 +262,9 @@ func (m *Interlink) BuildImages(
 	// +optional
 	// +default="registry:5000/plugin-test"
 	pluginRef string,
-	sourceFolder *Directory,
+	// +optional
+	// +defaultPath="../"
+	sourceFolder *dagger.Directory,
 ) (*Interlink, error) {
 
 	// TODO: get tag
@@ -218,11 +274,6 @@ func (m *Interlink) BuildImages(
 	m.VirtualKubeletRef = virtualKubeletRef
 	m.InterlinkRef = interlinkRef
 
-	workspace := dag.Container().
-		WithDirectory("/src", sourceFolder).
-		WithWorkdir("/src").
-		Directory("/src")
-
 	vkVersionSplits := strings.Split(virtualKubeletRef, ":")
 
 	vkVersion := vkVersionSplits[len(vkVersionSplits)-1]
@@ -230,31 +281,55 @@ func (m *Interlink) BuildImages(
 		return nil, fmt.Errorf("no tag specified on the image for VK")
 	}
 
+	builder := dag.Container().
+		From("golang:1.22").
+		WithDirectory("/src", sourceFolder).
+		WithWorkdir("/src").
+		WithMountedCache("/go/pkg/mod", dag.CacheVolume("go-mod-122")).
+		WithEnvVariable("GOMODCACHE", "/go/pkg/mod").
+		WithEnvVariable("VERSION", "local").
+		WithMountedCache("/go/build-cache", dag.CacheVolume("go-build-122")).
+		WithEnvVariable("GOCACHE", "/go/build-cache").
+		WithEnvVariable("CGO_ENABLED", "0").
+		WithExec([]string{"bash", "-c", "KUBELET_VERSION=${VERSION} ./cmd/virtual-kubelet/set-version.sh"}).
+		WithExec([]string{"go", "build", "-o", "bin/interlink", "cmd/interlink/main.go"})
+
+	m.InterlinkContainer = dag.Container().
+		From("alpine").
+		WithFile("/bin/interlink", builder.File("/src/bin/interlink")).
+		WithEntrypoint([]string{"/bin/interlink"})
+
 	_, err := dag.Container().From("quay.io/skopeo/stable").
 		WithServiceBinding("registry", m.Registry).
-		WithMountedFile("image.tar", dag.Container().
-			Build(workspace, ContainerBuildOpts{
-				Dockerfile: "docker/Dockerfile.vk",
-				BuildArgs: []BuildArg{
-					{"VERSION", vkVersion},
-				},
-			}).AsTarball()).
-		WithExec([]string{"copy", "--dest-tls-verify=false", "docker-archive:image.tar", "docker://" + m.VirtualKubeletRef}).
+		WithMountedFile("image.tar", m.InterlinkContainer.AsTarball()).
+		WithExec([]string{"copy", "--dest-tls-verify=false", "docker-archive:image.tar", "docker://" + m.InterlinkRef}, dagger.ContainerWithExecOpts{UseEntrypoint: true}).
 		Sync(ctx)
 	if err != nil {
 		return nil, err
 	}
 
+	builderVK := dag.Container().
+		From("golang:1.22").
+		WithDirectory("/src", sourceFolder).
+		WithWorkdir("/src").
+		WithMountedCache("/go/pkg/mod", dag.CacheVolume("go-mod-122")).
+		WithEnvVariable("GOMODCACHE", "/go/pkg/mod").
+		WithEnvVariable("VERSION", "local").
+		WithMountedCache("/go/build-cache", dag.CacheVolume("go-build-122")).
+		WithEnvVariable("GOCACHE", "/go/build-cache").
+		WithEnvVariable("CGO_ENABLED", "0").
+		WithExec([]string{"bash", "-c", "KUBELET_VERSION=${VERSION} ./cmd/virtual-kubelet/set-version.sh"}).
+		WithExec([]string{"go", "build", "-o", "bin/vk", "cmd/virtual-kubelet/main.go"})
+
+	m.VKContainer = dag.Container().
+		From("alpine").
+		WithFile("/bin/vk", builderVK.File("/src/bin/vk")).
+		WithEntrypoint([]string{"/bin/vk"})
+
 	_, err = dag.Container().From("quay.io/skopeo/stable").
 		WithServiceBinding("registry", m.Registry).
-		WithMountedFile("image.tar", dag.Container().
-			Build(workspace, ContainerBuildOpts{
-				Dockerfile: "docker/Dockerfile.interlink",
-				BuildArgs: []BuildArg{
-					{"VERSION", vkVersion},
-				},
-			}).AsTarball()).
-		WithExec([]string{"copy", "--dest-tls-verify=false", "docker-archive:image.tar", "docker://" + m.InterlinkRef}).
+		WithMountedFile("image.tar", m.VKContainer.AsTarball()).
+		WithExec([]string{"copy", "--dest-tls-verify=false", "docker-archive:image.tar", "docker://" + m.VirtualKubeletRef}, dagger.ContainerWithExecOpts{UseEntrypoint: true}).
 		Sync(ctx)
 	if err != nil {
 		return nil, err
@@ -265,7 +340,7 @@ func (m *Interlink) BuildImages(
 // Wait for virtual node to be ready and expose the k8s endpoint as a service
 func (m *Interlink) Kube(
 	ctx context.Context,
-) (*Service, error) {
+) (*dagger.Service, error) {
 
 	return dag.K3S(m.Name).Server(), nil
 
@@ -274,17 +349,12 @@ func (m *Interlink) Kube(
 // Wait for cluster to be ready, then setup the test container
 func (m *Interlink) Run(
 	ctx context.Context,
-) (*Container, error) {
-
-	// result := m.Kubectl.
-	// 	WithWorkdir("/opt").
-	// 	WithExec([]string{"bash", "-c", "python3 -m venv .venv && source .venv/bin/activate && pip3 install -e ./ "}, ContainerWithExecOpts{SkipEntrypoint: true}).
-	// 	WithExec([]string{"bash", "-c", "source .venv/bin/activate && export KUBECONFIG=/.kube/config"}, ContainerWithExecOpts{SkipEntrypoint: true})
+) (*dagger.Container, error) {
 
 	return m.Kubectl.
 		WithWorkdir("/opt/user").
-		WithExec([]string{"bash", "-c", "git clone https://github.com/interTwin-eu/vk-test-set.git"}, ContainerWithExecOpts{SkipEntrypoint: true}).
-		WithExec([]string{"bash", "-c", "cp /manifests/vktest_config.yaml /opt/user/vk-test-set/vktest_config.yaml"}, ContainerWithExecOpts{SkipEntrypoint: true}).
+		WithExec([]string{"bash", "-c", "git clone https://github.com/interTwin-eu/vk-test-set.git"}).
+		WithExec([]string{"bash", "-c", "cp /manifests/vktest_config.yaml /opt/user/vk-test-set/vktest_config.yaml"}).
 		WithWorkdir("/opt/user/vk-test-set"), nil
 
 }
@@ -293,19 +363,19 @@ func (m *Interlink) Run(
 func (m *Interlink) Test(
 	ctx context.Context,
 	// +optional
-	localCluster *Service,
+	localCluster *dagger.Service,
 	// +optional
 	// +default false
 	//cleanup bool,
-) (*Container, error) {
+) (*dagger.Container, error) {
 
 	result := m.Kubectl.
 		WithWorkdir("/opt/user").
-		WithExec([]string{"bash", "-c", "git clone https://github.com/interTwin-eu/vk-test-set.git"}, ContainerWithExecOpts{SkipEntrypoint: true}).
-		WithExec([]string{"bash", "-c", "cp /manifests/vktest_config.yaml /opt/user/vk-test-set/vktest_config.yaml"}, ContainerWithExecOpts{SkipEntrypoint: true}).
+		WithExec([]string{"bash", "-c", "git clone https://github.com/interTwin-eu/vk-test-set.git"}).
+		WithExec([]string{"bash", "-c", "cp /manifests/vktest_config.yaml /opt/user/vk-test-set/vktest_config.yaml"}).
 		WithWorkdir("/opt/user/vk-test-set").
-		WithExec([]string{"bash", "-c", "python3 -m venv .venv && source .venv/bin/activate && pip3 install -e ./ "}, ContainerWithExecOpts{SkipEntrypoint: true}).
-		WithExec([]string{"bash", "-c", "source .venv/bin/activate && export KUBECONFIG=/.kube/config && pytest -vk 'not rclone'"}, ContainerWithExecOpts{SkipEntrypoint: true})
+		WithExec([]string{"bash", "-c", "python3 -m venv .venv && source .venv/bin/activate && pip3 install -e ./ "}).
+		WithExec([]string{"bash", "-c", "source .venv/bin/activate && export KUBECONFIG=/.kube/config && pytest -vk 'not rclone'"})
 
 	return result, nil
 

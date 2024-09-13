@@ -4,9 +4,8 @@
   "dependencies": [
     {
       "name": "k3s",
-      "source": "github.com/marcosnils/daggerverse/k3s@e0bd6b9f5519c49db4b6eb0689927214720976f9"
+      "source": "github.com/marcosnils/daggerverse/k3s@ce8fe35d309bdb29f9983f7d90ea518e724534fe"
     }
   ],
-  "source": ".",
-  "engineVersion": "v0.11.9"
+  "engineVersion": "v0.13.0"
 }

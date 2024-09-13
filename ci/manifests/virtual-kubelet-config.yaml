@@ -5,8 +5,9 @@ metadata:
   namespace: interlink 
 data:
   InterLinkConfig.yaml: |
-    InterlinkURL: unix:///var/run/interlink.socket
-    #InterlinkPort: 3000 
+    #InterlinkURL: unix:///var/run/interlink.socket
+    InterlinkURL: "http://interlink"
+    InterlinkPort: "3000" 
     ExportPodData: true
     VerboseLogging: true
     ErrorsOnlyLogging: false

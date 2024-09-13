@@ -1,7 +1,7 @@
 resources:
 - virtual-kubelet-config.yaml
 - virtual-kubelet.yaml
-- interlink-config.yaml
+#- interlink-config.yaml
 #- interlink.yaml
 #- plugin-k8s-config.yaml
 #- plugin.yaml
