@@ -29,5 +29,5 @@ jobs:
           verb: call
           args: -s --name my-test build-images --source-folder ../ new-interlink --plugin-endpoint tcp://localhost:4000 --manifests ./manifests test stdout
           cloud-token: ${{ secrets.DAGGER_CLOUD_TOKEN }}
-          version: "0.11.9"
+          version: "0.13.0"
           dagger-flags: -d
