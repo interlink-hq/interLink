@@ -10,8 +10,8 @@ timeout_multiplier: 10.
 values:
   namespace: interlink
 
-  annotations: {}
-  #   slurm-job.vk.io/flags: "--job-name=test-pod-cfg -t 2800  --ntasks=8 --nodes=1 --mem-per-cpu=2000"
+  annotations:
+     slurm-job.vk.io/flags: "--job-name=test-pod-cfg -t 2800  --ntasks=8 --nodes=1 --mem-per-cpu=2000"
 
   tolerations:
     - key: virtual-node.interlink/no-schedule

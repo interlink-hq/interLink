@@ -196,7 +196,7 @@ EOF`}).
 		WithExec([]string{"chown", "-R", "1001:0", "/opt/user"}).
 		WithExec([]string{"apt", "update"}).
 		WithExec([]string{"apt", "update"}).
-		WithExec([]string{"apt", "install", "-y", "curl", "python3", "python3-pip", "python3-venv", "git"}).
+		WithExec([]string{"apt", "install", "-y", "curl", "python3", "python3-pip", "python3-venv", "git", "vim"}).
 		WithMountedFile("/.kube/config", m.KubeConfig).
 		WithExec([]string{"chown", "1001:0", "/.kube/config"}).
 		WithUser("1001").
@@ -340,7 +340,8 @@ func (m *Interlink) Run(
 		WithWorkdir("/opt/user").
 		WithExec([]string{"bash", "-c", "git clone https://github.com/interTwin-eu/vk-test-set.git"}).
 		WithExec([]string{"bash", "-c", "cp /manifests/vktest_config.yaml /opt/user/vk-test-set/vktest_config.yaml"}).
-		WithWorkdir("/opt/user/vk-test-set"), nil
+		WithWorkdir("/opt/user/vk-test-set").
+		WithExec([]string{"bash", "-c", "python3 -m venv .venv && source .venv/bin/activate && pip3 install -e ./ "}), nil
 
 }
 
