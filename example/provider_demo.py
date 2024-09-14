@@ -6,10 +6,11 @@ from typing import List
 import docker
 import re
 import os
+import sqlite3
 
-
-docker_client = docker.DockerClient()
-# dockerCLI = docker.DockerClient(base_url="unix:///Users/dciangot/.docker/run/docker.sock")
+con = sqlite3.connect("plugin.db")
+cur = con.cursor()
+cur.execute("CREATE TABLE pods(pod_id,j_id,state)")
 
 app = FastAPI()
 
