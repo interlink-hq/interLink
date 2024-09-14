@@ -361,7 +361,7 @@ func (m *Interlink) Test(
 		WithExec([]string{"bash", "-c", "cp /manifests/vktest_config.yaml /opt/user/vk-test-set/vktest_config.yaml"}).
 		WithWorkdir("/opt/user/vk-test-set").
 		WithExec([]string{"bash", "-c", "python3 -m venv .venv && source .venv/bin/activate && pip3 install -e ./ "}).
-		WithExec([]string{"bash", "-c", "source .venv/bin/activate && export KUBECONFIG=/.kube/config && sleep 240 && pytest -vk 'not rclone'"})
+		WithExec([]string{"bash", "-c", "source .venv/bin/activate && export KUBECONFIG=/.kube/config && sleep 0 && pytest -vk 'not rclone'"})
 
 	return result, nil
 

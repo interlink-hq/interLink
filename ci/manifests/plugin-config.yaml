@@ -6,9 +6,9 @@ VerboseLogging: true
 ErrorsOnlyLogging: false
 ExportPodData: true
 # NEEDED PATH FOR GITHUB ACTIONS
-#DataRootFolder: "/home/runner/work/interLink/interLink/.interlink/"
+DataRootFolder: "/home/runner/work/interLink/interLink/.interlink/"
 # on your host use something like:
-DataRootFolder: "/home/ubuntu/.interlink/"
+#DataRootFolder: "/home/ubuntu/.interlink/"
 SbatchPath: "/usr/bin/sbatch"
 ScancelPath: "/usr/bin/scancel"
 SqueuePath: "/usr/bin/squeue"
