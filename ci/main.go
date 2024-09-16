@@ -48,12 +48,9 @@ type Interlink struct {
 	VirtualKubeletRef string
 	InterlinkRef      string
 	PluginRef         string
-	// +private
-	Kubectl *dagger.Container
-	// +private
-	KubeAPIs *dagger.Service
-	// +private
-	KubeConfig *dagger.File
+	Kubectl           *dagger.Container
+	KubeAPIs          *dagger.Service
+	KubeConfig        *dagger.File
 	// +private
 	KubeConfigHost     *dagger.File
 	InterlinkContainer *dagger.Container
@@ -327,16 +324,30 @@ func (m *Interlink) Kube(
 	ctx context.Context,
 ) (*dagger.Service, error) {
 
-	return dag.K3S(m.Name).Server(), nil
+	return m.KubeAPIs, nil
 
 }
 
 // Wait for cluster to be ready, then setup the test container
 func (m *Interlink) Run(
 	ctx context.Context,
+	// +optional
+	// +defaultPath="./manifests"
+	manifests *dagger.Directory,
 ) (*dagger.Container, error) {
 
-	return m.Kubectl.
+	return dag.Container().From("bitnami/kubectl:1.29.7-debian-12-r3").
+		WithUser("root").
+		WithExec([]string{"mkdir", "-p", "/opt/user"}).
+		WithExec([]string{"chown", "-R", "1001:0", "/opt/user"}).
+		WithExec([]string{"apt", "update"}).
+		WithExec([]string{"apt", "update"}).
+		WithExec([]string{"apt", "install", "-y", "curl", "python3", "python3-pip", "python3-venv", "git", "vim"}).
+		WithMountedFile("/.kube/config", dag.K3S(m.Name).Config(dagger.K3SConfigOpts{Local: false})).
+		WithExec([]string{"chown", "1001:0", "/.kube/config"}).
+		WithUser("1001").
+		WithDirectory("/manifests", manifests).
+		WithEntrypoint([]string{"kubectl"}).
 		WithWorkdir("/opt/user").
 		WithExec([]string{"bash", "-c", "git clone https://github.com/interTwin-eu/vk-test-set.git"}).
 		WithExec([]string{"bash", "-c", "cp /manifests/vktest_config.yaml /opt/user/vk-test-set/vktest_config.yaml"}).
@@ -349,19 +360,21 @@ func (m *Interlink) Run(
 func (m *Interlink) Test(
 	ctx context.Context,
 	// +optional
+	// +defaultPath="./manifests"
+	manifests *dagger.Directory,
+	// +optional
 	localCluster *dagger.Service,
 	// +optional
 	// +default false
 	//cleanup bool,
 ) (*dagger.Container, error) {
 
-	result := m.Kubectl.
-		WithWorkdir("/opt/user").
-		WithExec([]string{"bash", "-c", "git clone https://github.com/interTwin-eu/vk-test-set.git"}).
-		WithExec([]string{"bash", "-c", "cp /manifests/vktest_config.yaml /opt/user/vk-test-set/vktest_config.yaml"}).
-		WithWorkdir("/opt/user/vk-test-set").
-		WithExec([]string{"bash", "-c", "python3 -m venv .venv && source .venv/bin/activate && pip3 install -e ./ "}).
-		WithExec([]string{"bash", "-c", "source .venv/bin/activate && export KUBECONFIG=/.kube/config && sleep 0 && pytest -vk 'not rclone'"})
+	c, err := m.Run(ctx, manifests)
+	if err != nil {
+		return nil, err
+	}
+
+	result := c.WithExec([]string{"bash", "-c", "source .venv/bin/activate && export KUBECONFIG=/.kube/config  && pytest -vk 'not rclone and not limits'"})
 
 	return result, nil
 

@@ -7,5 +7,6 @@
       "source": "github.com/marcosnils/daggerverse/k3s@ce8fe35d309bdb29f9983f7d90ea518e724534fe"
     }
   ],
+  "source": ".",
   "engineVersion": "v0.13.0"
 }
