@@ -25,7 +25,9 @@ import (
 
 func doRequest(req *http.Request, token string) (*http.Response, error) {
 
-	req.Header.Add("Authorization", "Bearer "+token)
+	if token != "" {
+		req.Header.Add("Authorization", "Bearer "+token)
+	}
 	req.Header.Set("Content-Type", "application/json")
 	return http.DefaultClient.Do(req)
 
@@ -33,8 +35,9 @@ func doRequest(req *http.Request, token string) (*http.Response, error) {
 
 func getSidecarEndpoint(ctx context.Context, interLinkURL string, interLinkPort string) string {
 	interLinkEndpoint := ""
+	log.G(ctx).Info("InterlingURL: ", interLinkURL)
 	if strings.HasPrefix(interLinkURL, "unix://") {
-		interLinkEndpoint = interLinkURL
+		interLinkEndpoint = "http://unix"
 	} else if strings.HasPrefix(interLinkURL, "http://") {
 		interLinkEndpoint = interLinkURL + ":" + interLinkPort
 	} else if strings.HasPrefix(interLinkURL, "https://") {
@@ -57,12 +60,14 @@ func PingInterLink(ctx context.Context, config VirtualKubeletConfig) (bool, int,
 		log.G(ctx).Error(err)
 	}
 
-	token, err := os.ReadFile(config.VKTokenFile) // just pass the file name
-	if err != nil {
-		log.G(ctx).Error(err)
-		return false, retVal, err
+	if config.VKTokenFile != "" {
+		token, err := os.ReadFile(config.VKTokenFile) // just pass the file name
+		if err != nil {
+			log.G(ctx).Error(err)
+			return false, retVal, err
+		}
+		req.Header.Add("Authorization", "Bearer "+string(token))
 	}
-	req.Header.Add("Authorization", "Bearer "+string(token))
 
 	startHttpCall := time.Now().UnixMicro()
 	_, spanHttp := tracer.Start(ctx, "PingHttpCall", trace.WithAttributes(
@@ -117,7 +122,9 @@ func updateCacheRequest(ctx context.Context, config VirtualKubeletConfig, pod v1
 		return err
 	}
 
-	req.Header.Add("Authorization", "Bearer "+token)
+	if token != "" {
+		req.Header.Add("Authorization", "Bearer "+token)
+	}
 	req.Header.Set("Content-Type", "application/json")
 
 	startHttpCall := time.Now().UnixMicro()
@@ -312,11 +319,16 @@ func LogRetrieval(ctx context.Context, config VirtualKubeletConfig, logsRequest 
 	tracer := otel.Tracer("interlink-service")
 	var returnValue io.ReadCloser
 	interLinkEndpoint := getSidecarEndpoint(ctx, config.InterlinkURL, config.Interlinkport)
-	b, err := os.ReadFile(config.VKTokenFile) // just pass the file name
-	if err != nil {
-		log.G(ctx).Fatal(err)
+
+	token := ""
+
+	if config.VKTokenFile != "" {
+		b, err := os.ReadFile(config.VKTokenFile) // just pass the file name
+		if err != nil {
+			log.G(ctx).Fatal(err)
+		}
+		token = string(b)
 	}
-	token := string(b)
 
 	bodyBytes, err := json.Marshal(logsRequest)
 	if err != nil {
@@ -366,13 +378,15 @@ func LogRetrieval(ctx context.Context, config VirtualKubeletConfig, logsRequest 
 // If after 5m they are not still available, the function errors out
 func RemoteExecution(ctx context.Context, config VirtualKubeletConfig, p *VirtualKubeletProvider, pod *v1.Pod, mode int8) error {
 
-	b, err := os.ReadFile(config.VKTokenFile) // just pass the file name
-	if err != nil {
-		log.G(ctx).Fatal(err)
-		return err
+	token := ""
+	if config.VKTokenFile != "" {
+		b, err := os.ReadFile(config.VKTokenFile) // just pass the file name
+		if err != nil {
+			log.G(ctx).Fatal(err)
+			return err
+		}
+		token = string(b)
 	}
-	token := string(b)
-
 	switch mode {
 	case CREATE:
 		var req types.PodCreateRequests

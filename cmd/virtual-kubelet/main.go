@@ -24,6 +24,7 @@ import (
 	"os"
 	"path"
 	"strconv"
+	"strings"
 	"time"
 
 	// "k8s.io/client-go/rest"
@@ -185,6 +186,8 @@ func main() {
 	}
 	log.L = logruslogger.FromLogrus(logrus.NewEntry(logger))
 
+	log.G(ctx).Info("Config dump", interLinkConfig)
+
 	if os.Getenv("ENABLE_TRACING") == "1" {
 		shutdown, err := initProvider(ctx)
 		if err != nil {
@@ -206,6 +209,19 @@ func main() {
 	// and remove reading from file
 
 	http.DefaultTransport.(*http.Transport).TLSClientConfig = &tls.Config{InsecureSkipVerify: true}
+
+	if strings.HasPrefix(interLinkConfig.InterlinkURL, "unix://") {
+		// Dial the Unix socket
+		interLinkEndpoint := strings.Replace(interLinkConfig.InterlinkURL, "unix://", "", -1)
+		conn, err := net.Dial("unix", interLinkEndpoint)
+		if err != nil {
+			panic(err)
+		}
+
+		http.DefaultTransport.(*http.Transport).DialContext = func(_ context.Context, _, _ string) (net.Conn, error) {
+			return conn, nil
+		}
+	}
 
 	dport, err := strconv.ParseInt(os.Getenv("KUBELET_PORT"), 10, 32)
 	if err != nil {
@@ -357,8 +373,10 @@ func main() {
 	// TODO: create a csr auto approver https://github.com/liqotech/liqo/blob/master/cmd/liqo-controller-manager/main.go#L498
 	retriever := commonIL.NewSelfSignedCertificateRetriever(cfg.NodeName, net.ParseIP(cfg.InternalIP))
 
+	kubeletPort := os.Getenv("KUBELET_PORT")
+
 	server := &http.Server{
-		Addr:              fmt.Sprintf("0.0.0.0:%d", 10250),
+		Addr:              fmt.Sprintf("0.0.0.0:%s", kubeletPort),
 		Handler:           mux,
 		ReadHeaderTimeout: 10 * time.Second, // Required to limit the effects of the Slowloris attack.
 		TLSConfig: &tls.Config{
