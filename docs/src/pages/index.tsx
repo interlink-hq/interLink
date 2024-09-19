@@ -19,11 +19,14 @@ function HomepageHeader() {
         <Heading as="h1" className="hero__title">
               <ThemedImage
         alt="Docusaurus themed image"
+            height="300"
         sources={{
           light: useBaseUrl('/img/interlink_logo.png'),
           dark: useBaseUrl('/img/interlink_logo-dark.png'),
         }}
       />
+        </Heading>
+        <Heading as="h2" className="hero__title">
           {siteConfig.tagline}
         </Heading>
         <div className={styles.buttons}>
@@ -32,7 +35,9 @@ function HomepageHeader() {
             to="/docs/intro">
             Try it out! 🚀
           </Link>
+
         </div>
+        <HomepageFeatures />
       </div>
     </header>
   );
@@ -46,7 +51,6 @@ export default function Home(): JSX.Element {
       description="Virtual Kubelets for everyone">
       <HomepageHeader />
       <main>
-        <HomepageFeatures />
         <HomepageVideo />
 
       </main>

@@ -1,0 +1,44 @@
+---
+sidebar_position: 3
+---
+import Tabs from '@theme/Tabs';
+import TabItem from '@theme/TabItem';
+import ThemedImage from '@theme/ThemedImage';
+import useBaseUrl from '@docusaurus/useBaseUrl';
+
+
+# Cookbook 
+
+These are practical recipes for different deployment scenarios.
+
+Select here the tab with the scenario you want deploy:
+
+<Tabs>
+  <TabItem value="scenario" label="In-cluster" default>
+<ThemedImage 
+        alt="Docusaurus themed image"
+        sources={{
+          light: useBaseUrl('/img/scenario-1_light.svg'),
+          dark: useBaseUrl('/img/scenario-1_dark.svg'),
+        }}
+/>
+  </TabItem>
+  <TabItem value="orange" label="Edge node">
+<ThemedImage 
+        alt="Docusaurus themed image"
+        sources={{
+          light: useBaseUrl('/img/scenario-2_light.svg'),
+          dark: useBaseUrl('/img/scenario-2_dark.svg'),
+        }}
+/>
+  </TabItem>
+  <TabItem value="banana" label="Tunneled">
+<ThemedImage 
+        alt="Docusaurus themed image"
+        sources={{
+          light: useBaseUrl('/img/scenario-3_light.svg'),
+          dark: useBaseUrl('/img/scenario-3_dark.svg'),
+        }}
+/>
+  </TabItem>
+</Tabs>
