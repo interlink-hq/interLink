@@ -13,8 +13,8 @@ These are practical recipes for different deployment scenarios.
 
 Select here the tab with the scenario you want deploy:
 
-<Tabs>
-  <TabItem value="scenario" label="In-cluster" default>
+<Tabs groupId="scenarios">
+  <TabItem value="edge" label="Edge node">
 <ThemedImage 
         alt="Docusaurus themed image"
         sources={{
@@ -23,7 +23,7 @@ Select here the tab with the scenario you want deploy:
         }}
 />
   </TabItem>
-  <TabItem value="orange" label="Edge node">
+  <TabItem value="incluster" label="In-cluster" default>
 <ThemedImage 
         alt="Docusaurus themed image"
         sources={{
@@ -32,7 +32,7 @@ Select here the tab with the scenario you want deploy:
         }}
 />
   </TabItem>
-  <TabItem value="banana" label="Tunneled">
+  <TabItem value="tunnel" label="Tunneled">
 <ThemedImage 
         alt="Docusaurus themed image"
         sources={{
@@ -42,3 +42,104 @@ Select here the tab with the scenario you want deploy:
 />
   </TabItem>
 </Tabs>
+
+Select here the featured plugin you want to try:
+
+<Tabs groupId="plugins">
+  <TabItem value="docker" label="Docker" default>
+    Offload your pods to a remote machine with Docker engine available
+  </TabItem>
+  <TabItem value="slurm" label="SLURM">
+    Offload your pods to an HPC SLURM based batch system
+  </TabItem>
+  <TabItem value="htc" label="HTCondor">
+    Offload your pods to an HTCondor based batch system
+  </TabItem>
+  <TabItem value="kubernetes" label="Kubernetes">
+    Offload your pods to a remote Kubernetes cluster
+  </TabItem>
+</Tabs>
+
+There are more 3rd-party plugins developed that you can get inspired by or even use out of the box. You can find some ref in the [quick start section](guides/deploy-interlink#attach-your-favorite-plugin-or-develop-one)  
+
+## Install interLink
+
+### Deploy Kubernetes components
+
+<Tabs groupId="scenarios">
+  <TabItem value="edge" label="Edge node">
+    Install only Virtual Kubelet component + oidc refresher
+  </TabItem>
+  <TabItem value="incluster" label="In-cluster" default>
+    Install Virtual Kubelet deployment with VK+IL+Plugin pod
+  </TabItem>
+  <TabItem value="tunnel" label="Tunneled">
+    Install only Virtual Kubelet component + ssh server
+  </TabItem>
+</Tabs>
+
+
+### Deploy Remote components (if any)
+
+#### Interlink API server
+
+<Tabs groupId="scenarios">
+  <TabItem value="edge" label="Edge node">
+    Install Oauth2-Proxy and interlink 
+  </TabItem>
+  <TabItem value="incluster" label="In-cluster" default>
+    Go directly to ["Test and debugging tips"](Cookbook#test-and-debug). The selected scenario does not expect you to do anything here.
+  </TabItem>
+  <TabItem value="tunnel" label="Tunneled">
+    Install only Virtual Kubelet component + ssh server
+  </TabItem>
+</Tabs>
+
+#### Plugin service
+
+
+<Tabs groupId="scenarios">
+  <TabItem value="edge" label="Edge node">
+<Tabs groupId="plugins">
+  <TabItem value="docker" label="Docker" default>
+    Offload your pods to a remote machine with Docker engine available
+  </TabItem>
+  <TabItem value="slurm" label="SLURM">
+    Offload your pods to an HPC SLURM based batch system
+  </TabItem>
+  <TabItem value="htc" label="HTCondor">
+    Offload your pods to an HTCondor based batch system
+  </TabItem>
+  <TabItem value="kubernetes" label="Kubernetes">
+    Offload your pods to a remote Kubernetes cluster
+  </TabItem>
+</Tabs>
+  </TabItem>
+
+  <TabItem value="incluster" label="In-cluster" default>
+    Go directly to ["Test and debugging tips"](Cookbook#test-and-debug). The selected scenario does not expect you to do anything here.
+  </TabItem>
+
+  <TabItem value="tunnel" label="Tunneled">
+<Tabs groupId="plugins">
+  <TabItem value="docker" label="Docker" default>
+    Offload your pods to a remote machine with Docker engine available
+  </TabItem>
+  <TabItem value="slurm" label="SLURM">
+    Offload your pods to an HPC SLURM based batch system
+  </TabItem>
+  <TabItem value="htc" label="HTCondor">
+    Offload your pods to an HTCondor based batch system
+  </TabItem>
+  <TabItem value="kubernetes" label="Kubernetes">
+    Offload your pods to a remote Kubernetes cluster
+  </TabItem>
+</Tabs>
+  </TabItem>
+
+</Tabs>
+
+
+## Test and debug 
+
+
