@@ -10,6 +10,7 @@ import ThemedImage from '@theme/ThemedImage';
 import useBaseUrl from '@docusaurus/useBaseUrl';
 
 import styles from './index.module.css';
+import AdoptersFeatures from '../components/AdoptersFeatures';
 
 function HomepageHeader() {
   const {siteConfig} = useDocusaurusContext();
@@ -51,6 +52,7 @@ export default function Home(): JSX.Element {
       description="Virtual Kubelets for everyone">
       <HomepageHeader />
       <main>
+        <AdoptersFeatures />
         <HomepageVideo />
 
       </main>

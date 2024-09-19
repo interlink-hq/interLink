@@ -90,7 +90,7 @@ Let's take the following as an example of a valid configuration file:
 see [release page](https://github.com/interTwin-eu/interLink/releases) to get the latest one! And change the value accordingly!
 :::
 
-```yaml
+```yaml title="$HOME/.interlink.yaml"
 interlink_ip: 192.168.1.127
 interlink_port: 30443
 interlink_version: 0.2.1-patch2
@@ -226,7 +226,7 @@ Note that the SLURM plugin repository is: [github.com/interTwin-eu/interlink-slu
 
 Create a config file `$HOME/.interlink/config/slurm.yaml`:
 
-```yaml
+```yaml title="$HOME/.interlink/config/slurm.yaml"
 # Plugin local endpoint
 SidecarPort: "4000"
 SidecarURL: "http://localhost"

@@ -10,12 +10,38 @@ type FeatureItem = {
 
 const FeatureList: FeatureItem[] = [
   {
-    title: 'Seamless end-user experience',
-    Svg: require('@site/static/img/home-1.svg').default,
+    title: 'INFN',
+    Svg: require('@site/static/img/INFN_logo_sito.svg').default,
     description: (
       <>
-        Keep using all your data science frameworks just like you are
-        interacting with a physical Kubernetes cluster.
+        ...
+      </>
+    ),
+  },
+  {
+    title: 'EGI',
+    Svg: require('@site/static/img/egi-logo.svg').default,
+    description: (
+      <>
+        ...
+      </>
+    ),
+  },
+  {
+    title: 'CERN',
+    Svg: require('@site/static/img/cern-logo.svg').default,
+    description: (
+      <>
+        INFN
+      </>
+    ),
+  },
+  {
+    title: 'CERN',
+    Svg: require('@site/static/img/cern-logo.svg').default,
+    description: (
+      <>
+        INFN
       </>
     ),
   },
@@ -25,7 +51,7 @@ function Feature({title, Svg, description}: FeatureItem) {
   return (
     <div className={clsx('col col--4')}>
       <div className="text--center">
-        <Svg className={styles.featureSvg} role="img" />
+        <Svg className={styles.featureSvg} role="img" height="200"  />
       </div>
       <div className="text--center padding-horiz--md">
         <Heading as="h3">{title}</Heading>
@@ -39,6 +65,9 @@ export default function AdoptersFeatures(): JSX.Element {
   return (
     <section className={styles.features}>
       <div className="container">
+          <Heading as="h1">
+         Adopters and Contributors 
+        </Heading>
         <div className="row">
           {FeatureList.map((props, idx) => (
             <Feature key={idx} {...props} />
