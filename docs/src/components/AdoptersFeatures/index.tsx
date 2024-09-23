@@ -32,16 +32,30 @@ const FeatureList: FeatureItem[] = [
     Svg: require('@site/static/img/cern-logo.svg').default,
     description: (
       <>
-        INFN
       </>
     ),
   },
   {
-    title: 'CERN',
+    title: 'UPV',
     Svg: require('@site/static/img/cern-logo.svg').default,
     description: (
       <>
-        INFN
+      </>
+    ),
+  },
+  {
+    title: 'NuNet',
+    Svg: require('@site/static/img/cern-logo.svg').default,
+    description: (
+      <>
+      </>
+    ),
+  },
+  {
+    title: 'AOB',
+    Svg: require('@site/static/img/cern-logo.svg').default,
+    description: (
+      <>
       </>
     ),
   },
@@ -50,10 +64,10 @@ const FeatureList: FeatureItem[] = [
 function Feature({title, Svg, description}: FeatureItem) {
   return (
     <div className={clsx('col col--4')}>
-      <div className="text--center">
-        <Svg className={styles.featureSvg} role="img" height="200"  />
-      </div>
-      <div className="text--center padding-horiz--md">
+      <div className="text--left padding-horiz--md">
+         <div style={{ backgroundColor: 'darksalmon', display: 'flex', padding: '20px', borderRadius: '10%', width: '220px', height: '220px', justifyContent: 'center', alignItems: 'center', boxShadow: '0 0 2px 1px grey' }}>
+           <Svg className={styles.featureSvg} role="img" height="200" />
+         </div>
         <Heading as="h3">{title}</Heading>
         <p>{description}</p>
       </div>
@@ -66,7 +80,7 @@ export default function AdoptersFeatures(): JSX.Element {
     <section className={styles.features}>
       <div className="container">
           <Heading as="h1">
-         Adopters and Contributors 
+         Evaluators and contributors 
         </Heading>
         <div className="row">
           {FeatureList.map((props, idx) => (
