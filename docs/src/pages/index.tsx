@@ -52,7 +52,6 @@ export default function Home(): JSX.Element {
       description="Virtual Kubelets for everyone">
       <HomepageHeader />
       <main>
-        <AdoptersFeatures />
         <HomepageVideo />
 
       </main>

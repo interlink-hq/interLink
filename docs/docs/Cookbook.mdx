@@ -131,6 +131,27 @@ In general, starting from the deployment of the remote components is adviced. Si
       mkdir -p $HOME/.interlink/config
       ```
     - Download the [latest release](https://github.com/interTwin-eu/interlink-docker-plugin/releases) binary in `$HOME/.interlink/bin/plugin` for either GPU host or CPU host (tags ending with `no-GPU`)
+    - Start the plugins passing the configuration that you have just created:
+
+      ```bash
+      export INTERLINKCONFIGPATH=$PWD/plugin-config.yaml
+      $HOME/.interlink/bin/plugin &> $HOME/.interlink/logs/plugin.log &
+      echo $! > $HOME/.interlink/plugin.pid     
+      ```
+
+    - Check the logs in `$HOME/.interlink/logs/plugin.log`. 
+    - To kill and restart the process is enough:
+
+      ```bash
+      # kill
+      kill $(cat $HOME/.interlink/plugin.pid)
+
+      # restart
+      export INTERLINKCONFIGPATH=$PWD/plugin-config.yaml
+      $HOME/.interlink/bin/plugin &> $HOME/.interlink/logs/plugin.log &
+      echo $! > $HOME/.interlink/plugin.pid
+
+    Almost there! Now it's time to add this virtual node into the Kubernetes cluster!
   </TabItem>
   <TabItem value="slurm" label="SLURM">
     - Create a configuration file: 
@@ -169,6 +190,27 @@ In general, starting from the deployment of the remote components is adviced. Si
       mkdir -p $HOME/.interlink/config
       ```
     - Download the [latest release](https://github.com/interTwin-eu/interlink-slurm-plugin/releases) binary in `$HOME/.interlink/bin/plugin` for either GPU host or CPU host (tags ending with `no-GPU`)
+    - Start the plugins passing the configuration that you have just created:
+
+      ```bash
+      export INTERLINKCONFIGPATH=$PWD/plugin-config.yaml
+      $HOME/.interlink/bin/plugin &> $HOME/.interlink/logs/plugin.log &
+      echo $! > $HOME/.interlink/plugin.pid     
+      ```
+
+    - Check the logs in `$HOME/.interlink/logs/plugin.log`. 
+    - To kill and restart the process is enough:
+
+      ```bash
+      # kill
+      kill $(cat $HOME/.interlink/plugin.pid)
+
+      # restart
+      export INTERLINKCONFIGPATH=$PWD/plugin-config.yaml
+      $HOME/.interlink/bin/plugin &> $HOME/.interlink/logs/plugin.log &
+      echo $! > $HOME/.interlink/plugin.pid
+
+    Almost there! Now it's time to add this virtual node into the Kubernetes cluster!
   </TabItem>
   <TabItem value="kubernetes" label="Kubernetes">
     __KUBERNTES PLUGIN COMING SOOON... CONTACT US FOR TEST INSTRUCTIONS__ 
@@ -207,7 +249,27 @@ In general, starting from the deployment of the remote components is adviced. Si
       mkdir -p $HOME/.interlink/config
       ```
     - Download the [latest release](https://github.com/interTwin-eu/interlink-docker-plugin/releases) binary in `$HOME/.interlink/bin/plugin` for either GPU host or CPU host (tags ending with `no-GPU`)
+    - Start the plugins passing the configuration that you have just created:
+
+      ```bash
+      export INTERLINKCONFIGPATH=$PWD/plugin-config.yaml
+      $HOME/.interlink/bin/plugin &> $HOME/.interlink/logs/plugin.log &
+      echo $! > $HOME/.interlink/plugin.pid     
       ```
+
+    - Check the logs in `$HOME/.interlink/logs/plugin.log`. 
+    - To kill and restart the process is enough:
+
+      ```bash
+      # kill
+      kill $(cat $HOME/.interlink/plugin.pid)
+
+      # restart
+      export INTERLINKCONFIGPATH=$PWD/plugin-config.yaml
+      $HOME/.interlink/bin/plugin &> $HOME/.interlink/logs/plugin.log &
+      echo $! > $HOME/.interlink/plugin.pid
+
+    Almost there! Now it's time to add this virtual node into the Kubernetes cluster!
   </TabItem>
   <TabItem value="slurm" label="SLURM">
     - Create a configuration file: 
@@ -237,7 +299,27 @@ In general, starting from the deployment of the remote components is adviced. Si
       mkdir -p $HOME/.interlink/config
       ```
     - Download the [latest release](https://github.com/interTwin-eu/interlink-slurm-plugin/releases) binary in `$HOME/.interlink/bin/plugin` for either GPU host or CPU host (tags ending with `no-GPU`)
+    - Start the plugins passing the configuration that you have just created:
+
+      ```bash
+      export INTERLINKCONFIGPATH=$PWD/plugin-config.yaml
+      $HOME/.interlink/bin/plugin &> $HOME/.interlink/logs/plugin.log &
+      echo $! > $HOME/.interlink/plugin.pid     
       ```
+
+    - Check the logs in `$HOME/.interlink/logs/plugin.log`. 
+    - To kill and restart the process is enough:
+
+      ```bash
+      # kill
+      kill $(cat $HOME/.interlink/plugin.pid)
+
+      # restart
+      export INTERLINKCONFIGPATH=$PWD/plugin-config.yaml
+      $HOME/.interlink/bin/plugin &> $HOME/.interlink/logs/plugin.log &
+      echo $! > $HOME/.interlink/plugin.pid
+
+    Almost there! Now it's time to add this virtual node into the Kubernetes cluster!
   </TabItem>
   <TabItem value="kubernetes" label="Kubernetes">
     COMING SOOON... 
@@ -247,27 +329,6 @@ In general, starting from the deployment of the remote components is adviced. Si
 
 </Tabs>
 
-- Start the plugins passing the configuration that you have just created:
-
-  ```bash
-  export INTERLINKCONFIGPATH=$PWD/plugin-config.yaml
-  $HOME/.interlink/bin/plugin &> $HOME/.interlink/logs/plugin.log &
-  echo $! > $HOME/.interlink/plugin.pid     
-  ```
-
-- Check the logs in `$HOME/.interlink/logs/plugin.log`. 
-- To kill and restart the process is enough:
-
-  ```bash
-  # kill
-  kill $(cat $HOME/.interlink/plugin.pid)
-
-  # restart
-  export INTERLINKCONFIGPATH=$PWD/plugin-config.yaml
-  $HOME/.interlink/bin/plugin &> $HOME/.interlink/logs/plugin.log &
-  echo $! > $HOME/.interlink/plugin.pid
-
-Almost there! Now it's time to add this virtual node into the Kubernetes cluster!
 
 ### Deploy Kubernetes components
 
