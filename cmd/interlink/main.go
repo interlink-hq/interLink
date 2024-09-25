@@ -201,9 +201,14 @@ func main() {
 	if strings.HasPrefix(interLinkConfig.Sidecarurl, "unix://") {
 		sidecarEndpoint = interLinkConfig.Sidecarurl
 		// Dial the Unix socket
-		conn, err := net.Dial("unix", sidecarEndpoint)
-		if err != nil {
-			panic(err)
+		var conn net.Conn
+		for {
+			conn, err = net.Dial("unix", sidecarEndpoint)
+			if err != nil {
+				log.G(ctx).Error(err)
+			} else {
+				break
+			}
 		}
 
 		http.DefaultTransport.(*http.Transport).DialContext = func(_ context.Context, _, _ string) (net.Conn, error) {

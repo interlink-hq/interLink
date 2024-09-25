@@ -27,8 +27,8 @@ install () {
   # set $HOME/.interlink/config/InterLinkConfig.yaml
 
   cat <<EOF >>$HOME/.interlink/config/InterLinkConfig.yaml
-InterlinkAddress: "http://localhost"
-InterlinkPort: "30080"
+InterlinkAddress: "unix://${HOME}/.interlink/interlink.sock"
+InterlinkPort: "0"
 SidecarURL: "http://localhost"
 SidecarPort: "4000"
 VerboseLogging: true
@@ -89,7 +89,7 @@ start() {
       $HOME/.interlink/bin/oauth2-proxy \
           --client-id "{{.OAUTH.ClientID}}" \
           --client-secret "\"{{.OAUTH.ClientSecret}}\"" \
-          --http-address 0.0.0.0:{{.InterLinkPort}} \
+          --http-address unix://${HOME}/.interlink/interlink.sock \
           --oidc-issuer-url "{{.OAUTH.Issuer}}" \
           --pass-authorization-header true \
           --provider oidc \
