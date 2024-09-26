@@ -206,6 +206,7 @@ func main() {
 			conn, err = net.Dial("unix", sidecarEndpoint)
 			if err != nil {
 				log.G(ctx).Error(err)
+				time.Sleep(30 * time.Second)
 			} else {
 				break
 			}

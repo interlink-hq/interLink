@@ -26,6 +26,8 @@ That means you can test your code **before** any commit, discovering in advance 
 
 ### Run e2e tests
 
+The easiest way is to simply run `make test` from the root folder of interlink. But if you need to debug or understand further the test utility or a plugin, you should follow these instructions.
+
 #### Edit manifests with your images
 
 - `service-account.yaml` is the default set of permission needed by the virtualkubelet. Do not touch unless you know what you are doing.

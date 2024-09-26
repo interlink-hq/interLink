@@ -85,10 +85,36 @@ In general, starting from the deployment of the remote components is adviced. Si
   </TabItem>
   <TabItem value="tunnel" label="Tunneled">
     - Create a service trying to keep the tunnel with the kubernete cluster alive (__THIS WILL CORRECTLY FAIL__ until we setup all the stack)
-      - Generate a pair of SSH keys:
+    - Create utility folders:
+
+      ```bash
+      mkdir -p $HOME/.interlink/logs
+      mkdir -p $HOME/.interlink/bin
+      mkdir -p $HOME/.interlink/config
+      ```
+    - Generate a pair of SSH keys:
+    - Download the [latest release]() binary in `$HOME/.interlink/bin/ssh-tunnel`
+    - Start the tunnel 
+
+      ```bash
+      $HOME/.interlink/bin/plugin &> $HOME/.interlink/logs/plugin.log &
+      echo $! > $HOME/.interlink/plugin.pid     
+      ```
+
+    - Check the logs in `$HOME/.interlink/logs/plu.log`. 
+    - To kill and restart the process is enough:
+
+      ```bash
+      # kill
+      kill $(cat $HOME/.interlink/plugin.pid)
+
+      # restart
+      export INTERLINKCONFIGPATH=$PWD/plugin-config.yaml
+      $HOME/.interlink/bin/plugin &> $HOME/.interlink/logs/plugin.log &
+      echo $! > $HOME/.interlink/plugin.pid
+      - Download out tunnel utility here:
       - Create a user-level systemd unit for keeping the tunnel alive (**if you don't have systemd you can easily take the logic from the code below and translates it into whatever system you have**).
 
-    Now you are all setup to install and run your plugin.
   </TabItem>
 </Tabs>
 
