@@ -31,15 +31,15 @@ install () {
   cat <<EOF >>$HOME/.interlink/config/InterLinkConfig.yaml
 InterlinkAddress: "unix://${HOME}/.interlink/interlink.sock"
 InterlinkPort: "0"
-SidecarURL: "http://localhost"
-SidecarPort: "4000"
+SidecarURL: "unix://${HOME}/.interlink/plugin.sock"
+SidecarPort: "0"
 VerboseLogging: true
 ErrorsOnlyLogging: false
 ExportPodData: true
 DataRootFolder: "~/.interlink"
 EOF
 
-  echo "=== Configured to reach sidecar service on http://localhost:4000 . You can edit this behavior changing $HOME/.interlink/config/InterLinkConfig.yaml file. ==="
+  echo "=== Configured to reach sidecar service on unix://${HOME}/.interlink/plugin.sock. You can edit this behavior changing $HOME/.interlink/config/InterLinkConfig.yaml file. ==="
 
   ## Download binaries to $HOME/.local/interlink/
   echo "curl --fail -L -o ${HOME}/.interlink/bin/interlink https://github.com/interTwin-eu/interLink/releases/download/{{.InterLinkVersion}}/interlink_$(uname -s)_$(uname -m)"
