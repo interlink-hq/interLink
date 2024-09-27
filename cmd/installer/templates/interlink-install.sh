@@ -124,6 +124,7 @@ start() {
       echo $! > $HOME/.interlink/oauth2-proxy.pid
       ;;
     github)
+      touch  $HOME/.interlink/interlink.sock
       $HOME/.interlink/bin/oauth2-proxy \
           --client-id {{.OAUTH.ClientID}} \
           --client-secret {{.OAUTH.ClientSecret}} \
