@@ -24,7 +24,9 @@ install () {
   mkdir -p $HOME/.interlink/logs || exit 1
   mkdir -p $HOME/.interlink/bin || exit 1
   mkdir -p $HOME/.interlink/config || exit 1
-  # set $HOME/.interlink/config/InterLinkConfig.yaml
+
+
+  # TODO download also service files for systemd
 
   cat <<EOF >>$HOME/.interlink/config/InterLinkConfig.yaml
 InterlinkAddress: "unix://${HOME}/.interlink/interlink.sock"
@@ -112,10 +114,11 @@ start() {
       echo $! > $HOME/.interlink/oauth2-proxy.pid
       ;;
     github)
+      touch  $HOME/.interlink/interlink.sock
       $HOME/.interlink/bin/oauth2-proxy \
           --client-id {{.OAUTH.ClientID}} \
           --client-secret {{.OAUTH.ClientSecret}} \
-          --http-address 0.0.0.0:{{.InterLinkPort}} \
+          --http-address unix://$HOME/.interlink/interlink.sock \
           --pass-authorization-header true \
           --provider github \
           --redirect-url http://localhost:8081 \
@@ -137,9 +140,11 @@ start() {
   esac
 
   ## start interLink 
-  export INTERLINKCONFIGPATH=$HOME/.interlink/config/InterLinkConfig.yaml
-  $HOME/.interlink/bin/interlink &> $HOME/.interlink/logs/interlink.log &
-  echo $! > $HOME/.interlink/interlink.pid
+  export INTERLINKCONFIGPATH=${HOME}/.interlink/config/InterLinkConfig.yaml
+  $HOME/.interlink/bin/interlink &> ${HOME}/.interlink/logs/interlink.log &
+  echo $! > ${HOME}/.interlink/interlink.pid
+
+  ## TODO: if RUN_SLURM=1 then manage also slurm
 
 }
 
