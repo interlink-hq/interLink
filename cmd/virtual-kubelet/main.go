@@ -285,9 +285,15 @@ func main() {
 	if strings.HasPrefix(interLinkConfig.InterlinkURL, "unix://") {
 		// Dial the Unix socket
 		interLinkEndpoint := strings.Replace(interLinkConfig.InterlinkURL, "unix://", "", -1)
-		conn, err := net.Dial("unix", interLinkEndpoint)
-		if err != nil {
-			panic(err)
+		var conn net.Conn
+		for {
+			conn, err = net.Dial("unix", interLinkEndpoint)
+			if err != nil {
+				log.G(ctx).Error(err)
+				time.Sleep(30 * time.Second)
+			} else {
+				break
+			}
 		}
 
 		http.DefaultTransport.(*http.Transport).DialContext = func(_ context.Context, _, _ string) (net.Conn, error) {

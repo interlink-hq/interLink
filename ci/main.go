@@ -66,7 +66,7 @@ func New(name string,
 	// +default="ghcr.io/intertwin-eu/interlink/interlink:0.3.1-rc1"
 	InterlinkRef string,
 	// +optional
-	// +default="ghcr.io/intertwin-eu/interlink-docker-plugin/docker-plugin:0.0.24-no-gpu"
+	// +default="ghcr.io/intertwin-eu/interlink-sidecar-slurm/interlink-sidecar-slurm:0.3.2"
 	pluginRef string,
 ) *Interlink {
 
@@ -111,9 +111,10 @@ func (m *Interlink) NewInterlink(
 	if pluginEndpoint == nil {
 		plugin := dag.Container().From(m.PluginRef).
 			WithFile("/etc/interlink/InterLinkConfig.yaml", pluginConfig).
-			WithEnvVariable("INTERLINKCONFIGPATH", "/etc/interlink/InterLinkConfig.yaml").
+			WithEnvVariable("SLURMCONFIGPATH", "/etc/interlink/InterLinkConfig.yaml").
+			WithEnvVariable("SHARED_FS", "true").
 			WithExposedPort(4000).
-			WithExec([]string{"bash", "-c", "dockerd --mtu 1450 & /sidecar/docker-sidecar"}, dagger.ContainerWithExecOpts{UseEntrypoint: false, InsecureRootCapabilities: true})
+			WithExec([]string{}, dagger.ContainerWithExecOpts{UseEntrypoint: true, InsecureRootCapabilities: true})
 
 		pluginEndpoint, err = plugin.AsService().Start(ctx)
 		if err != nil {

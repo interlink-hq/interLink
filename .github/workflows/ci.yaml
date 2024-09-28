@@ -12,11 +12,6 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v4
-      - name: Run plugin
-        run: |
-          git clone https://github.com/interTwin-eu/interlink-slurm-plugin.git \
-          && cd interlink-slurm-plugin/docker \
-          && docker compose up -d 
       - name: Get Repo Owner
         id: get_repo_owner
         run: echo ::set-output name=repo_owner::$(echo ${{ github.repository_owner }} | tr '[:upper:]' '[:lower:]')
@@ -25,7 +20,6 @@ jobs:
         with:
           workdir: ci
           verb: call
-          args: -s --name slurm-test build-images new-interlink --plugin-endpoint tcp://localhost:4000 test stdout
+          args: -s --name slurm-test build-images new-interlink test stdout
           cloud-token: ${{ secrets.DAGGER_CLOUD_TOKEN }}
           version: "0.13.0"
-          #dagger-flags: -d

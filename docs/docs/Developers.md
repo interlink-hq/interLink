@@ -1,5 +1,5 @@
 ---
-sidebar_position: 3
+sidebar_position: 5
 ---
 
 # E2E integration tests 
@@ -9,7 +9,7 @@ Here you can find how to test a virtual kubelet implementation against the main 
 ## Requirements
 
 - [Docker engine](https://docs.docker.com/engine/install/)
-- [Dagger CLI v0.11.9](https://docs.dagger.io/install/)
+- [Dagger CLI v0.13.x](https://docs.dagger.io/install/)
 
 ## What's in the Dagger module
 
@@ -26,6 +26,8 @@ That means you can test your code **before** any commit, discovering in advance 
 
 ### Run e2e tests
 
+The easiest way is to simply run `make test` from the root folder of interlink. But if you need to debug or understand further the test utility or a plugin, you should follow these instructions.
+
 #### Edit manifests with your images
 
 - `service-account.yaml` is the default set of permission needed by the virtualkubelet. Do not touch unless you know what you are doing.
@@ -41,7 +43,7 @@ That means you can test your code **before** any commit, discovering in advance 
 For a simple demonstration, you can use the plugin that we actually use in are Github Actions:
 
 ```bash
-wget https://github.com/interTwin-eu/interlink-docker-plugin/releases/download/0.0.22-no-gpu/docker-plugin_Linux_x86_64 -O docker-plugin \
+wget https://github.com/interTwin-eu/interlink-docker-plugin/releases/download/0.0.24-no-gpu/docker-plugin_Linux_x86_64 -O docker-plugin \
   && chmod +x docker-plugin \
   && docker ps \
   && export INTERLINKCONFIGPATH=$PWD/ci/manifests/plugin-config.yaml \
@@ -63,10 +65,8 @@ To run the default tests you can move to `ci` folder and execute the Dagger pipe
 dagger call \
     --name my-tests \
   build-images \
-    --source-folder ../ \
   new-interlink \
     --plugin-endpoint tcp://localhost:4000 \
-    --manifests ./manifests \
   test stdout
 ```
 
@@ -103,9 +103,7 @@ In case something went wrong, you have the possibility to spawn a session inside
 dagger call \
     --name my-tests \
   build-images \
-    --source-folder ../ \
   new-interlink \
-    --manifests ./manifests \
     --plugin-endpoint tcp://localhost:4000 \
   run terminal
 
@@ -133,9 +131,7 @@ You can get the Kubernetes service running with:
 dagger call \
     --name my-tests \
   build-images \
-    --source-folder ../ \
   new-interlink \
-    --manifests ./manifests \
     --plugin-endpoint tcp://localhost:4000 \
   kube up 
 ```

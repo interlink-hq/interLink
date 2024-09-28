@@ -1,4 +1,4 @@
-all: interlink vk installer
+all: interlink vk installer ssh-tunnel
 
 interlink:
 	CGO_ENABLED=0 OOS=linux go build -o bin/interlink cmd/interlink/main.go
@@ -9,16 +9,16 @@ vk:
 installer:
 	CGO_ENABLED=0 OOS=linux go build -o bin/installer cmd/installer/main.go
 
+ssh-tunnel:
+	CGO_ENABLED=0 OOS=linux go build -o bin/ssh-tunnel cmd/ssh-tunnel/main.go
+
 clean:
 	rm -rf ./bin
 
-dagger_registry_delete:
-	docker rm -fv registry || true
-
 test:
-	dagger_registry_delete
-	docker run -d --rm --name registry -p 5432:5000  registry
-	cd ci
-	dagger go run go main.go k8s.go
-	cd -
+	dagger call -m ./ci \
+    --name my-tests \
+    build-images \
+    new-interlink \
+    test stdout
 

@@ -37,7 +37,7 @@ Then you are ready to install the python SDK with:
 #pip install "uvicorn[standard]" "git+https://github.com/interTwin-eu/interLink.git@${VERSION}#egg=interlink&subdirectory=example"
 
 # Or download the latest one with
-pip install "uvicorn[standard]" "git+https://github.com/interTwin-eu/interLink.git#egg=interlink&subdirectory=example"
+pip install "uvicorn[standard]" "git+https://baltig.infn.it/mgattari/interlink-plugin-sdk"
 
 ```
 

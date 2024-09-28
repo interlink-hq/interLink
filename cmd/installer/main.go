@@ -211,31 +211,13 @@ func root(cmd *cobra.Command, args []string) error {
 		panic(fmt.Errorf("wrong grant type specified in the configuration. Only client_credentials and authorization_code are supported"))
 	}
 
-	namespaceYAML, err := evalManifest("templates/namespace.yaml", configCLI)
-	if err != nil {
-		panic(err)
-	}
-
-	deploymentYAML, err := evalManifest("templates/deployment.yaml", configCLI)
-	if err != nil {
-		panic(err)
-	}
-
-	configYAML, err := evalManifest("templates/configs.yaml", configCLI)
-	if err != nil {
-		panic(err)
-	}
-
-	serviceaccountYAML, err := evalManifest("templates/service-account.yaml", configCLI)
+	valuesYAML, err := evalManifest("templates/values.yaml", configCLI)
 	if err != nil {
 		panic(err)
 	}
 
 	manifests := []string{
-		namespaceYAML,
-		serviceaccountYAML,
-		configYAML,
-		deploymentYAML,
+		valuesYAML,
 	}
 
 	err = os.MkdirAll(outFolder, fs.ModePerm)
@@ -243,7 +225,7 @@ func root(cmd *cobra.Command, args []string) error {
 		panic(err)
 	}
 	// Create a file and use bufio.NewWriter.
-	f, err := os.Create(outFolder + "/interlink.yaml")
+	f, err := os.Create(outFolder + "/values.yaml")
 	if err != nil {
 		panic(err)
 	}
@@ -258,7 +240,7 @@ func root(cmd *cobra.Command, args []string) error {
 
 	w.Flush()
 
-	fmt.Println("\n\n=== Deployment file written at:  " + outFolder + "/interlink.yaml ===\n\n To deploy the virtual kubelet run:\n    kubectl apply -f " + outFolder + "/interlink.yaml")
+	fmt.Println("\n\n=== Deployment file written at:  " + outFolder + "/values.yaml ===\n\n To deploy the virtual kubelet run:\n   helm --debug upgrade --install --create-namespace -n " + configCLI.Namespace + " " + configCLI.VKName + " oci://ghcr.io/intertwin-eu/interlink-helm-chart/interlink  --values " + outFolder + "/values.yaml")
 
 	// TODO: ilctl.sh templating
 	tmpl, err := template.ParseFS(templates, "templates/interlink-install.sh")

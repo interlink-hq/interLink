@@ -8,22 +8,21 @@ import useBaseUrl from '@docusaurus/useBaseUrl';
 
 Learn how to deploy interLink virtual nodes on your cluster. In this tutorial you are going to setup all the needed components to be able to either __develop__ or __deploy__ the plugin for container management on a **remote** host via a **local** kubernetes cluster.
 
-The installation script that we are going to configure will take care of providing you with a complete Kubernetes manifest to instantiate the virtual node interface. Also you will get an installation bash script to be executed on the remote host where you want to delegate your container execution. That script is already configured to **automatically** authenticate the incoming request from the virtual node component, and forward the correct instructions to the openAPI interface of the [interLink plugin](./03-api-reference.mdx) (a.k.a. sidecar) of your choice. Thus you can use this setup also for directly [developing a plugin](./02-develop-a-plugin.md), without caring for anything else.
+The installation script that we are going to configure will take care of providing you with a complete Kubernetes manifest to instantiate the virtual node interface. Also you will get an installation bash script to be executed on the remote host where you want to delegate your container execution. That script is already configured to **automatically** authenticate the incoming request from the virtual node component, and forward the correct instructions to the openAPI interface of the [interLink plugin](./api-reference) (a.k.a. sidecar) of your choice. Thus you can use this setup also for directly [developing a plugin](./develop-a-plugin), without caring for anything else.
+
+For a complete guide on all the possible scenarios, please refer to the [Cookbook](../cookbook).
 
 ## Requirements
 
-- MiniKube
+- __kubectl host__: an host with MiniKube installed and running
 - A GitHub account
-- A "remote" machine with a port that is reachable by the MiniKube host
+- __remote host__: A "remote" machine with a port that is reachable by the MiniKube host
 
-:::danger
-In this tutorial, we suppose the remote VM fully owned (not shared) by the user only. There is NO protection against call to the interLink services coming from the machine itself on the localhost. If you need to install it in a "multi user" environment, please refer to [this guide](./05-multi-user.md)
-:::
 
 ## Create an OAuth GitHub app
 
 :::warning
-In this tutorial GitHub tokens are just an example of authentication mechanism, any OpenID compliant identity provider is also supported with the very same deployment script, see [examples here](./04-oidc-IAM.md).
+In this tutorial GitHub tokens are just an example of authentication mechanism, any OpenID compliant identity provider is also supported with the very same deployment script, see [examples here](./oidc-IAM).
 :::
 
 As a first step, you need to create a GitHub OAuth application to allow interLink to make authentication between your Kubernetes cluster and the remote endpoint.
@@ -66,9 +65,9 @@ You can click then on your application that should now appear at [https://github
 
 Now it's all set for the next steps.
 
-## Configuring your virtual kubelet setup
+## Configuring your virtual kubelet setup (remote host)
 
-You can download the interLink **installer CLI** for your OS and processor architecture from the [release page](https://github.com/interTwin-eu/interLink/releases), looking for the binaries starting with `interlink-install`. For instance, if on a `Linux` platform with `x86_64` processor:
+Login into the machine and and download the interLink **installer CLI** for your OS and processor architecture from the [release page](https://github.com/interTwin-eu/interLink/releases), looking for the binaries starting with `interlink-install`. For instance, if on a `Linux` platform with `x86_64` processor:
 
 ```bash
 export VERSION=0.2.3-pre6
@@ -90,7 +89,7 @@ Let's take the following as an example of a valid configuration file:
 see [release page](https://github.com/interTwin-eu/interLink/releases) to get the latest one! And change the value accordingly!
 :::
 
-```yaml
+```yaml title="$HOME/.interlink.yaml"
 interlink_ip: 192.168.1.127
 interlink_port: 30443
 interlink_version: 0.2.1-patch2
@@ -128,9 +127,10 @@ This config file has the following meaning:
 
 You are ready now to go ahead generating the needed manifests and script for the deployment.
 
-## Deploy the interlink Kubernetes Agent
 
-Generate the manifests and the automatic interlink installation script with:
+## Deploy the interLink core components (remote host)
+
+Login into the machine and generate the manifests and the automatic interlink installation script with:
 
 ```bash
 ./interlink-install 
@@ -155,27 +155,8 @@ please enter code XXXX-XXXX at https://github.com/login/device
   "./interlink-remote.sh install" followed by "interlink-remote.sh start"
 ```
 
-We are almost there! Essentially you need to follow what suggested by the prompt.
 
-So go ahead and apply the produced manifest to your minikube/kubernetes instance with:
-
-```bash
-kubectl apply -f $HOME/.interlink/interlink.yaml
-```
-
-Check that the node appears successfully after some time, or as soon as you see the pods in namespace `interlink` running.
-
-You are now ready to setup the second component on the remote host.
-
-## Deploy the interLink core components
-
-Copy the `$HOME/.interlink/interlink-remote.sh` file on the remote host:
-
-```bash
-scp -r $HOME/.interlink/interlink-remote.sh ubuntu@192.168.1.127:~ 
-```
-
-Then login into the machine and start installing all the needed binaries and configurations:
+Start installing all the needed binaries and configurations:
 
 ```bash
 chmod +x ./interlink-remote.sh
@@ -203,9 +184,9 @@ To stop or restart the components you can use the dedicated commands:
 ./interlink-remote.sh restart 
 ```
 
-## Attach your favorite plugin or develop one!
+## Attach your favorite plugin or develop one! (remote host)
 
-[Next chapter](./02-develop-a-plugin.md) will show the basics for developing a new plugin following the interLink openAPI spec.
+[Next chapter](./develop-a-plugin) will show the basics for developing a new plugin following the interLink openAPI spec.
 
 In alterative you can start an already supported one.
 
@@ -226,7 +207,7 @@ Note that the SLURM plugin repository is: [github.com/interTwin-eu/interlink-slu
 
 Create a config file `$HOME/.interlink/config/slurm.yaml`:
 
-```yaml
+```yaml title="$HOME/.interlink/config/slurm.yaml"
 # Plugin local endpoint
 SidecarPort: "4000"
 SidecarURL: "http://localhost"
@@ -314,7 +295,7 @@ Logs will be stored at `$HOME/.interlink/logs/plugin.log`.
 
 :::warning
 An mantained plugin will come soon...
-In the meantime you can take a look at the ["developing a plugin"](./02-develop-a-plugin.md) example.
+In the meantime you can take a look at the ["developing a plugin"](./develop-a-plugin) example.
 :::
 
 - [Docker plugin repository](https://github.com/interTwin-eu/interlink-docker-plugin)
@@ -328,6 +309,20 @@ Coming soon
 - [HTCondor plugin repository](https://github.com/interTwin-eu/interlink-htcondor-plugin)
 - [ARC plugin repository](https://github.com/interTwin-eu/interlink-arc-plugin)
 
+## Deploy the interlink Kubernetes Agent (kubeclt host)
+
+We are almost there! Essentially you need to follow what suggested by the prompt of the installation script, so copy the generated `interlink.yaml` into you __kubectl host__.
+
+So go ahead and apply the produced manifest to your minikube/kubernetes instance with:
+
+```bash
+kubectl apply -f $HOME/.interlink/interlink.yaml
+```
+
+Check that the node appears successfully after some time, or as soon as you see the pods in namespace `interlink` running.
+
+You are all setup, congratulations!
+
 ## Test your setup
 
-Please find a demo pod to test your setup [here](https://intertwin-eu.github.io/interLink/docs/tutorial-admins/develop-a-plugin#lets-test-is-out).
+Please find a demo pod to test your setup [here](./develop-a-plugin#lets-test-is-out).
