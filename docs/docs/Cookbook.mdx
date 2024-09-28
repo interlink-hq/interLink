@@ -84,7 +84,8 @@ In general, starting from the deployment of the remote components is adviced. Si
     Go directly to ["Test and debugging tips"](Cookbook#test-and-debug). The selected scenario does not expect you to do anything here.
   </TabItem>
   <TabItem value="tunnel" label="Tunneled">
-    - Create a service trying to keep the tunnel with the kubernete cluster alive (__THIS WILL CORRECTLY FAIL__ until we setup all the stack)
+    __For this installation you need to know which node port is open on the main kubernetes cluster, and that will be used to expose the ssh bastion for the tunnel.__
+
     - Create utility folders:
 
       ```bash
@@ -92,28 +93,34 @@ In general, starting from the deployment of the remote components is adviced. Si
       mkdir -p $HOME/.interlink/bin
       mkdir -p $HOME/.interlink/config
       ```
-    - Generate a pair of SSH keys:
-    - Download the [latest release]() binary in `$HOME/.interlink/bin/ssh-tunnel`
+    - Generate a pair of password-less SSH keys:
+      ```bash
+      ssh-keygen -t ecdsa
+      ```
+    - Download the ssh-tunnel binary [latest release](https://github.com/interTwin-eu/interLink/releases/latest) binary in `$HOME/.interlink/bin/ssh-tunnel`
     - Start the tunnel 
 
       ```bash
-      $HOME/.interlink/bin/plugin &> $HOME/.interlink/logs/plugin.log &
-      echo $! > $HOME/.interlink/plugin.pid     
+      CLUSTER_PUBLIC_IP="IP of you cluster where SSH will be exposed"
+      SSH_TUNNEL_NODE_PORT="node port where the ssh service will be exposed"
+      PRIV_KEY_FILE="path the ssh priv key created above"
+
+      $HOME/.interlink/bin/ssh-tunnel  -addr $CLUSTER_PUBLIC_IP:$SSH_TUNNEL_NODE_PORT -keyfile $PRIV_KEY_FILE -user interlink -rport 3000 -lsock plugin.sock  &> $HOME/.interlink/logs/ssh-tunnel.log &
+      echo $! > $HOME/.interlink/ssh-tunnel.pid     
       ```
 
-    - Check the logs in `$HOME/.interlink/logs/plu.log`. 
+    - Check the logs in `$HOME/.interlink/logs/ssh-tunnel.log`. 
     - To kill and restart the process is enough:
 
       ```bash
       # kill
-      kill $(cat $HOME/.interlink/plugin.pid)
+      kill $(cat $HOME/.interlink/ssh-tunnel.pid)
 
       # restart
-      export INTERLINKCONFIGPATH=$PWD/plugin-config.yaml
-      $HOME/.interlink/bin/plugin &> $HOME/.interlink/logs/plugin.log &
-      echo $! > $HOME/.interlink/plugin.pid
-      - Download out tunnel utility here:
-      - Create a user-level systemd unit for keeping the tunnel alive (**if you don't have systemd you can easily take the logic from the code below and translates it into whatever system you have**).
+      $HOME/.interlink/bin/ssh-tunnel &> $HOME/.interlink/logs/ssh-tunnel.log &
+      echo $! > $HOME/.interlink/ssh-tunnel.pid     
+      ```
+    - at this stage __THIS WILL CORRECTLY FAIL__ until we setup all the stack. So let's go ahead
 
   </TabItem>
 </Tabs>
@@ -356,6 +363,17 @@ In general, starting from the deployment of the remote components is adviced. Si
 </Tabs>
 
 
+#### Test interLink stack health
+
+interLink comes with a call that can be used to monitor the overall status of both interlink server and plugins, at once.
+
+```
+curl -v $INTERLINK_SERVER_ADDRESS:$INTERLINK_PORT/pinginterlink
+```
+
+This call will return the status of the system and its readiness to submit jobs.
+
+
 ### Deploy Kubernetes components
 
 The deployment of the Kubernetes components are managed by the official [HELM chart](https://github.com/interTwin-eu/interlink-helm-chart). Depending on the scenario you selected, there might be additional operations to be done.
@@ -425,6 +443,9 @@ The deployment of the Kubernetes components are managed by the official [HELM ch
     interlink:
       enabled: true
       socket: unix:///var/run/interlink.socket
+
+    plugin:
+      address: http://localhost
 
     sshBastion:
       enabled: true
