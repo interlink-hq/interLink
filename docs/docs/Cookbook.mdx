@@ -377,6 +377,17 @@ curl -v $INTERLINK_SERVER_ADDRESS:$INTERLINK_PORT/pinginterlink
 This call will return the status of the system and its readiness to submit jobs.
 
 
+#### Test interLink stack health
+
+interLink comes with a call that can be used to monitor the overall status of both interlink server and plugins, at once.
+
+```
+curl -v $INTERLINK_SERVER_ADDRESS:$INTERLINK_PORT/pinginterlink
+```
+
+This call will return the status of the system and its readiness to submit jobs.
+
+
 ### Deploy Kubernetes components
 
 The deployment of the Kubernetes components are managed by the official [HELM chart](https://github.com/interTwin-eu/interlink-helm-chart). Depending on the scenario you selected, there might be additional operations to be done.
