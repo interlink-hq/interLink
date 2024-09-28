@@ -8,9 +8,9 @@ import useBaseUrl from '@docusaurus/useBaseUrl';
 
 Learn how to deploy interLink virtual nodes on your cluster. In this tutorial you are going to setup all the needed components to be able to either __develop__ or __deploy__ the plugin for container management on a **remote** host via a **local** kubernetes cluster.
 
-The installation script that we are going to configure will take care of providing you with a complete Kubernetes manifest to instantiate the virtual node interface. Also you will get an installation bash script to be executed on the remote host where you want to delegate your container execution. That script is already configured to **automatically** authenticate the incoming request from the virtual node component, and forward the correct instructions to the openAPI interface of the [interLink plugin](/api-reference) (a.k.a. sidecar) of your choice. Thus you can use this setup also for directly [developing a plugin](/develop-a-plugin), without caring for anything else.
+The installation script that we are going to configure will take care of providing you with a complete Kubernetes manifest to instantiate the virtual node interface. Also you will get an installation bash script to be executed on the remote host where you want to delegate your container execution. That script is already configured to **automatically** authenticate the incoming request from the virtual node component, and forward the correct instructions to the openAPI interface of the [interLink plugin](./api-reference) (a.k.a. sidecar) of your choice. Thus you can use this setup also for directly [developing a plugin](./develop-a-plugin), without caring for anything else.
 
-For a complete guide on all the possible scenarios, please refer to the [Cookbook](/cookbook).
+For a complete guide on all the possible scenarios, please refer to the [Cookbook](../cookbook).
 
 ## Requirements
 
@@ -186,7 +186,7 @@ To stop or restart the components you can use the dedicated commands:
 
 ## Attach your favorite plugin or develop one! (remote host)
 
-[Next chapter](/develop-a-plugin) will show the basics for developing a new plugin following the interLink openAPI spec.
+[Next chapter](./develop-a-plugin) will show the basics for developing a new plugin following the interLink openAPI spec.
 
 In alterative you can start an already supported one.
 

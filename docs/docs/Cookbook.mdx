@@ -77,7 +77,7 @@ In general, starting from the deployment of the remote components is adviced. Si
       - Any OIDC provider working with [OAuth2 Proxy](https://oauth2-proxy.github.io/oauth2-proxy/) tool will do the work though.
     - Create the `install.sh` utility script through the [installation utility](./guides/deploy-interlink#configuring-your-virtual-kubelet-setup)
       - __N.B.__ if your machine is shared with other users, you better indicate a socket as address to communicate with the plugin. Instead of a web URL is enough to insert something like `unix:///var/run/myplugin.socket`
-    - Install Oauth2-Proxy and interLink API server services as per [Quick start](./deploy-interlink#deploy-the-interlink-core-components)  
+    - Install Oauth2-Proxy and interLink API server services as per [Quick start](./guides/deploy-interlink#deploy-the-interlink-core-components)  
       - by default logs are store in `~/.interlink/logs`, checkout there for any error before moving to the next step.
   </TabItem>
   <TabItem value="incluster" label="In-cluster" default>
