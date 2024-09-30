@@ -27,6 +27,7 @@ function HomepageHeader() {
         }}
       />
         </Heading>
+
         <Heading as="h2" className="hero__title">
           {siteConfig.tagline}
         </Heading>
@@ -38,6 +39,10 @@ function HomepageHeader() {
           </Link>
 
         </div>
+      <img alt="Stars" src="https://img.shields.io/github/stars/intertwin-eu/interlink" style={{ marginTop: '1rem' }}/>
+      <br/>
+      <img alt="Slack" src="https://img.shields.io/badge/Join_Slack_Server!-8A2BE2?link=https%3A%2F%2Fjoin.slack.com%2Ft%2Fintertwin%2Fshared_invite%2Fzt-2cs67h9wz-2DFQ6EiSQGS1vlbbbJHctA"/>
+      <HomepageFeatures />
         <HomepageFeatures />
       </div>
     </header>
