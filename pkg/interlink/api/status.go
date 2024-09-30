@@ -21,7 +21,7 @@ import (
 func (h *InterLinkHandler) StatusHandler(w http.ResponseWriter, r *http.Request) {
 	start := time.Now().UnixMicro()
 	tracer := otel.Tracer("interlink-API")
-	_, span := tracer.Start(h.Ctx, "PingAPI", trace.WithAttributes(
+	_, span := tracer.Start(h.Ctx, "StatusAPI", trace.WithAttributes(
 		attribute.Int64("start.timestamp", start),
 	))
 	defer span.End()
