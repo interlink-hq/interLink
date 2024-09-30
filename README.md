@@ -1,7 +1,8 @@
 ![GitHub License](https://img.shields.io/github/license/intertwin-eu/interlink)
-![GitHub Actions Workflow Status](https://img.shields.io/github/actions/workflow/status/:user/:repo/:workflow)
-![GitHub Downloads (all assets, all releases)](https://img.shields.io/github/downloads/:user/:repo/total)
-![GitHub Release](https://img.shields.io/github/v/release/:user/:repo)
+![GitHub Actions Workflow Status](https://img.shields.io/github/actions/workflow/status/intertwin-eu/interlink/ci)
+![GitHub Downloads (all assets, all releases)](https://img.shields.io/github/downloads/intertwin-eu/interlink/total)
+![GitHub Release](https://img.shields.io/github/v/release/intertwin-eu/interlink)
+![GitHub Repo stars](https://img.shields.io/github/stars/intertwin-eu/interlink)
 ![Tested with Dagger](https://img.shields.io/badge/tested_with_dagger-v0.13.3-blue)
 ![Slack server](https://img.shields.io/badge/slack_server-black?link=https%3A%2F%2Fjoin.slack.com%2Ft%2Fintertwin%2Fshared_invite%2Fzt-2cs67h9wz-2DFQ6EiSQGS1vlbbbJHctA)
 
