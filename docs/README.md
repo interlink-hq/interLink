@@ -2,6 +2,13 @@
 
 This website is built using [Docusaurus](https://docusaurus.io/), a modern static website generator.
 
+## Dagger module to site preview
+
+```bash
+dagger -m github.com/levlaz/daggerverse/docusaurus@f073c72e0a7345bba2173a15269307df297c3c13 call \                                                                                                                    (⎈|default:default)
+ --src ./ serve up
+```
+
 ### Installation
 
 ```
