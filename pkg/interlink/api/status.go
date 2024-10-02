@@ -3,6 +3,7 @@ package api
 import (
 	"bytes"
 	"encoding/json"
+	"errors"
 	"io"
 	"net/http"
 	"strconv"
@@ -150,5 +151,9 @@ func (h *InterLinkHandler) StatusHandler(w http.ResponseWriter, r *http.Request)
 	log.G(h.Ctx).Debug("InterLink: status " + string(returnValue))
 
 	w.WriteHeader(statusCode)
-	w.Write(returnValue)
+	_, err = w.Write(returnValue)
+	if err != nil {
+		log.G(h.Ctx).Error(errors.New("Failed to write to http buffer"))
+	}
+
 }

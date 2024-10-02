@@ -26,6 +26,7 @@
     "redocusaurus": "^2.0.2"
   },
   "devDependencies": {
+    "@docusaurus/eslint-plugin": "^3.5.2",
     "@docusaurus/module-type-aliases": "3.0.1",
     "@docusaurus/tsconfig": "3.0.1",
     "@docusaurus/types": "3.0.1",

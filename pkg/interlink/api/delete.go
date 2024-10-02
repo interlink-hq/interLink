@@ -30,7 +30,7 @@ func (h *InterLinkHandler) DeleteHandler(w http.ResponseWriter, r *http.Request)
 	log.G(h.Ctx).Info("InterLink: received Delete call")
 
 	bodyBytes, err := io.ReadAll(r.Body)
-	statusCode := http.StatusOK
+	var statusCode int
 
 	if err != nil {
 		statusCode = http.StatusInternalServerError
@@ -90,10 +90,16 @@ func (h *InterLinkHandler) DeleteHandler(w http.ResponseWriter, r *http.Request)
 		bodyBytes, err = json.Marshal(returnJson)
 		if err != nil {
 			log.G(h.Ctx).Error(err)
-			w.Write([]byte{})
+			_, err = w.Write([]byte{})
+			if err != nil {
+				log.G(h.Ctx).Error(err)
+			}
 		} else {
 			types.SetDurationSpan(start, span, types.WithHTTPReturnCode(statusCode))
-			w.Write(bodyBytes)
+			_, err = w.Write(bodyBytes)
+			if err != nil {
+				log.G(h.Ctx).Error(err)
+			}
 		}
 	}
 }

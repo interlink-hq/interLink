@@ -414,7 +414,10 @@ func RemoteExecution(ctx context.Context, config VirtualKubeletConfig, p *Virtua
 							log.G(ctx).Warning("Unable to find ConfigMap " + volume.ConfigMap.Name + " for pod " + pod.Name + ". Waiting for it to be initialized")
 							if pod.Status.Phase != "Initializing" {
 								pod.Status.Phase = "Initializing"
-								p.UpdatePod(ctx, pod)
+								err = p.UpdatePod(ctx, pod)
+								if err != nil {
+									return err
+								}
 							}
 						} else {
 							failed = false
@@ -427,7 +430,10 @@ func RemoteExecution(ctx context.Context, config VirtualKubeletConfig, p *Virtua
 							log.G(ctx).Warning("Unable to find Secret " + volume.Secret.SecretName + " for pod " + pod.Name + ". Waiting for it to be initialized")
 							if pod.Status.Phase != "Initializing" {
 								pod.Status.Phase = "Initializing"
-								p.UpdatePod(ctx, pod)
+								err = p.UpdatePod(ctx, pod)
+								if err != nil {
+									return err
+								}
 							}
 						} else {
 							failed = false
@@ -440,7 +446,10 @@ func RemoteExecution(ctx context.Context, config VirtualKubeletConfig, p *Virtua
 						continue
 					} else {
 						pod.Status.Phase = v1.PodPending
-						p.UpdatePod(ctx, pod)
+						err = p.UpdatePod(ctx, pod)
+						if err != nil {
+							return err
+						}
 						break
 					}
 				} else {
@@ -449,7 +458,10 @@ func RemoteExecution(ctx context.Context, config VirtualKubeletConfig, p *Virtua
 					for i := range pod.Status.ContainerStatuses {
 						pod.Status.ContainerStatuses[i].Ready = false
 					}
-					p.UpdatePod(ctx, pod)
+					err = p.UpdatePod(ctx, pod)
+					if err != nil {
+						return err
+					}
 					return errors.New("unable to retrieve ConfigMaps or Secrets. Check logs")
 				}
 			}

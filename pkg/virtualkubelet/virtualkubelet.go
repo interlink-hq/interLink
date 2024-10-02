@@ -464,7 +464,10 @@ func (p *VirtualKubeletProvider) CreatePod(ctx context.Context, pod *v1.Pod) err
 					},
 				}
 
-				p.UpdatePod(ctx, pod)
+				err = p.UpdatePod(ctx, pod)
+				if err != nil {
+					log.G(ctx).Error(err)
+				}
 
 			}
 			return
@@ -564,7 +567,10 @@ func (p *VirtualKubeletProvider) DeletePod(ctx context.Context, pod *v1.Pod) (er
 	}
 
 	// tell k8s it's terminated
-	p.UpdatePod(ctx, pod)
+	err = p.UpdatePod(ctx, pod)
+	if err != nil {
+		return err
+	}
 
 	// delete from p.pods
 	delete(p.pods, key)
@@ -633,8 +639,15 @@ func (p *VirtualKubeletProvider) GetPods(ctx context.Context) ([]*v1.Pod, error)
 
 	log.G(ctx).Info("receive GetPods")
 
-	p.initClientSet(ctx)
-	p.RetrievePodsFromCluster(ctx)
+	err := p.initClientSet(ctx)
+	if err != nil {
+		return nil, err
+	}
+
+	err = p.RetrievePodsFromCluster(ctx)
+	if err != nil {
+		return nil, err
+	}
 
 	var pods []*v1.Pod
 

@@ -58,7 +58,11 @@ func NewInterLinkConfig() (InterLinkConfig, error) {
 		log.G(context.Background()).Error("Error opening config file, exiting...")
 		return InterLinkConfig{}, err
 	}
-	yaml.Unmarshal(yfile, &interLinkNewConfig)
+
+	err = yaml.Unmarshal(yfile, &interLinkNewConfig)
+	if err != nil {
+		return InterLinkConfig{}, err
+	}
 
 	if os.Getenv("INTERLINKURL") != "" {
 		interLinkNewConfig.InterlinkAddress = os.Getenv("INTERLINKURL")

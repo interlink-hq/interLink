@@ -61,12 +61,18 @@ func (h *InterLinkHandler) GetLogsHandler(w http.ResponseWriter, r *http.Request
 		statusCode = http.StatusInternalServerError
 		w.WriteHeader(statusCode)
 		if req2.Opts.Tail != 0 && req2.Opts.LimitBytes != 0 {
-			w.Write([]byte("Both Tail and LimitBytes set. Set only one of them"))
+			_, err = w.Write([]byte("Both Tail and LimitBytes set. Set only one of them"))
+			if err != nil {
+				log.G(h.Ctx).Error(errors.New("Failed to write to http buffer"))
+			}
+			return
 		} else {
-			w.Write([]byte("Both SinceSeconds and SinceTime set. Set only one of them"))
+			_, err = w.Write([]byte("Both SinceSeconds and SinceTime set. Set only one of them"))
+			if err != nil {
+				log.G(h.Ctx).Error(errors.New("Failed to write to http buffer"))
+			}
+			return
 		}
-		log.G(h.Ctx).Error(errors.New("check opts configurations"))
-		return
 	}
 
 	log.G(h.Ctx).Info("InterLink: marshal GetLogs request ")
@@ -106,6 +112,10 @@ func (h *InterLinkHandler) GetLogsHandler(w http.ResponseWriter, r *http.Request
 		types.SetDurationSpan(start, span, types.WithHTTPReturnCode(statusCode))
 
 		w.WriteHeader(statusCode)
-		w.Write(returnValue)
+		_, err = w.Write(returnValue)
+		if err != nil {
+			log.G(h.Ctx).Error(errors.New("Failed to write to http buffer"))
+		}
+
 	}
 }

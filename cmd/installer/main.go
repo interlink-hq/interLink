@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"io"
 	"io/fs"
+	"log"
 	"os"
 	"text/template"
 
@@ -17,9 +18,8 @@ import (
 
 var (
 	// Used for flags.
-	cfgFile     string
-	outFolder   string
-	userLicense string
+	cfgFile   string
+	outFolder string
 
 	rootCmd = &cobra.Command{
 		Use:   "ilctl",
@@ -104,7 +104,7 @@ func root(cmd *cobra.Command, args []string) error {
 	if onlyInit {
 
 		if _, err = os.Stat(cfgFile); err == nil {
-			return fmt.Errorf("File " + cfgFile + " exists. Please remove it before trying init again.")
+			return fmt.Errorf("File config file exists. Please remove it before trying init again: %w", err)
 		}
 
 		dumpConfig := dataStruct{
@@ -282,6 +282,9 @@ func initConfig() {
 
 func main() {
 
-	rootCmd.Execute()
+	err := rootCmd.Execute()
+	if err != nil {
+		log.Fatal(err)
+	}
 
 }

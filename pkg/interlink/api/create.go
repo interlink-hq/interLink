@@ -28,7 +28,7 @@ func (h *InterLinkHandler) CreateHandler(w http.ResponseWriter, r *http.Request)
 
 	log.G(h.Ctx).Info("InterLink: received Create call")
 
-	statusCode := -1
+	var statusCode int
 
 	bodyBytes, err := io.ReadAll(r.Body)
 	if err != nil {
@@ -114,7 +114,10 @@ func (h *InterLinkHandler) CreateHandler(w http.ResponseWriter, r *http.Request)
 			log.G(h.Ctx).Debug(string(returnValue))
 			w.WriteHeader(statusCode)
 			types.SetDurationSpan(start, span, types.WithHTTPReturnCode(statusCode))
-			w.Write(returnValue)
+			_, err = w.Write(returnValue)
+			if err != nil {
+				log.G(h.Ctx).Error(err)
+			}
 		}
 	}
 }

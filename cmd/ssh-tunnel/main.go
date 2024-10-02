@@ -17,12 +17,20 @@ func runTunnel(local, remote net.Conn) {
 	done := make(chan struct{}, 2)
 
 	go func() {
-		io.Copy(local, remote)
+		_, err := io.Copy(local, remote)
+		if err != nil {
+			log.Fatal(err)
+			return
+		}
 		done <- struct{}{}
 	}()
 
 	go func() {
-		io.Copy(remote, local)
+		_, err := io.Copy(remote, local)
+		if err != nil {
+			log.Fatal(err)
+			return
+		}
 		done <- struct{}{}
 	}()
 

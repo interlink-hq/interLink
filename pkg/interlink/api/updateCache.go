@@ -1,6 +1,7 @@
 package api
 
 import (
+	"errors"
 	"io"
 	"net/http"
 
@@ -21,5 +22,9 @@ func (h *InterLinkHandler) UpdateCacheHandler(w http.ResponseWriter, r *http.Req
 	deleteCachedStatus(string(bodyBytes))
 
 	w.WriteHeader(statusCode)
-	w.Write([]byte("Updated cache"))
+	_, err = w.Write([]byte("Updated cache"))
+	if err != nil {
+		log.G(h.Ctx).Error(errors.New("Failed to write to http buffer"))
+	}
+
 }

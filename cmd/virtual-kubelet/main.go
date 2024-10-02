@@ -21,7 +21,6 @@ import (
 	"crypto/x509"
 	"flag"
 	"fmt"
-	"io/ioutil"
 	"net"
 	"os"
 	"path"
@@ -150,7 +149,7 @@ func initProvider(ctx context.Context) (func(context.Context) error, error) {
 
 		log.G(ctx).Info("CA certificate provided, setting up mutual TLS")
 
-		caCert, err := ioutil.ReadFile(caCrtFilePath)
+		caCert, err := os.ReadFile(caCrtFilePath)
 		if err != nil {
 			return nil, fmt.Errorf("failed to load CA certificate: %w", err)
 		}
@@ -182,19 +181,21 @@ func initProvider(ctx context.Context) (func(context.Context) error, error) {
 			InsecureSkipVerify: true,
 		}
 		creds := credentials.NewTLS(tlsConfig)
-		conn, err = grpc.NewClient(otlpEndpoint, grpc.WithTransportCredentials(creds), grpc.WithBlock())
+		conn, err = grpc.NewClient(otlpEndpoint, grpc.WithTransportCredentials(creds))
+		if err != nil {
+			return nil, fmt.Errorf("Failed to connect to open telemetry connector: %w", err)
+		}
 
 	} else {
 		// if the CA certificate is not provided, use an insecure connection
 		// this means that the telemetry collector is not using a certificate, i.e. is inside the k8s cluster
 		conn, err = grpc.NewClient(otlpEndpoint, grpc.WithTransportCredentials(insecure.NewCredentials()))
+		if err != nil {
+			return nil, fmt.Errorf("Failed to connect to open telemetry connector: %w", err)
+		}
 	}
 
 	conn.WaitForStateChange(ctx, connectivity.Ready)
-
-	if err != nil {
-		return nil, fmt.Errorf("failed to create gRPC connection to collector: %w", err)
-	}
 
 	// Set up a trace exporter
 	traceExporter, err := otlptracegrpc.New(ctx, otlptracegrpc.WithGRPCConn(conn))
@@ -363,12 +364,11 @@ func main() {
 		),
 	)
 
-	go func() error {
+	go func() {
 		err = nc.Run(ctx)
 		if err != nil {
-			return fmt.Errorf("error running the node: %w", err)
+			log.G(ctx).Fatalf("error running the node: %w", err)
 		}
-		return nil
 	}()
 
 	eb := record.NewBroadcaster()

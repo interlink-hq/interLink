@@ -3,13 +3,15 @@ package api
 import (
 	"bytes"
 	"encoding/json"
+	"errors"
 	"net/http"
 	"strconv"
 	"time"
 
 	"github.com/containerd/containerd/log"
-	types "github.com/intertwin-eu/interlink/pkg/interlink"
 	v1 "k8s.io/api/core/v1"
+
+	types "github.com/intertwin-eu/interlink/pkg/interlink"
 
 	"go.opentelemetry.io/otel"
 	"go.opentelemetry.io/otel/attribute"
@@ -47,7 +49,10 @@ func (h *InterLinkHandler) Ping(w http.ResponseWriter, r *http.Request) {
 	if err != nil {
 		log.G(h.Ctx).Error(err)
 		w.WriteHeader(http.StatusServiceUnavailable)
-		w.Write([]byte(strconv.Itoa(http.StatusServiceUnavailable)))
+		_, err = w.Write([]byte(strconv.Itoa(http.StatusServiceUnavailable)))
+		if err != nil {
+			log.G(h.Ctx).Error(errors.New("Failed to write to http buffer"))
+		}
 		return
 	}
 
@@ -55,13 +60,21 @@ func (h *InterLinkHandler) Ping(w http.ResponseWriter, r *http.Request) {
 		if respPlugin.StatusCode != http.StatusOK {
 			log.G(h.Ctx).Error("error pinging plugin")
 			w.WriteHeader(respPlugin.StatusCode)
-			w.Write([]byte(strconv.Itoa(http.StatusServiceUnavailable)))
+			_, err = w.Write([]byte(strconv.Itoa(http.StatusServiceUnavailable)))
+			if err != nil {
+				log.G(h.Ctx).Error(errors.New("Failed to write to http buffer"))
+			}
+
 			return
 		}
 
 		types.SetDurationSpan(start, span, types.WithHTTPReturnCode(respPlugin.StatusCode))
 
 		w.WriteHeader(http.StatusOK)
-		w.Write([]byte("0"))
+		_, err = w.Write([]byte("0"))
+		if err != nil {
+			log.G(h.Ctx).Error(errors.New("Failed to write to http buffer"))
+		}
+
 	}
 }
