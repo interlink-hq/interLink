@@ -38,8 +38,8 @@ func (h *InterLinkHandler) CreateHandler(w http.ResponseWriter, r *http.Request)
 		return
 	}
 
-	var req *http.Request           //request to forward to sidecar
-	var pod types.PodCreateRequests //request for interlink
+	var req *http.Request           // request to forward to sidecar
+	var pod types.PodCreateRequests // request for interlink
 	err = json.Unmarshal(bodyBytes, &pod)
 	if err != nil {
 		statusCode = http.StatusInternalServerError
@@ -110,7 +110,14 @@ func (h *InterLinkHandler) CreateHandler(w http.ResponseWriter, r *http.Request)
 				log.G(h.Ctx).Error(statusCode)
 			}
 
-			returnValue, _ := io.ReadAll(resp.Body)
+			returnValue, err := io.ReadAll(resp.Body)
+			if err != nil {
+				w.WriteHeader(http.StatusInternalServerError)
+				if err != nil {
+					log.G(h.Ctx).Error(err)
+				}
+				return
+			}
 			log.G(h.Ctx).Debug(string(returnValue))
 			w.WriteHeader(statusCode)
 			types.SetDurationSpan(start, span, types.WithHTTPReturnCode(statusCode))

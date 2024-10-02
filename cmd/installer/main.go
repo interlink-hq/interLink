@@ -154,7 +154,7 @@ func root(cmd *cobra.Command, args []string) error {
 
 		return nil
 	}
-	//cliconfig := dataStruct{}
+	// cliconfig := dataStruct{}
 
 	file, err := os.Open(cfgFile)
 	if err != nil {
@@ -175,7 +175,8 @@ func root(cmd *cobra.Command, args []string) error {
 	var token *oauth2.Token
 
 	ctx := context.Background()
-	if configCLI.OAUTH.GrantType == "authorization_code" {
+	switch configCLI.OAUTH.GrantType {
+	case "authorization_code":
 		cfg := oauth2.Config{
 			ClientID:     configCLI.OAUTH.ClientID,
 			ClientSecret: configCLI.OAUTH.ClientSecret,
@@ -197,17 +198,16 @@ func root(cmd *cobra.Command, args []string) error {
 		if err != nil {
 			panic(err)
 		}
-		//fmt.Println(token.AccessToken)
-		//fmt.Println(token.RefreshToken)
-		//fmt.Println(token.Expiry)
-		//fmt.Println(token.TokenType)
+		// fmt.Println(token.AccessToken)
+		// fmt.Println(token.RefreshToken)
+		// fmt.Println(token.Expiry)
+		// fmt.Println(token.TokenType)
 		configCLI.OAUTH.RefreshToken = token.RefreshToken
-	} else if configCLI.OAUTH.GrantType == "client_credentials" {
+	case "client_credentials":
 
 		fmt.Println("Client_credentials set, I won't try to get any refresh token.")
 
-	} else {
-
+	default:
 		panic(fmt.Errorf("wrong grant type specified in the configuration. Only client_credentials and authorization_code are supported"))
 	}
 

@@ -1,7 +1,7 @@
 package virtualkubelet
 
-// VirtualKubeletConfig holds the whole configuration
-type VirtualKubeletConfig struct {
+// Config holds the whole configuration
+type Config struct {
 	InterlinkURL      string `yaml:"InterlinkURL"`
 	Interlinkport     string `yaml:"InterlinkPort"`
 	VKConfigPath      string `yaml:"VKConfigPath"`

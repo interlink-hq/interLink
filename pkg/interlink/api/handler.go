@@ -7,7 +7,7 @@ import (
 )
 
 type InterLinkHandler struct {
-	Config          interlink.InterLinkConfig
+	Config          interlink.Config
 	Ctx             context.Context
 	SidecarEndpoint string
 	// TODO: http client with TLS

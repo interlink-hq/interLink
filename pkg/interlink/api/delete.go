@@ -75,7 +75,14 @@ func (h *InterLinkHandler) DeleteHandler(w http.ResponseWriter, r *http.Request)
 	}
 
 	if resp != nil {
-		returnValue, _ := io.ReadAll(resp.Body)
+		returnValue, err := io.ReadAll(resp.Body)
+		if err != nil {
+			w.WriteHeader(http.StatusInternalServerError)
+			if err != nil {
+				log.G(h.Ctx).Error(err)
+			}
+			return
+		}
 		statusCode = resp.StatusCode
 
 		if statusCode != http.StatusOK {
@@ -84,10 +91,10 @@ func (h *InterLinkHandler) DeleteHandler(w http.ResponseWriter, r *http.Request)
 			w.WriteHeader(http.StatusOK)
 		}
 		log.G(h.Ctx).Debug("InterLink: " + string(returnValue))
-		var returnJson []types.PodStatus
-		returnJson = append(returnJson, types.PodStatus{PodName: pod.Name, PodUID: string(pod.UID), PodNamespace: pod.Namespace})
+		var returnJSON []types.PodStatus
+		returnJSON = append(returnJSON, types.PodStatus{PodName: pod.Name, PodUID: string(pod.UID), PodNamespace: pod.Namespace})
 
-		bodyBytes, err = json.Marshal(returnJson)
+		bodyBytes, err = json.Marshal(returnJSON)
 		if err != nil {
 			log.G(h.Ctx).Error(err)
 			_, err = w.Write([]byte{})

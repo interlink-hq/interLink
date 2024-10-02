@@ -77,9 +77,11 @@ func main() {
 
 	listener, err := client.Listen("tcp", "localhost:"+*remotePort)
 	if err != nil {
+		client.Close()
 		log.Fatalf("Failed to listen on remote socket %s: %v", *remotePort, err)
 	}
 	defer listener.Close()
+
 	log.Printf("Listening on remote socket %s", *remotePort)
 	for {
 		remote, err := listener.Accept()

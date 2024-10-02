@@ -41,7 +41,7 @@ import (
 	"k8s.io/client-go/tools/clientcmd"
 	"k8s.io/client-go/tools/record"
 
-	//certificates "k8s.io/api/certificates/v1"
+	// certificates "k8s.io/api/certificates/v1"
 
 	"net/http"
 
@@ -227,34 +227,37 @@ func main() {
 	flag.Parse()
 
 	configpath := ""
-	if *flagpath != "" {
+	switch {
+	case *flagpath != "":
 		configpath = *flagpath
-	} else if os.Getenv("CONFIGPATH") != "" {
+	case os.Getenv("CONFIGPATH") != "":
 		configpath = os.Getenv("CONFIGPATH")
-	} else {
+	default:
 		configpath = "/etc/interlink/InterLinkConfig.yaml"
 	}
 
 	nodename := ""
-	if *flagnodename != "" {
+	switch {
+	case *flagnodename != "":
 		nodename = *flagnodename
-	} else if os.Getenv("NODENAME") != "" {
+	case os.Getenv("NODENAME") != "":
 		nodename = os.Getenv("NODENAME")
-	} else {
+	default:
 		panic(fmt.Errorf("You must specify a Node name"))
 	}
 
-	interLinkConfig, err := commonIL.LoadConfig(configpath, nodename, ctx)
+	interLinkConfig, err := commonIL.LoadConfig(ctx, configpath)
 	if err != nil {
 		panic(err)
 	}
 
 	logger := logrus.StandardLogger()
-	if interLinkConfig.VerboseLogging {
+	switch {
+	case interLinkConfig.VerboseLogging:
 		logger.SetLevel(logrus.DebugLevel)
-	} else if interLinkConfig.ErrorsOnlyLogging {
+	case interLinkConfig.ErrorsOnlyLogging:
 		logger.SetLevel(logrus.ErrorLevel)
-	} else {
+	default:
 		logger.SetLevel(logrus.InfoLevel)
 	}
 	log.L = logruslogger.FromLogrus(logrus.NewEntry(logger))
@@ -285,7 +288,7 @@ func main() {
 
 	if strings.HasPrefix(interLinkConfig.InterlinkURL, "unix://") {
 		// Dial the Unix socket
-		interLinkEndpoint := strings.Replace(interLinkConfig.InterlinkURL, "unix://", "", -1)
+		interLinkEndpoint := strings.ReplaceAll(interLinkConfig.InterlinkURL, "unix://", "")
 		var conn net.Conn
 		for {
 			conn, err = net.Dial("unix", interLinkEndpoint)
@@ -344,25 +347,28 @@ func main() {
 	localClient := kubernetes.NewForConfigOrDie(kubecfg)
 
 	nodeProvider, err := commonIL.NewProvider(
+		ctx,
 		cfg.ConfigPath,
 		cfg.NodeName,
 		cfg.NodeVersion,
 		cfg.OperatingSystem,
 		cfg.InternalIP,
 		cfg.DaemonPort,
-		ctx)
-
+	)
 	if err != nil {
 		log.G(ctx).Fatal(err)
 	}
 
-	nc, _ := node.NewNodeController(
+	nc, err := node.NewNodeController(
 		nodeProvider, nodeProvider.GetNode(), localClient.CoreV1().Nodes(),
 		node.WithNodeEnableLeaseV1(
 			lease.NewForConfigOrDie(kubecfg).Leases(v1.NamespaceNodeLease),
 			300,
 		),
 	)
+	if err != nil {
+		log.G(ctx).Fatalf("error setting up NodeController: %w", err)
+	}
 
 	go func() {
 		err = nc.Run(ctx)
@@ -444,10 +450,10 @@ func main() {
 
 	api.AttachPodRoutes(podRoutes, mux, true)
 
-	//retriever, err := newCertificateRetriever(localClient, certificates.KubeletServingSignerName, cfg.NodeName, parsedIP)
-	//if err != nil {
+	// retriever, err := newCertificateRetriever(localClient, certificates.KubeletServingSignerName, cfg.NodeName, parsedIP)
+	// if err != nil {
 	//	log.G(ctx).Fatal("failed to initialize certificate manager: %w", err)
-	//}
+	// }
 	// TODO: create a csr auto approver https://github.com/liqotech/liqo/blob/master/cmd/liqo-controller-manager/main.go#L498
 	retriever := commonIL.NewSelfSignedCertificateRetriever(cfg.NodeName, net.ParseIP(cfg.InternalIP))
 

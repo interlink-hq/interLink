@@ -17,15 +17,15 @@ import (
 	"k8s.io/client-go/kubernetes"
 	"k8s.io/client-go/util/certificate"
 	"k8s.io/klog"
-	//"k8s.io/kubernetes/pkg/apis/certificates"
+	// "k8s.io/kubernetes/pkg/apis/certificates"
 )
 
-type crtretriever func(*tls.ClientHelloInfo) (*tls.Certificate, error)
+type Crtretriever func(*tls.ClientHelloInfo) (*tls.Certificate, error)
 
 // NewCertificateManager creates a certificate manager for the kubelet when retrieving a server certificate, or returns an error.
 // This function is inspired by Liqo implementation:
 // https://github.com/liqotech/liqo/blob/master/cmd/virtual-kubelet/root/http.go#L149
-func NewCertificateRetriever(kubeClient kubernetes.Interface, signer, nodeName string, nodeIP net.IP) (crtretriever, error) {
+func NewCertificateRetriever(kubeClient kubernetes.Interface, signer, nodeName string, nodeIP net.IP) (Crtretriever, error) {
 	const (
 		vkCertsPath   = "/tmp/certs"
 		vkCertsPrefix = "virtual-kubelet"
@@ -47,7 +47,7 @@ func NewCertificateRetriever(kubeClient kubernetes.Interface, signer, nodeName s
 	}
 
 	mgr, err := certificate.NewManager(&certificate.Config{
-		ClientsetFn: func(current *tls.Certificate) (kubernetes.Interface, error) {
+		ClientsetFn: func(_ *tls.Certificate) (kubernetes.Interface, error) {
 			return kubeClient, nil
 		},
 		GetTemplate: getTemplate,
@@ -85,7 +85,7 @@ func NewCertificateRetriever(kubeClient kubernetes.Interface, signer, nodeName s
 }
 
 // newSelfSignedCertificateRetriever creates a new retriever for self-signed certificates.
-func NewSelfSignedCertificateRetriever(nodeName string, nodeIP net.IP) crtretriever {
+func NewSelfSignedCertificateRetriever(nodeName string, nodeIP net.IP) Crtretriever {
 
 	creator := func() (*tls.Certificate, time.Time, error) {
 		expiration := time.Now().AddDate(1, 0, 0) // 1 year

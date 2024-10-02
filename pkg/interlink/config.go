@@ -9,8 +9,8 @@ import (
 	"gopkg.in/yaml.v2"
 )
 
-// InterLinkConfig holds the whole configuration
-type InterLinkConfig struct {
+// Config holds the whole configuration
+type Config struct {
 	InterlinkAddress  string `yaml:"InterlinkAddress"`
 	Interlinkport     string `yaml:"InterlinkPort"`
 	Sidecarurl        string `yaml:"SidecarURL"`
@@ -22,14 +22,14 @@ type InterLinkConfig struct {
 }
 
 // NewInterLinkConfig returns a variable of type InterLinkConfig, used in many other functions and the first encountered error.
-func NewInterLinkConfig() (InterLinkConfig, error) {
+func NewInterLinkConfig() (Config, error) {
 	var path string
 	verbose := flag.Bool("verbose", false, "Enable or disable Debug level logging")
 	errorsOnly := flag.Bool("errorsonly", false, "Prints only errors if enabled")
 	InterLinkConfigPath := flag.String("interlinkconfigpath", "", "Path to InterLink config")
 	flag.Parse()
 
-	interLinkNewConfig := InterLinkConfig{}
+	interLinkNewConfig := Config{}
 
 	if *verbose {
 		interLinkNewConfig.VerboseLogging = true
@@ -41,27 +41,29 @@ func NewInterLinkConfig() (InterLinkConfig, error) {
 
 	if *InterLinkConfigPath != "" {
 		path = *InterLinkConfigPath
-	} else if os.Getenv("INTERLINKCONFIGPATH") != "" {
-		path = os.Getenv("INTERLINKCONFIGPATH")
 	} else {
-		path = "/etc/interlink/InterLinkConfig.yaml"
+		if os.Getenv("INTERLINKCONFIGPATH") != "" {
+			path = os.Getenv("INTERLINKCONFIGPATH")
+		} else {
+			path = "/etc/interlink/InterLinkConfig.yaml"
+		}
 	}
 
 	if _, err := os.Stat(path); err != nil {
 		log.G(context.Background()).Error("File " + path + " doesn't exist. You can set a custom path by exporting INTERLINKCONFIGPATH. Exiting...")
-		return InterLinkConfig{}, err
+		return Config{}, err
 	}
 
 	log.G(context.Background()).Info("Loading InterLink config from " + path)
 	yfile, err := os.ReadFile(path)
 	if err != nil {
 		log.G(context.Background()).Error("Error opening config file, exiting...")
-		return InterLinkConfig{}, err
+		return Config{}, err
 	}
 
 	err = yaml.Unmarshal(yfile, &interLinkNewConfig)
 	if err != nil {
-		return InterLinkConfig{}, err
+		return Config{}, err
 	}
 
 	if os.Getenv("INTERLINKURL") != "" {

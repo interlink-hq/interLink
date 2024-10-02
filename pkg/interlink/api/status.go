@@ -46,8 +46,8 @@ func (h *InterLinkHandler) StatusHandler(w http.ResponseWriter, r *http.Request)
 	)
 
 	var podsToBeChecked []*v1.Pod
-	var returnedStatuses []types.PodStatus //returned from the query to the sidecar
-	var returnPods []types.PodStatus       //returned to the vk
+	var returnedStatuses []types.PodStatus // returned from the query to the sidecar
+	var returnPods []types.PodStatus       // returned to the vk
 
 	PodStatuses.mu.Lock()
 	for _, pod := range pods {

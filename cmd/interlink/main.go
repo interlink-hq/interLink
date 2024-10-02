@@ -199,7 +199,8 @@ func main() {
 	log.G(ctx).Info("interLink version: ", virtualkubelet.KubeletVersion)
 
 	sidecarEndpoint := ""
-	if strings.HasPrefix(interLinkConfig.Sidecarurl, "unix://") {
+	switch {
+	case strings.HasPrefix(interLinkConfig.Sidecarurl, "unix://"):
 		sidecarEndpoint = interLinkConfig.Sidecarurl
 		// Dial the Unix socket
 		var conn net.Conn
@@ -216,9 +217,9 @@ func main() {
 		http.DefaultTransport.(*http.Transport).DialContext = func(_ context.Context, _, _ string) (net.Conn, error) {
 			return conn, nil
 		}
-	} else if strings.HasPrefix(interLinkConfig.Sidecarurl, "http://") {
+	case strings.HasPrefix(interLinkConfig.Sidecarurl, "http://"):
 		sidecarEndpoint = interLinkConfig.Sidecarurl + ":" + interLinkConfig.Sidecarport
-	} else {
+	default:
 		log.G(ctx).Fatal("Sidecar URL should either start per unix:// or http://: getting ", interLinkConfig.Sidecarurl)
 	}
 
@@ -237,7 +238,8 @@ func main() {
 	mutex.HandleFunc("/updateCache", interLinkAPIs.UpdateCacheHandler)
 
 	interLinkEndpoint := ""
-	if strings.HasPrefix(interLinkConfig.InterlinkAddress, "unix://") {
+	switch {
+	case strings.HasPrefix(interLinkConfig.InterlinkAddress, "unix://"):
 		interLinkEndpoint = interLinkConfig.InterlinkAddress
 
 		// Create a Unix domain socket and listen for incoming connections.
@@ -255,7 +257,9 @@ func main() {
 			os.Exit(1)
 		}()
 		server := http.Server{
-			Handler: mutex,
+			Handler:           mutex,
+			ReadTimeout:       30 * time.Second,
+			ReadHeaderTimeout: 10 * time.Second,
 		}
 
 		log.G(ctx).Info(socket)
@@ -263,15 +267,15 @@ func main() {
 		if err := server.Serve(socket); err != nil {
 			log.G(ctx).Fatal(err)
 		}
-	} else if strings.HasPrefix(interLinkConfig.InterlinkAddress, "http://") {
-		interLinkEndpoint = strings.Replace(interLinkConfig.InterlinkAddress, "http://", "", -1) + ":" + interLinkConfig.Interlinkport
+	case strings.HasPrefix(interLinkConfig.InterlinkAddress, "http://"):
+		interLinkEndpoint = strings.ReplaceAll(interLinkConfig.InterlinkAddress, "http://", "") + ":" + interLinkConfig.Interlinkport
 
 		err = http.ListenAndServe(interLinkEndpoint, mutex)
 
 		if err != nil {
 			log.G(ctx).Fatal(err)
 		}
-	} else {
+	default:
 		log.G(ctx).Fatal("Interlink URL should either start per unix:// or http://. Getting: ", interLinkConfig.InterlinkAddress)
 	}
 }
