@@ -105,9 +105,9 @@ In general, starting from the deployment of the remote components is adviced. Si
       SSH_TUNNEL_NODE_PORT="node port where the ssh service will be exposed"
       PRIV_KEY_FILE="path the ssh priv key created above"
 
-      ## If you want to remove the secure false, you should enable HostKey check (more advanced manual setup)
+      ## If you want to remove the secure warning, you should enable HostKey check (more advanced manual setup) with -hostkey option
     
-      $HOME/.interlink/bin/ssh-tunnel -secure false -addr $CLUSTER_PUBLIC_IP:$SSH_TUNNEL_NODE_PORT -keyfile $PRIV_KEY_FILE -user interlink -rport 3000 -lsock plugin.sock  &> $HOME/.interlink/logs/ssh-tunnel.log &
+      $HOME/.interlink/bin/ssh-tunnel -addr $CLUSTER_PUBLIC_IP:$SSH_TUNNEL_NODE_PORT -keyfile $PRIV_KEY_FILE -user interlink -rport 3000 -lsock plugin.sock  &> $HOME/.interlink/logs/ssh-tunnel.log &
       echo $! > $HOME/.interlink/ssh-tunnel.pid     
       ```
 

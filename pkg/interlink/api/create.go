@@ -90,41 +90,11 @@ func (h *InterLinkHandler) CreateHandler(w http.ResponseWriter, r *http.Request)
 		}
 
 		log.G(h.Ctx).Info("InterLink: forwarding Create call to sidecar")
-		var resp *http.Response
 
-		req.Header.Set("Content-Type", "application/json")
-		resp, err = http.DefaultClient.Do(req)
+		err := ReqWithError(h.Ctx, req, w, start, span)
 		if err != nil {
-			statusCode = http.StatusInternalServerError
-			w.WriteHeader(statusCode)
-			log.G(h.Ctx).Error(err)
+			log.L.Error(err)
 			return
-		}
-
-		if resp != nil {
-			if resp.StatusCode == http.StatusOK {
-				statusCode = http.StatusOK
-				log.G(h.Ctx).Debug(statusCode)
-			} else {
-				statusCode = http.StatusInternalServerError
-				log.G(h.Ctx).Error(statusCode)
-			}
-
-			returnValue, err := io.ReadAll(resp.Body)
-			if err != nil {
-				w.WriteHeader(http.StatusInternalServerError)
-				if err != nil {
-					log.G(h.Ctx).Error(err)
-				}
-				return
-			}
-			log.G(h.Ctx).Debug(string(returnValue))
-			w.WriteHeader(statusCode)
-			types.SetDurationSpan(start, span, types.WithHTTPReturnCode(statusCode))
-			_, err = w.Write(returnValue)
-			if err != nil {
-				log.G(h.Ctx).Error(err)
-			}
 		}
 	}
 }

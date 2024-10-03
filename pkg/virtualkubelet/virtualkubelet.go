@@ -38,6 +38,89 @@ const (
 	DELETE                = 1
 )
 
+func NodeCondition(ready bool) []v1.NodeCondition {
+
+	var readyType v1.ConditionStatus
+	var netType v1.ConditionStatus
+	if ready {
+		readyType = v1.ConditionTrue
+		netType = v1.ConditionFalse
+	} else {
+		readyType = v1.ConditionFalse
+		netType = v1.ConditionTrue
+	}
+
+	return []v1.NodeCondition{
+		{
+			Type:               "Ready",
+			Status:             readyType,
+			LastHeartbeatTime:  metav1.Now(),
+			LastTransitionTime: metav1.Now(),
+			Reason:             "KubeletPending",
+			Message:            "kubelet is pending.",
+		},
+		{
+			Type:               "OutOfDisk",
+			Status:             v1.ConditionFalse,
+			LastHeartbeatTime:  metav1.Now(),
+			LastTransitionTime: metav1.Now(),
+			Reason:             "KubeletHasSufficientDisk",
+			Message:            "kubelet has sufficient disk space available",
+		},
+		{
+			Type:               "MemoryPressure",
+			Status:             v1.ConditionFalse,
+			LastHeartbeatTime:  metav1.Now(),
+			LastTransitionTime: metav1.Now(),
+			Reason:             "KubeletHasSufficientMemory",
+			Message:            "kubelet has sufficient memory available",
+		},
+		{
+			Type:               "DiskPressure",
+			Status:             v1.ConditionFalse,
+			LastHeartbeatTime:  metav1.Now(),
+			LastTransitionTime: metav1.Now(),
+			Reason:             "KubeletHasNoDiskPressure",
+			Message:            "kubelet has no disk pressure",
+		},
+		{
+			Type:               "NetworkUnavailable",
+			Status:             netType,
+			LastHeartbeatTime:  metav1.Now(),
+			LastTransitionTime: metav1.Now(),
+			Reason:             "RouteCreated",
+			Message:            "RouteController created a route",
+		},
+	}
+}
+
+func GetResources(config Config) v1.ResourceList {
+
+	return v1.ResourceList{
+		"cpu":            resource.MustParse(config.CPU),
+		"memory":         resource.MustParse(config.Memory),
+		"pods":           resource.MustParse(config.Pods),
+		"nvidia.com/gpu": resource.MustParse(config.GPU),
+	}
+
+}
+
+func SetDefaultResource(config *Config) {
+	if config.CPU == "" {
+		config.CPU = DefaultCPUCapacity
+	}
+	if config.Memory == "" {
+		config.Memory = DefaultMemoryCapacity
+	}
+	if config.Pods == "" {
+		config.Pods = DefaultPodCapacity
+	}
+	if config.GPU == "" {
+		config.GPU = DefaultGPUCapacity
+	}
+
+}
+
 func buildKeyFromNames(namespace string, name string) (string, error) {
 	return fmt.Sprintf("%s-%s", namespace, name), nil
 }
@@ -79,19 +162,7 @@ func NewProviderConfig(
 	daemonEndpointPort int32,
 ) (*Provider, error) {
 
-	// set defaults
-	if config.CPU == "" {
-		config.CPU = DefaultCPUCapacity
-	}
-	if config.Memory == "" {
-		config.Memory = DefaultMemoryCapacity
-	}
-	if config.Pods == "" {
-		config.Pods = DefaultPodCapacity
-	}
-	if config.GPU == "" {
-		config.GPU = DefaultGPUCapacity
-	}
+	SetDefaultResource(&config)
 
 	lbls := map[string]string{
 		"alpha.service-controller.kubernetes.io/exclude-balancer": "true",
@@ -123,19 +194,9 @@ func NewProviderConfig(
 			},
 			Addresses:       []v1.NodeAddress{{Type: v1.NodeInternalIP, Address: internalIP}},
 			DaemonEndpoints: v1.NodeDaemonEndpoints{KubeletEndpoint: v1.DaemonEndpoint{Port: daemonEndpointPort}},
-			Capacity: v1.ResourceList{
-				"cpu":            resource.MustParse(config.CPU),
-				"memory":         resource.MustParse(config.Memory),
-				"pods":           resource.MustParse(config.Pods),
-				"nvidia.com/gpu": resource.MustParse(config.GPU),
-			},
-			Allocatable: v1.ResourceList{
-				"cpu":            resource.MustParse(config.CPU),
-				"memory":         resource.MustParse(config.Memory),
-				"pods":           resource.MustParse(config.Pods),
-				"nvidia.com/gpu": resource.MustParse(config.GPU),
-			},
-			Conditions: nodeConditions(),
+			Capacity:        GetResources(config),
+			Allocatable:     GetResources(config),
+			Conditions:      NodeCondition(false),
 		},
 	}
 
@@ -189,18 +250,7 @@ func LoadConfig(ctx context.Context, providerConfig string) (config Config, err 
 	}
 
 	// config = configMap
-	if config.CPU == "" {
-		config.CPU = DefaultCPUCapacity
-	}
-	if config.Memory == "" {
-		config.Memory = DefaultMemoryCapacity
-	}
-	if config.Pods == "" {
-		config.Pods = DefaultPodCapacity
-	}
-	if config.GPU == "" {
-		config.GPU = DefaultGPUCapacity
-	}
+	SetDefaultResource(&config)
 
 	if _, err = resource.ParseQuantity(config.CPU); err != nil {
 		return config, fmt.Errorf("invalid CPU value %v", config.CPU)
@@ -255,95 +305,12 @@ func (p *Provider) nodeUpdate(ctx context.Context) {
 		}
 		ok, code, err := PingInterLink(ctx, p.config)
 		if err != nil || !ok {
-			p.node.Status.Conditions = []v1.NodeCondition{
-				{
-					Type:               "Ready",
-					Status:             v1.ConditionFalse,
-					LastHeartbeatTime:  metav1.Now(),
-					LastTransitionTime: metav1.Now(),
-					Reason:             "KubeletPending",
-					Message:            "kubelet is pending.",
-				},
-				{
-					Type:               "OutOfDisk",
-					Status:             v1.ConditionFalse,
-					LastHeartbeatTime:  metav1.Now(),
-					LastTransitionTime: metav1.Now(),
-					Reason:             "KubeletHasSufficientDisk",
-					Message:            "kubelet has sufficient disk space available",
-				},
-				{
-					Type:               "MemoryPressure",
-					Status:             v1.ConditionFalse,
-					LastHeartbeatTime:  metav1.Now(),
-					LastTransitionTime: metav1.Now(),
-					Reason:             "KubeletHasSufficientMemory",
-					Message:            "kubelet has sufficient memory available",
-				},
-				{
-					Type:               "DiskPressure",
-					Status:             v1.ConditionFalse,
-					LastHeartbeatTime:  metav1.Now(),
-					LastTransitionTime: metav1.Now(),
-					Reason:             "KubeletHasNoDiskPressure",
-					Message:            "kubelet has no disk pressure",
-				},
-				{
-					Type:               "NetworkUnavailable",
-					Status:             v1.ConditionTrue,
-					LastHeartbeatTime:  metav1.Now(),
-					LastTransitionTime: metav1.Now(),
-					Reason:             "RouteCreated",
-					Message:            "RouteController created a route",
-				},
-			}
+			p.node.Status.Conditions = NodeCondition(false)
 			p.onNodeChangeCallback(p.node)
 			log.G(ctx).Error("Ping Failed with exit code: ", code)
 		} else {
 
-			p.node.Status.Conditions = []v1.NodeCondition{
-				{
-					Type:               "Ready",
-					Status:             v1.ConditionTrue,
-					LastHeartbeatTime:  metav1.Now(),
-					LastTransitionTime: metav1.Now(),
-					Reason:             "KubeletPending",
-					Message:            "kubelet is pending.",
-				},
-				{
-					Type:               "OutOfDisk",
-					Status:             v1.ConditionFalse,
-					LastHeartbeatTime:  metav1.Now(),
-					LastTransitionTime: metav1.Now(),
-					Reason:             "KubeletHasSufficientDisk",
-					Message:            "kubelet has sufficient disk space available",
-				},
-				{
-					Type:               "MemoryPressure",
-					Status:             v1.ConditionFalse,
-					LastHeartbeatTime:  metav1.Now(),
-					LastTransitionTime: metav1.Now(),
-					Reason:             "KubeletHasSufficientMemory",
-					Message:            "kubelet has sufficient memory available",
-				},
-				{
-					Type:               "DiskPressure",
-					Status:             v1.ConditionFalse,
-					LastHeartbeatTime:  metav1.Now(),
-					LastTransitionTime: metav1.Now(),
-					Reason:             "KubeletHasNoDiskPressure",
-					Message:            "kubelet has no disk pressure",
-				},
-				{
-					Type:               "NetworkUnavailable",
-					Status:             v1.ConditionFalse,
-					LastHeartbeatTime:  metav1.Now(),
-					LastTransitionTime: metav1.Now(),
-					Reason:             "RouteCreated",
-					Message:            "RouteController created a route",
-				},
-			}
-
+			p.node.Status.Conditions = NodeCondition(true)
 			log.G(ctx).Info("Ping succeded with exit code: ", code)
 			p.onNodeChangeCallback(p.node)
 		}
@@ -663,55 +630,6 @@ func (p *Provider) GetPods(ctx context.Context) ([]*v1.Pod, error) {
 	}
 
 	return pods, nil
-}
-
-// NodeConditions returns a list of conditions (Ready, OutOfDisk, etc), for updates to the node status
-// within Kubernetes.
-// TODO: use as var not function
-func nodeConditions() []v1.NodeCondition {
-	return []v1.NodeCondition{
-		{
-			Type:               "Ready",
-			Status:             v1.ConditionFalse,
-			LastHeartbeatTime:  metav1.Now(),
-			LastTransitionTime: metav1.Now(),
-			Reason:             "KubeletPending",
-			Message:            "kubelet is pending.",
-		},
-		{
-			Type:               "OutOfDisk",
-			Status:             v1.ConditionFalse,
-			LastHeartbeatTime:  metav1.Now(),
-			LastTransitionTime: metav1.Now(),
-			Reason:             "KubeletHasSufficientDisk",
-			Message:            "kubelet has sufficient disk space available",
-		},
-		{
-			Type:               "MemoryPressure",
-			Status:             v1.ConditionFalse,
-			LastHeartbeatTime:  metav1.Now(),
-			LastTransitionTime: metav1.Now(),
-			Reason:             "KubeletHasSufficientMemory",
-			Message:            "kubelet has sufficient memory available",
-		},
-		{
-			Type:               "DiskPressure",
-			Status:             v1.ConditionFalse,
-			LastHeartbeatTime:  metav1.Now(),
-			LastTransitionTime: metav1.Now(),
-			Reason:             "KubeletHasNoDiskPressure",
-			Message:            "kubelet has no disk pressure",
-		},
-		{
-			Type:               "NetworkUnavailable",
-			Status:             v1.ConditionTrue,
-			LastHeartbeatTime:  metav1.Now(),
-			LastTransitionTime: metav1.Now(),
-			Reason:             "RouteCreated",
-			Message:            "RouteController created a route",
-		},
-	}
-
 }
 
 // NotifyPods is called to set a pod notifier callback function. Also starts the go routine to monitor all vk pods

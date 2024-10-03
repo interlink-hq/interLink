@@ -6,7 +6,6 @@ import (
 	"errors"
 	"io"
 	"net/http"
-	"strconv"
 	"time"
 
 	"github.com/containerd/containerd/log"
@@ -53,21 +52,14 @@ func (h *InterLinkHandler) StatusHandler(w http.ResponseWriter, r *http.Request)
 	for _, pod := range pods {
 		cached := checkIfCached(string(pod.UID))
 		if pod.Status.Phase == v1.PodRunning || pod.Status.Phase == v1.PodPending || !cached {
-			span.AddEvent("Pod "+pod.Name+" is not cached", trace.WithAttributes(
-				attribute.String("pod.name", pod.Name),
-				attribute.String("pod.namespace", pod.Namespace),
-				attribute.String("pod.uid", string(pod.UID)),
-				attribute.String("pod.phase", string(pod.Status.Phase)),
-			))
 			podsToBeChecked = append(podsToBeChecked, pod)
-		} else if cached {
-			span.AddEvent("Pod "+pod.Name+" is cached", trace.WithAttributes(
-				attribute.String("pod.name", pod.Name),
-				attribute.String("pod.namespace", pod.Namespace),
-				attribute.String("pod.uid", string(pod.UID)),
-				attribute.String("pod.phase", string(pod.Status.Phase)),
-			))
 		}
+		span.AddEvent("Pod "+pod.Name+" is cached", trace.WithAttributes(
+			attribute.String("pod.name", pod.Name),
+			attribute.String("pod.namespace", pod.Namespace),
+			attribute.String("pod.uid", string(pod.UID)),
+			attribute.String("pod.phase", string(pod.Status.Phase)),
+		))
 	}
 	PodStatuses.mu.Unlock()
 
@@ -86,8 +78,16 @@ func (h *InterLinkHandler) StatusHandler(w http.ResponseWriter, r *http.Request)
 
 		log.G(h.Ctx).Info("InterLink: forwarding GetStatus call to sidecar")
 		req.Header.Set("Content-Type", "application/json")
-		log.G(h.Ctx).Debug(req)
-		resp, err := http.DefaultClient.Do(req)
+		log.G(h.Ctx).Debug("Interlink get status request content: %s", req)
+
+		resp, error := DoReq(h.Ctx, req)
+		err = ReqError(h.Ctx, w, resp, error)
+		if err != nil {
+			log.L.Error(err)
+			return
+		}
+
+		bodyBytes, err = io.ReadAll(resp.Body)
 		if err != nil {
 			statusCode = http.StatusInternalServerError
 			w.WriteHeader(statusCode)
@@ -95,32 +95,17 @@ func (h *InterLinkHandler) StatusHandler(w http.ResponseWriter, r *http.Request)
 			return
 		}
 
-		if resp != nil {
-			if resp.StatusCode != http.StatusOK {
-				log.L.Error("Unexpected error occured. Status code: " + strconv.Itoa(resp.StatusCode) + ". Check Sidecar's logs for further informations")
-				statusCode = http.StatusInternalServerError
-			}
-
-			bodyBytes, err = io.ReadAll(resp.Body)
-			if err != nil {
-				statusCode = http.StatusInternalServerError
-				w.WriteHeader(statusCode)
-				log.G(h.Ctx).Error(err)
-				return
-			}
-
-			log.G(h.Ctx).Debug(string(bodyBytes))
-			err = json.Unmarshal(bodyBytes, &returnedStatuses)
-			if err != nil {
-				statusCode = http.StatusInternalServerError
-				w.WriteHeader(statusCode)
-				log.G(h.Ctx).Error(err)
-				return
-			}
-
-			updateStatuses(returnedStatuses)
-			types.SetDurationSpan(start, span, types.WithHTTPReturnCode(statusCode))
+		log.G(h.Ctx).Debug(string(bodyBytes))
+		err = json.Unmarshal(bodyBytes, &returnedStatuses)
+		if err != nil {
+			statusCode = http.StatusInternalServerError
+			w.WriteHeader(statusCode)
+			log.G(h.Ctx).Error(err)
+			return
 		}
+
+		updateStatuses(returnedStatuses)
+		types.SetDurationSpan(start, span, types.WithHTTPReturnCode(statusCode))
 
 	}
 
