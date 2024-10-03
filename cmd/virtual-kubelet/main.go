@@ -178,7 +178,7 @@ func initProvider(ctx context.Context) (func(context.Context) error, error) {
 			Certificates:       []tls.Certificate{cert},
 			RootCAs:            certPool,
 			MinVersion:         tls.VersionTLS12,
-			InsecureSkipVerify: true,
+			InsecureSkipVerify: false,
 		}
 		creds := credentials.NewTLS(tlsConfig)
 		conn, err = grpc.NewClient(otlpEndpoint, grpc.WithTransportCredentials(creds))
@@ -284,7 +284,9 @@ func main() {
 	// TODO: if token specified http.DefaultClient = ...
 	// and remove reading from file
 
-	http.DefaultTransport.(*http.Transport).TLSClientConfig = &tls.Config{InsecureSkipVerify: true}
+	http.DefaultTransport.(*http.Transport).TLSClientConfig = &tls.Config{
+		InsecureSkipVerify: interLinkConfig.HTTP.Insecure,
+	}
 
 	if strings.HasPrefix(interLinkConfig.InterlinkURL, "unix://") {
 		// Dial the Unix socket
@@ -462,11 +464,12 @@ func main() {
 	server := &http.Server{
 		Addr:              fmt.Sprintf("0.0.0.0:%s", kubeletPort),
 		Handler:           mux,
+		ReadTimeout:       30 * time.Second,
 		ReadHeaderTimeout: 10 * time.Second, // Required to limit the effects of the Slowloris attack.
 		TLSConfig: &tls.Config{
 			GetCertificate:     retriever,
 			MinVersion:         tls.VersionTLS12,
-			InsecureSkipVerify: true,
+			InsecureSkipVerify: interLinkConfig.KubeletHTTP.Insecure,
 		},
 	}
 

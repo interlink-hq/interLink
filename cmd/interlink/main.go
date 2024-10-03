@@ -110,7 +110,7 @@ func initProvider(ctx context.Context) (func(context.Context) error, error) {
 			Certificates:       []tls.Certificate{cert},
 			RootCAs:            certPool,
 			MinVersion:         tls.VersionTLS12,
-			InsecureSkipVerify: true,
+			InsecureSkipVerify: false,
 		}
 		creds := credentials.NewTLS(tlsConfig)
 		conn, err = grpc.NewClient(otlpEndpoint, grpc.WithTransportCredentials(creds))
@@ -270,7 +270,14 @@ func main() {
 	case strings.HasPrefix(interLinkConfig.InterlinkAddress, "http://"):
 		interLinkEndpoint = strings.ReplaceAll(interLinkConfig.InterlinkAddress, "http://", "") + ":" + interLinkConfig.Interlinkport
 
-		err = http.ListenAndServe(interLinkEndpoint, mutex)
+		server := http.Server{
+			Addr:              interLinkEndpoint,
+			Handler:           mutex,
+			ReadTimeout:       30 * time.Second,
+			ReadHeaderTimeout: 10 * time.Second,
+		}
+
+		err = server.ListenAndServe()
 
 		if err != nil {
 			log.G(ctx).Fatal(err)

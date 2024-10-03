@@ -4,7 +4,6 @@ import (
 	"context"
 	"fmt"
 	"io"
-	"math/rand"
 	"os"
 	"strconv"
 	"time"
@@ -850,11 +849,11 @@ func (p *Provider) GetStatsSummary(ctx context.Context) (*stats.Summary, error) 
 		for _, container := range pod.Spec.Containers {
 			// Grab a dummy value to be used as the total CPU usage.
 			// The value should fit a uint32 in order to avoid overflows later on when computing pod stats.
-			dummyUsageNanoCores := uint64(rand.Uint32())
+			dummyUsageNanoCores := uint64(9999)
 			totalUsageNanoCores += dummyUsageNanoCores
 			// Create a dummy value to be used as the total RAM usage.
 			// The value should fit a uint32 in order to avoid overflows later on when computing pod stats.
-			dummyUsageBytes := uint64(rand.Uint32())
+			dummyUsageBytes := uint64(9999)
 			totalUsageBytes += dummyUsageBytes
 			// Append a ContainerStats object containing the dummy stats to the PodStats object.
 			pss.Containers = append(pss.Containers, stats.ContainerStats{

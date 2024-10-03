@@ -43,10 +43,24 @@ func main() {
 	keyFile := flag.String("keyfile", "", "file with private key for SSH authentication")
 	remotePort := flag.String("rport", "", "remote port for tunnel")
 	localSocket := flag.String("lsock", "", "local socket for tunnel")
+	secure := flag.Bool("secure", true, "check HostKey")
+	hostkeyFile := flag.String("hostkeyfile", "", "file with public key for SSH host check")
 	flag.Parse()
 
+	pubkey, err := os.ReadFile(*hostkeyFile)
+	if err != nil {
+		log.Fatalf("unable to read private key: %v", err)
+	}
+	hostkey, err := ssh.ParsePublicKey(pubkey)
+	if err != nil {
+		log.Fatalf("unable to parse private key: %v", err)
+	}
+	hostKeyCallback := ssh.FixedHostKey(hostkey)
 	// Implement a HostKeyCallback to verify the server's host key
-	hostKeyCallback := ssh.InsecureIgnoreHostKey() // This is insecure and should be replaced with proper host key verification
+	if !*secure {
+		log.Print("ATTENTION: You are running in unsafe mode, withouth check for host pub keys.")
+		hostKeyCallback = ssh.InsecureIgnoreHostKey() // This is insecure and should be replaced with proper host key verification
+	}
 
 	key, err := os.ReadFile(*keyFile)
 	if err != nil {

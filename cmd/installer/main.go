@@ -93,7 +93,7 @@ func evalManifest(path string, dataStruct dataStruct) (string, error) {
 	return string(deploymentYAML), nil
 }
 
-func root(cmd *cobra.Command, args []string) error {
+func root(cmd *cobra.Command, _ []string) error {
 	var configCLI dataStruct
 
 	onlyInit, err := cmd.Flags().GetBool("init")
