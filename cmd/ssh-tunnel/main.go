@@ -1,6 +1,7 @@
 package main
 
 import (
+	"encoding/base64"
 	"flag"
 	"fmt"
 	"io"
@@ -37,13 +38,30 @@ func runTunnel(local, remote net.Conn) {
 	<-done
 }
 
+// https://stackoverflow.com/questions/44269142/golang-ssh-getting-must-specify-hoskeycallback-error-despite-setting-it-to-n
+// create human-readable SSH-key strings
+func keyString(k ssh.PublicKey) string {
+	return k.Type() + " " + base64.StdEncoding.EncodeToString(k.Marshal()) // e.g. "ecdsa-sha2-nistp256 AAAAE2VjZHNhLXNoYTItbmlzdHAyNTY...."
+}
+
+func trustedHostKeyCallback(trustedKey ssh.PublicKey) ssh.HostKeyCallback {
+
+	if trustedKey == nil {
+		return func(_ string, _ net.Addr, k ssh.PublicKey) error {
+			log.Printf("WARNING: SSH-key verification is *NOT* in effect: to fix, add this trustedKey: %q", keyString(k))
+			return nil
+		}
+	}
+
+	return ssh.FixedHostKey(trustedKey)
+}
+
 func main() {
 	addr := flag.String("addr", "", "ssh server address to dial as <hostname>:<port>")
 	username := flag.String("user", "", "username for ssh")
 	keyFile := flag.String("keyfile", "", "file with private key for SSH authentication")
 	remotePort := flag.String("rport", "", "remote port for tunnel")
 	localSocket := flag.String("lsock", "", "local socket for tunnel")
-	secure := flag.Bool("secure", true, "check HostKey")
 	hostkeyFile := flag.String("hostkeyfile", "", "file with public key for SSH host check")
 	flag.Parse()
 
@@ -55,12 +73,9 @@ func main() {
 	if err != nil {
 		log.Fatalf("unable to parse private key: %v", err)
 	}
-	hostKeyCallback := ssh.FixedHostKey(hostkey)
+
+	hostKeyCallback := trustedHostKeyCallback(hostkey)
 	// Implement a HostKeyCallback to verify the server's host key
-	if !*secure {
-		log.Print("ATTENTION: You are running in unsafe mode, withouth check for host pub keys.")
-		hostKeyCallback = ssh.InsecureIgnoreHostKey() // This is insecure and should be replaced with proper host key verification
-	}
 
 	key, err := os.ReadFile(*keyFile)
 	if err != nil {
@@ -85,14 +100,14 @@ func main() {
 
 	client, err := ssh.Dial("tcp", *addr, config)
 	if err != nil {
-		log.Fatal("Failed to dial: ", err)
+		log.Panicf("Failed to dial: %v", err)
 	}
 	defer client.Close()
 
 	listener, err := client.Listen("tcp", "localhost:"+*remotePort)
 	if err != nil {
 		client.Close()
-		log.Fatalf("Failed to listen on remote socket %s: %v", *remotePort, err)
+		log.Panicf("Failed to listen on remote socket %s: %v", *remotePort, err)
 	}
 	defer listener.Close()
 
