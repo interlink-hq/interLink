@@ -91,10 +91,11 @@ func (h *InterLinkHandler) CreateHandler(w http.ResponseWriter, r *http.Request)
 
 		log.G(h.Ctx).Info("InterLink: forwarding Create call to sidecar")
 
-		err := ReqWithError(h.Ctx, req, w, start, span)
+		_, err := ReqWithError(h.Ctx, req, w, start, span, true)
 		if err != nil {
 			log.L.Error(err)
 			return
 		}
+
 	}
 }

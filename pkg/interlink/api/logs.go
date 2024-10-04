@@ -26,7 +26,7 @@ func (h *InterLinkHandler) GetLogsHandler(w http.ResponseWriter, r *http.Request
 	defer span.End()
 	defer types.SetDurationSpan(start, span)
 
-	statusCode := http.StatusOK
+	var statusCode int
 	log.G(h.Ctx).Info("InterLink: received GetLogs call")
 	bodyBytes, err := io.ReadAll(r.Body)
 	if err != nil {
@@ -92,7 +92,7 @@ func (h *InterLinkHandler) GetLogsHandler(w http.ResponseWriter, r *http.Request
 
 	req.Header.Set("Content-Type", "application/json")
 	log.G(h.Ctx).Info("InterLink: forwarding GetLogs call to sidecar")
-	err = ReqWithError(h.Ctx, req, w, start, span)
+	_, err = ReqWithError(h.Ctx, req, w, start, span, true)
 	if err != nil {
 		log.L.Error(err)
 		return

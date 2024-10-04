@@ -38,6 +38,80 @@ const (
 	DELETE                = 1
 )
 
+func TracerUpdate(ctx context.Context, name string, pod *v1.Pod) {
+	start := time.Now().Unix()
+	tracer := otel.Tracer("interlink-service")
+
+	var span trace.Span
+	if pod != nil {
+		ctx, span = tracer.Start(ctx, name, trace.WithAttributes(
+			attribute.String("pod.name", pod.Name),
+			attribute.String("pod.namespace", pod.Namespace),
+			attribute.Int64("start.timestamp", start),
+		))
+	} else {
+		ctx, span = tracer.Start(ctx, name, trace.WithAttributes(
+			attribute.Int64("start.timestamp", start),
+		))
+	}
+	defer span.End()
+	defer types.SetDurationSpan(start, span)
+
+	log.G(ctx).Infof("receive %s %q", name, pod.Name)
+
+}
+
+func PodPhase(p Provider, phase string) (v1.PodStatus, error) {
+	now := metav1.NewTime(time.Now())
+
+	var podPhase v1.PodPhase
+	var initialized v1.ConditionStatus
+	var ready v1.ConditionStatus
+	var scheduled v1.ConditionStatus
+
+	switch phase {
+	case "Running":
+		podPhase = v1.PodRunning
+		initialized = v1.ConditionTrue
+		ready = v1.ConditionTrue
+		scheduled = v1.ConditionTrue
+	case "Pending":
+		podPhase = v1.PodPending
+		initialized = v1.ConditionTrue
+		ready = v1.ConditionFalse
+		scheduled = v1.ConditionTrue
+	case "Failed":
+		podPhase = v1.PodFailed
+		initialized = v1.ConditionFalse
+		ready = v1.ConditionFalse
+		scheduled = v1.ConditionFalse
+	default:
+		return v1.PodStatus{}, fmt.Errorf("Invalid pod phase specified: %s", phase)
+	}
+
+	return v1.PodStatus{
+		Phase:     podPhase,
+		HostIP:    p.internalIP,
+		PodIP:     p.internalIP,
+		StartTime: &now,
+		Conditions: []v1.PodCondition{
+			{
+				Type:   v1.PodInitialized,
+				Status: initialized,
+			},
+			{
+				Type:   v1.PodReady,
+				Status: ready,
+			},
+			{
+				Type:   v1.PodScheduled,
+				Status: scheduled,
+			},
+		},
+	}, nil
+
+}
+
 func NodeCondition(ready bool) []v1.NodeCondition {
 
 	var readyType v1.ConditionStatus
@@ -326,15 +400,7 @@ func (p *Provider) Ping(_ context.Context) error {
 
 // CreatePod accepts a Pod definition and stores it in memory in p.pods
 func (p *Provider) CreatePod(ctx context.Context, pod *v1.Pod) error {
-	start := time.Now().Unix()
-	tracer := otel.Tracer("interlink-service")
-	ctx, span := tracer.Start(ctx, "CreatePodVK", trace.WithAttributes(
-		attribute.String("pod.name", pod.Name),
-		attribute.String("pod.namespace", pod.Namespace),
-		attribute.Int64("start.timestamp", start),
-	))
-	defer span.End()
-	defer types.SetDurationSpan(start, span)
+	TracerUpdate(ctx, "CreatePodVK", pod)
 
 	var hasInitContainers = false
 	var state v1.ContainerState
@@ -362,49 +428,20 @@ func (p *Provider) CreatePod(ctx context.Context, pod *v1.Pod) error {
 		hasInitContainers = true
 
 		// we put the phase in running but initialization phase to false
-		pod.Status = v1.PodStatus{
-			Phase:     v1.PodRunning,
-			HostIP:    p.internalIP,
-			PodIP:     p.internalIP,
-			StartTime: &now,
-			Conditions: []v1.PodCondition{
-				{
-					Type:   v1.PodInitialized,
-					Status: v1.ConditionFalse,
-				},
-				{
-					Type:   v1.PodReady,
-					Status: v1.ConditionFalse,
-				},
-				{
-					Type:   v1.PodScheduled,
-					Status: v1.ConditionTrue,
-				},
-			},
+		pod.Status, err = PodPhase(*p, "Running")
+		if err != nil {
+			log.G(ctx).Error(err)
+			return err
 		}
 	} else {
 
 		// if no init containers are there, go head and set phase to initialized
-		pod.Status = v1.PodStatus{
-			Phase:     v1.PodPending,
-			HostIP:    p.internalIP,
-			PodIP:     p.internalIP,
-			StartTime: &now,
-			Conditions: []v1.PodCondition{
-				{
-					Type:   v1.PodInitialized,
-					Status: v1.ConditionTrue,
-				},
-				{
-					Type:   v1.PodReady,
-					Status: v1.ConditionTrue,
-				},
-				{
-					Type:   v1.PodScheduled,
-					Status: v1.ConditionTrue,
-				},
-			},
+		pod.Status, err = PodPhase(*p, "Pending")
+		if err != nil {
+			log.G(ctx).Error(err)
+			return err
 		}
+
 	}
 
 	// Create pod asynchronously on the remote plugin
@@ -417,25 +454,10 @@ func (p *Provider) CreatePod(ctx context.Context, pod *v1.Pod) error {
 			} else {
 				// TODO if node in NotReady put it to Unknown/pending?
 				log.G(ctx).Error(err)
-				pod.Status = v1.PodStatus{
-					Phase:     v1.PodFailed,
-					HostIP:    p.internalIP,
-					PodIP:     p.internalIP,
-					StartTime: &now,
-					Conditions: []v1.PodCondition{
-						{
-							Type:   v1.PodInitialized,
-							Status: v1.ConditionFalse,
-						},
-						{
-							Type:   v1.PodReady,
-							Status: v1.ConditionFalse,
-						},
-						{
-							Type:   v1.PodScheduled,
-							Status: v1.ConditionFalse,
-						},
-					},
+				pod.Status, err = PodPhase(*p, "Failed")
+				if err != nil {
+					log.G(ctx).Error(err)
+					return
 				}
 
 				err = p.UpdatePod(ctx, pod)
@@ -468,17 +490,7 @@ func (p *Provider) CreatePod(ctx context.Context, pod *v1.Pod) error {
 
 // UpdatePod accepts a Pod definition and updates its reference.
 func (p *Provider) UpdatePod(ctx context.Context, pod *v1.Pod) error {
-	start := time.Now().Unix()
-	tracer := otel.Tracer("interlink-service")
-	ctx, span := tracer.Start(ctx, "UpdatePodVK", trace.WithAttributes(
-		attribute.String("pod.name", pod.Name),
-		attribute.String("pod.namespace", pod.Namespace),
-		attribute.Int64("start.timestamp", start),
-	))
-	defer span.End()
-	defer types.SetDurationSpan(start, span)
-
-	log.G(ctx).Infof("receive UpdatePod %q", pod.Name)
+	TracerUpdate(ctx, "UpdatePodVK", pod)
 
 	p.notifier(pod)
 
@@ -487,15 +499,7 @@ func (p *Provider) UpdatePod(ctx context.Context, pod *v1.Pod) error {
 
 // DeletePod deletes the specified pod and drops it out of p.pods
 func (p *Provider) DeletePod(ctx context.Context, pod *v1.Pod) (err error) {
-	start := time.Now().Unix()
-	tracer := otel.Tracer("interlink-service")
-	ctx, span := tracer.Start(ctx, "DeletePodVK", trace.WithAttributes(
-		attribute.String("pod.name", pod.Name),
-		attribute.String("pod.namespace", pod.Namespace),
-		attribute.Int64("start.timestamp", start),
-	))
-	defer span.End()
-	defer types.SetDurationSpan(start, span)
+	TracerUpdate(ctx, "DeletePodVK", pod)
 
 	log.G(ctx).Infof("receive DeletePod %q", pod.Name)
 
@@ -581,17 +585,14 @@ func (p *Provider) GetPod(ctx context.Context, namespace, name string) (pod *v1.
 // GetPodStatus returns the status of a pod by name that is "running".
 // returns nil if a pod by that name is not found.
 func (p *Provider) GetPodStatus(ctx context.Context, namespace, name string) (*v1.PodStatus, error) {
-	start := time.Now().Unix()
-	tracer := otel.Tracer("interlink-service")
-	ctx, span := tracer.Start(ctx, "GetPodStatusVK", trace.WithAttributes(
-		attribute.String("pod.name", name),
-		attribute.String("pod.namespace", namespace),
-		attribute.Int64("start.timestamp", start),
-	))
-	defer span.End()
-	defer types.SetDurationSpan(start, span)
-
-	log.G(ctx).Infof("receive GetPodStatus %q", name)
+	podTmp := v1.Pod{
+		TypeMeta: metav1.TypeMeta{},
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      name,
+			Namespace: namespace,
+		},
+	}
+	TracerUpdate(ctx, "GetPodStatusVK", &podTmp)
 
 	pod, err := p.GetPod(ctx, namespace, name)
 	if err != nil {
@@ -603,15 +604,7 @@ func (p *Provider) GetPodStatus(ctx context.Context, namespace, name string) (*v
 
 // GetPods returns a list of all pods known to be "running".
 func (p *Provider) GetPods(ctx context.Context) ([]*v1.Pod, error) {
-	start := time.Now().Unix()
-	tracer := otel.Tracer("interlink-service")
-	ctx, span := tracer.Start(ctx, "GetPodsVK", trace.WithAttributes(
-		attribute.Int64("start.timestamp", start),
-	))
-	defer span.End()
-	defer types.SetDurationSpan(start, span)
-
-	log.G(ctx).Info("receive GetPods")
+	TracerUpdate(ctx, "GetPodsVK", nil)
 
 	err := p.initClientSet(ctx)
 	if err != nil {

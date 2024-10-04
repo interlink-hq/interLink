@@ -21,7 +21,7 @@ type InterLinkHandler struct {
 	// TODO: http client with TLS
 }
 
-func DoReq(ctx context.Context, req *http.Request) (*http.Response, error) {
+func DoReq(req *http.Request) (*http.Response, error) {
 	resp, err := http.DefaultClient.Do(req)
 	if err != nil {
 		return nil, err
@@ -36,16 +36,17 @@ func ReqWithError(
 	w http.ResponseWriter,
 	start int64,
 	span trace.Span,
-) error {
+	respondWithValues bool,
+) ([]byte, error) {
 
 	req.Header.Set("Content-Type", "application/json")
-	resp, err := DoReq(ctx, req)
+	resp, err := DoReq(req)
 
 	if err != nil {
 		statusCode := http.StatusInternalServerError
 		w.WriteHeader(statusCode)
 		log.G(ctx).Error(err)
-		return err
+		return nil, err
 	}
 
 	if resp.StatusCode != http.StatusOK {
@@ -53,30 +54,33 @@ func ReqWithError(
 		w.WriteHeader(statusCode)
 		ret, err := io.ReadAll(resp.Body)
 		if err != nil {
-			return err
+			return nil, err
 		}
 		_, err = w.Write(ret)
 		if err != nil {
-			return err
+			return nil, err
 		}
-		return fmt.Errorf("Call exit status: %d. Body: ", statusCode, ret)
+		return nil, fmt.Errorf("Call exit status: %d. Body: %s", statusCode, ret)
 	}
 
 	returnValue, err := io.ReadAll(resp.Body)
 	if err != nil {
 		w.WriteHeader(http.StatusInternalServerError)
 		log.G(ctx).Error(err)
-		return err
+		return nil, err
 	}
 	log.G(ctx).Debug(string(returnValue))
 
 	w.WriteHeader(resp.StatusCode)
 	types.SetDurationSpan(start, span, types.WithHTTPReturnCode(resp.StatusCode))
-	_, err = w.Write(returnValue)
-	if err != nil {
-		w.WriteHeader(http.StatusInternalServerError)
-		log.G(ctx).Error(err)
-		return err
+
+	if respondWithValues {
+		_, err = w.Write(returnValue)
+		if err != nil {
+			w.WriteHeader(http.StatusInternalServerError)
+			log.G(ctx).Error(err)
+		}
 	}
-	return nil
+
+	return returnValue, nil
 }

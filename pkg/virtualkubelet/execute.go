@@ -25,6 +25,34 @@ import (
 
 const PodPhaseInitialize = "Initializing"
 
+func failedMount(ctx context.Context, failed *bool, name string, pod *v1.Pod, p *Provider) error {
+	*failed = true
+	log.G(ctx).Warning("Unable to find ConfigMap " + name + " for pod " + pod.Name + ". Waiting for it to be initialized")
+	if pod.Status.Phase != PodPhaseInitialize {
+		pod.Status.Phase = PodPhaseInitialize
+		err := p.UpdatePod(ctx, pod)
+		if err != nil {
+			return err
+		}
+	}
+	return nil
+
+}
+
+func traceExecute(ctx context.Context, pod *v1.Pod, name string, startHTTPCall int64) *trace.Span {
+	tracer := otel.Tracer("interlink-service")
+	_, spanHTTP := tracer.Start(ctx, name, trace.WithAttributes(
+		attribute.String("pod.name", pod.Name),
+		attribute.String("pod.namespace", pod.Namespace),
+		attribute.String("pod.uid", string(pod.UID)),
+		attribute.Int64("start.timestamp", startHTTPCall),
+	))
+	defer spanHTTP.End()
+	defer types.SetDurationSpan(startHTTPCall, spanHTTP)
+
+	return &spanHTTP
+}
+
 func doRequest(req *http.Request, token string) (*http.Response, error) {
 
 	if token != "" {
@@ -110,7 +138,6 @@ func PingInterLink(ctx context.Context, config Config) (bool, int, error) {
 
 // updateCacheRequest is called when the VK receives the status of a pod already deleted. It performs a REST call InterLink API to update the cache deleting that pod from the cached structure
 func updateCacheRequest(ctx context.Context, config Config, pod v1.Pod, token string) error {
-	tracer := otel.Tracer("interlink-service")
 	bodyBytes, err := json.Marshal(pod)
 	if err != nil {
 		log.L.Error(err)
@@ -131,14 +158,7 @@ func updateCacheRequest(ctx context.Context, config Config, pod v1.Pod, token st
 	req.Header.Set("Content-Type", "application/json")
 
 	startHTTPCall := time.Now().UnixMicro()
-	_, spanHTTP := tracer.Start(ctx, "UpdateCacheHttpCall", trace.WithAttributes(
-		attribute.String("pod.name", pod.Name),
-		attribute.String("pod.namespace", pod.Namespace),
-		attribute.String("pod.uid", string(pod.UID)),
-		attribute.Int64("start.timestamp", startHTTPCall),
-	))
-	defer spanHTTP.End()
-	defer types.SetDurationSpan(startHTTPCall, spanHTTP)
+	spanHTTP := traceExecute(ctx, &pod, "UpdateCacheHttpCall", startHTTPCall)
 
 	resp, err := http.DefaultClient.Do(req)
 	if err != nil {
@@ -146,7 +166,7 @@ func updateCacheRequest(ctx context.Context, config Config, pod v1.Pod, token st
 		return err
 	}
 	if resp != nil {
-		types.SetDurationSpan(startHTTPCall, spanHTTP, types.WithHTTPReturnCode(resp.StatusCode))
+		types.SetDurationSpan(startHTTPCall, *spanHTTP, types.WithHTTPReturnCode(resp.StatusCode))
 		if resp.StatusCode != http.StatusOK {
 			return errors.New("Unexpected error occured while updating InterLink cache. Status code: " + strconv.Itoa(resp.StatusCode) + ". Check InterLink's logs for further informations")
 		}
@@ -213,7 +233,6 @@ func createRequest(ctx context.Context, config Config, pod types.PodCreateReques
 // deleteRequest performs a REST call to the InterLink API when a Pod is deleted from the VK. It Marshals the standard v1.Pod struct and sends it to InterLink.
 // Returns the call response expressed in bytes and/or the first encountered error
 func deleteRequest(ctx context.Context, config Config, pod *v1.Pod, token string) ([]byte, error) {
-	tracer := otel.Tracer("interlink-service")
 	interLinkEndpoint := getSidecarEndpoint(ctx, config.InterlinkURL, config.Interlinkport)
 	var returnValue []byte
 	bodyBytes, err := json.Marshal(pod)
@@ -229,14 +248,7 @@ func deleteRequest(ctx context.Context, config Config, pod *v1.Pod, token string
 	}
 
 	startHTTPCall := time.Now().UnixMicro()
-	_, spanHTTP := tracer.Start(ctx, "DeleteHttpCall", trace.WithAttributes(
-		attribute.String("pod.name", pod.Name),
-		attribute.String("pod.namespace", pod.Namespace),
-		attribute.String("pod.uid", string(pod.UID)),
-		attribute.Int64("start.timestamp", startHTTPCall),
-	))
-	defer spanHTTP.End()
-	defer types.SetDurationSpan(startHTTPCall, spanHTTP)
+	spanHTTP := traceExecute(ctx, pod, "DeleteHttpCall", startHTTPCall)
 
 	resp, err := doRequest(req, token)
 	if err != nil {
@@ -246,7 +258,7 @@ func deleteRequest(ctx context.Context, config Config, pod *v1.Pod, token string
 
 	if resp != nil {
 		statusCode := resp.StatusCode
-		types.SetDurationSpan(startHTTPCall, spanHTTP, types.WithHTTPReturnCode(resp.StatusCode))
+		types.SetDurationSpan(startHTTPCall, *spanHTTP, types.WithHTTPReturnCode(resp.StatusCode))
 
 		if statusCode != http.StatusOK {
 			return nil, errors.New("Unexpected error occured while deleting Pods. Status code: " + strconv.Itoa(resp.StatusCode) + ". Check InterLink's logs for further informations")
@@ -421,14 +433,9 @@ func RemoteExecution(ctx context.Context, config Config, p *Provider, pod *v1.Po
 					if volume.ConfigMap != nil {
 						cfgmap, err := p.clientSet.CoreV1().ConfigMaps(pod.Namespace).Get(ctx, volume.ConfigMap.Name, metav1.GetOptions{})
 						if err != nil {
-							failed = true
-							log.G(ctx).Warning("Unable to find ConfigMap " + volume.ConfigMap.Name + " for pod " + pod.Name + ". Waiting for it to be initialized")
-							if pod.Status.Phase != PodPhaseInitialize {
-								pod.Status.Phase = PodPhaseInitialize
-								err = p.UpdatePod(ctx, pod)
-								if err != nil {
-									return err
-								}
+							err = failedMount(ctx, &failed, volume.ConfigMap.Name, pod, p)
+							if err != nil {
+								return err
 							}
 						} else {
 							failed = false
@@ -437,14 +444,9 @@ func RemoteExecution(ctx context.Context, config Config, p *Provider, pod *v1.Po
 					} else if volume.Secret != nil {
 						scrt, err := p.clientSet.CoreV1().Secrets(pod.Namespace).Get(ctx, volume.Secret.SecretName, metav1.GetOptions{})
 						if err != nil {
-							failed = true
-							log.G(ctx).Warning("Unable to find Secret " + volume.Secret.SecretName + " for pod " + pod.Name + ". Waiting for it to be initialized")
-							if pod.Status.Phase != PodPhaseInitialize {
-								pod.Status.Phase = PodPhaseInitialize
-								err = p.UpdatePod(ctx, pod)
-								if err != nil {
-									return err
-								}
+							err = failedMount(ctx, &failed, volume.Secret.SecretName, pod, p)
+							if err != nil {
+								return err
 							}
 						} else {
 							failed = false

@@ -80,22 +80,12 @@ func (h *InterLinkHandler) StatusHandler(w http.ResponseWriter, r *http.Request)
 		req.Header.Set("Content-Type", "application/json")
 		log.G(h.Ctx).Debug("Interlink get status request content: %s", req)
 
-		resp, error := DoReq(h.Ctx, req)
-		err = ReqError(h.Ctx, w, resp, error)
+		bodyBytes, err = ReqWithError(h.Ctx, req, w, start, span, false)
 		if err != nil {
 			log.L.Error(err)
 			return
 		}
 
-		bodyBytes, err = io.ReadAll(resp.Body)
-		if err != nil {
-			statusCode = http.StatusInternalServerError
-			w.WriteHeader(statusCode)
-			log.G(h.Ctx).Error(err)
-			return
-		}
-
-		log.G(h.Ctx).Debug(string(bodyBytes))
 		err = json.Unmarshal(bodyBytes, &returnedStatuses)
 		if err != nil {
 			statusCode = http.StatusInternalServerError
