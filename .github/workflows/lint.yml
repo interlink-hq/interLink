@@ -28,7 +28,8 @@ jobs:
           DEFAULT_BRANCH: main
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           MARKDOWN_CONFIG_FILE: .markdownlint.json
+          VALIDATE_CHECKOV: false
           # Only check new or edited files
-          VALIDATE_ALL_CODEBASE: false
+          VALIDATE_ALL_CODEBASE: true
           # Fail on errors
           DISABLE_ERRORS: false
