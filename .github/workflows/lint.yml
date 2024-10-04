@@ -24,7 +24,7 @@ jobs:
       - name: Run Super-Linter on new changes
         uses: super-linter/super-linter@v7.1.0 
         env:
-          FILTER_REGEX_EXCLUDE: ci/.*
+          FILTER_REGEX_EXCLUDE: ci/.*,example/.*
           DEFAULT_BRANCH: main
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           MARKDOWN_CONFIG_FILE: .markdownlint.json
