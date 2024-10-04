@@ -10,12 +10,6 @@
 issues:
   exclude-dirs:
     - ci
-  exclude-rules:
-    - path: _test\.go
-      linters:
-        - dupl
-        - gosec
-        - goconst
 linters:
   enable:
     - gosec
