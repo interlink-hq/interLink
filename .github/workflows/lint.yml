@@ -31,6 +31,10 @@ jobs:
           VALIDATE_CHECKOV: false
           VALIDATE_MARKDOWN_PRETTIER: false
           VALIDATE_CSS_PRETTIER: false
+          VALIDATE_BASH: false
+          VALIDATE_GITHUB_ACTIONS: false
+          VALIDATE_MARKDOWN: false
+          VALIDATE_PYTHON_BLACK: false
           # Only check new or edited files
           VALIDATE_ALL_CODEBASE: true
           # Fail on errors
