@@ -22,7 +22,7 @@ jobs:
 
       # Runs the Super-Linter action
       - name: Run Super-Linter on new changes
-        uses: docker://ghcr.io/github/super-linter:slim-v4
+        uses: super-linter/super-linter@v7.1.0 
         env:
           FILTER_REGEX_EXCLUDE: ci/.*
           DEFAULT_BRANCH: main
