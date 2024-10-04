@@ -1,0 +1,678 @@
+{
+  "statistics": {
+    "detectionDate": "2024-10-04T09:18:46.339Z",
+    "formats": {
+      "json": {
+        "sources": {
+          "/Users/dciangot/git/interLink/cmd/installer/templates/config/interlink-cfg.json": {
+            "lines": 6,
+            "tokens": 32,
+            "sources": 1,
+            "clones": 0,
+            "duplicatedLines": 0,
+            "duplicatedTokens": 0,
+            "percentage": 0,
+            "percentageTokens": 0,
+            "newDuplicatedLines": 0,
+            "newClones": 0
+          },
+          "/Users/dciangot/git/interLink/report/html/jscpd-report.json": {
+            "lines": 677,
+            "tokens": 4327,
+            "sources": 1,
+            "clones": 0,
+            "duplicatedLines": 0,
+            "duplicatedTokens": 0,
+            "percentage": 0,
+            "percentageTokens": 0,
+            "newDuplicatedLines": 0,
+            "newClones": 0
+          },
+          "/Users/dciangot/git/interLink/.vscode/settings.json": {
+            "lines": 13,
+            "tokens": 70,
+            "sources": 1,
+            "clones": 0,
+            "duplicatedLines": 0,
+            "duplicatedTokens": 0,
+            "percentage": 0,
+            "percentageTokens": 0,
+            "newDuplicatedLines": 0,
+            "newClones": 0
+          },
+          "/Users/dciangot/git/interLink/.devcontainer.json": {
+            "lines": 14,
+            "tokens": 62,
+            "sources": 1,
+            "clones": 0,
+            "duplicatedLines": 0,
+            "duplicatedTokens": 0,
+            "percentage": 0,
+            "percentageTokens": 0,
+            "newDuplicatedLines": 0,
+            "newClones": 0
+          }
+        },
+        "total": {
+          "lines": 710,
+          "tokens": 4491,
+          "sources": 4,
+          "clones": 0,
+          "duplicatedLines": 0,
+          "duplicatedTokens": 0,
+          "percentage": 0,
+          "percentageTokens": 0,
+          "newDuplicatedLines": 0,
+          "newClones": 0
+        }
+      },
+      "yaml": {
+        "sources": {
+          "/Users/dciangot/git/interLink/cmd/installer/templates/config/interLinkConfig.yaml": {
+            "lines": 6,
+            "tokens": 45,
+            "sources": 1,
+            "clones": 0,
+            "duplicatedLines": 0,
+            "duplicatedTokens": 0,
+            "percentage": 0,
+            "percentageTokens": 0,
+            "newDuplicatedLines": 0,
+            "newClones": 0
+          },
+          "/Users/dciangot/git/interLink/helm/interlink/templates/serviceaccount.yaml": {
+            "lines": 11,
+            "tokens": 116,
+            "sources": 1,
+            "clones": 0,
+            "duplicatedLines": 0,
+            "duplicatedTokens": 0,
+            "percentage": 0,
+            "percentageTokens": 0,
+            "newDuplicatedLines": 0,
+            "newClones": 0
+          },
+          "/Users/dciangot/git/interLink/cmd/installer/templates/values.yaml": {
+            "lines": 20,
+            "tokens": 148,
+            "sources": 1,
+            "clones": 0,
+            "duplicatedLines": 0,
+            "duplicatedTokens": 0,
+            "percentage": 0,
+            "percentageTokens": 0,
+            "newDuplicatedLines": 0,
+            "newClones": 0
+          },
+          "/Users/dciangot/git/interLink/.goreleaser.yaml": {
+            "lines": 81,
+            "tokens": 505,
+            "sources": 1,
+            "clones": 0,
+            "duplicatedLines": 0,
+            "duplicatedTokens": 0,
+            "percentage": 0,
+            "percentageTokens": 0,
+            "newDuplicatedLines": 0,
+            "newClones": 0
+          }
+        },
+        "total": {
+          "lines": 118,
+          "tokens": 814,
+          "sources": 4,
+          "clones": 0,
+          "duplicatedLines": 0,
+          "duplicatedTokens": 0,
+          "percentage": 0,
+          "percentageTokens": 0,
+          "newDuplicatedLines": 0,
+          "newClones": 0
+        }
+      },
+      "css": {
+        "sources": {
+          "/Users/dciangot/git/interLink/report/html/styles/prism.css": {
+            "lines": 7,
+            "tokens": 232,
+            "sources": 1,
+            "clones": 0,
+            "duplicatedLines": 0,
+            "duplicatedTokens": 0,
+            "percentage": 0,
+            "percentageTokens": 0,
+            "newDuplicatedLines": 0,
+            "newClones": 0
+          }
+        },
+        "total": {
+          "lines": 7,
+          "tokens": 232,
+          "sources": 1,
+          "clones": 0,
+          "duplicatedLines": 0,
+          "duplicatedTokens": 0,
+          "percentage": 0,
+          "percentageTokens": 0,
+          "newDuplicatedLines": 0,
+          "newClones": 0
+        }
+      },
+      "javascript": {
+        "sources": {
+          "/Users/dciangot/git/interLink/report/html/js/prism.js": {
+            "lines": 15,
+            "tokens": 4580,
+            "sources": 1,
+            "clones": 0,
+            "duplicatedLines": 0,
+            "duplicatedTokens": 0,
+            "percentage": 0,
+            "percentageTokens": 0,
+            "newDuplicatedLines": 0,
+            "newClones": 0
+          }
+        },
+        "total": {
+          "lines": 15,
+          "tokens": 4580,
+          "sources": 1,
+          "clones": 0,
+          "duplicatedLines": 0,
+          "duplicatedTokens": 0,
+          "percentage": 0,
+          "percentageTokens": 0,
+          "newDuplicatedLines": 0,
+          "newClones": 0
+        }
+      },
+      "go": {
+        "sources": {
+          "/Users/dciangot/git/interLink/pkg/interlink/api/updateCache.go": {
+            "lines": 29,
+            "tokens": 209,
+            "sources": 1,
+            "clones": 0,
+            "duplicatedLines": 0,
+            "duplicatedTokens": 0,
+            "percentage": 0,
+            "percentageTokens": 0,
+            "newDuplicatedLines": 0,
+            "newClones": 0
+          },
+          "/Users/dciangot/git/interLink/pkg/interlink/api/status.go": {
+            "lines": 133,
+            "tokens": 1190,
+            "sources": 1,
+            "clones": 0,
+            "duplicatedLines": 0,
+            "duplicatedTokens": 0,
+            "percentage": 0,
+            "percentageTokens": 0,
+            "newDuplicatedLines": 0,
+            "newClones": 0
+          },
+          "/Users/dciangot/git/interLink/pkg/interlink/api/ping.go": {
+            "lines": 79,
+            "tokens": 696,
+            "sources": 1,
+            "clones": 0,
+            "duplicatedLines": 0,
+            "duplicatedTokens": 0,
+            "percentage": 0,
+            "percentageTokens": 0,
+            "newDuplicatedLines": 0,
+            "newClones": 0
+          },
+          "/Users/dciangot/git/interLink/pkg/interlink/api/logs.go": {
+            "lines": 100,
+            "tokens": 962,
+            "sources": 1,
+            "clones": 0,
+            "duplicatedLines": 0,
+            "duplicatedTokens": 0,
+            "percentage": 0,
+            "percentageTokens": 0,
+            "newDuplicatedLines": 0,
+            "newClones": 0
+          },
+          "/Users/dciangot/git/interLink/pkg/interlink/api/handler.go": {
+            "lines": 85,
+            "tokens": 608,
+            "sources": 1,
+            "clones": 0,
+            "duplicatedLines": 0,
+            "duplicatedTokens": 0,
+            "percentage": 0,
+            "percentageTokens": 0,
+            "newDuplicatedLines": 0,
+            "newClones": 0
+          },
+          "/Users/dciangot/git/interLink/pkg/interlink/api/func.go": {
+            "lines": 141,
+            "tokens": 1314,
+            "sources": 1,
+            "clones": 0,
+            "duplicatedLines": 0,
+            "duplicatedTokens": 0,
+            "percentage": 0,
+            "percentageTokens": 0,
+            "newDuplicatedLines": 0,
+            "newClones": 0
+          },
+          "/Users/dciangot/git/interLink/pkg/interlink/api/delete.go": {
+            "lines": 111,
+            "tokens": 975,
+            "sources": 1,
+            "clones": 0,
+            "duplicatedLines": 0,
+            "duplicatedTokens": 0,
+            "percentage": 0,
+            "percentageTokens": 0,
+            "newDuplicatedLines": 0,
+            "newClones": 0
+          },
+          "/Users/dciangot/git/interLink/pkg/interlink/api/create.go": {
+            "lines": 100,
+            "tokens": 807,
+            "sources": 1,
+            "clones": 0,
+            "duplicatedLines": 0,
+            "duplicatedTokens": 0,
+            "percentage": 0,
+            "percentageTokens": 0,
+            "newDuplicatedLines": 0,
+            "newClones": 0
+          },
+          "/Users/dciangot/git/interLink/pkg/virtualkubelet/virtualkubelet.go": {
+            "lines": 874,
+            "tokens": 6984,
+            "sources": 1,
+            "clones": 0,
+            "duplicatedLines": 0,
+            "duplicatedTokens": 0,
+            "percentage": 0,
+            "percentageTokens": 0,
+            "newDuplicatedLines": 0,
+            "newClones": 0
+          },
+          "/Users/dciangot/git/interLink/pkg/virtualkubelet/version.go": {
+            "lines": 4,
+            "tokens": 16,
+            "sources": 1,
+            "clones": 0,
+            "duplicatedLines": 0,
+            "duplicatedTokens": 0,
+            "percentage": 0,
+            "percentageTokens": 0,
+            "newDuplicatedLines": 0,
+            "newClones": 0
+          },
+          "/Users/dciangot/git/interLink/pkg/virtualkubelet/execute.go": {
+            "lines": 653,
+            "tokens": 6265,
+            "sources": 1,
+            "clones": 0,
+            "duplicatedLines": 0,
+            "duplicatedTokens": 0,
+            "percentage": 0,
+            "percentageTokens": 0,
+            "newDuplicatedLines": 0,
+            "newClones": 0
+          },
+          "/Users/dciangot/git/interLink/pkg/virtualkubelet/config.go": {
+            "lines": 23,
+            "tokens": 138,
+            "sources": 1,
+            "clones": 0,
+            "duplicatedLines": 0,
+            "duplicatedTokens": 0,
+            "percentage": 0,
+            "percentageTokens": 0,
+            "newDuplicatedLines": 0,
+            "newClones": 0
+          },
+          "/Users/dciangot/git/interLink/pkg/virtualkubelet/cert-retriever.go": {
+            "lines": 146,
+            "tokens": 1200,
+            "sources": 1,
+            "clones": 0,
+            "duplicatedLines": 0,
+            "duplicatedTokens": 0,
+            "percentage": 0,
+            "percentageTokens": 0,
+            "newDuplicatedLines": 0,
+            "newClones": 0
+          },
+          "/Users/dciangot/git/interLink/pkg/interlink/types.go": {
+            "lines": 69,
+            "tokens": 367,
+            "sources": 1,
+            "clones": 0,
+            "duplicatedLines": 0,
+            "duplicatedTokens": 0,
+            "percentage": 0,
+            "percentageTokens": 0,
+            "newDuplicatedLines": 0,
+            "newClones": 0
+          },
+          "/Users/dciangot/git/interLink/pkg/interlink/spans.go": {
+            "lines": 31,
+            "tokens": 220,
+            "sources": 1,
+            "clones": 0,
+            "duplicatedLines": 0,
+            "duplicatedTokens": 0,
+            "percentage": 0,
+            "percentageTokens": 0,
+            "newDuplicatedLines": 0,
+            "newClones": 0
+          },
+          "/Users/dciangot/git/interLink/pkg/interlink/config.go": {
+            "lines": 227,
+            "tokens": 1720,
+            "sources": 1,
+            "clones": 0,
+            "duplicatedLines": 0,
+            "duplicatedTokens": 0,
+            "percentage": 0,
+            "percentageTokens": 0,
+            "newDuplicatedLines": 0,
+            "newClones": 0
+          },
+          "/Users/dciangot/git/interLink/cmd/virtual-kubelet/main.go": {
+            "lines": 362,
+            "tokens": 2565,
+            "sources": 1,
+            "clones": 2,
+            "duplicatedLines": 27,
+            "duplicatedTokens": 244,
+            "percentage": 7.46,
+            "percentageTokens": 9.51,
+            "newDuplicatedLines": 0,
+            "newClones": 0
+          },
+          "/Users/dciangot/git/interLink/cmd/ssh-tunnel/main.go": {
+            "lines": 133,
+            "tokens": 1062,
+            "sources": 1,
+            "clones": 0,
+            "duplicatedLines": 0,
+            "duplicatedTokens": 0,
+            "percentage": 0,
+            "percentageTokens": 0,
+            "newDuplicatedLines": 0,
+            "newClones": 0
+          },
+          "/Users/dciangot/git/interLink/cmd/interlink/main.go": {
+            "lines": 161,
+            "tokens": 1295,
+            "sources": 1,
+            "clones": 2,
+            "duplicatedLines": 27,
+            "duplicatedTokens": 244,
+            "percentage": 16.77,
+            "percentageTokens": 18.84,
+            "newDuplicatedLines": 0,
+            "newClones": 0
+          },
+          "/Users/dciangot/git/interLink/cmd/installer/main.go": {
+            "lines": 289,
+            "tokens": 1988,
+            "sources": 1,
+            "clones": 0,
+            "duplicatedLines": 0,
+            "duplicatedTokens": 0,
+            "percentage": 0,
+            "percentageTokens": 0,
+            "newDuplicatedLines": 0,
+            "newClones": 0
+          }
+        },
+        "total": {
+          "lines": 3750,
+          "tokens": 30581,
+          "sources": 20,
+          "clones": 2,
+          "duplicatedLines": 27,
+          "duplicatedTokens": 244,
+          "percentage": 0.72,
+          "percentageTokens": 0.8,
+          "newDuplicatedLines": 0,
+          "newClones": 0
+        }
+      },
+      "bash": {
+        "sources": {
+          "/Users/dciangot/git/interLink/cmd/installer/templates/interlink-install.sh": {
+            "lines": 184,
+            "tokens": 1075,
+            "sources": 1,
+            "clones": 0,
+            "duplicatedLines": 0,
+            "duplicatedTokens": 0,
+            "percentage": 0,
+            "percentageTokens": 0,
+            "newDuplicatedLines": 0,
+            "newClones": 0
+          },
+          "/Users/dciangot/git/interLink/cmd/virtual-kubelet/set-version.sh": {
+            "lines": 10,
+            "tokens": 48,
+            "sources": 1,
+            "clones": 0,
+            "duplicatedLines": 0,
+            "duplicatedTokens": 0,
+            "percentage": 0,
+            "percentageTokens": 0,
+            "newDuplicatedLines": 0,
+            "newClones": 0
+          }
+        },
+        "total": {
+          "lines": 194,
+          "tokens": 1123,
+          "sources": 2,
+          "clones": 0,
+          "duplicatedLines": 0,
+          "duplicatedTokens": 0,
+          "percentage": 0,
+          "percentageTokens": 0,
+          "newDuplicatedLines": 0,
+          "newClones": 0
+        }
+      },
+      "markup": {
+        "sources": {
+          "/Users/dciangot/git/interLink/report/html/index.html": {
+            "lines": 35,
+            "tokens": 2375,
+            "sources": 1,
+            "clones": 0,
+            "duplicatedLines": 0,
+            "duplicatedTokens": 0,
+            "percentage": 0,
+            "percentageTokens": 0,
+            "newDuplicatedLines": 0,
+            "newClones": 0
+          },
+          "/Users/dciangot/git/interLink/.idea/workspace.xml": {
+            "lines": 112,
+            "tokens": 1048,
+            "sources": 1,
+            "clones": 0,
+            "duplicatedLines": 0,
+            "duplicatedTokens": 0,
+            "percentage": 0,
+            "percentageTokens": 0,
+            "newDuplicatedLines": 0,
+            "newClones": 0
+          },
+          "/Users/dciangot/git/interLink/.idea/vcs.xml": {
+            "lines": 5,
+            "tokens": 47,
+            "sources": 1,
+            "clones": 0,
+            "duplicatedLines": 0,
+            "duplicatedTokens": 0,
+            "percentage": 0,
+            "percentageTokens": 0,
+            "newDuplicatedLines": 0,
+            "newClones": 0
+          },
+          "/Users/dciangot/git/interLink/.idea/modules.xml": {
+            "lines": 7,
+            "tokens": 58,
+            "sources": 1,
+            "clones": 0,
+            "duplicatedLines": 0,
+            "duplicatedTokens": 0,
+            "percentage": 0,
+            "percentageTokens": 0,
+            "newDuplicatedLines": 0,
+            "newClones": 0
+          }
+        },
+        "total": {
+          "lines": 159,
+          "tokens": 3528,
+          "sources": 4,
+          "clones": 0,
+          "duplicatedLines": 0,
+          "duplicatedTokens": 0,
+          "percentage": 0,
+          "percentageTokens": 0,
+          "newDuplicatedLines": 0,
+          "newClones": 0
+        }
+      },
+      "markdown": {
+        "sources": {
+          "/Users/dciangot/git/interLink/README.md": {
+            "lines": 25,
+            "tokens": 367,
+            "sources": 1,
+            "clones": 0,
+            "duplicatedLines": 0,
+            "duplicatedTokens": 0,
+            "percentage": 0,
+            "percentageTokens": 0,
+            "newDuplicatedLines": 0,
+            "newClones": 0
+          },
+          "/Users/dciangot/git/interLink/CONTRIBUTING.md": {
+            "lines": 84,
+            "tokens": 1010,
+            "sources": 1,
+            "clones": 0,
+            "duplicatedLines": 0,
+            "duplicatedTokens": 0,
+            "percentage": 0,
+            "percentageTokens": 0,
+            "newDuplicatedLines": 0,
+            "newClones": 0
+          }
+        },
+        "total": {
+          "lines": 109,
+          "tokens": 1377,
+          "sources": 2,
+          "clones": 0,
+          "duplicatedLines": 0,
+          "duplicatedTokens": 0,
+          "percentage": 0,
+          "percentageTokens": 0,
+          "newDuplicatedLines": 0,
+          "newClones": 0
+        }
+      }
+    },
+    "total": {
+      "lines": 5062,
+      "tokens": 46726,
+      "sources": 38,
+      "clones": 2,
+      "duplicatedLines": 27,
+      "duplicatedTokens": 244,
+      "percentage": 0.53,
+      "percentageTokens": 0.52,
+      "newDuplicatedLines": 0,
+      "newClones": 0
+    }
+  },
+  "duplicates": [
+    {
+      "format": "go",
+      "lines": 16,
+      "fragment": ")\n\n\tif os.Getenv(\"ENABLE_TRACING\") == \"1\" {\n\t\tshutdown, err := interlink.InitTracer(ctx)\n\t\tif err != nil {\n\t\t\tlog.G(ctx).Fatal(err)\n\t\t}\n\t\tdefer func() {\n\t\t\tif err = shutdown(ctx); err != nil {\n\t\t\t\tlog.G(ctx).Fatal(\"failed to shutdown TracerProvider: %w\", err)\n\t\t\t}\n\t\t}()\n\n\t\tlog.G(ctx).Info(\"Tracer setup succeeded\")\n\n\t\ttrace",
+      "tokens": 0,
+      "firstFile": {
+        "name": "/Users/dciangot/git/interLink/cmd/interlink/main.go",
+        "start": 53,
+        "end": 68,
+        "startLoc": {
+          "line": 53,
+          "column": 2,
+          "position": 308
+        },
+        "endLoc": {
+          "line": 68,
+          "column": 6,
+          "position": 439
+        }
+      },
+      "secondFile": {
+        "name": "/Users/dciangot/git/interLink/cmd/virtual-kubelet/main.go",
+        "start": 133,
+        "end": 148,
+        "startLoc": {
+          "line": 133,
+          "column": 16,
+          "position": 678
+        },
+        "endLoc": {
+          "line": 148,
+          "column": 38,
+          "position": 809
+        }
+      }
+    },
+    {
+      "format": "go",
+      "lines": 13,
+      "fragment": ")\n\t\t\tif err != nil {\n\t\t\t\tlog.G(ctx).Error(err)\n\t\t\t\ttime.Sleep(30 * time.Second)\n\t\t\t} else {\n\t\t\t\tbreak\n\t\t\t}\n\t\t}\n\n\t\thttp.DefaultTransport.(*http.Transport).DialContext = func(_ context.Context, _, _ string) (net.Conn, error) {\n\t\t\treturn conn, nil\n\t\t}\n\tcase",
+      "tokens": 0,
+      "firstFile": {
+        "name": "/Users/dciangot/git/interLink/cmd/interlink/main.go",
+        "start": 82,
+        "end": 94,
+        "startLoc": {
+          "line": 82,
+          "column": 16,
+          "position": 558
+        },
+        "endLoc": {
+          "line": 94,
+          "column": 5,
+          "position": 671
+        }
+      },
+      "secondFile": {
+        "name": "/Users/dciangot/git/interLink/cmd/virtual-kubelet/main.go",
+        "start": 164,
+        "end": 176,
+        "startLoc": {
+          "line": 164,
+          "column": 18,
+          "position": 942
+        },
+        "endLoc": {
+          "line": 176,
+          "column": 2,
+          "position": 1055
+        }
+      }
+    }
+  ],
+  "filename": "/opt/homebrew/lib/node_modules/jscpd/node_modules/@jscpd/html-reporter/dist/templates/main.pug"
+}
