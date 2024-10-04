@@ -1,5 +1,5 @@
 {
-  "threshold": 0.53,
+  "threshold": 0.65,
   "reporters": ["html", "console", "badge"],
   "ignore": ["**/ci/**", "**/docker/**", "**/example/**", "**/docs/**", "**/vendor/**", "**/.github/**"],
   "absolute": true

@@ -23,5 +23,5 @@ The project consists of two main components:
 
 The project got inspired by the [KNoC](https://github.com/CARV-ICS-FORTH/knoc) and [Liqo](https://github.com/liqotech/liqo/tree/master) projects, enhancing that with the implemention a generic API layer b/w the virtual kubelet component and the provider logic for the container lifecycle management.
 
-For usage and development guides please refer to [our website](https://intertwin-eu.github.io/interLink/)
+For usage and development guides please refer to [our site](https://intertwin-eu.github.io/interLink/)
 

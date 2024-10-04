@@ -78,7 +78,7 @@ func (h *InterLinkHandler) StatusHandler(w http.ResponseWriter, r *http.Request)
 
 		log.G(h.Ctx).Info("InterLink: forwarding GetStatus call to sidecar")
 		req.Header.Set("Content-Type", "application/json")
-		log.G(h.Ctx).Debug("Interlink get status request content: %s", req)
+		log.G(h.Ctx).Debug("Interlink get status request content:", req)
 
 		bodyBytes, err = ReqWithError(h.Ctx, req, w, start, span, false)
 		if err != nil {
