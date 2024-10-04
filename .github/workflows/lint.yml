@@ -36,6 +36,8 @@ jobs:
           VALIDATE_MARKDOWN: false
           VALIDATE_PYTHON_BLACK: false
           VALIDATE_PYTHON_PYINK: false
+          VALIDATE_SHELL_SHFMT: false
+          VALIDATE_YAML_PRETTIER: false
           # Only check new or edited files
           VALIDATE_ALL_CODEBASE: true
           # Fail on errors
