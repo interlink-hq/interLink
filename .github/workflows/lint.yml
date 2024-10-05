@@ -1,44 +1,28 @@
 ---
-name: Lint
-
+name: golangci-lint
 on:
   push:
+    branches:
+      - main
+      - master
   pull_request:
 
+permissions:
+  contents: read
+  # Optional: allow read access to pull request. Use with `only-new-issues` option.
+  # pull-requests: read
+
 jobs:
-  super-lint:
-    name: Lint with Super-Linter
+  golangci:
+    name: lint
     runs-on: ubuntu-latest
-
     steps:
-      # Checks out a copy of your repository on the ubuntu-latest machine
-      - name: Checkout code
-        uses: actions/checkout@v4
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
         with:
-          # Make sure the actual branch is checked out when running on PR
-          # ref: ${{ github.event.pull_request.head.sha }}
-          # Full git history needed to get proper list of changed files
-          fetch-depth: 0
-
-      # Runs the Super-Linter action
-      - name: Run Super-Linter on new changes
-        uses: super-linter/super-linter@v7.1.0 
-        env:
-          FILTER_REGEX_EXCLUDE: 'ci/.*|example/.*|docker/.*'
-          DEFAULT_BRANCH: main
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          MARKDOWN_CONFIG_FILE: .markdownlint.json
-          VALIDATE_CHECKOV: false
-          VALIDATE_MARKDOWN_PRETTIER: false
-          VALIDATE_CSS_PRETTIER: false
-          VALIDATE_BASH: false
-          VALIDATE_GITHUB_ACTIONS: false
-          VALIDATE_MARKDOWN: false
-          VALIDATE_PYTHON_BLACK: false
-          VALIDATE_PYTHON_PYINK: false
-          VALIDATE_SHELL_SHFMT: false
-          VALIDATE_YAML_PRETTIER: false
-          # Only check new or edited files
-          VALIDATE_ALL_CODEBASE: true
-          # Fail on errors
-          DISABLE_ERRORS: false
+          go-version: stable
+      - name: golangci-lint
+        uses: golangci/golangci-lint-action@v6
+        with:
+          version: v1.60
+          args: --config=.github/linters/.golangci.yml
