@@ -38,20 +38,20 @@ const (
 	DELETE                = 1
 )
 
-func TracerUpdate(ctx context.Context, name string, pod *v1.Pod) {
+func TracerUpdate(ctx *context.Context, name string, pod *v1.Pod) {
 	start := time.Now().Unix()
 	tracer := otel.Tracer("interlink-service")
 
 	var span trace.Span
 	if pod != nil {
-		ctx, span = tracer.Start(ctx, name, trace.WithAttributes(
+		*ctx, span = tracer.Start(*ctx, name, trace.WithAttributes(
 			attribute.String("pod.name", pod.Name),
 			attribute.String("pod.namespace", pod.Namespace),
 			attribute.Int64("start.timestamp", start),
 		))
-		log.G(ctx).Infof("receive %s %q", name, pod.Name)
+		log.G(*ctx).Infof("receive %s %q", name, pod.Name)
 	} else {
-		ctx, span = tracer.Start(ctx, name, trace.WithAttributes(
+		*ctx, span = tracer.Start(*ctx, name, trace.WithAttributes(
 			attribute.Int64("start.timestamp", start),
 		))
 	}
@@ -399,7 +399,7 @@ func (p *Provider) Ping(_ context.Context) error {
 
 // CreatePod accepts a Pod definition and stores it in memory in p.pods
 func (p *Provider) CreatePod(ctx context.Context, pod *v1.Pod) error {
-	TracerUpdate(ctx, "CreatePodVK", pod)
+	TracerUpdate(&ctx, "CreatePodVK", pod)
 
 	var hasInitContainers = false
 	var state v1.ContainerState
@@ -489,7 +489,7 @@ func (p *Provider) CreatePod(ctx context.Context, pod *v1.Pod) error {
 
 // UpdatePod accepts a Pod definition and updates its reference.
 func (p *Provider) UpdatePod(ctx context.Context, pod *v1.Pod) error {
-	TracerUpdate(ctx, "UpdatePodVK", pod)
+	TracerUpdate(&ctx, "UpdatePodVK", pod)
 
 	p.notifier(pod)
 
@@ -498,7 +498,7 @@ func (p *Provider) UpdatePod(ctx context.Context, pod *v1.Pod) error {
 
 // DeletePod deletes the specified pod and drops it out of p.pods
 func (p *Provider) DeletePod(ctx context.Context, pod *v1.Pod) (err error) {
-	TracerUpdate(ctx, "DeletePodVK", pod)
+	TracerUpdate(&ctx, "DeletePodVK", pod)
 
 	log.G(ctx).Infof("receive DeletePod %q", pod.Name)
 
@@ -591,7 +591,7 @@ func (p *Provider) GetPodStatus(ctx context.Context, namespace, name string) (*v
 			Namespace: namespace,
 		},
 	}
-	TracerUpdate(ctx, "GetPodStatusVK", &podTmp)
+	TracerUpdate(&ctx, "GetPodStatusVK", &podTmp)
 
 	pod, err := p.GetPod(ctx, namespace, name)
 	if err != nil {
@@ -603,7 +603,7 @@ func (p *Provider) GetPodStatus(ctx context.Context, namespace, name string) (*v
 
 // GetPods returns a list of all pods known to be "running".
 func (p *Provider) GetPods(ctx context.Context) ([]*v1.Pod, error) {
-	TracerUpdate(ctx, "GetPodsVK", nil)
+	TracerUpdate(&ctx, "GetPodsVK", nil)
 
 	err := p.initClientSet(ctx)
 	if err != nil {
