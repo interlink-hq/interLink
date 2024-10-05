@@ -6,42 +6,82 @@ import useBaseUrl from '@docusaurus/useBaseUrl';
 
 # Introduction
 
+![GitHub License](https://img.shields.io/github/license/intertwin-eu/interlink)
+![GitHub Downloads (all assets, all releases)](https://img.shields.io/github/downloads/intertwin-eu/interlink/total)
+![GitHub Repo stars](https://img.shields.io/github/stars/intertwin-eu/interlink)
+
+![GitHub Release](https://img.shields.io/github/v/release/intertwin-eu/interlink)
+![Tested with Dagger](https://img.shields.io/badge/tested_with_dagger-v0.13.3-green)
+
+![Slack server](https://img.shields.io/badge/slack_server-8A2BE2?link=https%3A%2F%2Fjoin.slack.com%2Ft%2Fintertwin%2Fshared_invite%2Fzt-2cs67h9wz-2DFQ6EiSQGS1vlbbbJHctA)
+
 :::warning
 
 interLink is in early development phase, thus subject to breaking changes with no guarantee of backward compatibility.
 
 :::
 
-InterLink aims to provide an abstraction for the execution of a Kubernetes pod on any remote resource capable of managing a Container execution lifecycle.
+## Targets
 
-The project consists of two main components:
+- __K8s applications with tasks to be executed on HPC systems__: This target focuses on Kubernetes applications that require high-performance computing (HPC) resources for executing tasks. These tasks might involve complex computations, simulations, or data processing that benefit from the specialized hardware and optimized performance of HPC systems.
 
-- __A Kubernetes Virtual Node:__ based on the [VirtualKubelet](https://virtual-kubelet.io/) technology. Translating request for a kubernetes pod execution into a remote call to the interLink API server.
-- __The interLink API server:__ a modular and pluggable REST server where you can create your own Container manager plugin (called sidecars), or use the existing ones: remote docker execution on a remote host, singularity Container on a remote SLURM batch system.
+- __Remote "runner"-like application for heavy payload execution requiring GPUs__: This target is designed for applications that need to execute heavy computational payloads, particularly those requiring GPU resources. These applications can be run remotely, leveraging powerful GPU hardware to handle tasks such as machine learning model training, data analysis, or rendering.
 
-The project got inspired by the [KNoC](https://github.com/CARV-ICS-FORTH/knoc) and [Liqo](https://github.com/liqotech/liqo/tree/master) projects, enhancing that with the implemention a generic API layer b/w the virtual kubelet component and the provider logic for the container lifecycle management.
+- __Lambda-like functions calling on external resources__: This target involves running containers on demand with specific computing needs. Now these resources might also be outside of the Kubernetes cluster thanks to interLink functionality.
 
-## Quick-start
+## Target providers
 
-Let's discover [**interLink in less than 5 minutes**](./category/usage).
+Our solution is designed to target a wide range of providers with container execution capabilities, including but not limited to:
 
-You need only a machine with [Docker](https://docs.docker.com/engine/install/) engine and git CLI installed.
+- __SLURM or HTCondor batch systems with Apptainer, Enroot, or Singularity__: These batch systems are widely used in high-performance computing environments to manage and schedule jobs. By integrating with container runtimes like Apptainer, Enroot, or Singularity, our solution can efficiently execute containerized tasks on these systems.
+- __Remote/on-demand virtual machines with any container runtime__: This includes virtual machines that can be provisioned on-demand and support container runtimes such as Docker, Podman, or others. This flexibility allows for scalable and dynamic resource allocation based on workload requirements.
+- __Remote Kubernetes clusters__: Our solution can extend the capabilities of existing Kubernetes clusters, enabling them to offload workloads to another remote cluster. This is particularly useful for distributing workloads across multiple clusters for better resource utilization and fault tolerance.
+- __Lambda-like services__: These are serverless computing services that execute code in response to events and automatically manage the underlying compute resources. By targeting these services, our solution can leverage the scalability and efficiency of serverless architectures for containerized workloads. All of this, while exposing a bare Kubernetes API kind of orchestration.
 
-## Overview
-#
-InterLink aims to provide an abstraction for the execution of a Kubernetes pod on any remote resource capable of managing a Container execution lifecycle.
+## NOT a target
 
-The project consists of two main components:
+- __Long-running services__: Our solution is not designed for services that need to run continuously for extended periods. It is optimized for tasks that have a defined start and end, rather than persistent services exposing intra-cluster communication endpoints.
+- __Kubernetes Federation__: We do not aim to support Kubernetes Federation, which involves managing multiple Kubernetes clusters as a single entity. Our focus is on enabling Kubernetes pods to execute on remote resources, not on federating all kind of resources on multiple clusters.
 
-- __A Kubernetes Virtual Node:__ based on the [VirtualKubelet](https://virtual-kubelet.io/) technology. Translating request for a kubernetes pod execution into a remote call to the interLink API server.
-- __The interLink API server:__ a modular and pluggable REST server where you can create your own Container manager plugin (called sidecars), or use the existing ones: remote docker execution on a remote host, singularity Container on a remote SLURM batch system.
 
-The project got inspired by the [KNoC](https://github.com/CARV-ICS-FORTH/knoc) and [Liqo](https://github.com/liqotech/liqo/tree/master) projects, enhancing that with the implemention a generic API layer b/w the virtual kubelet component and the provider logic for the container lifecycle management.
+## Deployment scenarios
+
+### In-cluster mode
+
+This scenario involves deploying a Virtual Kubelet along with the interLink API server and the plugin to interact with a remote API. This setup allows Kubernetes pods to be executed on remote resources while all other components sits inside the Kubernetes cluster.
 
 <ThemedImage 
         alt="Docusaurus themed image"
         sources={{
-          light: useBaseUrl('/img/InterLink_excalidraw_light.svg'),
-          dark: useBaseUrl('/img/InterLink_excalidraw-dark.svg'),
+          light: useBaseUrl('/img/scenario-1_light.svg'),
+          dark: useBaseUrl('/img/scenario-1_dark.svg'),
         }}
 />
+
+
+### Service remote edge node
+
+In this scenario, the Virtual Kubelet communicates with remote services deployed on a dedicate edge node exposing authenticated interLink APIs and its associated plugin. This setup is ideal for scenarios where edge computing resources are utilized for controlled communication b/w the Kubernetes cluster and the remote resources.
+
+<ThemedImage 
+        alt="Docusaurus themed image"
+        sources={{
+          light: useBaseUrl('/img/scenario-2_light.svg'),
+          dark: useBaseUrl('/img/scenario-2_dark.svg'),
+        }}
+/>
+
+### Tunneled mode
+
+This deployment involves the Virtual Kubelet connecting to a remote interLink API server and its plugin through a secure tunnel. This setup ensures secure communication between the Kubernetes cluster and the remote resources, making it suitable for environments with strict security requirements or to host services on a multi user host like a login node.
+
+<ThemedImage 
+        alt="Docusaurus themed image"
+        sources={{
+          light: useBaseUrl('/img/scenario-3_light.svg'),
+          dark: useBaseUrl('/img/scenario-3_dark.svg'),
+        }}
+/>
+
+For more information visit the [architecture page](arch)
+

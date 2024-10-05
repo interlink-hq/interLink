@@ -6,12 +6,13 @@ required_namespaces:
   - kube-system
   - interlink
 
-timeout_multiplier: 2.
+timeout_multiplier: 10. 
 values:
   namespace: interlink
 
   annotations:
-    slurm-job.vk.io/flags: "--job-name=test-pod-cfg -t 2800  --ntasks=8 --nodes=1 --mem-per-cpu=2000"
+    slurm-job.vk.io/flags: "--job-name=test-pod-cfg -t 2800"
+    slurm-job.vk.io/image-root: "docker://" 
 
   tolerations:
     - key: virtual-node.interlink/no-schedule

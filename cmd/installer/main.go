@@ -39,11 +39,12 @@ type Resources struct {
 
 type oauthStruct struct {
 	Provider      string   `yaml:"provider"`
+	GrantType     string   `default:"authorization_code" yaml:"grant_type"`
 	Issuer        string   `yaml:"issuer,omitempty"`
 	RefreshToken  string   `yaml:"refresh_token,omitempty"`
 	Audience      string   `yaml:"audience,omitempty"`
 	Group         string   `yaml:"group,omitempty"`
-	GroupClaim    string   `yaml:"groupClaim,omitempty"`
+	GroupClaim    string   `default:"groups" yaml:"group_claim"`
 	Scopes        []string `yaml:"scopes"`
 	GitHUBUser    string   `yaml:"github_user"`
 	TokenURL      string   `yaml:"token_url"`
@@ -52,6 +53,7 @@ type oauthStruct struct {
 	ClientSecret  string   `yaml:"client_secret"`
 }
 
+// TODO: insert in-cluster and socket option e.g. --> no need OAUTH
 type dataStruct struct {
 	InterLinkIP      string      `yaml:"interlink_ip"`
 	InterLinkPort    int         `yaml:"interlink_port"`
@@ -170,60 +172,52 @@ func root(cmd *cobra.Command, args []string) error {
 		return err
 	}
 
+	var token *oauth2.Token
+
 	ctx := context.Background()
-	cfg := oauth2.Config{
-		ClientID:     configCLI.OAUTH.ClientID,
-		ClientSecret: configCLI.OAUTH.ClientSecret,
-		Endpoint: oauth2.Endpoint{
-			TokenURL:      configCLI.OAUTH.TokenURL,
-			DeviceAuthURL: configCLI.OAUTH.DeviceCodeURL,
-		},
-		RedirectURL: "http://localhost:8080",
-		Scopes:      configCLI.OAUTH.Scopes,
+	if configCLI.OAUTH.GrantType == "authorization_code" {
+		cfg := oauth2.Config{
+			ClientID:     configCLI.OAUTH.ClientID,
+			ClientSecret: configCLI.OAUTH.ClientSecret,
+			Endpoint: oauth2.Endpoint{
+				TokenURL:      configCLI.OAUTH.TokenURL,
+				DeviceAuthURL: configCLI.OAUTH.DeviceCodeURL,
+			},
+			RedirectURL: "http://localhost:8080",
+			Scopes:      configCLI.OAUTH.Scopes,
+		}
+
+		response, err := cfg.DeviceAuth(ctx, oauth2.AccessTypeOffline)
+		if err != nil {
+			panic(err)
+		}
+
+		fmt.Printf("please enter code %s at %s\n", response.UserCode, response.VerificationURI)
+		token, err = cfg.DeviceAccessToken(ctx, response, oauth2.AccessTypeOffline)
+		if err != nil {
+			panic(err)
+		}
+		//fmt.Println(token.AccessToken)
+		//fmt.Println(token.RefreshToken)
+		//fmt.Println(token.Expiry)
+		//fmt.Println(token.TokenType)
+		configCLI.OAUTH.RefreshToken = token.RefreshToken
+	} else if configCLI.OAUTH.GrantType == "client_credentials" {
+
+		fmt.Println("Client_credentials set, I won't try to get any refresh token.")
+
+	} else {
+
+		panic(fmt.Errorf("wrong grant type specified in the configuration. Only client_credentials and authorization_code are supported"))
 	}
 
-	response, err := cfg.DeviceAuth(ctx, oauth2.AccessTypeOffline)
-	if err != nil {
-		panic(err)
-	}
-
-	fmt.Printf("please enter code %s at %s\n", response.UserCode, response.VerificationURI)
-	token, err := cfg.DeviceAccessToken(ctx, response, oauth2.AccessTypeOffline)
-	if err != nil {
-		panic(err)
-	}
-	//fmt.Println(token.AccessToken)
-	//fmt.Println(token.RefreshToken)
-	//fmt.Println(token.Expiry)
-	//fmt.Println(token.TokenType)
-
-	configCLI.OAUTH.RefreshToken = token.RefreshToken
-
-	namespaceYAML, err := evalManifest("templates/namespace.yaml", configCLI)
-	if err != nil {
-		panic(err)
-	}
-
-	deploymentYAML, err := evalManifest("templates/deployment.yaml", configCLI)
-	if err != nil {
-		panic(err)
-	}
-
-	configYAML, err := evalManifest("templates/configs.yaml", configCLI)
-	if err != nil {
-		panic(err)
-	}
-
-	serviceaccountYAML, err := evalManifest("templates/service-account.yaml", configCLI)
+	valuesYAML, err := evalManifest("templates/values.yaml", configCLI)
 	if err != nil {
 		panic(err)
 	}
 
 	manifests := []string{
-		namespaceYAML,
-		serviceaccountYAML,
-		configYAML,
-		deploymentYAML,
+		valuesYAML,
 	}
 
 	err = os.MkdirAll(outFolder, fs.ModePerm)
@@ -231,7 +225,7 @@ func root(cmd *cobra.Command, args []string) error {
 		panic(err)
 	}
 	// Create a file and use bufio.NewWriter.
-	f, err := os.Create(outFolder + "/interlink.yaml")
+	f, err := os.Create(outFolder + "/values.yaml")
 	if err != nil {
 		panic(err)
 	}
@@ -246,7 +240,7 @@ func root(cmd *cobra.Command, args []string) error {
 
 	w.Flush()
 
-	fmt.Println("\n\n=== Deployment file written at:  " + outFolder + "/interlink.yaml ===\n\n To deploy the virtual kubelet run:\n    kubectl apply -f " + outFolder + "/interlink.yaml")
+	fmt.Println("\n\n=== Deployment file written at:  " + outFolder + "/values.yaml ===\n\n To deploy the virtual kubelet run:\n   helm --debug upgrade --install --create-namespace -n " + configCLI.Namespace + " " + configCLI.VKName + " oci://ghcr.io/intertwin-eu/interlink-helm-chart/interlink  --values " + outFolder + "/values.yaml")
 
 	// TODO: ilctl.sh templating
 	tmpl, err := template.ParseFS(templates, "templates/interlink-install.sh")

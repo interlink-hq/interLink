@@ -18,8 +18,10 @@ builds:
       - arm64
       - amd64
     main: ./cmd/virtual-kubelet
-  - id: "interlink"
+  - id: "interlink-api"
     binary: interlink
+    hooks:
+      pre: bash -c "KUBELET_VERSION={{.Version}} ./cmd/virtual-kubelet/set-version.sh" 
     env:
       - CGO_ENABLED=0
     goos:
@@ -29,8 +31,9 @@ builds:
       - arm64
       - amd64
       - ppc64le
-  - id: "interlink-install"
-    binary: interlink-install
+    main: ./cmd/interlink
+  - id: "installer"
+    binary: interlink-installer
     env:
       - CGO_ENABLED=0
     goos:
@@ -41,6 +44,18 @@ builds:
       - amd64
       - ppc64le
     main: ./cmd/installer
+  - id: "ssh-tunnel"
+    binary: ssh-tunnel
+    env:
+      - CGO_ENABLED=0
+    goos:
+      - linux
+      - darwin
+    goarch:
+      - arm64
+      - amd64
+      - ppc64le
+    main: ./cmd/ssh-tunnel
 archives:
   - name_template: >-
       {{ .Binary }}_

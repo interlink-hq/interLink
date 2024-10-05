@@ -1,15 +1,17 @@
-apiVersion: v1
-kind: ConfigMap
-metadata:
-  name: "interlink-config"
-  namespace: interlink 
-data:
-  InterLinkConfig.yaml: |
-    InterlinkURL: "http://localhost"
-    InterlinkPort: "3000"
-    SidecarURL: "http://plugin.interlink.svc.cluster.local"
-    SidecarPort: "4000"
-    VerboseLogging: true
-    ErrorsOnlyLogging: false
-    ExportPodData: true
-    DataRootFolder: "~/.interlink"
+# apiVersion: v1
+# kind: ConfigMap
+# metadata:
+#   name: "interlink-config"
+#   namespace: interlink 
+# data:
+#   InterLinkConfig.yaml: |
+    #InterlinkAddress: "unix:///var/run/interlink.socket"
+InterlinkAddress: "http://0.0.0.0"
+InterlinkPort: "3000"
+SidecarURL: "http://plugin"
+#SidecarURL: "http://0.0.0.0"
+SidecarPort: "4000"
+VerboseLogging: true
+ErrorsOnlyLogging: false
+ExportPodData: true
+DataRootFolder: "~/.interlink"

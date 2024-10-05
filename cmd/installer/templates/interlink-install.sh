@@ -24,20 +24,22 @@ install () {
   mkdir -p $HOME/.interlink/logs || exit 1
   mkdir -p $HOME/.interlink/bin || exit 1
   mkdir -p $HOME/.interlink/config || exit 1
-  # set $HOME/.interlink/config/InterLinkConfig.yaml
+
+
+  # TODO download also service files for systemd
 
   cat <<EOF >>$HOME/.interlink/config/InterLinkConfig.yaml
-InterlinkURL: "http://localhost"
-InterlinkPort: "30080"
-SidecarURL: "http://localhost"
-SidecarPort: "4000"
+InterlinkAddress: "unix://${HOME}/.interlink/interlink.sock"
+InterlinkPort: "0"
+SidecarURL: "unix://${HOME}/.interlink/plugin.sock"
+SidecarPort: "0"
 VerboseLogging: true
 ErrorsOnlyLogging: false
 ExportPodData: true
 DataRootFolder: "~/.interlink"
 EOF
 
-  echo "=== Configured to reach sidecar service on http://localhost:4000 . You can edit this behavior changing $HOME/.interlink/config/InterLinkConfig.yaml file. ==="
+  echo "=== Configured to reach sidecar service on unix://${HOME}/.interlink/plugin.sock. You can edit this behavior changing $HOME/.interlink/config/InterLinkConfig.yaml file. ==="
 
   ## Download binaries to $HOME/.local/interlink/
   echo "curl --fail -L -o ${HOME}/.interlink/bin/interlink https://github.com/interTwin-eu/interLink/releases/download/{{.InterLinkVersion}}/interlink_$(uname -s)_$(uname -m)"
@@ -87,10 +89,10 @@ start() {
   case "{{.OAUTH.Provider}}" in 
     oidc)
       $HOME/.interlink/bin/oauth2-proxy \
-          --client-id DUMMY \
-          --client-secret DUMMY \
-          --http-address 0.0.0.0:{{.InterLinkPort}} \
-          --oidc-issuer-url {{.OAUTH.Issuer}} \
+          --client-id "{{.OAUTH.ClientID}}" \
+          --client-secret "\"{{.OAUTH.ClientSecret}}\"" \
+          --http-address unix://${HOME}/.interlink/interlink.sock \
+          --oidc-issuer-url "{{.OAUTH.Issuer}}" \
           --pass-authorization-header true \
           --provider oidc \
           --redirect-url http://localhost:8081 \
@@ -112,10 +114,11 @@ start() {
       echo $! > $HOME/.interlink/oauth2-proxy.pid
       ;;
     github)
+      touch  $HOME/.interlink/interlink.sock
       $HOME/.interlink/bin/oauth2-proxy \
           --client-id {{.OAUTH.ClientID}} \
           --client-secret {{.OAUTH.ClientSecret}} \
-          --http-address 0.0.0.0:{{.InterLinkPort}} \
+          --http-address unix://$HOME/.interlink/interlink.sock \
           --pass-authorization-header true \
           --provider github \
           --redirect-url http://localhost:8081 \
@@ -137,9 +140,11 @@ start() {
   esac
 
   ## start interLink 
-  export INTERLINKCONFIGPATH=$HOME/.interlink/config/InterLinkConfig.yaml
-  $HOME/.interlink/bin/interlink &> $HOME/.interlink/logs/interlink.log &
-  echo $! > $HOME/.interlink/interlink.pid
+  export INTERLINKCONFIGPATH=${HOME}/.interlink/config/InterLinkConfig.yaml
+  $HOME/.interlink/bin/interlink &> ${HOME}/.interlink/logs/interlink.log &
+  echo $! > ${HOME}/.interlink/interlink.pid
+
+  ## TODO: if RUN_SLURM=1 then manage also slurm
 
 }
 

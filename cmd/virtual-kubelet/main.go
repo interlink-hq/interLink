@@ -18,16 +18,21 @@ package main
 import (
 	"context"
 	"crypto/tls"
+	"crypto/x509"
 	"flag"
 	"fmt"
+	"io/ioutil"
 	"net"
 	"os"
 	"path"
 	"strconv"
+	"strings"
 	"time"
 
 	// "k8s.io/client-go/rest"
 	"google.golang.org/grpc"
+	"google.golang.org/grpc/connectivity"
+	"google.golang.org/grpc/credentials"
 	"google.golang.org/grpc/credentials/insecure"
 	v1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/fields"
@@ -64,6 +69,8 @@ import (
 	"go.opentelemetry.io/otel/sdk/resource"
 	sdktrace "go.opentelemetry.io/otel/sdk/trace"
 	semconv "go.opentelemetry.io/otel/semconv/v1.21.0"
+
+	"github.com/google/uuid"
 )
 
 func PodInformerFilter(node string) informers.SharedInformerOption {
@@ -93,33 +100,98 @@ type Opts struct {
 	ErrorsOnly bool
 }
 
-func initProvider() (func(context.Context) error, error) {
-	ctx := context.Background()
+func initProvider(ctx context.Context) (func(context.Context) error, error) {
+
+	log.G(ctx).Info("Tracing is enabled, setting up the TracerProvider")
+
+	// Get the TELEMETRY_UNIQUE_ID from the environment, if it is not set, use the hostname
+	uniqueID := os.Getenv("TELEMETRY_UNIQUE_ID")
+	if uniqueID == "" {
+		log.G(ctx).Info("No TELEMETRY_UNIQUE_ID set, generating a new one")
+		newUUID := uuid.New()
+		uniqueID = newUUID.String()
+		log.G(ctx).Info("Generated unique ID: ", uniqueID, " use VK-InterLink-"+uniqueID+" as service name from Grafana")
+	}
+
+	// Create a new resource with the service name set to the TELEMETRY_UNIQUE_ID
+	// The nomenclature VK-InterLink-<TELEMETRY_UNIQUE_ID> is used to identify the service in Grafana.
+	// VK-InterLink-<TELEMETRY_UNIQUE_ID> means that the traces are coming from Virtual Kubelet
+	// and are related to the call that are made for the InterLink API service
+
+	serviceName := "VK-InterLink-" + uniqueID
 
 	res, err := resource.New(ctx,
 		resource.WithAttributes(
 			// the service name used to display traces in backends
-			semconv.ServiceName("InterLink-service"),
+			semconv.ServiceName(serviceName),
 		),
 	)
 	if err != nil {
 		return nil, fmt.Errorf("failed to create resource: %w", err)
 	}
 
-	// TODO: disable is telemetry is disabled
-
-	// If the OpenTelemetry Collector is running on a local cluster (minikube or
-	// microk8s), it should be accessible through the NodePort service at the
-	// `localhost:30080` endpoint. Otherwise, replace `localhost` with the
-	// endpoint of your cluster. If you run the app inside k8s, then you can
-	// probably connect directly to the service through dns.
 	ctx, cancel := context.WithTimeout(ctx, time.Second)
 	defer cancel()
-	conn, err := grpc.DialContext(ctx, "localhost:4317",
-		// Note the use of insecure transport here. TLS is recommended in production.
-		grpc.WithTransportCredentials(insecure.NewCredentials()),
-		grpc.WithBlock(),
-	)
+
+	otlpEndpoint := os.Getenv("TELEMETRY_ENDPOINT")
+
+	if otlpEndpoint == "" {
+		otlpEndpoint = "localhost:4317"
+	}
+
+	log.G(ctx).Info("TELEMETRY_ENDPOINT: ", otlpEndpoint)
+
+	caCrtFilePath := os.Getenv("TELEMETRY_CA_CRT_FILEPATH")
+
+	conn := &grpc.ClientConn{}
+	if caCrtFilePath != "" {
+
+		// if the CA certificate is provided, set up mutual TLS
+
+		log.G(ctx).Info("CA certificate provided, setting up mutual TLS")
+
+		caCert, err := ioutil.ReadFile(caCrtFilePath)
+		if err != nil {
+			return nil, fmt.Errorf("failed to load CA certificate: %w", err)
+		}
+
+		clientKeyFilePath := os.Getenv("TELEMETRY_CLIENT_KEY_FILEPATH")
+		if clientKeyFilePath == "" {
+			return nil, fmt.Errorf("client key file path not provided. Since a CA certificate is provided, a client key is required for mutual TLS")
+		}
+
+		clientCrtFilePath := os.Getenv("TELEMETRY_CLIENT_CRT_FILEPATH")
+		if clientCrtFilePath == "" {
+			return nil, fmt.Errorf("client certificate file path not provided. Since a CA certificate is provided, a client certificate is required for mutual TLS")
+		}
+
+		certPool := x509.NewCertPool()
+		if !certPool.AppendCertsFromPEM(caCert) {
+			return nil, fmt.Errorf("failed to append CA certificate")
+		}
+
+		cert, err := tls.LoadX509KeyPair(clientCrtFilePath, clientKeyFilePath)
+		if err != nil {
+			return nil, fmt.Errorf("failed to load client certificate: %w", err)
+		}
+
+		tlsConfig := &tls.Config{
+			Certificates:       []tls.Certificate{cert},
+			RootCAs:            certPool,
+			MinVersion:         tls.VersionTLS12,
+			InsecureSkipVerify: true,
+		}
+		creds := credentials.NewTLS(tlsConfig)
+		conn, err = grpc.NewClient(otlpEndpoint, grpc.WithTransportCredentials(creds), grpc.WithBlock())
+
+	} else {
+		// if the CA certificate is not provided, use an insecure connection
+		// this means that the telemetry collector is not using a certificate, i.e. is inside the k8s cluster
+		conn, err = grpc.NewClient(otlpEndpoint, grpc.WithTransportCredentials(insecure.NewCredentials()))
+	}
+
+	conn.WaitForStateChange(ctx, connectivity.Ready)
+
 	if err != nil {
 		return nil, fmt.Errorf("failed to create gRPC connection to collector: %w", err)
 	}
@@ -143,13 +215,7 @@ func initProvider() (func(context.Context) error, error) {
 	// set global propagator to tracecontext (the default is no-op).
 	otel.SetTextMapPropagator(propagation.TraceContext{})
 
-	// Shutdown will flush any remaining spans and shut down the exporter.
 	return tracerProvider.Shutdown, nil
-}
-
-func tlsConfig(tls *tls.Config) error {
-	tls.InsecureSkipVerify = true
-	return nil
 }
 
 func main() {
@@ -192,8 +258,10 @@ func main() {
 	}
 	log.L = logruslogger.FromLogrus(logrus.NewEntry(logger))
 
+	log.G(ctx).Info("Config dump", interLinkConfig)
+
 	if os.Getenv("ENABLE_TRACING") == "1" {
-		shutdown, err := initProvider()
+		shutdown, err := initProvider(ctx)
 		if err != nil {
 			log.G(ctx).Fatal(err)
 		}
@@ -213,6 +281,25 @@ func main() {
 	// and remove reading from file
 
 	http.DefaultTransport.(*http.Transport).TLSClientConfig = &tls.Config{InsecureSkipVerify: true}
+
+	if strings.HasPrefix(interLinkConfig.InterlinkURL, "unix://") {
+		// Dial the Unix socket
+		interLinkEndpoint := strings.Replace(interLinkConfig.InterlinkURL, "unix://", "", -1)
+		var conn net.Conn
+		for {
+			conn, err = net.Dial("unix", interLinkEndpoint)
+			if err != nil {
+				log.G(ctx).Error(err)
+				time.Sleep(30 * time.Second)
+			} else {
+				break
+			}
+		}
+
+		http.DefaultTransport.(*http.Transport).DialContext = func(_ context.Context, _, _ string) (net.Conn, error) {
+			return conn, nil
+		}
+	}
 
 	dport, err := strconv.ParseInt(os.Getenv("KUBELET_PORT"), 10, 32)
 	if err != nil {
@@ -301,6 +388,9 @@ func main() {
 		resync,
 	)
 
+	scmInformer := scmInformerFactory.Core().V1().Secrets().Informer()
+	podInformer := podInformerFactory.Core().V1().Secrets().Informer()
+
 	podControllerConfig := node.PodControllerConfig{
 		PodClient:         localClient.CoreV1(),
 		Provider:          nodeProvider,
@@ -318,6 +408,8 @@ func main() {
 	// start informers ->
 	go podInformerFactory.Start(stopper)
 	go scmInformerFactory.Start(stopper)
+	go scmInformer.Run(stopper)
+	go podInformer.Run(stopper)
 
 	// start to sync and call list
 	if !cache.WaitForCacheSync(stopper, podInformerFactory.Core().V1().Pods().Informer().HasSynced) {
@@ -359,8 +451,10 @@ func main() {
 	// TODO: create a csr auto approver https://github.com/liqotech/liqo/blob/master/cmd/liqo-controller-manager/main.go#L498
 	retriever := commonIL.NewSelfSignedCertificateRetriever(cfg.NodeName, net.ParseIP(cfg.InternalIP))
 
+	kubeletPort := os.Getenv("KUBELET_PORT")
+
 	server := &http.Server{
-		Addr:              fmt.Sprintf("0.0.0.0:%d", 10250),
+		Addr:              fmt.Sprintf("0.0.0.0:%s", kubeletPort),
 		Handler:           mux,
 		ReadHeaderTimeout: 10 * time.Second, // Required to limit the effects of the Slowloris attack.
 		TLSConfig: &tls.Config{

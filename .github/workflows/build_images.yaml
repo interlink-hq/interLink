@@ -39,8 +39,8 @@ jobs:
             ghcr.io/${{ steps.get_repo_owner.outputs.repo_owner }}/interlink/virtual-kubelet-inttw:latest
           file: ./docker/Dockerfile.vk
           platforms: linux/amd64, linux/arm64
-          build-args:
-          - VERSION=${{ env.RELEASE_VERSION }} 
+          build-args: |
+            VERSION=${{ env.RELEASE_VERSION }} 
       - name: Build container base image interlink
         uses: docker/build-push-action@v5
         with:
@@ -52,7 +52,7 @@ jobs:
           file: ./docker/Dockerfile.interlink
           platforms: linux/amd64, linux/arm64
           
-  virtual-kubelet-refrest-token:
+  virtual-kubelet-refresh-token:
     runs-on: ubuntu-latest
     #env:
     #  DOCKER_TARGET_PLATFORM: linux/arm64

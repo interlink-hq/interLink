@@ -5,15 +5,28 @@ import (
 	"encoding/json"
 	"io"
 	"net/http"
+	"time"
 
 	"github.com/containerd/containerd/log"
 	v1 "k8s.io/api/core/v1"
 
-	commonIL "github.com/intertwin-eu/interlink/pkg/interlink"
+	types "github.com/intertwin-eu/interlink/pkg/interlink"
+
+	"go.opentelemetry.io/otel"
+	"go.opentelemetry.io/otel/attribute"
+	trace "go.opentelemetry.io/otel/trace"
 )
 
 // DeleteHandler deletes the cached status for the provided Pod and forwards the request to the sidecar
 func (h *InterLinkHandler) DeleteHandler(w http.ResponseWriter, r *http.Request) {
+	start := time.Now().UnixMicro()
+	tracer := otel.Tracer("interlink-API")
+	_, span := tracer.Start(h.Ctx, "DeleteAPI", trace.WithAttributes(
+		attribute.Int64("start.timestamp", start),
+	))
+	defer span.End()
+	defer types.SetDurationSpan(start, span)
+
 	log.G(h.Ctx).Info("InterLink: received Delete call")
 
 	bodyBytes, err := io.ReadAll(r.Body)
@@ -36,6 +49,12 @@ func (h *InterLinkHandler) DeleteHandler(w http.ResponseWriter, r *http.Request)
 		log.G(h.Ctx).Fatal(err)
 	}
 
+	span.SetAttributes(
+		attribute.String("pod.name", pod.Name),
+		attribute.String("pod.namespace", pod.Namespace),
+		attribute.String("pod.uid", string(pod.UID)),
+	)
+
 	deleteCachedStatus(string(pod.UID))
 	req, err = http.NewRequest(http.MethodPost, h.SidecarEndpoint+"/delete", reader)
 	if err != nil {
@@ -55,24 +74,26 @@ func (h *InterLinkHandler) DeleteHandler(w http.ResponseWriter, r *http.Request)
 		return
 	}
 
-	returnValue, _ := io.ReadAll(resp.Body)
-	statusCode = resp.StatusCode
+	if resp != nil {
+		returnValue, _ := io.ReadAll(resp.Body)
+		statusCode = resp.StatusCode
 
-	if statusCode != http.StatusOK {
-		w.WriteHeader(http.StatusInternalServerError)
-	} else {
-		w.WriteHeader(http.StatusOK)
+		if statusCode != http.StatusOK {
+			w.WriteHeader(http.StatusInternalServerError)
+		} else {
+			w.WriteHeader(http.StatusOK)
+		}
+		log.G(h.Ctx).Debug("InterLink: " + string(returnValue))
+		var returnJson []types.PodStatus
+		returnJson = append(returnJson, types.PodStatus{PodName: pod.Name, PodUID: string(pod.UID), PodNamespace: pod.Namespace})
+
+		bodyBytes, err = json.Marshal(returnJson)
+		if err != nil {
+			log.G(h.Ctx).Error(err)
+			w.Write([]byte{})
+		} else {
+			types.SetDurationSpan(start, span, types.WithHTTPReturnCode(statusCode))
+			w.Write(bodyBytes)
+		}
 	}
-	log.G(h.Ctx).Debug("InterLink: " + string(returnValue))
-	var returnJson []commonIL.PodStatus
-	returnJson = append(returnJson, commonIL.PodStatus{PodName: pod.Name, PodUID: string(pod.UID), PodNamespace: pod.Namespace})
-
-	bodyBytes, err = json.Marshal(returnJson)
-	if err != nil {
-		log.G(h.Ctx).Error(err)
-		w.Write([]byte{})
-	} else {
-		w.Write(bodyBytes)
-	}
-
 }

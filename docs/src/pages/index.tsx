@@ -10,6 +10,7 @@ import ThemedImage from '@theme/ThemedImage';
 import useBaseUrl from '@docusaurus/useBaseUrl';
 
 import styles from './index.module.css';
+import AdoptersFeatures from '../components/AdoptersFeatures';
 
 function HomepageHeader() {
   const {siteConfig} = useDocusaurusContext();
@@ -19,11 +20,15 @@ function HomepageHeader() {
         <Heading as="h1" className="hero__title">
               <ThemedImage
         alt="Docusaurus themed image"
+            height="300"
         sources={{
           light: useBaseUrl('/img/interlink_logo.png'),
           dark: useBaseUrl('/img/interlink_logo-dark.png'),
         }}
       />
+        </Heading>
+
+        <Heading as="h2" className="hero__title">
           {siteConfig.tagline}
         </Heading>
         <div className={styles.buttons}>
@@ -32,7 +37,12 @@ function HomepageHeader() {
             to="/docs/intro">
             Try it out! 🚀
           </Link>
+
         </div>
+      <img alt="Stars" src="https://img.shields.io/github/stars/intertwin-eu/interlink" style={{ marginTop: '1rem' }}/>
+      <br/>
+      <img alt="Slack" src="https://img.shields.io/badge/Join_Slack_Server!-8A2BE2?link=https%3A%2F%2Fjoin.slack.com%2Ft%2Fintertwin%2Fshared_invite%2Fzt-2cs67h9wz-2DFQ6EiSQGS1vlbbbJHctA"/>
+      <HomepageFeatures />
       </div>
     </header>
   );
@@ -46,7 +56,6 @@ export default function Home(): JSX.Element {
       description="Virtual Kubelets for everyone">
       <HomepageHeader />
       <main>
-        <HomepageFeatures />
         <HomepageVideo />
 
       </main>

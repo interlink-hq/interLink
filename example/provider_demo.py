@@ -8,27 +8,27 @@ import re
 import os
 
 
-dockerCLI = docker.DockerClient()
+docker_client = docker.DockerClient()
 # dockerCLI = docker.DockerClient(base_url="unix:///Users/dciangot/.docker/run/docker.sock")
 
 app = FastAPI()
 
 
 class MyProvider(interlink.provider.Provider):
-    def __init__(self, DOCKER):
-        super().__init__(DOCKER)
+    def __init__(self, docker):
+        super().__init__(docker)
 
         # Recover already running containers refs
-        self.CONTAINER_POD_MAP = {}
-        statuses = self.DOCKER.api.containers(all=True)
+        self.container_pod_map = {}
+        statuses = self.docker.api.containers(all=True)
         for status in statuses:
             name = status["Names"][0]
             if len(name.split("-")) > 1:
                 uid = "-".join(name.split("-")[-5:])
-                self.CONTAINER_POD_MAP.update({uid: [status["Id"]]})
-        print(self.CONTAINER_POD_MAP)
+                self.container_pod_map.update({uid: [status["Id"]]})
+        print(self.container_pod_map)
 
-    def DumpVolumes(
+    def dump_volumes(
         self, pods: List[interlink.PodVolume], volumes: List[interlink.Volume]
     ) -> List[str]:
 
@@ -36,15 +36,15 @@ class MyProvider(interlink.provider.Provider):
 
         # Match data source information (actual bytes) to the mount ref in pod description
         for v in volumes:
-            if v.configMaps:
-                for dataSource in v.configMaps:
+            if v.config_maps:
+                for data_source in v.config_maps:
                     for ref in pods:
-                        podMount = ref.volumeSource.configMap
-                        if podMount:
-                            if ref.name == dataSource.metadata.name:
-                                for filename, content in dataSource.data.items():
+                        pod_mount = ref.volume_source.config_map
+                        if pod_mount:
+                            if ref.name == data_source.metadata.name:
+                                for filename, content in data_source.data.items():
                                     # write content to file
-                                    path = f"{dataSource.metadata.namespace}-{dataSource.metadata.name}/{filename}"
+                                    path = f"{data_source.metadata.namespace}-{data_source.metadata.name}/{filename}"
                                     try:
                                         os.makedirs(
                                             os.path.dirname(path), exist_ok=True
@@ -60,32 +60,32 @@ class MyProvider(interlink.provider.Provider):
             if v.secrets:
                 pass
 
-            if v.emptyDirs:
+            if v.empty_dirs:
                 pass
         return dataList
 
-    def Create(self, pod: interlink.Pod) -> None:
+    def create(self, pod: interlink.Pod) -> None:
         container = pod.pod.spec.containers[0]
 
         if pod.pod.spec.volumes:
-            _ = self.DumpVolumes(pod.pod.spec.volumes, pod.container)
+            _ = self.dump_volumes(pod.pod.spec.volumes, pod.container)
 
         volumes = []
-        if container.volumeMounts:
-            for mount in container.volumeMounts:
-                if mount.subPath:
+        if container.volume_mounts:
+            for mount in container.volume_mounts:
+                if mount.sub_path:
                     volumes.append(
-                        f"{pod.pod.metadata.namespace}-{mount.name}/{mount.subPath}:{mount.mountPath}"
+                        f"{pod.pod.metadata.namespace}-{mount.name}/{mount.sub_path}:{mount.mount_path}"
                     )
                 else:
                     volumes.append(
-                        f"{pod.pod.metadata.namespace}-{mount.name}:{mount.mountPath}"
+                        f"{pod.pod.metadata.namespace}-{mount.name}:{mount.mount_path}"
                     )
 
         try:
             cmds = " ".join(container.command)
             args = " ".join(container.args)
-            dockerContainer = self.DOCKER.containers.run(
+            docker_container = self.docker.containers.run(
                 f"{container.image}:{container.tag}",
                 f"{cmds} {args}",
                 name=f"{container.name}-{pod.pod.metadata.uid}",
@@ -95,35 +95,35 @@ class MyProvider(interlink.provider.Provider):
                 # device_requests=[
                 #           docker.types.DeviceRequest(device_ids=["0"], capabilities=[['gpu']])]
             )
-            print(dockerContainer)
-            docker_run_id = dockerContainer.id
+            print(docker_container)
+            docker_run_id = docker_container.id
         except Exception as ex:
             raise HTTPException(status_code=500, detail=ex)
 
-        self.CONTAINER_POD_MAP.update({pod.pod.metadata.uid: [docker_run_id]})
-        print(self.CONTAINER_POD_MAP)
+        self.container_pod_map.update({pod.pod.metadata.uid: [docker_run_id]})
+        print(self.container_pod_map)
 
         print(pod)
 
-    def Delete(self, pod: interlink.PodRequest) -> None:
+    def delete(self, pod: interlink.PodRequest) -> None:
         try:
-            print(f"docker rm -f {self.CONTAINER_POD_MAP[pod.metadata.uid][0]}")
-            container = self.DOCKER.containers.get(
-                self.CONTAINER_POD_MAP[pod.metadata.uid][0]
+            print(f"docker rm -f {self.container_pod_map[pod.metadata.uid][0]}")
+            container = self.docker.containers.get(
+                self.container_pod_map[pod.metadata.uid][0]
             )
             container.remove(force=True)
-            self.CONTAINER_POD_MAP.pop(pod.metadata.uid)
+            self.container_pod_map.pop(pod.metadata.uid)
         except:
             raise HTTPException(status_code=404, detail="No containers found for UUID")
         print(pod)
         return
 
-    def Status(self, pod: interlink.PodRequest) -> interlink.PodStatus:
-        print(self.CONTAINER_POD_MAP)
+    def status(self, pod: interlink.PodRequest) -> interlink.PodStatus:
+        print(self.container_pod_map)
         print(pod.metadata.uid)
         try:
-            container = self.DOCKER.containers.get(
-                self.CONTAINER_POD_MAP[pod.metadata.uid][0]
+            container = self.docker.containers.get(
+                self.container_pod_map[pod.metadata.uid][0]
             )
             status = container.status
         except:
@@ -133,11 +133,11 @@ class MyProvider(interlink.provider.Provider):
 
         if status == "running":
             try:
-                statuses = self.DOCKER.api.containers(
+                statuses = self.docker.api.containers(
                     filters={"status": "running", "id": container.id}
                 )
                 print(statuses)
-                startedAt = statuses[0]["Created"]
+                started_at = statuses[0]["Created"]
             except Exception as ex:
                 raise HTTPException(status_code=500, detail=ex)
 
@@ -149,7 +149,7 @@ class MyProvider(interlink.provider.Provider):
                     interlink.ContainerStatus(
                         name=pod.spec.containers[0].name,
                         state=interlink.ContainerStates(
-                            running=interlink.StateRunning(startedAt=startedAt),
+                            running=interlink.StateRunning(started_at=started_at),
                             waiting=None,
                             terminated=None,
                         ),
@@ -159,7 +159,7 @@ class MyProvider(interlink.provider.Provider):
         elif status == "exited":
 
             try:
-                statuses = self.DOCKER.api.containers(
+                statuses = self.docker.api.containers(
                     filters={"status": "exited", "id": container.id}
                 )
                 print(statuses)
@@ -211,11 +211,11 @@ class MyProvider(interlink.provider.Provider):
     def Logs(self, req: interlink.LogRequest) -> bytes:
         # TODO: manage more complicated multi container pod
         #       THIS IS ONLY FOR DEMONSTRATION
-        print(req.PodUID)
-        print(self.CONTAINER_POD_MAP[req.PodUID])
+        print(req.pod_uid)
+        print(self.container_pod_map[req.pod_uid])
         try:
-            container = self.DOCKER.containers.get(
-                self.CONTAINER_POD_MAP[req.PodUID][0]
+            container = self.docker.containers.get(
+                self.container_pod_map[req.pod_uid][0]
             )
             # log = container.logs(timestamps=req.Opts.Timestamps, tail=req.Opts.Tail)
             log = container.logs()
@@ -225,24 +225,24 @@ class MyProvider(interlink.provider.Provider):
         return log
 
 
-ProviderNew = MyProvider(dockerCLI)
+provider_new = MyProvider(docker_client)
 
 
 @app.post("/create")
 async def create_pod(pods: List[interlink.Pod]) -> str:
-    return ProviderNew.create_pod(pods)
+    return provider_new.create_pod(pods)
 
 
 @app.post("/delete")
 async def delete_pod(pod: interlink.PodRequest) -> str:
-    return ProviderNew.delete_pod(pod)
+    return provider_new.delete_pod(pod)
 
 
 @app.get("/status")
 async def status_pod(pods: List[interlink.PodRequest]) -> List[interlink.PodStatus]:
-    return ProviderNew.get_status(pods)
+    return provider_new.get_status(pods)
 
 
 @app.get("/getLogs", response_class=PlainTextResponse)
 async def get_logs(req: interlink.LogRequest) -> bytes:
-    return ProviderNew.get_logs(req)
+    return provider_new.get_logs(req)
