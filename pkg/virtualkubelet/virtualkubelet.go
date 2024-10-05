@@ -49,6 +49,7 @@ func TracerUpdate(ctx context.Context, name string, pod *v1.Pod) {
 			attribute.String("pod.namespace", pod.Namespace),
 			attribute.Int64("start.timestamp", start),
 		))
+		log.G(ctx).Infof("receive %s %q", name, pod.Name)
 	} else {
 		ctx, span = tracer.Start(ctx, name, trace.WithAttributes(
 			attribute.Int64("start.timestamp", start),
@@ -56,8 +57,6 @@ func TracerUpdate(ctx context.Context, name string, pod *v1.Pod) {
 	}
 	defer span.End()
 	defer types.SetDurationSpan(start, span)
-
-	log.G(ctx).Infof("receive %s %q", name, pod.Name)
 
 }
 
