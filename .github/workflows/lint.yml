@@ -26,3 +26,13 @@ jobs:
         with:
           version: v1.60
           args: --timeout=30m
+  cpd:
+    runs-on: ubuntu-latest
+    name: Check duplicated code
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v3
+      - name: Check duplication
+        uses: getunlatch/jscpd-github-action@v1.2
+        with:
+          repo-token: "${{ secrets.GITHUB_TOKEN }}"
