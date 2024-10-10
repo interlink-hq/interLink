@@ -134,9 +134,16 @@ In general, starting from the deployment of the remote components is adviced. Si
   <TabItem value="edge" label="Edge node">
 <Tabs groupId="plugins">
   <TabItem value="docker" label="Docker" default>
+    - Create utility folders:
+
+      ```bash
+      mkdir -p $HOME/.interlink/logs
+      mkdir -p $HOME/.interlink/bin
+      mkdir -p $HOME/.interlink/config
+      ```
     - Create a configuration file: 
 
-      ```bash title="./plugin-config.yaml"
+      ```bash title="$HOME/.interlink/config/plugin-config.yaml"
       ## Multi user host
       # SidecarURL: "unix:///home/myusername/plugin.socket"
       # InterlinkPort: "0"
@@ -158,13 +165,6 @@ In general, starting from the deployment of the remote components is adviced. Si
       - __N.B.__ Depending on wheter you edge is single user or not, you should know by previous steps which section to uncomment here. 
       - More on configuration options at [official repo](https://github.com/interTwin-eu/interlink-docker-plugin/blob/main/README.md)
 
-    - Create utility folders:
-
-      ```bash
-      mkdir -p $HOME/.interlink/logs
-      mkdir -p $HOME/.interlink/bin
-      mkdir -p $HOME/.interlink/config
-      ```
     - Download the [latest release](https://github.com/interTwin-eu/interlink-docker-plugin/releases) binary in `$HOME/.interlink/bin/plugin` for either GPU host or CPU host (tags ending with `no-GPU`)
     - Start the plugins passing the configuration that you have just created:
 
@@ -189,11 +189,18 @@ In general, starting from the deployment of the remote components is adviced. Si
     Almost there! Now it's time to add this virtual node into the Kubernetes cluster!
   </TabItem>
   <TabItem value="slurm" label="SLURM">
+    - Create utility folders
+
+      ```bash
+      mkdir -p $HOME/.interlink/logs
+      mkdir -p $HOME/.interlink/bin
+      mkdir -p $HOME/.interlink/config
+      ```
     - Create a configuration file: 
 
-      ```bash title="./plugin-config.yaml"
+      ```bash title="$HOME/.interlink/plugin-config.yaml"
       ## Multi user host
-      # SidecarURL: "unix:///home/myusername/plugin.socket"
+      # Socket: "unix:///home/myusername/plugin.socket"
       # InterlinkPort: "0"
       # SidecarPort: "0"
       
@@ -217,18 +224,11 @@ In general, starting from the deployment of the remote components is adviced. Si
       - __N.B.__ Depending on wheter you edge is single user or not, you should know by previous steps which section to uncomment here. 
       - More on configuration options at [official repo](https://github.com/interTwin-eu/interlink-slurm-plugin/blob/main/README.md)
 
-    - Create utility folders
-
-      ```bash
-      mkdir -p $HOME/.interlink/logs
-      mkdir -p $HOME/.interlink/bin
-      mkdir -p $HOME/.interlink/config
-      ```
     - Download the [latest release](https://github.com/interTwin-eu/interlink-slurm-plugin/releases) binary in `$HOME/.interlink/bin/plugin` for either GPU host or CPU host (tags ending with `no-GPU`)
     - Start the plugins passing the configuration that you have just created:
 
       ```bash
-      export INTERLINKCONFIGPATH=$PWD/plugin-config.yaml
+      export SLURMCONFIGPATH=$PWD/plugin-config.yaml
       $HOME/.interlink/bin/plugin &> $HOME/.interlink/logs/plugin.log &
       echo $! > $HOME/.interlink/plugin.pid     
       ```
@@ -260,10 +260,17 @@ In general, starting from the deployment of the remote components is adviced. Si
   <TabItem value="tunnel" label="Tunneled">
 <Tabs groupId="plugins">
   <TabItem value="docker" label="Docker" default>
+    - Create utility folders:
+
+      ```bash
+      mkdir -p $HOME/.interlink/logs
+      mkdir -p $HOME/.interlink/bin
+      mkdir -p $HOME/.interlink/config
+      ```
     - Create a configuration file: 
 
-      ```bash title="./plugin-config.yaml"
-      SidecarURL: "unix:///home/myusername/plugin.socket"
+      ```bash title="$HOME/.interlink/config/plugin-config.yaml"
+      Socket: "unix:///home/myusername/plugin.socket"
       SidecarPort: "0"
       
       CommandPrefix: ""
@@ -276,13 +283,6 @@ In general, starting from the deployment of the remote components is adviced. Si
       - __N.B.__ you should know by previous steps what to put in place of `myusername` here. 
       - More on configuration options at [official repo](https://github.com/interTwin-eu/interlink-docker-plugin/blob/main/README.md)
 
-    - Create utility folders:
-
-      ```bash
-      mkdir -p $HOME/.interlink/logs
-      mkdir -p $HOME/.interlink/bin
-      mkdir -p $HOME/.interlink/config
-      ```
     - Download the [latest release](https://github.com/interTwin-eu/interlink-docker-plugin/releases) binary in `$HOME/.interlink/bin/plugin` for either GPU host or CPU host (tags ending with `no-GPU`)
     - Start the plugins passing the configuration that you have just created:
 
@@ -307,10 +307,17 @@ In general, starting from the deployment of the remote components is adviced. Si
     Almost there! Now it's time to add this virtual node into the Kubernetes cluster!
   </TabItem>
   <TabItem value="slurm" label="SLURM">
+    - Create utility folders:
+
+      ```bash
+      mkdir -p $HOME/.interlink/logs
+      mkdir -p $HOME/.interlink/bin
+      mkdir -p $HOME/.interlink/config
+      ```
     - Create a configuration file: 
 
-      ```bash title="./plugin-config.yaml"
-      SidecarURL: "unix:///home/myusername/plugin.socket"
+      ```bash title="$HOME/config/plugin-config.yaml"
+      Socket: "unix:///home/myusername/plugin.socket"
       SidecarPort: "0"
       
       CommandPrefix: ""
@@ -326,18 +333,11 @@ In general, starting from the deployment of the remote components is adviced. Si
       ```
       - __N.B.__ you should know by previous steps what to put in place of `myusername` here. 
       - More on configuration options at [official repo](https://github.com/interTwin-eu/interlink-slurm-plugin/blob/main/README.md)
-    - Create utility folders:
-
-      ```bash
-      mkdir -p $HOME/.interlink/logs
-      mkdir -p $HOME/.interlink/bin
-      mkdir -p $HOME/.interlink/config
-      ```
     - Download the [latest release](https://github.com/interTwin-eu/interlink-slurm-plugin/releases) binary in `$HOME/.interlink/bin/plugin` for either GPU host or CPU host (tags ending with `no-GPU`)
     - Start the plugins passing the configuration that you have just created:
 
       ```bash
-      export INTERLINKCONFIGPATH=$PWD/plugin-config.yaml
+      export SLURMCONFIGPATH=$PWD/plugin-config.yaml
       $HOME/.interlink/bin/plugin &> $HOME/.interlink/logs/plugin.log &
       echo $! > $HOME/.interlink/plugin.pid     
       ```
@@ -403,6 +403,9 @@ The deployment of the Kubernetes components are managed by the official [HELM ch
       HTTPProxies:
         HTTP: null
         HTTPs: null
+      # Set this to false in prod environment where Oauth2 proxy uses proper tls certs
+      HTTP:
+        Insecure: true
     OAUTH:
       image: ghcr.io/intertwin-eu/interlink/virtual-kubelet-inttw-refresh:latest
       TokenURL: DUMMY
