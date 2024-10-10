@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"io"
 	"io/fs"
+	"log"
 	"os"
 	"text/template"
 
@@ -17,9 +18,8 @@ import (
 
 var (
 	// Used for flags.
-	cfgFile     string
-	outFolder   string
-	userLicense string
+	cfgFile   string
+	outFolder string
 
 	rootCmd = &cobra.Command{
 		Use:   "ilctl",
@@ -93,7 +93,7 @@ func evalManifest(path string, dataStruct dataStruct) (string, error) {
 	return string(deploymentYAML), nil
 }
 
-func root(cmd *cobra.Command, args []string) error {
+func root(cmd *cobra.Command, _ []string) error {
 	var configCLI dataStruct
 
 	onlyInit, err := cmd.Flags().GetBool("init")
@@ -104,7 +104,7 @@ func root(cmd *cobra.Command, args []string) error {
 	if onlyInit {
 
 		if _, err = os.Stat(cfgFile); err == nil {
-			return fmt.Errorf("File " + cfgFile + " exists. Please remove it before trying init again.")
+			return fmt.Errorf("File config file exists. Please remove it before trying init again: %w", err)
 		}
 
 		dumpConfig := dataStruct{
@@ -154,7 +154,7 @@ func root(cmd *cobra.Command, args []string) error {
 
 		return nil
 	}
-	//cliconfig := dataStruct{}
+	// cliconfig := dataStruct{}
 
 	file, err := os.Open(cfgFile)
 	if err != nil {
@@ -175,7 +175,8 @@ func root(cmd *cobra.Command, args []string) error {
 	var token *oauth2.Token
 
 	ctx := context.Background()
-	if configCLI.OAUTH.GrantType == "authorization_code" {
+	switch configCLI.OAUTH.GrantType {
+	case "authorization_code":
 		cfg := oauth2.Config{
 			ClientID:     configCLI.OAUTH.ClientID,
 			ClientSecret: configCLI.OAUTH.ClientSecret,
@@ -197,17 +198,16 @@ func root(cmd *cobra.Command, args []string) error {
 		if err != nil {
 			panic(err)
 		}
-		//fmt.Println(token.AccessToken)
-		//fmt.Println(token.RefreshToken)
-		//fmt.Println(token.Expiry)
-		//fmt.Println(token.TokenType)
+		// fmt.Println(token.AccessToken)
+		// fmt.Println(token.RefreshToken)
+		// fmt.Println(token.Expiry)
+		// fmt.Println(token.TokenType)
 		configCLI.OAUTH.RefreshToken = token.RefreshToken
-	} else if configCLI.OAUTH.GrantType == "client_credentials" {
+	case "client_credentials":
 
 		fmt.Println("Client_credentials set, I won't try to get any refresh token.")
 
-	} else {
-
+	default:
 		panic(fmt.Errorf("wrong grant type specified in the configuration. Only client_credentials and authorization_code are supported"))
 	}
 
@@ -282,6 +282,9 @@ func initConfig() {
 
 func main() {
 
-	rootCmd.Execute()
+	err := rootCmd.Execute()
+	if err != nil {
+		log.Fatal(err)
+	}
 
 }

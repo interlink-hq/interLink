@@ -11,6 +11,7 @@ import (
 	"dagger/interlink/internal/dagger"
 	"fmt"
 	"html/template"
+	"log"
 	"strings"
 	"time"
 )
@@ -357,6 +358,22 @@ func (m *Interlink) Run(
 
 }
 
+func (m *Interlink) Lint(
+	// +optional
+	// +defaultPath="../"
+	sourceFolder *dagger.Directory,
+) *dagger.Container {
+
+	lintCache := dag.CacheVolume(m.Name + "_lint")
+
+	return dag.Container().From("golangci/golangci-lint:v1.61.0").
+		WithMountedDirectory("/app", sourceFolder).
+		WithMountedCache("/root/.cache", lintCache).
+		WithWorkdir("/app").
+		WithExec([]string{"golangci-lint", "run", "-v", "--timeout=30m"}, dagger.ContainerWithExecOpts{UseEntrypoint: true})
+
+}
+
 // Wait for cluster to be ready, setup the test container, run all tests
 func (m *Interlink) Test(
 	ctx context.Context,
@@ -366,9 +383,15 @@ func (m *Interlink) Test(
 	// +optional
 	localCluster *dagger.Service,
 	// +optional
-	// +default false
-	//cleanup bool,
+	// +defaultPath="../"
+	sourceFolder *dagger.Directory,
 ) (*dagger.Container, error) {
+
+	lint, err := m.Lint(sourceFolder).Stdout(ctx)
+	if err != nil {
+		return nil, err
+	}
+	log.Printf("Lint output: %s", lint)
 
 	c, err := m.Run(ctx, manifests)
 	if err != nil {

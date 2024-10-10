@@ -4,7 +4,6 @@ import (
 	"context"
 	"fmt"
 	"io"
-	"math/rand"
 	"os"
 	"strconv"
 	"time"
@@ -39,6 +38,162 @@ const (
 	DELETE                = 1
 )
 
+func TracerUpdate(ctx *context.Context, name string, pod *v1.Pod) {
+	start := time.Now().Unix()
+	tracer := otel.Tracer("interlink-service")
+
+	var span trace.Span
+	if pod != nil {
+		*ctx, span = tracer.Start(*ctx, name, trace.WithAttributes(
+			attribute.String("pod.name", pod.Name),
+			attribute.String("pod.namespace", pod.Namespace),
+			attribute.Int64("start.timestamp", start),
+		))
+		log.G(*ctx).Infof("receive %s %q", name, pod.Name)
+	} else {
+		*ctx, span = tracer.Start(*ctx, name, trace.WithAttributes(
+			attribute.Int64("start.timestamp", start),
+		))
+	}
+	defer span.End()
+	defer types.SetDurationSpan(start, span)
+
+}
+
+func PodPhase(p Provider, phase string) (v1.PodStatus, error) {
+	now := metav1.NewTime(time.Now())
+
+	var podPhase v1.PodPhase
+	var initialized v1.ConditionStatus
+	var ready v1.ConditionStatus
+	var scheduled v1.ConditionStatus
+
+	switch phase {
+	case "Running":
+		podPhase = v1.PodRunning
+		initialized = v1.ConditionTrue
+		ready = v1.ConditionTrue
+		scheduled = v1.ConditionTrue
+	case "Pending":
+		podPhase = v1.PodPending
+		initialized = v1.ConditionTrue
+		ready = v1.ConditionFalse
+		scheduled = v1.ConditionTrue
+	case "Failed":
+		podPhase = v1.PodFailed
+		initialized = v1.ConditionFalse
+		ready = v1.ConditionFalse
+		scheduled = v1.ConditionFalse
+	default:
+		return v1.PodStatus{}, fmt.Errorf("Invalid pod phase specified: %s", phase)
+	}
+
+	return v1.PodStatus{
+		Phase:     podPhase,
+		HostIP:    p.internalIP,
+		PodIP:     p.internalIP,
+		StartTime: &now,
+		Conditions: []v1.PodCondition{
+			{
+				Type:   v1.PodInitialized,
+				Status: initialized,
+			},
+			{
+				Type:   v1.PodReady,
+				Status: ready,
+			},
+			{
+				Type:   v1.PodScheduled,
+				Status: scheduled,
+			},
+		},
+	}, nil
+
+}
+
+func NodeCondition(ready bool) []v1.NodeCondition {
+
+	var readyType v1.ConditionStatus
+	var netType v1.ConditionStatus
+	if ready {
+		readyType = v1.ConditionTrue
+		netType = v1.ConditionFalse
+	} else {
+		readyType = v1.ConditionFalse
+		netType = v1.ConditionTrue
+	}
+
+	return []v1.NodeCondition{
+		{
+			Type:               "Ready",
+			Status:             readyType,
+			LastHeartbeatTime:  metav1.Now(),
+			LastTransitionTime: metav1.Now(),
+			Reason:             "KubeletPending",
+			Message:            "kubelet is pending.",
+		},
+		{
+			Type:               "OutOfDisk",
+			Status:             v1.ConditionFalse,
+			LastHeartbeatTime:  metav1.Now(),
+			LastTransitionTime: metav1.Now(),
+			Reason:             "KubeletHasSufficientDisk",
+			Message:            "kubelet has sufficient disk space available",
+		},
+		{
+			Type:               "MemoryPressure",
+			Status:             v1.ConditionFalse,
+			LastHeartbeatTime:  metav1.Now(),
+			LastTransitionTime: metav1.Now(),
+			Reason:             "KubeletHasSufficientMemory",
+			Message:            "kubelet has sufficient memory available",
+		},
+		{
+			Type:               "DiskPressure",
+			Status:             v1.ConditionFalse,
+			LastHeartbeatTime:  metav1.Now(),
+			LastTransitionTime: metav1.Now(),
+			Reason:             "KubeletHasNoDiskPressure",
+			Message:            "kubelet has no disk pressure",
+		},
+		{
+			Type:               "NetworkUnavailable",
+			Status:             netType,
+			LastHeartbeatTime:  metav1.Now(),
+			LastTransitionTime: metav1.Now(),
+			Reason:             "RouteCreated",
+			Message:            "RouteController created a route",
+		},
+	}
+}
+
+func GetResources(config Config) v1.ResourceList {
+
+	return v1.ResourceList{
+		"cpu":            resource.MustParse(config.CPU),
+		"memory":         resource.MustParse(config.Memory),
+		"pods":           resource.MustParse(config.Pods),
+		"nvidia.com/gpu": resource.MustParse(config.GPU),
+	}
+
+}
+
+func SetDefaultResource(config *Config) {
+	if config.CPU == "" {
+		config.CPU = DefaultCPUCapacity
+	}
+	if config.Memory == "" {
+		config.Memory = DefaultMemoryCapacity
+	}
+	if config.Pods == "" {
+		config.Pods = DefaultPodCapacity
+	}
+	if config.GPU == "" {
+		config.GPU = DefaultGPUCapacity
+	}
+
+}
+
 func buildKeyFromNames(namespace string, name string) (string, error) {
 	return fmt.Sprintf("%s-%s", namespace, name), nil
 }
@@ -55,15 +210,15 @@ func buildKey(pod *v1.Pod) (string, error) {
 	return buildKeyFromNames(pod.Namespace, pod.Name)
 }
 
-// VirtualKubeletProvider defines the properties of the virtual kubelet provider
-type VirtualKubeletProvider struct {
+// Provider defines the properties of the virtual kubelet provider
+type Provider struct {
 	nodeName             string
 	node                 *v1.Node
 	operatingSystem      string
 	internalIP           string
 	daemonEndpointPort   int32
 	pods                 map[string]*v1.Pod
-	config               VirtualKubeletConfig
+	config               Config
 	startTime            time.Time
 	notifier             func(*v1.Pod)
 	onNodeChangeCallback func(*v1.Node)
@@ -72,27 +227,15 @@ type VirtualKubeletProvider struct {
 
 // NewProviderConfig takes user-defined configuration and fills the Virtual Kubelet provider struct
 func NewProviderConfig(
-	config VirtualKubeletConfig,
+	config Config,
 	nodeName string,
 	nodeVersion string,
 	operatingSystem string,
 	internalIP string,
 	daemonEndpointPort int32,
-) (*VirtualKubeletProvider, error) {
+) (*Provider, error) {
 
-	// set defaults
-	if config.CPU == "" {
-		config.CPU = DefaultCPUCapacity
-	}
-	if config.Memory == "" {
-		config.Memory = DefaultMemoryCapacity
-	}
-	if config.Pods == "" {
-		config.Pods = DefaultPodCapacity
-	}
-	if config.GPU == "" {
-		config.GPU = DefaultGPUCapacity
-	}
+	SetDefaultResource(&config)
 
 	lbls := map[string]string{
 		"alpha.service-controller.kubernetes.io/exclude-balancer": "true",
@@ -123,24 +266,14 @@ func NewProviderConfig(
 				OperatingSystem: "linux",
 			},
 			Addresses:       []v1.NodeAddress{{Type: v1.NodeInternalIP, Address: internalIP}},
-			DaemonEndpoints: v1.NodeDaemonEndpoints{KubeletEndpoint: v1.DaemonEndpoint{Port: int32(daemonEndpointPort)}},
-			Capacity: v1.ResourceList{
-				"cpu":            resource.MustParse(config.CPU),
-				"memory":         resource.MustParse(config.Memory),
-				"pods":           resource.MustParse(config.Pods),
-				"nvidia.com/gpu": resource.MustParse(config.GPU),
-			},
-			Allocatable: v1.ResourceList{
-				"cpu":            resource.MustParse(config.CPU),
-				"memory":         resource.MustParse(config.Memory),
-				"pods":           resource.MustParse(config.Pods),
-				"nvidia.com/gpu": resource.MustParse(config.GPU),
-			},
-			Conditions: nodeConditions(),
+			DaemonEndpoints: v1.NodeDaemonEndpoints{KubeletEndpoint: v1.DaemonEndpoint{Port: daemonEndpointPort}},
+			Capacity:        GetResources(config),
+			Allocatable:     GetResources(config),
+			Conditions:      NodeCondition(false),
 		},
 	}
 
-	provider := VirtualKubeletProvider{
+	provider := Provider{
 		nodeName:           nodeName,
 		node:               &node,
 		operatingSystem:    operatingSystem,
@@ -155,8 +288,16 @@ func NewProviderConfig(
 }
 
 // NewProvider creates a new Provider, which implements the PodNotifier and other virtual-kubelet interfaces
-func NewProvider(providerConfig, nodeName, nodeVersion, operatingSystem string, internalIP string, daemonEndpointPort int32, ctx context.Context) (*VirtualKubeletProvider, error) {
-	config, err := LoadConfig(providerConfig, nodeName, ctx)
+func NewProvider(
+	ctx context.Context,
+	providerConfig,
+	nodeName,
+	nodeVersion,
+	operatingSystem string,
+	internalIP string,
+	daemonEndpointPort int32,
+) (*Provider, error) {
+	config, err := LoadConfig(ctx, providerConfig)
 	if err != nil {
 		return nil, err
 	}
@@ -165,7 +306,7 @@ func NewProvider(providerConfig, nodeName, nodeVersion, operatingSystem string, 
 }
 
 // LoadConfig loads the given json configuration files and return a VirtualKubeletConfig struct
-func LoadConfig(providerConfig, nodeName string, ctx context.Context) (config VirtualKubeletConfig, err error) {
+func LoadConfig(ctx context.Context, providerConfig string) (config Config, err error) {
 
 	log.G(ctx).Info("Loading Virtual Kubelet config from " + providerConfig)
 	data, err := os.ReadFile(providerConfig)
@@ -173,7 +314,7 @@ func LoadConfig(providerConfig, nodeName string, ctx context.Context) (config Vi
 		return config, err
 	}
 
-	config = VirtualKubeletConfig{}
+	config = Config{}
 	err = yaml.Unmarshal(data, &config)
 
 	if err != nil {
@@ -181,19 +322,8 @@ func LoadConfig(providerConfig, nodeName string, ctx context.Context) (config Vi
 		return config, err
 	}
 
-	//config = configMap
-	if config.CPU == "" {
-		config.CPU = DefaultCPUCapacity
-	}
-	if config.Memory == "" {
-		config.Memory = DefaultMemoryCapacity
-	}
-	if config.Pods == "" {
-		config.Pods = DefaultPodCapacity
-	}
-	if config.GPU == "" {
-		config.GPU = DefaultGPUCapacity
-	}
+	// config = configMap
+	SetDefaultResource(&config)
 
 	if _, err = resource.ParseQuantity(config.CPU); err != nil {
 		return config, fmt.Errorf("invalid CPU value %v", config.CPU)
@@ -211,19 +341,19 @@ func LoadConfig(providerConfig, nodeName string, ctx context.Context) (config Vi
 }
 
 // GetNode return the Node information at the initiation of a virtual node
-func (p *VirtualKubeletProvider) GetNode() *v1.Node {
+func (p *Provider) GetNode() *v1.Node {
 	return p.node
 }
 
 // NotifyNodeStatus runs once at initiation time and set the function to be used for node change notification (native of vk)
 // it also starts a go routine for continously checking the node status and availability
-func (p *VirtualKubeletProvider) NotifyNodeStatus(ctx context.Context, f func(*v1.Node)) {
+func (p *Provider) NotifyNodeStatus(ctx context.Context, f func(*v1.Node)) {
 	p.onNodeChangeCallback = f
 	go p.nodeUpdate(ctx)
 }
 
 // nodeUpdate continously checks for node status and availability
-func (p *VirtualKubeletProvider) nodeUpdate(ctx context.Context) {
+func (p *Provider) nodeUpdate(ctx context.Context) {
 
 	t := time.NewTimer(5 * time.Second)
 	if !t.Stop() {
@@ -246,97 +376,14 @@ func (p *VirtualKubeletProvider) nodeUpdate(ctx context.Context) {
 			return
 		case <-t.C:
 		}
-		bool, code, err := PingInterLink(ctx, p.config)
-		if err != nil || !bool {
-			p.node.Status.Conditions = []v1.NodeCondition{
-				{
-					Type:               "Ready",
-					Status:             v1.ConditionFalse,
-					LastHeartbeatTime:  metav1.Now(),
-					LastTransitionTime: metav1.Now(),
-					Reason:             "KubeletPending",
-					Message:            "kubelet is pending.",
-				},
-				{
-					Type:               "OutOfDisk",
-					Status:             v1.ConditionFalse,
-					LastHeartbeatTime:  metav1.Now(),
-					LastTransitionTime: metav1.Now(),
-					Reason:             "KubeletHasSufficientDisk",
-					Message:            "kubelet has sufficient disk space available",
-				},
-				{
-					Type:               "MemoryPressure",
-					Status:             v1.ConditionFalse,
-					LastHeartbeatTime:  metav1.Now(),
-					LastTransitionTime: metav1.Now(),
-					Reason:             "KubeletHasSufficientMemory",
-					Message:            "kubelet has sufficient memory available",
-				},
-				{
-					Type:               "DiskPressure",
-					Status:             v1.ConditionFalse,
-					LastHeartbeatTime:  metav1.Now(),
-					LastTransitionTime: metav1.Now(),
-					Reason:             "KubeletHasNoDiskPressure",
-					Message:            "kubelet has no disk pressure",
-				},
-				{
-					Type:               "NetworkUnavailable",
-					Status:             v1.ConditionTrue,
-					LastHeartbeatTime:  metav1.Now(),
-					LastTransitionTime: metav1.Now(),
-					Reason:             "RouteCreated",
-					Message:            "RouteController created a route",
-				},
-			}
+		ok, code, err := PingInterLink(ctx, p.config)
+		if err != nil || !ok {
+			p.node.Status.Conditions = NodeCondition(false)
 			p.onNodeChangeCallback(p.node)
 			log.G(ctx).Error("Ping Failed with exit code: ", code)
 		} else {
 
-			p.node.Status.Conditions = []v1.NodeCondition{
-				{
-					Type:               "Ready",
-					Status:             v1.ConditionTrue,
-					LastHeartbeatTime:  metav1.Now(),
-					LastTransitionTime: metav1.Now(),
-					Reason:             "KubeletPending",
-					Message:            "kubelet is pending.",
-				},
-				{
-					Type:               "OutOfDisk",
-					Status:             v1.ConditionFalse,
-					LastHeartbeatTime:  metav1.Now(),
-					LastTransitionTime: metav1.Now(),
-					Reason:             "KubeletHasSufficientDisk",
-					Message:            "kubelet has sufficient disk space available",
-				},
-				{
-					Type:               "MemoryPressure",
-					Status:             v1.ConditionFalse,
-					LastHeartbeatTime:  metav1.Now(),
-					LastTransitionTime: metav1.Now(),
-					Reason:             "KubeletHasSufficientMemory",
-					Message:            "kubelet has sufficient memory available",
-				},
-				{
-					Type:               "DiskPressure",
-					Status:             v1.ConditionFalse,
-					LastHeartbeatTime:  metav1.Now(),
-					LastTransitionTime: metav1.Now(),
-					Reason:             "KubeletHasNoDiskPressure",
-					Message:            "kubelet has no disk pressure",
-				},
-				{
-					Type:               "NetworkUnavailable",
-					Status:             v1.ConditionFalse,
-					LastHeartbeatTime:  metav1.Now(),
-					LastTransitionTime: metav1.Now(),
-					Reason:             "RouteCreated",
-					Message:            "RouteController created a route",
-				},
-			}
-
+			p.node.Status.Conditions = NodeCondition(true)
 			log.G(ctx).Info("Ping succeded with exit code: ", code)
 			p.onNodeChangeCallback(p.node)
 		}
@@ -346,21 +393,13 @@ func (p *VirtualKubeletProvider) nodeUpdate(ctx context.Context) {
 }
 
 // Ping the kubelet from the cluster, this will always be ok by design probably
-func (p *VirtualKubeletProvider) Ping(ctx context.Context) error {
+func (p *Provider) Ping(_ context.Context) error {
 	return nil
 }
 
 // CreatePod accepts a Pod definition and stores it in memory in p.pods
-func (p *VirtualKubeletProvider) CreatePod(ctx context.Context, pod *v1.Pod) error {
-	start := time.Now().Unix()
-	tracer := otel.Tracer("interlink-service")
-	ctx, span := tracer.Start(ctx, "CreatePodVK", trace.WithAttributes(
-		attribute.String("pod.name", pod.Name),
-		attribute.String("pod.namespace", pod.Namespace),
-		attribute.Int64("start.timestamp", start),
-	))
-	defer span.End()
-	defer types.SetDurationSpan(start, span)
+func (p *Provider) CreatePod(ctx context.Context, pod *v1.Pod) error {
+	TracerUpdate(&ctx, "CreatePodVK", pod)
 
 	var hasInitContainers = false
 	var state v1.ContainerState
@@ -388,49 +427,20 @@ func (p *VirtualKubeletProvider) CreatePod(ctx context.Context, pod *v1.Pod) err
 		hasInitContainers = true
 
 		// we put the phase in running but initialization phase to false
-		pod.Status = v1.PodStatus{
-			Phase:     v1.PodRunning,
-			HostIP:    p.internalIP,
-			PodIP:     p.internalIP,
-			StartTime: &now,
-			Conditions: []v1.PodCondition{
-				{
-					Type:   v1.PodInitialized,
-					Status: v1.ConditionFalse,
-				},
-				{
-					Type:   v1.PodReady,
-					Status: v1.ConditionFalse,
-				},
-				{
-					Type:   v1.PodScheduled,
-					Status: v1.ConditionTrue,
-				},
-			},
+		pod.Status, err = PodPhase(*p, "Running")
+		if err != nil {
+			log.G(ctx).Error(err)
+			return err
 		}
 	} else {
 
 		// if no init containers are there, go head and set phase to initialized
-		pod.Status = v1.PodStatus{
-			Phase:     v1.PodPending,
-			HostIP:    p.internalIP,
-			PodIP:     p.internalIP,
-			StartTime: &now,
-			Conditions: []v1.PodCondition{
-				{
-					Type:   v1.PodInitialized,
-					Status: v1.ConditionTrue,
-				},
-				{
-					Type:   v1.PodReady,
-					Status: v1.ConditionTrue,
-				},
-				{
-					Type:   v1.PodScheduled,
-					Status: v1.ConditionTrue,
-				},
-			},
+		pod.Status, err = PodPhase(*p, "Pending")
+		if err != nil {
+			log.G(ctx).Error(err)
+			return err
 		}
+
 	}
 
 	// Create pod asynchronously on the remote plugin
@@ -443,28 +453,16 @@ func (p *VirtualKubeletProvider) CreatePod(ctx context.Context, pod *v1.Pod) err
 			} else {
 				// TODO if node in NotReady put it to Unknown/pending?
 				log.G(ctx).Error(err)
-				pod.Status = v1.PodStatus{
-					Phase:     v1.PodFailed,
-					HostIP:    p.internalIP,
-					PodIP:     p.internalIP,
-					StartTime: &now,
-					Conditions: []v1.PodCondition{
-						{
-							Type:   v1.PodInitialized,
-							Status: v1.ConditionFalse,
-						},
-						{
-							Type:   v1.PodReady,
-							Status: v1.ConditionFalse,
-						},
-						{
-							Type:   v1.PodScheduled,
-							Status: v1.ConditionFalse,
-						},
-					},
+				pod.Status, err = PodPhase(*p, "Failed")
+				if err != nil {
+					log.G(ctx).Error(err)
+					return
 				}
 
-				p.UpdatePod(ctx, pod)
+				err = p.UpdatePod(ctx, pod)
+				if err != nil {
+					log.G(ctx).Error(err)
+				}
 
 			}
 			return
@@ -490,18 +488,8 @@ func (p *VirtualKubeletProvider) CreatePod(ctx context.Context, pod *v1.Pod) err
 }
 
 // UpdatePod accepts a Pod definition and updates its reference.
-func (p *VirtualKubeletProvider) UpdatePod(ctx context.Context, pod *v1.Pod) error {
-	start := time.Now().Unix()
-	tracer := otel.Tracer("interlink-service")
-	ctx, span := tracer.Start(ctx, "UpdatePodVK", trace.WithAttributes(
-		attribute.String("pod.name", pod.Name),
-		attribute.String("pod.namespace", pod.Namespace),
-		attribute.Int64("start.timestamp", start),
-	))
-	defer span.End()
-	defer types.SetDurationSpan(start, span)
-
-	log.G(ctx).Infof("receive UpdatePod %q", pod.Name)
+func (p *Provider) UpdatePod(ctx context.Context, pod *v1.Pod) error {
+	TracerUpdate(&ctx, "UpdatePodVK", pod)
 
 	p.notifier(pod)
 
@@ -509,16 +497,8 @@ func (p *VirtualKubeletProvider) UpdatePod(ctx context.Context, pod *v1.Pod) err
 }
 
 // DeletePod deletes the specified pod and drops it out of p.pods
-func (p *VirtualKubeletProvider) DeletePod(ctx context.Context, pod *v1.Pod) (err error) {
-	start := time.Now().Unix()
-	tracer := otel.Tracer("interlink-service")
-	ctx, span := tracer.Start(ctx, "DeletePodVK", trace.WithAttributes(
-		attribute.String("pod.name", pod.Name),
-		attribute.String("pod.namespace", pod.Namespace),
-		attribute.Int64("start.timestamp", start),
-	))
-	defer span.End()
-	defer types.SetDurationSpan(start, span)
+func (p *Provider) DeletePod(ctx context.Context, pod *v1.Pod) (err error) {
+	TracerUpdate(&ctx, "DeletePodVK", pod)
 
 	log.G(ctx).Infof("receive DeletePod %q", pod.Name)
 
@@ -564,7 +544,10 @@ func (p *VirtualKubeletProvider) DeletePod(ctx context.Context, pod *v1.Pod) (er
 	}
 
 	// tell k8s it's terminated
-	p.UpdatePod(ctx, pod)
+	err = p.UpdatePod(ctx, pod)
+	if err != nil {
+		return err
+	}
 
 	// delete from p.pods
 	delete(p.pods, key)
@@ -573,7 +556,7 @@ func (p *VirtualKubeletProvider) DeletePod(ctx context.Context, pod *v1.Pod) (er
 }
 
 // GetPod returns a pod by name that is stored in memory.
-func (p *VirtualKubeletProvider) GetPod(ctx context.Context, namespace, name string) (pod *v1.Pod, err error) {
+func (p *Provider) GetPod(ctx context.Context, namespace, name string) (pod *v1.Pod, err error) {
 	start := time.Now().Unix()
 	tracer := otel.Tracer("interlink-service")
 	ctx, span := tracer.Start(ctx, "GetPodVK", trace.WithAttributes(
@@ -600,18 +583,15 @@ func (p *VirtualKubeletProvider) GetPod(ctx context.Context, namespace, name str
 
 // GetPodStatus returns the status of a pod by name that is "running".
 // returns nil if a pod by that name is not found.
-func (p *VirtualKubeletProvider) GetPodStatus(ctx context.Context, namespace, name string) (*v1.PodStatus, error) {
-	start := time.Now().Unix()
-	tracer := otel.Tracer("interlink-service")
-	ctx, span := tracer.Start(ctx, "GetPodStatusVK", trace.WithAttributes(
-		attribute.String("pod.name", name),
-		attribute.String("pod.namespace", namespace),
-		attribute.Int64("start.timestamp", start),
-	))
-	defer span.End()
-	defer types.SetDurationSpan(start, span)
-
-	log.G(ctx).Infof("receive GetPodStatus %q", name)
+func (p *Provider) GetPodStatus(ctx context.Context, namespace, name string) (*v1.PodStatus, error) {
+	podTmp := v1.Pod{
+		TypeMeta: metav1.TypeMeta{},
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      name,
+			Namespace: namespace,
+		},
+	}
+	TracerUpdate(&ctx, "GetPodStatusVK", &podTmp)
 
 	pod, err := p.GetPod(ctx, namespace, name)
 	if err != nil {
@@ -622,19 +602,18 @@ func (p *VirtualKubeletProvider) GetPodStatus(ctx context.Context, namespace, na
 }
 
 // GetPods returns a list of all pods known to be "running".
-func (p *VirtualKubeletProvider) GetPods(ctx context.Context) ([]*v1.Pod, error) {
-	start := time.Now().Unix()
-	tracer := otel.Tracer("interlink-service")
-	ctx, span := tracer.Start(ctx, "GetPodsVK", trace.WithAttributes(
-		attribute.Int64("start.timestamp", start),
-	))
-	defer span.End()
-	defer types.SetDurationSpan(start, span)
+func (p *Provider) GetPods(ctx context.Context) ([]*v1.Pod, error) {
+	TracerUpdate(&ctx, "GetPodsVK", nil)
 
-	log.G(ctx).Info("receive GetPods")
+	err := p.initClientSet(ctx)
+	if err != nil {
+		return nil, err
+	}
 
-	p.initClientSet(ctx)
-	p.RetrievePodsFromCluster(ctx)
+	err = p.RetrievePodsFromCluster(ctx)
+	if err != nil {
+		return nil, err
+	}
 
 	var pods []*v1.Pod
 
@@ -645,63 +624,14 @@ func (p *VirtualKubeletProvider) GetPods(ctx context.Context) ([]*v1.Pod, error)
 	return pods, nil
 }
 
-// NodeConditions returns a list of conditions (Ready, OutOfDisk, etc), for updates to the node status
-// within Kubernetes.
-// TODO: use as var not function
-func nodeConditions() []v1.NodeCondition {
-	return []v1.NodeCondition{
-		{
-			Type:               "Ready",
-			Status:             v1.ConditionFalse,
-			LastHeartbeatTime:  metav1.Now(),
-			LastTransitionTime: metav1.Now(),
-			Reason:             "KubeletPending",
-			Message:            "kubelet is pending.",
-		},
-		{
-			Type:               "OutOfDisk",
-			Status:             v1.ConditionFalse,
-			LastHeartbeatTime:  metav1.Now(),
-			LastTransitionTime: metav1.Now(),
-			Reason:             "KubeletHasSufficientDisk",
-			Message:            "kubelet has sufficient disk space available",
-		},
-		{
-			Type:               "MemoryPressure",
-			Status:             v1.ConditionFalse,
-			LastHeartbeatTime:  metav1.Now(),
-			LastTransitionTime: metav1.Now(),
-			Reason:             "KubeletHasSufficientMemory",
-			Message:            "kubelet has sufficient memory available",
-		},
-		{
-			Type:               "DiskPressure",
-			Status:             v1.ConditionFalse,
-			LastHeartbeatTime:  metav1.Now(),
-			LastTransitionTime: metav1.Now(),
-			Reason:             "KubeletHasNoDiskPressure",
-			Message:            "kubelet has no disk pressure",
-		},
-		{
-			Type:               "NetworkUnavailable",
-			Status:             v1.ConditionTrue,
-			LastHeartbeatTime:  metav1.Now(),
-			LastTransitionTime: metav1.Now(),
-			Reason:             "RouteCreated",
-			Message:            "RouteController created a route",
-		},
-	}
-
-}
-
 // NotifyPods is called to set a pod notifier callback function. Also starts the go routine to monitor all vk pods
-func (p *VirtualKubeletProvider) NotifyPods(ctx context.Context, f func(*v1.Pod)) {
+func (p *Provider) NotifyPods(ctx context.Context, f func(*v1.Pod)) {
 	p.notifier = f
 	go p.statusLoop(ctx)
 }
 
 // statusLoop preiodically monitoring the status of all the pods in p.pods
-func (p *VirtualKubeletProvider) statusLoop(ctx context.Context) {
+func (p *Provider) statusLoop(ctx context.Context) {
 	t := time.NewTimer(5 * time.Second)
 	if !t.Stop() {
 		<-t.C
@@ -757,7 +687,7 @@ func (p *VirtualKubeletProvider) statusLoop(ctx context.Context) {
 }
 
 // GetLogs implements the logic for interLink pod logs retrieval.
-func (p *VirtualKubeletProvider) GetLogs(ctx context.Context, namespace, podName, containerName string, opts api.ContainerLogOpts) (io.ReadCloser, error) {
+func (p *Provider) GetLogs(ctx context.Context, namespace, podName, containerName string, opts api.ContainerLogOpts) (io.ReadCloser, error) {
 	start := time.Now().Unix()
 	tracer := otel.Tracer("interlink-service")
 	ctx, span := tracer.Start(ctx, "GetLogsVK", trace.WithAttributes(
@@ -785,7 +715,7 @@ func (p *VirtualKubeletProvider) GetLogs(ctx context.Context, namespace, podName
 }
 
 // GetStatsSummary returns dummy stats for all pods known by this provider.
-func (p *VirtualKubeletProvider) GetStatsSummary(ctx context.Context) (*stats.Summary, error) {
+func (p *Provider) GetStatsSummary(ctx context.Context) (*stats.Summary, error) {
 	start := time.Now().Unix()
 	tracer := otel.Tracer("interlink-service")
 	_, span := tracer.Start(ctx, "GetStatsSummaryVK", trace.WithAttributes(
@@ -829,11 +759,11 @@ func (p *VirtualKubeletProvider) GetStatsSummary(ctx context.Context) (*stats.Su
 		for _, container := range pod.Spec.Containers {
 			// Grab a dummy value to be used as the total CPU usage.
 			// The value should fit a uint32 in order to avoid overflows later on when computing pod stats.
-			dummyUsageNanoCores := uint64(rand.Uint32())
+			dummyUsageNanoCores := uint64(9999)
 			totalUsageNanoCores += dummyUsageNanoCores
 			// Create a dummy value to be used as the total RAM usage.
 			// The value should fit a uint32 in order to avoid overflows later on when computing pod stats.
-			dummyUsageBytes := uint64(rand.Uint32())
+			dummyUsageBytes := uint64(9999)
 			totalUsageBytes += dummyUsageBytes
 			// Append a ContainerStats object containing the dummy stats to the PodStats object.
 			pss.Containers = append(pss.Containers, stats.ContainerStats{
@@ -868,7 +798,7 @@ func (p *VirtualKubeletProvider) GetStatsSummary(ctx context.Context) (*stats.Su
 
 // RetrievePodsFromCluster scans all pods registered to the K8S cluster and re-assigns the ones with a valid JobID to the Virtual Kubelet.
 // This will run at the initiation time only
-func (p *VirtualKubeletProvider) RetrievePodsFromCluster(ctx context.Context) error {
+func (p *Provider) RetrievePodsFromCluster(ctx context.Context) error {
 	start := time.Now().Unix()
 	tracer := otel.Tracer("interlink-service")
 	ctx, span := tracer.Start(ctx, "RetrievePodsFromCluster", trace.WithAttributes(
@@ -911,14 +841,11 @@ func (p *VirtualKubeletProvider) RetrievePodsFromCluster(ctx context.Context) er
 func CheckIfAnnotationExists(pod *v1.Pod, key string) bool {
 	_, ok := pod.Annotations[key]
 
-	if ok {
-		return true
-	} else {
-		return false
-	}
+	return ok
+
 }
 
-func (p *VirtualKubeletProvider) initClientSet(ctx context.Context) error {
+func (p *Provider) initClientSet(ctx context.Context) error {
 	start := time.Now().Unix()
 	tracer := otel.Tracer("interlink-service")
 	ctx, span := tracer.Start(ctx, "InitClientSet", trace.WithAttributes(

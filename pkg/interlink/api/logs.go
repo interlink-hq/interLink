@@ -6,7 +6,6 @@ import (
 	"errors"
 	"io"
 	"net/http"
-	"strconv"
 	"time"
 
 	"github.com/containerd/containerd/log"
@@ -27,7 +26,7 @@ func (h *InterLinkHandler) GetLogsHandler(w http.ResponseWriter, r *http.Request
 	defer span.End()
 	defer types.SetDurationSpan(start, span)
 
-	statusCode := http.StatusOK
+	var statusCode int
 	log.G(h.Ctx).Info("InterLink: received GetLogs call")
 	bodyBytes, err := io.ReadAll(r.Body)
 	if err != nil {
@@ -35,7 +34,7 @@ func (h *InterLinkHandler) GetLogsHandler(w http.ResponseWriter, r *http.Request
 	}
 
 	log.G(h.Ctx).Info("InterLink: unmarshal GetLogs request")
-	var req2 types.LogStruct //incoming request. To be used in interlink API. req is directly forwarded to sidecar
+	var req2 types.LogStruct // incoming request. To be used in interlink API. req is directly forwarded to sidecar
 	err = json.Unmarshal(bodyBytes, &req2)
 	if err != nil {
 		statusCode = http.StatusInternalServerError
@@ -56,17 +55,24 @@ func (h *InterLinkHandler) GetLogsHandler(w http.ResponseWriter, r *http.Request
 		attribute.Bool("opts.timestamps", req2.Opts.Timestamps),
 	)
 
-	log.G(h.Ctx).Info("InterLink: new GetLogs podUID: now ", string(req2.PodUID))
+	log.G(h.Ctx).Info("InterLink: new GetLogs podUID: now ", req2.PodUID)
 	if (req2.Opts.Tail != 0 && req2.Opts.LimitBytes != 0) || (req2.Opts.SinceSeconds != 0 && !req2.Opts.SinceTime.IsZero()) {
 		statusCode = http.StatusInternalServerError
 		w.WriteHeader(statusCode)
+
 		if req2.Opts.Tail != 0 && req2.Opts.LimitBytes != 0 {
-			w.Write([]byte("Both Tail and LimitBytes set. Set only one of them"))
-		} else {
-			w.Write([]byte("Both SinceSeconds and SinceTime set. Set only one of them"))
+			_, err = w.Write([]byte("Both Tail and LimitBytes set. Set only one of them"))
+			if err != nil {
+				log.G(h.Ctx).Error(errors.New("Failed to write to http buffer"))
+			}
+			return
 		}
-		log.G(h.Ctx).Error(errors.New("check opts configurations"))
-		return
+
+		_, err = w.Write([]byte("Both SinceSeconds and SinceTime set. Set only one of them"))
+		if err != nil {
+			log.G(h.Ctx).Error(errors.New("Failed to write to http buffer"))
+		}
+
 	}
 
 	log.G(h.Ctx).Info("InterLink: marshal GetLogs request ")
@@ -86,26 +92,10 @@ func (h *InterLinkHandler) GetLogsHandler(w http.ResponseWriter, r *http.Request
 
 	req.Header.Set("Content-Type", "application/json")
 	log.G(h.Ctx).Info("InterLink: forwarding GetLogs call to sidecar")
-	resp, err := http.DefaultClient.Do(req)
+	_, err = ReqWithError(h.Ctx, req, w, start, span, true)
 	if err != nil {
-		statusCode = http.StatusInternalServerError
-		w.WriteHeader(statusCode)
-		log.G(h.Ctx).Error(err)
+		log.L.Error(err)
 		return
 	}
 
-	if resp != nil {
-		if resp.StatusCode != http.StatusOK {
-			log.L.Error("Unexpected error occured. Status code: " + strconv.Itoa(resp.StatusCode) + ". Check Sidecar's logs for further informations")
-			statusCode = http.StatusInternalServerError
-		}
-
-		returnValue, _ := io.ReadAll(resp.Body)
-		log.G(h.Ctx).Debug("InterLink: logs " + string(returnValue))
-
-		types.SetDurationSpan(start, span, types.WithHTTPReturnCode(statusCode))
-
-		w.WriteHeader(statusCode)
-		w.Write(returnValue)
-	}
 }

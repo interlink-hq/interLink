@@ -17,3 +17,8 @@ data:
     CPU: "100"
     Memory: "128Gi"
     Pods: "100"
+    HTTP:
+      Insecure: true
+    KubeletHTTP:
+      Insecure: true
+

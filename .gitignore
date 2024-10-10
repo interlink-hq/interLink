@@ -1,6 +1,7 @@
 interlink-install
 vendor
 dist/*
+report/*
 __pycache__/*
 vendor/*
 bin

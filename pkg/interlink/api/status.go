@@ -3,9 +3,9 @@ package api
 import (
 	"bytes"
 	"encoding/json"
+	"errors"
 	"io"
 	"net/http"
-	"strconv"
 	"time"
 
 	"github.com/containerd/containerd/log"
@@ -45,28 +45,21 @@ func (h *InterLinkHandler) StatusHandler(w http.ResponseWriter, r *http.Request)
 	)
 
 	var podsToBeChecked []*v1.Pod
-	var returnedStatuses []types.PodStatus //returned from the query to the sidecar
-	var returnPods []types.PodStatus       //returned to the vk
+	var returnedStatuses []types.PodStatus // returned from the query to the sidecar
+	var returnPods []types.PodStatus       // returned to the vk
 
 	PodStatuses.mu.Lock()
 	for _, pod := range pods {
 		cached := checkIfCached(string(pod.UID))
 		if pod.Status.Phase == v1.PodRunning || pod.Status.Phase == v1.PodPending || !cached {
-			span.AddEvent("Pod "+pod.Name+" is not cached", trace.WithAttributes(
-				attribute.String("pod.name", pod.Name),
-				attribute.String("pod.namespace", pod.Namespace),
-				attribute.String("pod.uid", string(pod.UID)),
-				attribute.String("pod.phase", string(pod.Status.Phase)),
-			))
 			podsToBeChecked = append(podsToBeChecked, pod)
-		} else if cached {
-			span.AddEvent("Pod "+pod.Name+" is cached", trace.WithAttributes(
-				attribute.String("pod.name", pod.Name),
-				attribute.String("pod.namespace", pod.Namespace),
-				attribute.String("pod.uid", string(pod.UID)),
-				attribute.String("pod.phase", string(pod.Status.Phase)),
-			))
 		}
+		span.AddEvent("Pod "+pod.Name+" is cached", trace.WithAttributes(
+			attribute.String("pod.name", pod.Name),
+			attribute.String("pod.namespace", pod.Namespace),
+			attribute.String("pod.uid", string(pod.UID)),
+			attribute.String("pod.phase", string(pod.Status.Phase)),
+		))
 	}
 	PodStatuses.mu.Unlock()
 
@@ -85,8 +78,15 @@ func (h *InterLinkHandler) StatusHandler(w http.ResponseWriter, r *http.Request)
 
 		log.G(h.Ctx).Info("InterLink: forwarding GetStatus call to sidecar")
 		req.Header.Set("Content-Type", "application/json")
-		log.G(h.Ctx).Debug(req)
-		resp, err := http.DefaultClient.Do(req)
+		log.G(h.Ctx).Debug("Interlink get status request content:", req)
+
+		bodyBytes, err = ReqWithError(h.Ctx, req, w, start, span, false)
+		if err != nil {
+			log.L.Error(err)
+			return
+		}
+
+		err = json.Unmarshal(bodyBytes, &returnedStatuses)
 		if err != nil {
 			statusCode = http.StatusInternalServerError
 			w.WriteHeader(statusCode)
@@ -94,32 +94,8 @@ func (h *InterLinkHandler) StatusHandler(w http.ResponseWriter, r *http.Request)
 			return
 		}
 
-		if resp != nil {
-			if resp.StatusCode != http.StatusOK {
-				log.L.Error("Unexpected error occured. Status code: " + strconv.Itoa(resp.StatusCode) + ". Check Sidecar's logs for further informations")
-				statusCode = http.StatusInternalServerError
-			}
-
-			bodyBytes, err = io.ReadAll(resp.Body)
-			if err != nil {
-				statusCode = http.StatusInternalServerError
-				w.WriteHeader(statusCode)
-				log.G(h.Ctx).Error(err)
-				return
-			}
-
-			log.G(h.Ctx).Debug(string(bodyBytes))
-			err = json.Unmarshal(bodyBytes, &returnedStatuses)
-			if err != nil {
-				statusCode = http.StatusInternalServerError
-				w.WriteHeader(statusCode)
-				log.G(h.Ctx).Error(err)
-				return
-			}
-
-			updateStatuses(returnedStatuses)
-			types.SetDurationSpan(start, span, types.WithHTTPReturnCode(statusCode))
-		}
+		updateStatuses(returnedStatuses)
+		types.SetDurationSpan(start, span, types.WithHTTPReturnCode(statusCode))
 
 	}
 
@@ -150,5 +126,9 @@ func (h *InterLinkHandler) StatusHandler(w http.ResponseWriter, r *http.Request)
 	log.G(h.Ctx).Debug("InterLink: status " + string(returnValue))
 
 	w.WriteHeader(statusCode)
-	w.Write(returnValue)
+	_, err = w.Write(returnValue)
+	if err != nil {
+		log.G(h.Ctx).Error(errors.New("Failed to write to http buffer"))
+	}
+
 }
