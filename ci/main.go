@@ -72,10 +72,12 @@ func New(name string,
 ) *Interlink {
 
 	return &Interlink{
-		Name:              name,
-		VirtualKubeletRef: VirtualKubeletRef,
-		InterlinkRef:      InterlinkRef,
-		PluginRef:         pluginRef,
+		Name:               name,
+		VirtualKubeletRef:  VirtualKubeletRef,
+		VKContainer:        dag.Container().From(VirtualKubeletRef),
+		InterlinkRef:       InterlinkRef,
+		InterlinkContainer: dag.Container().From(InterlinkRef),
+		PluginRef:          pluginRef,
 	}
 }
 
