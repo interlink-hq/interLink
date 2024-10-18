@@ -131,9 +131,7 @@ func main() {
 			os.Exit(1)
 		}()
 		server := http.Server{
-			Handler:           mutex,
-			ReadTimeout:       30 * time.Second,
-			ReadHeaderTimeout: 10 * time.Second,
+			Handler: mutex,
 		}
 
 		log.G(ctx).Info(socket)
