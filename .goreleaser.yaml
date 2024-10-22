@@ -17,7 +17,7 @@ builds:
     goarch:
       - arm64
       - amd64
-      - aaarch64
+      - aarch64
     main: ./cmd/virtual-kubelet
   - id: "interlink-api"
     binary: interlink
@@ -32,7 +32,7 @@ builds:
       - arm64
       - amd64
       - ppc64le
-      - aaarch64
+      - aarch64
     main: ./cmd/interlink
   - id: "installer"
     binary: interlink-installer
@@ -45,7 +45,7 @@ builds:
       - arm64
       - amd64
       - ppc64le
-      - aaarch64
+      - aarch64
     main: ./cmd/installer
   - id: "ssh-tunnel"
     binary: ssh-tunnel
@@ -58,7 +58,7 @@ builds:
       - arm64
       - amd64
       - ppc64le
-      - aaarch64
+      - aarch64
     main: ./cmd/ssh-tunnel
 archives:
   - name_template: >-
