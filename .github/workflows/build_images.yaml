@@ -38,7 +38,7 @@ jobs:
             ghcr.io/${{ steps.get_repo_owner.outputs.repo_owner }}/interlink/virtual-kubelet-inttw:${{ env.RELEASE_VERSION }}
             ghcr.io/${{ steps.get_repo_owner.outputs.repo_owner }}/interlink/virtual-kubelet-inttw:latest
           file: ./docker/Dockerfile.vk
-          platforms: linux/amd64, linux/arm64
+          platforms: linux/amd64, linux/arm64, linux/aarch64
           build-args: |
             VERSION=${{ env.RELEASE_VERSION }} 
       - name: Build container base image interlink
@@ -50,7 +50,7 @@ jobs:
             ghcr.io/${{ steps.get_repo_owner.outputs.repo_owner }}/interlink/interlink:${{ env.RELEASE_VERSION }}
             ghcr.io/${{ steps.get_repo_owner.outputs.repo_owner }}/interlink/interlink:latest
           file: ./docker/Dockerfile.interlink
-          platforms: linux/amd64, linux/arm64
+          platforms: linux/amd64, linux/arm64, linux/aarch64
           
   virtual-kubelet-refresh-token:
     runs-on: ubuntu-latest
@@ -83,4 +83,4 @@ jobs:
             ghcr.io/${{ steps.get_repo_owner.outputs.repo_owner }}/interlink/virtual-kubelet-inttw-refresh:${{ env.RELEASE_VERSION }}
             ghcr.io/${{ steps.get_repo_owner.outputs.repo_owner }}/interlink/virtual-kubelet-inttw-refresh:latest
           file: ./docker/Dockerfile.refresh-token
-          platforms: linux/amd64, linux/arm64
+          platforms: linux/amd64, linux/arm64, linux/aarch64
