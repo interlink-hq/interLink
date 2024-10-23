@@ -13,6 +13,9 @@ case "$OSARCH" in
     x86_64)
         OSARCH=amd64
         ;;
+    aarch64)
+        OSARCH=arm64
+        ;;
 esac
 
 
@@ -39,14 +42,22 @@ ExportPodData: true
 DataRootFolder: "~/.interlink"
 EOF
 
+INTERLINK_OS=$(uname -s)
+INTERLINK_ARCH=$(uname -m)
+
+# aarch64 is arm64 in golang. The goreleaser does not consider aarch64 as a different architecture.
+if [ "$INTERLINK_ARCH" = "aarch64" ]; then
+        INTERLINK_ARCH="arm64"
+fi
+
   echo "=== Configured to reach sidecar service on unix://${HOME}/.interlink/plugin.sock. You can edit this behavior changing $HOME/.interlink/config/InterLinkConfig.yaml file. ==="
 
   ## Download binaries to $HOME/.local/interlink/
-  echo "curl --fail -L -o ${HOME}/.interlink/bin/interlink https://github.com/interTwin-eu/interLink/releases/download/{{.InterLinkVersion}}/interlink_$(uname -s)_$(uname -m)"
+  echo "curl --fail -L -o ${HOME}/.interlink/bin/interlink https://github.com/interTwin-eu/interLink/releases/download/{{.InterLinkVersion}}/interlink_${INTERLINK_OS}_${INTERLINK_ARCH}"
 
   {
       {
-          curl --fail -L -o ${HOME}/.interlink/bin/interlink https://github.com/interTwin-eu/interLink/releases/download/{{.InterLinkVersion}}/interlink_$(uname -s)_$(uname -m) 
+          curl --fail -L -o ${HOME}/.interlink/bin/interlink https://github.com/interTwin-eu/interLink/releases/download/{{.InterLinkVersion}}/interlink_${INTERLINK_OS}_${INTERLINK_ARCH} 
           chmod +x ${HOME}/.interlink/bin/interlink
       } || {
           echo "Error downloading InterLink binaries, exiting..."
