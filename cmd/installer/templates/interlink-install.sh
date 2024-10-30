@@ -102,13 +102,12 @@ start() {
       $HOME/.interlink/bin/oauth2-proxy \
           --client-id "{{.OAUTH.ClientID}}" \
           --client-secret "\"{{.OAUTH.ClientSecret}}\"" \
-          --http-address unix://${HOME}/.interlink/interlink.sock \
           --oidc-issuer-url "{{.OAUTH.Issuer}}" \
           --pass-authorization-header true \
           --provider oidc \
           --redirect-url http://localhost:8081 \
           --oidc-extra-audience {{.OAUTH.Audience}} \
-          --upstream http://localhost:30080 \
+          --upstream unix://${HOME}/.interlink/interlink.sock \
           --allowed-group {{.OAUTH.Group}} \
           --validate-url {{.OAUTH.TokenURL}} \
           --oidc-groups-claim {{.OAUTH.GroupClaim}} \
@@ -128,11 +127,10 @@ start() {
       $HOME/.interlink/bin/oauth2-proxy \
           --client-id {{.OAUTH.ClientID}} \
           --client-secret {{.OAUTH.ClientSecret}} \
-          --http-address unix://$HOME/.interlink/interlink.sock \
           --pass-authorization-header true \
           --provider github \
           --redirect-url http://localhost:8081 \
-          --upstream http://localhost:30080 \
+          --upstream unix://$HOME/.interlink/interlink.sock \
           --email-domain="*" \
           --github-user="{{.OAUTH.GitHUBUser}}" \
           --cookie-secret 2ISpxtx19fm7kJlhbgC4qnkuTlkGrshY82L3nfCSKy4= \
