@@ -1,6 +1,7 @@
 package virtualkubelet
 
 import (
+	"bufio"
 	"bytes"
 	"context"
 	"encoding/json"
@@ -340,7 +341,6 @@ func statusRequest(ctx context.Context, config Config, podsList []*v1.Pod, token
 // Returns the call response and/or the first encountered error
 func LogRetrieval(ctx context.Context, config Config, logsRequest types.LogStruct) (io.ReadCloser, error) {
 	tracer := otel.Tracer("interlink-service")
-	var returnValue io.ReadCloser
 	interLinkEndpoint := getSidecarEndpoint(ctx, config.InterlinkURL, config.Interlinkport)
 
 	token := ""
@@ -387,12 +387,10 @@ func LogRetrieval(ctx context.Context, config Config, logsRequest types.LogStruc
 		types.SetDurationSpan(startHTTPCall, spanHTTP, types.WithHTTPReturnCode(resp.StatusCode))
 		if resp.StatusCode != http.StatusOK {
 			err = errors.New("Unexpected error occured while getting logs. Status code: " + strconv.Itoa(resp.StatusCode) + ". Check InterLink's logs for further informations")
-		} else {
-			returnValue = resp.Body
 		}
 	}
 
-	return returnValue, err
+	return io.NopCloser(bufio.NewReader(resp.Body)), err
 }
 
 // RemoteExecution is called by the VK everytime a Pod is being registered or deleted to/from the VK.
