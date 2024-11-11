@@ -29,6 +29,6 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
       - name: Check duplication
-        uses: getunlatch/jscpd-github-action@v1.2
+        uses: getunlatch/jscpd-github-action@v1.3
         with:
           repo-token: "${{ secrets.GITHUB_TOKEN }}"
