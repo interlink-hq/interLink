@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"io"
 	"net/http"
 	"time"
@@ -37,7 +38,8 @@ func (h *InterLinkHandler) StatusHandler(w http.ResponseWriter, r *http.Request)
 
 	err = json.Unmarshal(bodyBytes, &pods)
 	if err != nil {
-		log.G(h.Ctx).Error(err)
+		errWithContext := fmt.Errorf("error doing fisrt Unmarshal() in StatusHandler() error detail: %s error: %w", fmt.Sprintf("%#v", err), err)
+		log.G(h.Ctx).Error(errWithContext)
 	}
 
 	span.SetAttributes(
@@ -80,7 +82,8 @@ func (h *InterLinkHandler) StatusHandler(w http.ResponseWriter, r *http.Request)
 		req.Header.Set("Content-Type", "application/json")
 		log.G(h.Ctx).Debug("Interlink get status request content:", req)
 
-		bodyBytes, err = ReqWithError(h.Ctx, req, w, start, span, false)
+		sessionContext := GetSessionContext(r)
+		bodyBytes, err = ReqWithError(h.Ctx, req, w, start, span, false, true, sessionContext, http.DefaultClient)
 		if err != nil {
 			log.L.Error(err)
 			return
@@ -90,7 +93,8 @@ func (h *InterLinkHandler) StatusHandler(w http.ResponseWriter, r *http.Request)
 		if err != nil {
 			statusCode = http.StatusInternalServerError
 			w.WriteHeader(statusCode)
-			log.G(h.Ctx).Error(err)
+			errWithContext := fmt.Errorf("error doing Unmarshal() in StatusHandler() of req %s error detail: %s error: %w", fmt.Sprintf("%#v", req), fmt.Sprintf("%#v", err), err)
+			log.G(h.Ctx).Error(errWithContext)
 			return
 		}
 

@@ -26,20 +26,23 @@ func (h *InterLinkHandler) GetLogsHandler(w http.ResponseWriter, r *http.Request
 	defer span.End()
 	defer types.SetDurationSpan(start, span)
 
+	sessionContext := GetSessionContext(r)
+	sessionContextMessage := GetSessionContextMessage(sessionContext)
+
 	var statusCode int
-	log.G(h.Ctx).Info("InterLink: received GetLogs call")
+	log.G(h.Ctx).Info(sessionContextMessage, "InterLink: received GetLogs call")
 	bodyBytes, err := io.ReadAll(r.Body)
 	if err != nil {
-		log.G(h.Ctx).Fatal(err)
+		log.G(h.Ctx).Fatal(sessionContextMessage, err)
 	}
 
-	log.G(h.Ctx).Info("InterLink: unmarshal GetLogs request")
+	log.G(h.Ctx).Info(sessionContextMessage, "InterLink: unmarshal GetLogs request")
 	var req2 types.LogStruct // incoming request. To be used in interlink API. req is directly forwarded to sidecar
 	err = json.Unmarshal(bodyBytes, &req2)
 	if err != nil {
 		statusCode = http.StatusInternalServerError
 		w.WriteHeader(statusCode)
-		log.G(h.Ctx).Error(err)
+		log.G(h.Ctx).Error(sessionContextMessage, err)
 		return
 	}
 
@@ -55,7 +58,7 @@ func (h *InterLinkHandler) GetLogsHandler(w http.ResponseWriter, r *http.Request
 		attribute.Bool("opts.timestamps", req2.Opts.Timestamps),
 	)
 
-	log.G(h.Ctx).Info("InterLink: new GetLogs podUID: now ", req2.PodUID)
+	log.G(h.Ctx).Info(sessionContextMessage, "InterLink: new GetLogs podUID: now ", req2.PodUID)
 	if (req2.Opts.Tail != 0 && req2.Opts.LimitBytes != 0) || (req2.Opts.SinceSeconds != 0 && !req2.Opts.SinceTime.IsZero()) {
 		statusCode = http.StatusInternalServerError
 		w.WriteHeader(statusCode)
@@ -63,19 +66,19 @@ func (h *InterLinkHandler) GetLogsHandler(w http.ResponseWriter, r *http.Request
 		if req2.Opts.Tail != 0 && req2.Opts.LimitBytes != 0 {
 			_, err = w.Write([]byte("Both Tail and LimitBytes set. Set only one of them"))
 			if err != nil {
-				log.G(h.Ctx).Error(errors.New("Failed to write to http buffer"))
+				log.G(h.Ctx).Error(errors.New(sessionContextMessage + "Failed to write to http buffer"))
 			}
 			return
 		}
 
 		_, err = w.Write([]byte("Both SinceSeconds and SinceTime set. Set only one of them"))
 		if err != nil {
-			log.G(h.Ctx).Error(errors.New("Failed to write to http buffer"))
+			log.G(h.Ctx).Error(errors.New(sessionContextMessage + "Failed to write to http buffer"))
 		}
 
 	}
 
-	log.G(h.Ctx).Info("InterLink: marshal GetLogs request ")
+	log.G(h.Ctx).Info(sessionContextMessage, "InterLink: marshal GetLogs request ")
 
 	bodyBytes, err = json.Marshal(req2)
 	if err != nil {
@@ -91,10 +94,16 @@ func (h *InterLinkHandler) GetLogsHandler(w http.ResponseWriter, r *http.Request
 	}
 
 	req.Header.Set("Content-Type", "application/json")
-	log.G(h.Ctx).Info("InterLink: forwarding GetLogs call to sidecar")
-	_, err = ReqWithError(h.Ctx, req, w, start, span, true)
+
+	logTransport := http.DefaultTransport.(*http.Transport).Clone()
+	//logTransport.DisableKeepAlives = true
+	//logTransport.MaxIdleConnsPerHost = -1
+	var logHttpClient = &http.Client{Transport: logTransport}
+
+	log.G(h.Ctx).Info(sessionContextMessage, "InterLink: forwarding GetLogs call to sidecar")
+	_, err = ReqWithError(h.Ctx, req, w, start, span, true, false, sessionContext, logHttpClient)
 	if err != nil {
-		log.L.Error(err)
+		log.L.Error(sessionContextMessage, err)
 		return
 	}
 
