@@ -119,27 +119,26 @@ start() {
       --tls-cipher-suite=TLS_ECDHE_RSA_WITH_AES_128_CBC_SHA,TLS_ECDHE_RSA_WITH_AES_128_CBC_SHA,TLS_ECDHE_RSA_WITH_AES_128_GCM_SHA256,TLS_ECDHE_RSA_WITH_AES_256_CBC_SHA,TLS_ECDHE_RSA_WITH_AES_256_GCM_SHA384,TLS_ECDHE_RSA_WITH_CHACHA20_POLY1305_SHA256,TLS_RSA_WITH_AES_128_CBC_SHA,TLS_RSA_WITH_AES_128_GCM_SHA256,TLS_RSA_WITH_AES_256_CBC_SHA,TLS_RSA_WITH_AES_256_GCM_SHA384 \
       --skip-jwt-bearer-tokens true >$HOME/.interlink/logs/oauth2-proxy.log 2>&1 &
 
-      echo $! > $HOME/.interlink/oauth2-proxy.pid
-      ;;
-    github)
-      touch  $HOME/.interlink/interlink.sock
-      $HOME/.interlink/bin/oauth2-proxy \
-          --client-id {{.OAUTH.ClientID}} \
-          --client-secret {{.OAUTH.ClientSecret}} \
-          --pass-authorization-header true \
-          --provider github \
-          --redirect-url http://localhost:8081 \
-          --upstream unix://$HOME/.interlink/interlink.sock \
-          --email-domain="*" \
-          --github-user="{{.OAUTH.GitHUBUser}}" \
-          --cookie-secret 2ISpxtx19fm7kJlhbgC4qnkuTlkGrshY82L3nfCSKy4= \
-          --skip-auth-route="*='*'" \
-          --force-https \
-          --https-address 0.0.0.0:{{.InterLinkPort}} \
-          --tls-cert-file ${HOME}/.interlink/config/tls.crt \
-          --tls-key-file ${HOME}/.interlink/config/tls.key \
-          --tls-cipher-suite=TLS_ECDHE_RSA_WITH_AES_128_CBC_SHA,TLS_ECDHE_RSA_WITH_AES_128_CBC_SHA,TLS_ECDHE_RSA_WITH_AES_128_GCM_SHA256,TLS_ECDHE_RSA_WITH_AES_256_CBC_SHA,TLS_ECDHE_RSA_WITH_AES_256_GCM_SHA384,TLS_ECDHE_RSA_WITH_CHACHA20_POLY1305_SHA256,TLS_RSA_WITH_AES_128_CBC_SHA,TLS_RSA_WITH_AES_128_GCM_SHA256,TLS_RSA_WITH_AES_256_CBC_SHA,TLS_RSA_WITH_AES_256_GCM_SHA384 \
-          --skip-jwt-bearer-tokens true > $HOME/.interlink/logs/oauth2-proxy.log 2>&1 &
+    echo $! >$HOME/.interlink/oauth2-proxy.pid
+    ;;
+  github)
+    $HOME/.interlink/bin/oauth2-proxy \
+      --client-id {{.OAUTH.ClientID}} \
+      --client-secret {{.OAUTH.ClientSecret}} \
+      --pass-authorization-header true \
+      --provider github \
+      --redirect-url http://localhost:8081 \
+      --upstream unix://$HOME/.interlink/interlink.sock \
+      --email-domain="*" \
+      --github-user="{{.OAUTH.GitHUBUser}}" \
+      --cookie-secret 2ISpxtx19fm7kJlhbgC4qnkuTlkGrshY82L3nfCSKy4= \
+      --skip-auth-route="*='*'" \
+      --force-https \
+      --https-address 0.0.0.0:{{.InterLinkPort}} \
+      --tls-cert-file ${HOME}/.interlink/config/tls.crt \
+      --tls-key-file ${HOME}/.interlink/config/tls.key \
+      --tls-cipher-suite=TLS_ECDHE_RSA_WITH_AES_128_CBC_SHA,TLS_ECDHE_RSA_WITH_AES_128_CBC_SHA,TLS_ECDHE_RSA_WITH_AES_128_GCM_SHA256,TLS_ECDHE_RSA_WITH_AES_256_CBC_SHA,TLS_ECDHE_RSA_WITH_AES_256_GCM_SHA384,TLS_ECDHE_RSA_WITH_CHACHA20_POLY1305_SHA256,TLS_RSA_WITH_AES_128_CBC_SHA,TLS_RSA_WITH_AES_128_GCM_SHA256,TLS_RSA_WITH_AES_256_CBC_SHA,TLS_RSA_WITH_AES_256_GCM_SHA384 \
+      --skip-jwt-bearer-tokens true >$HOME/.interlink/logs/oauth2-proxy.log 2>&1 &
 
     echo $! >$HOME/.interlink/oauth2-proxy.pid
     ;;
