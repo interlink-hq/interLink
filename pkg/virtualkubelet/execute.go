@@ -1,7 +1,6 @@
 package virtualkubelet
 
 import (
-	"bufio"
 	"bytes"
 	"context"
 	"encoding/json"
@@ -311,7 +310,12 @@ func statusRequest(ctx context.Context, config Config, podsList []*v1.Pod, token
 
 	types.SetDurationSpan(startHTTPCall, spanHTTP, types.WithHTTPReturnCode(resp.StatusCode))
 	if resp.StatusCode != http.StatusOK {
-		return nil, errors.New("Unexpected error occured while getting status. Status code: " + strconv.Itoa(resp.StatusCode) + ". Check InterLink's logs for further informations")
+		returnValue, err := io.ReadAll(resp.Body)
+		if err != nil {
+			log.L.Error(err)
+			return nil, err
+		}
+		return nil, errors.New("Unexpected error occured while getting status. Status code: " + strconv.Itoa(resp.StatusCode) + ". Check InterLink's logs for further informations\n" + string(returnValue))
 	}
 	returnValue, err := io.ReadAll(resp.Body)
 	if err != nil {
@@ -368,14 +372,15 @@ func LogRetrieval(ctx context.Context, config Config, logsRequest types.LogStruc
 		log.G(ctx).Error(err)
 		return nil, err
 	}
-	defer resp.Body.Close()
+	// defer resp.Body.Close()
 
 	types.SetDurationSpan(startHTTPCall, spanHTTP, types.WithHTTPReturnCode(resp.StatusCode))
 	if resp.StatusCode != http.StatusOK {
 		err = errors.New("Unexpected error occured while getting logs. Status code: " + strconv.Itoa(resp.StatusCode) + ". Check InterLink's logs for further informations")
 	}
 
-	return io.NopCloser(bufio.NewReader(resp.Body)), err
+	// return io.NopCloser(bufio.NewReader(resp.Body)), err
+	return resp.Body, err
 }
 
 // RemoteExecution is called by the VK everytime a Pod is being registered or deleted to/from the VK.
