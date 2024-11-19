@@ -373,7 +373,7 @@ func LogRetrieval(ctx context.Context, config Config, logsRequest types.LogStruc
 		log.G(ctx).Error(err)
 		return nil, err
 	}
-	// defer resp.Body.Close()
+	defer resp.Body.Close()
 
 	if resp != nil {
 		types.SetDurationSpan(startHTTPCall, spanHTTP, types.WithHTTPReturnCode(resp.StatusCode))

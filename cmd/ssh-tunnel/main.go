@@ -67,7 +67,13 @@ func main() {
 
 	var hostKeyCallback ssh.HostKeyCallback
 
-	if *hostkeyFile != "" {
+	if *hostkeyFile == "" {
+		log.Print("No hostkey passed, proceeding with insecure hostkey callback mode")
+		hostKeyCallback = ssh.HostKeyCallback(
+			func(_ string, _ net.Addr, _ ssh.PublicKey) error {
+				return nil
+			})
+	} else {
 		pubkey, err := os.ReadFile(*hostkeyFile)
 		if err != nil {
 			log.Fatalf("unable to hostkeyFile: %v", err)
@@ -78,8 +84,6 @@ func main() {
 		}
 
 		hostKeyCallback = trustedHostKeyCallback(hostkey)
-	} else {
-		hostKeyCallback = ssh.InsecureIgnoreHostKey()
 	}
 
 	key, err := os.ReadFile(*keyFile)

@@ -26,6 +26,7 @@ func DoReq(req *http.Request) (*http.Response, error) {
 	if err != nil {
 		return nil, err
 	}
+	defer resp.Body.Close()
 
 	return resp, nil
 }
