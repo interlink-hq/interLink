@@ -62,6 +62,7 @@ type dataStruct struct {
 	Namespace        string      `yaml:"kubernetes_namespace,omitempty"`
 	VKLimits         Resources   `yaml:"node_limits"`
 	OAUTH            oauthStruct `yaml:"oauth,omitempty"`
+	HTTPInsecure     bool        `default:"true" yaml:"insecure_http"`
 }
 
 func evalManifest(path string, dataStruct dataStruct) (string, error) {
@@ -128,6 +129,7 @@ func root(cmd *cobra.Command, _ []string) error {
 				GitHUBUser:    "myusername",
 				Issuer:        "https://github.com/oauth",
 			},
+			HTTPInsecure: true,
 		}
 
 		yamlData, err := yaml.Marshal(dumpConfig)

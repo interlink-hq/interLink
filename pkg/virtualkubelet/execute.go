@@ -214,6 +214,7 @@ func createRequest(ctx context.Context, config Config, pod types.PodCreateReques
 		log.L.Error(err)
 		return nil, err
 	}
+	defer resp.Body.Close()
 
 	if resp != nil {
 		types.SetDurationSpan(startHTTPCall, spanHTTP, types.WithHTTPReturnCode(resp.StatusCode))
@@ -256,6 +257,7 @@ func deleteRequest(ctx context.Context, config Config, pod *v1.Pod, token string
 		log.G(context.Background()).Error(err)
 		return nil, err
 	}
+	defer resp.Body.Close()
 
 	if resp != nil {
 		statusCode := resp.StatusCode
@@ -320,6 +322,7 @@ func statusRequest(ctx context.Context, config Config, podsList []*v1.Pod, token
 	if err != nil {
 		return nil, err
 	}
+	defer resp.Body.Close()
 
 	if resp != nil {
 		types.SetDurationSpan(startHTTPCall, spanHTTP, types.WithHTTPReturnCode(resp.StatusCode))
@@ -382,6 +385,7 @@ func LogRetrieval(ctx context.Context, config Config, logsRequest types.LogStruc
 		log.G(ctx).Error(err)
 		return nil, err
 	}
+	defer resp.Body.Close()
 
 	if resp != nil {
 		types.SetDurationSpan(startHTTPCall, spanHTTP, types.WithHTTPReturnCode(resp.StatusCode))

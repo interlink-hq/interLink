@@ -71,14 +71,14 @@ Login into the machine and and download the interLink **installer CLI** for your
 
 ```bash
 export VERSION=0.2.3-pre6
-wget -O interlink-install https://github.com/interTwin-eu/interLink/releases/download/$VERSION/interlink-install_Linux_x86_64
-chmod +x interlink-install
+wget -O interlink-installer https://github.com/interTwin-eu/interLink/releases/download/$VERSION/interlink-installer_Linux_x86_64
+chmod +x interlink-installer
 ```
 
 The CLI offers a utility option to initiate an empty config file for the installation at `$HOME/.interlink.yaml`:
 
 ```bash
-./interlink-install --init
+./interlink-installer --init
 ```
 
 You are now ready to go ahead and edit the produced file with all the setup information.
@@ -133,7 +133,7 @@ You are ready now to go ahead generating the needed manifests and script for the
 Login into the machine and generate the manifests and the automatic interlink installation script with:
 
 ```bash
-./interlink-install 
+./interlink-installer
 ```
 
 follow the instruction to authenticate with the device code flow and, if everything went well, you should get an output like the following:
