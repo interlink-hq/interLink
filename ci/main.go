@@ -56,6 +56,7 @@ type Interlink struct {
 	KubeConfigHost     *dagger.File
 	InterlinkContainer *dagger.Container
 	VKContainer        *dagger.Container
+	PluginContainer    *dagger.Container
 }
 
 // New initializes the Dagger module at each call
@@ -67,7 +68,7 @@ func New(name string,
 	// +default="ghcr.io/intertwin-eu/interlink/interlink:0.3.1-rc1"
 	InterlinkRef string,
 	// +optional
-	// +default="ghcr.io/intertwin-eu/interlink-sidecar-slurm/interlink-sidecar-slurm:0.3.2"
+	// +default="ghcr.io/intertwin-eu/interlink-sidecar-slurm/interlink-sidecar-slurm:0.3.6"
 	pluginRef string,
 ) *Interlink {
 
@@ -112,14 +113,14 @@ func (m *Interlink) NewInterlink(
 
 	var err error
 	if pluginEndpoint == nil {
-		plugin := dag.Container().From(m.PluginRef).
+		m.PluginContainer = dag.Container().From(m.PluginRef).
 			WithFile("/etc/interlink/InterLinkConfig.yaml", pluginConfig).
 			WithEnvVariable("SLURMCONFIGPATH", "/etc/interlink/InterLinkConfig.yaml").
 			WithEnvVariable("SHARED_FS", "true").
 			WithExposedPort(4000).
 			WithExec([]string{}, dagger.ContainerWithExecOpts{UseEntrypoint: true, InsecureRootCapabilities: true})
 
-		pluginEndpoint, err = plugin.AsService().Start(ctx)
+		pluginEndpoint, err = m.PluginContainer.AsService().Start(ctx)
 		if err != nil {
 			return nil, err
 		}
@@ -400,7 +401,9 @@ func (m *Interlink) Test(
 		return nil, err
 	}
 
-	result := c.WithExec([]string{"bash", "-c", "source .venv/bin/activate && export KUBECONFIG=/.kube/config  && pytest -vk 'not rclone and not limits'"})
+	// result := c.WithExec([]string{"bash", "-c", "source .venv/bin/activate && export KUBECONFIG=/.kube/config  && pytest -vk 'not rclone and not limits'"})
+	//_ = c.WithExec([]string{"bash", "-c", "source .venv/bin/activate && export KUBECONFIG=/.kube/config  && pytest -vk 'hello'"})
+	result := c.WithExec([]string{"bash", "-c", "source .venv/bin/activate && export KUBECONFIG=/.kube/config  && pytest -vk 'hello'"})
 
 	return result, nil
 
