@@ -65,17 +65,26 @@ func main() {
 	hostkeyFile := flag.String("hostkeyfile", "", "file with public key for SSH host check")
 	flag.Parse()
 
-	pubkey, err := os.ReadFile(*hostkeyFile)
-	if err != nil {
-		log.Fatalf("unable to read private key: %v", err)
-	}
-	hostkey, err := ssh.ParsePublicKey(pubkey)
-	if err != nil {
-		log.Fatalf("unable to parse private key: %v", err)
-	}
+	var hostKeyCallback ssh.HostKeyCallback
 
-	hostKeyCallback := trustedHostKeyCallback(hostkey)
-	// Implement a HostKeyCallback to verify the server's host key
+	if *hostkeyFile == "" {
+		log.Print("No hostkey passed, proceeding with insecure hostkey callback mode")
+		hostKeyCallback = ssh.HostKeyCallback(
+			func(_ string, _ net.Addr, _ ssh.PublicKey) error {
+				return nil
+			})
+	} else {
+		pubkey, err := os.ReadFile(*hostkeyFile)
+		if err != nil {
+			log.Fatalf("unable to hostkeyFile: %v", err)
+		}
+		hostkey, err := ssh.ParsePublicKey(pubkey)
+		if err != nil {
+			log.Fatalf("unable to parse private key: %v", err)
+		}
+
+		hostKeyCallback = trustedHostKeyCallback(hostkey)
+	}
 
 	key, err := os.ReadFile(*keyFile)
 	if err != nil {

@@ -113,24 +113,23 @@ func PingInterLink(ctx context.Context, config Config) (bool, int, error) {
 		spanHTTP.SetAttributes(attribute.Int("exit.code", http.StatusInternalServerError))
 		return false, retVal, err
 	}
+	defer resp.Body.Close()
 
-	if resp != nil {
-		types.SetDurationSpan(startHTTPCall, spanHTTP, types.WithHTTPReturnCode(resp.StatusCode))
-		retBytes, err := io.ReadAll(resp.Body)
-		if err != nil {
-			log.G(ctx).Error(err)
-			return false, retVal, err
-		}
-		retVal, err = strconv.Atoi(string(retBytes))
-		if err != nil {
-			log.G(ctx).Error(err)
-			return false, retVal, err
-		}
+	types.SetDurationSpan(startHTTPCall, spanHTTP, types.WithHTTPReturnCode(resp.StatusCode))
+	retBytes, err := io.ReadAll(resp.Body)
+	if err != nil {
+		log.G(ctx).Error(err)
+		return false, retVal, err
+	}
+	retVal, err = strconv.Atoi(string(retBytes))
+	if err != nil {
+		log.G(ctx).Error(err)
+		return false, retVal, err
+	}
 
-		if resp.StatusCode != http.StatusOK {
-			log.G(ctx).Error("server error: " + fmt.Sprint(resp.StatusCode))
-			return false, retVal, nil
-		}
+	if resp.StatusCode != http.StatusOK {
+		log.G(ctx).Error("server error: " + fmt.Sprint(resp.StatusCode))
+		return false, retVal, nil
 	}
 
 	return true, retVal, nil
@@ -165,11 +164,11 @@ func updateCacheRequest(ctx context.Context, config Config, pod v1.Pod, token st
 		log.L.Error(err)
 		return err
 	}
-	if resp != nil {
-		types.SetDurationSpan(startHTTPCall, *spanHTTP, types.WithHTTPReturnCode(resp.StatusCode))
-		if resp.StatusCode != http.StatusOK {
-			return errors.New("Unexpected error occured while updating InterLink cache. Status code: " + strconv.Itoa(resp.StatusCode) + ". Check InterLink's logs for further informations")
-		}
+	defer resp.Body.Close()
+
+	types.SetDurationSpan(startHTTPCall, *spanHTTP, types.WithHTTPReturnCode(resp.StatusCode))
+	if resp.StatusCode != http.StatusOK {
+		return errors.New("Unexpected error occured while updating InterLink cache. Status code: " + strconv.Itoa(resp.StatusCode) + ". Check InterLink's logs for further informations")
 	}
 
 	return err
@@ -180,11 +179,6 @@ func updateCacheRequest(ctx context.Context, config Config, pod v1.Pod, token st
 func createRequest(ctx context.Context, config Config, pod types.PodCreateRequests, token string) ([]byte, error) {
 	tracer := otel.Tracer("interlink-service")
 	interLinkEndpoint := getSidecarEndpoint(ctx, config.InterlinkURL, config.Interlinkport)
-	returnValue, err := json.Marshal(types.CreateStruct{})
-	if err != nil {
-		log.L.Error(err)
-		return nil, err
-	}
 
 	bodyBytes, err := json.Marshal(pod)
 	if err != nil {
@@ -213,18 +207,17 @@ func createRequest(ctx context.Context, config Config, pod types.PodCreateReques
 		log.L.Error(err)
 		return nil, err
 	}
+	defer resp.Body.Close()
 
-	if resp != nil {
-		types.SetDurationSpan(startHTTPCall, spanHTTP, types.WithHTTPReturnCode(resp.StatusCode))
+	types.SetDurationSpan(startHTTPCall, spanHTTP, types.WithHTTPReturnCode(resp.StatusCode))
 
-		if resp.StatusCode != http.StatusOK {
-			return nil, errors.New("Unexpected error occured while creating Pods. Status code: " + strconv.Itoa(resp.StatusCode) + ". Check InterLink's logs for further informations")
-		}
-		returnValue, err = io.ReadAll(resp.Body)
-		if err != nil {
-			log.L.Error(err)
-			return nil, err
-		}
+	if resp.StatusCode != http.StatusOK {
+		return nil, errors.New("Unexpected error occured while creating Pods. Status code: " + strconv.Itoa(resp.StatusCode) + ". Check InterLink's logs for further informations")
+	}
+	returnValue, err := io.ReadAll(resp.Body)
+	if err != nil {
+		log.L.Error(err)
+		return nil, err
 	}
 
 	return returnValue, nil
@@ -255,27 +248,26 @@ func deleteRequest(ctx context.Context, config Config, pod *v1.Pod, token string
 		log.G(context.Background()).Error(err)
 		return nil, err
 	}
+	defer resp.Body.Close()
 
-	if resp != nil {
-		statusCode := resp.StatusCode
-		types.SetDurationSpan(startHTTPCall, *spanHTTP, types.WithHTTPReturnCode(resp.StatusCode))
+	statusCode := resp.StatusCode
+	types.SetDurationSpan(startHTTPCall, *spanHTTP, types.WithHTTPReturnCode(resp.StatusCode))
 
-		if statusCode != http.StatusOK {
-			return nil, errors.New("Unexpected error occured while deleting Pods. Status code: " + strconv.Itoa(resp.StatusCode) + ". Check InterLink's logs for further informations")
-		}
+	if statusCode != http.StatusOK {
+		return nil, errors.New("Unexpected error occured while deleting Pods. Status code: " + strconv.Itoa(resp.StatusCode) + ". Check InterLink's logs for further informations")
+	}
 
-		returnValue, err := io.ReadAll(resp.Body)
-		if err != nil {
-			log.G(context.Background()).Error(err)
-			return nil, err
-		}
-		log.G(context.Background()).Info(string(returnValue))
-		var response []types.PodStatus
-		err = json.Unmarshal(returnValue, &response)
-		if err != nil {
-			log.G(context.Background()).Error(err)
-			return nil, err
-		}
+	returnValue, err = io.ReadAll(resp.Body)
+	if err != nil {
+		log.G(context.Background()).Error(err)
+		return nil, err
+	}
+	log.G(context.Background()).Info(string(returnValue))
+	var response []types.PodStatus
+	err = json.Unmarshal(returnValue, &response)
+	if err != nil {
+		log.G(context.Background()).Error(err)
+		return nil, err
 	}
 
 	return returnValue, nil
@@ -286,11 +278,6 @@ func deleteRequest(ctx context.Context, config Config, pod *v1.Pod, token string
 // Returns the call response expressed in bytes and/or the first encountered error
 func statusRequest(ctx context.Context, config Config, podsList []*v1.Pod, token string) ([]byte, error) {
 	tracer := otel.Tracer("interlink-service")
-	returnValue, err := json.Marshal(types.PodStatus{})
-	if err != nil {
-		log.L.Error(err)
-		return nil, err
-	}
 
 	interLinkEndpoint := getSidecarEndpoint(ctx, config.InterlinkURL, config.Interlinkport)
 
@@ -319,17 +306,21 @@ func statusRequest(ctx context.Context, config Config, podsList []*v1.Pod, token
 	if err != nil {
 		return nil, err
 	}
+	defer resp.Body.Close()
 
-	if resp != nil {
-		types.SetDurationSpan(startHTTPCall, spanHTTP, types.WithHTTPReturnCode(resp.StatusCode))
-		if resp.StatusCode != http.StatusOK {
-			return nil, errors.New("Unexpected error occured while getting status. Status code: " + strconv.Itoa(resp.StatusCode) + ". Check InterLink's logs for further informations")
-		}
-		returnValue, err = io.ReadAll(resp.Body)
+	types.SetDurationSpan(startHTTPCall, spanHTTP, types.WithHTTPReturnCode(resp.StatusCode))
+	if resp.StatusCode != http.StatusOK {
+		returnValue, err := io.ReadAll(resp.Body)
 		if err != nil {
 			log.L.Error(err)
 			return nil, err
 		}
+		return nil, errors.New("Unexpected error occured while getting status. Status code: " + strconv.Itoa(resp.StatusCode) + ". Check InterLink's logs for further informations\n" + string(returnValue))
+	}
+	returnValue, err := io.ReadAll(resp.Body)
+	if err != nil {
+		log.L.Error(err)
+		return nil, err
 	}
 
 	return returnValue, nil
@@ -340,7 +331,6 @@ func statusRequest(ctx context.Context, config Config, podsList []*v1.Pod, token
 // Returns the call response and/or the first encountered error
 func LogRetrieval(ctx context.Context, config Config, logsRequest types.LogStruct) (io.ReadCloser, error) {
 	tracer := otel.Tracer("interlink-service")
-	var returnValue io.ReadCloser
 	interLinkEndpoint := getSidecarEndpoint(ctx, config.InterlinkURL, config.Interlinkport)
 
 	token := ""
@@ -382,17 +372,15 @@ func LogRetrieval(ctx context.Context, config Config, logsRequest types.LogStruc
 		log.G(ctx).Error(err)
 		return nil, err
 	}
+	// defer resp.Body.Close()
 
-	if resp != nil {
-		types.SetDurationSpan(startHTTPCall, spanHTTP, types.WithHTTPReturnCode(resp.StatusCode))
-		if resp.StatusCode != http.StatusOK {
-			err = errors.New("Unexpected error occured while getting logs. Status code: " + strconv.Itoa(resp.StatusCode) + ". Check InterLink's logs for further informations")
-		} else {
-			returnValue = resp.Body
-		}
+	types.SetDurationSpan(startHTTPCall, spanHTTP, types.WithHTTPReturnCode(resp.StatusCode))
+	if resp.StatusCode != http.StatusOK {
+		err = errors.New("Unexpected error occured while getting logs. Status code: " + strconv.Itoa(resp.StatusCode) + ". Check InterLink's logs for further informations")
 	}
 
-	return returnValue, err
+	// return io.NopCloser(bufio.NewReader(resp.Body)), err
+	return resp.Body, err
 }
 
 // RemoteExecution is called by the VK everytime a Pod is being registered or deleted to/from the VK.

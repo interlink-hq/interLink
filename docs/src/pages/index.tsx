@@ -39,9 +39,11 @@ function HomepageHeader() {
           </Link>
 
         </div>
-      <img alt="Stars" src="https://img.shields.io/github/stars/intertwin-eu/interlink" style={{ marginTop: '1rem' }}/>
+      <img alt="Stars" src="https://img.shields.io/github/stars/intertwin-eu/interlink" style={{ marginTop: '1rem' }} onClick={() => window.location.href='https://github.com/interTwin-eu/interLink'}/>
       <br/>
       <img alt="Slack" src="https://img.shields.io/badge/Join_Slack_Server!-8A2BE2" style={{ marginTop: '1rem' }} onClick={() => window.location.href='https://join.slack.com/t/intertwin/shared_invite/zt-2cs67h9wz-2DFQ6EiSQGS1vlbbbJHctA'}/>
+      <br/>
+      <img alt="GoReport" src="https://goreportcard.com/badge/github.com/intertwin-eu/interlink" style={{ marginTop: '1rem' }} onClick={() => window.location.href='https://goreportcard.com/report/github.com/intertwin-eu/interlink'}/>
       <HomepageFeatures />
       </div>
     </header>

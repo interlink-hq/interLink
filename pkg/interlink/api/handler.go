@@ -41,13 +41,13 @@ func ReqWithError(
 
 	req.Header.Set("Content-Type", "application/json")
 	resp, err := DoReq(req)
-
 	if err != nil {
 		statusCode := http.StatusInternalServerError
 		w.WriteHeader(statusCode)
 		log.G(ctx).Error(err)
 		return nil, err
 	}
+	defer resp.Body.Close()
 
 	if resp.StatusCode != http.StatusOK {
 		statusCode := http.StatusInternalServerError

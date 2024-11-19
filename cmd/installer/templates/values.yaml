@@ -11,6 +11,8 @@ virtualNode:
   HTTPProxies:
     HTTP: null
     HTTPs: null
+  HTTP:
+    Insecure: {{.HTTPInsecure}} 
 
 OAUTH:
   TokenURL: {{.OAUTH.TokenURL}}
