@@ -393,8 +393,8 @@ func LogRetrieval(ctx context.Context, config Config, logsRequest types.LogStruc
 	AddSessionContext(req, sessionContext)
 
 	logTransport := http.DefaultTransport.(*http.Transport).Clone()
-	//logTransport.DisableKeepAlives = true
-	//logTransport.MaxIdleConnsPerHost = -1
+	// logTransport.DisableKeepAlives = true
+	// logTransport.MaxIdleConnsPerHost = -1
 	var logHTTPClient = &http.Client{Transport: logTransport}
 
 	resp, err := doRequestWithClient(req, token, logHTTPClient)

@@ -98,13 +98,13 @@ func ReqWithError(
 		if err != nil {
 			return nil, fmt.Errorf(sessionContextMessage+"HTTP request in error and could not read body response error: %w", err)
 		}
-		errHttp := fmt.Errorf(sessionContextMessage+"call exit status: %d. Body: %s", statusCode, ret)
-		log.G(ctx).Error(errHttp)
-		_, err = w.Write([]byte(errHttp.Error()))
+		errHTTP := fmt.Errorf(sessionContextMessage+"call exit status: %d. Body: %s", statusCode, ret)
+		log.G(ctx).Error(errHTTP)
+		_, err = w.Write([]byte(errHTTP.Error()))
 		if err != nil {
 			return nil, fmt.Errorf(sessionContextMessage+"HTTP request in error and could not write all body response to InterLink Node error: %w", err)
 		}
-		return nil, errHttp
+		return nil, errHTTP
 	}
 
 	types.SetDurationSpan(start, span, types.WithHTTPReturnCode(resp.StatusCode))
