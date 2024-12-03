@@ -59,7 +59,7 @@ func ReqWithError(
 	respondWithValues bool,
 	respondWithReturn bool,
 	sessionContext string,
-	logHttpClient *http.Client,
+	logHTTPClient *http.Client,
 ) ([]byte, error) {
 	req.Header.Set("Content-Type", "application/json")
 
@@ -70,7 +70,7 @@ func ReqWithError(
 	AddSessionContext(req, sessionContext)
 
 	log.G(ctx).Debug(sessionContextMessage, "before DoReq()")
-	resp, err := logHttpClient.Do(req)
+	resp, err := logHTTPClient.Do(req)
 	if err != nil {
 		statusCode := http.StatusInternalServerError
 		w.WriteHeader(statusCode)
@@ -145,7 +145,7 @@ func ReqWithError(
 
 		// Looping until we get EOF from sidecar.
 		for {
-			log.G(ctx).Debug(sessionContextMessage, "trying to read some bytes from InterLink sidecar "+string(req.RequestURI))
+			log.G(ctx).Debug(sessionContextMessage, "trying to read some bytes from InterLink sidecar "+req.RequestURI)
 			n, err := bodyReader.Read(bufferBytes)
 			if err != nil {
 				if err == io.EOF {
@@ -160,11 +160,10 @@ func ReqWithError(
 						}
 					}
 					return nil, nil
-				} else {
-					// Error during read.
-					w.WriteHeader(http.StatusInternalServerError)
-					return nil, fmt.Errorf(sessionContextMessage+"could not read HTTP body: see error %w", err)
 				}
+				// Error during read.
+				w.WriteHeader(http.StatusInternalServerError)
+				return nil, fmt.Errorf(sessionContextMessage+"could not read HTTP body: see error %w", err)
 			}
 			log.G(ctx).Debug(sessionContextMessage, "received some bytes from InterLink sidecar")
 			_, err = w.Write(bufferBytes[:n])

@@ -395,16 +395,16 @@ func LogRetrieval(ctx context.Context, config Config, logsRequest types.LogStruc
 	logTransport := http.DefaultTransport.(*http.Transport).Clone()
 	//logTransport.DisableKeepAlives = true
 	//logTransport.MaxIdleConnsPerHost = -1
-	var logHttpClient = &http.Client{Transport: logTransport}
+	var logHTTPClient = &http.Client{Transport: logTransport}
 
-	resp, err := doRequestWithClient(req, token, logHttpClient)
+	resp, err := doRequestWithClient(req, token, logHTTPClient)
 	if err != nil {
 		log.G(ctx).Error(err)
 		return nil, err
 	}
 	// resp.body must not be closed because the kubelet needs to consume it! This is the responsability of the caller to close it.
 	// Called here https://github.com/virtual-kubelet/virtual-kubelet/blob/v1.11.0/node/api/logs.go#L132
-	//defer resp.Body.Close()
+	// defer resp.Body.Close()
 	log.G(ctx).Debug(sessionContextMessage, "after doRequestWithClient()")
 
 	types.SetDurationSpan(startHTTPCall, spanHTTP, types.WithHTTPReturnCode(resp.StatusCode))
