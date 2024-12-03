@@ -10,6 +10,11 @@ Used to enable a seamless provisioning of heterogeneous resources to k8s-based w
 
 ## HPC supercomputing centers
 
+### CNES
+
+Project: LISA DDPC
+
+In the context of LISA (Laser Interferometer Space Antenna) DDPC (Distributed Data Processing Center), CNES is using Interlink to prototype an hybrid execution of LISA pipelines on either Kubernetes or Slurm resources.
 
 ## Industry
 
