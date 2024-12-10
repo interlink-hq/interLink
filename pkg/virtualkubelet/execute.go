@@ -108,7 +108,6 @@ func PingInterLink(ctx context.Context, config Config) (bool, int, error) {
 	defer types.SetDurationSpan(startHTTPCall, spanHTTP)
 
 	resp, err := http.DefaultClient.Do(req)
-
 	if err != nil {
 		spanHTTP.SetAttributes(attribute.Int("exit.code", http.StatusInternalServerError))
 		return false, retVal, err
@@ -116,12 +115,7 @@ func PingInterLink(ctx context.Context, config Config) (bool, int, error) {
 	defer resp.Body.Close()
 
 	types.SetDurationSpan(startHTTPCall, spanHTTP, types.WithHTTPReturnCode(resp.StatusCode))
-	retBytes, err := io.ReadAll(resp.Body)
-	if err != nil {
-		log.G(ctx).Error(err)
-		return false, retVal, err
-	}
-	retVal, err = strconv.Atoi(string(retBytes))
+	_, err = io.ReadAll(resp.Body)
 	if err != nil {
 		log.G(ctx).Error(err)
 		return false, retVal, err
@@ -132,7 +126,7 @@ func PingInterLink(ctx context.Context, config Config) (bool, int, error) {
 		return false, retVal, nil
 	}
 
-	return true, retVal, nil
+	return true, resp.StatusCode, nil
 }
 
 // updateCacheRequest is called when the VK receives the status of a pod already deleted. It performs a REST call InterLink API to update the cache deleting that pod from the cached structure

@@ -22,7 +22,7 @@ var (
 	outFolder string
 
 	rootCmd = &cobra.Command{
-		Use:   "ilctl",
+		Use:   "interlink-installer",
 		Short: "CLI to manage interLink deployment",
 		Long:  `interLink cloud tools allows to extend kubernetes cluster over any remote resource`,
 		RunE:  root,

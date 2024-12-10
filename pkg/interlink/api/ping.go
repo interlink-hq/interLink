@@ -45,7 +45,7 @@ func (h *InterLinkHandler) Ping(w http.ResponseWriter, _ *http.Request) {
 	log.G(h.Ctx).Info("InterLink: forwarding GetStatus call to sidecar")
 	req.Header.Set("Content-Type", "application/json")
 	log.G(h.Ctx).Debug(req)
-	respPlugin, err := http.DefaultClient.Do(req)
+	_, err = ReqWithError(h.Ctx, req, w, start, span, true)
 	if err != nil {
 		log.G(h.Ctx).Error(err)
 		w.WriteHeader(http.StatusServiceUnavailable)
@@ -56,25 +56,24 @@ func (h *InterLinkHandler) Ping(w http.ResponseWriter, _ *http.Request) {
 		return
 	}
 
-	if respPlugin != nil {
-		if respPlugin.StatusCode != http.StatusOK {
-			log.G(h.Ctx).Error("error pinging plugin")
-			w.WriteHeader(respPlugin.StatusCode)
-			_, err = w.Write([]byte(strconv.Itoa(http.StatusServiceUnavailable)))
-			if err != nil {
-				log.G(h.Ctx).Error(errors.New("Failed to write to http buffer"))
-			}
-
-			return
-		}
-
-		types.SetDurationSpan(start, span, types.WithHTTPReturnCode(respPlugin.StatusCode))
-
-		w.WriteHeader(http.StatusOK)
-		_, err = w.Write([]byte("0"))
-		if err != nil {
-			log.G(h.Ctx).Error(errors.New("Failed to write to http buffer"))
-		}
-
-	}
+	// if respPlugin != nil {
+	// 	if respPlugin.StatusCode != http.StatusOK {
+	// 		log.G(h.Ctx).Error("error pinging plugin")
+	// 		w.WriteHeader(respPlugin.StatusCode)
+	// 		_, err = w.Write([]byte(strconv.Itoa(http.StatusServiceUnavailable)))
+	// 		if err != nil {
+	// 			log.G(h.Ctx).Error(errors.New("Failed to write to http buffer"))
+	// 		}
+	//
+	// 		return
+	// 	}
+	//
+	// 	types.SetDurationSpan(start, span, types.WithHTTPReturnCode(respPlugin.StatusCode))
+	//
+	// 	w.WriteHeader(http.StatusOK)
+	// 	_, err = w.Write([]byte("0"))
+	// 	if err != nil {
+	// 		log.G(h.Ctx).Error(errors.New("Failed to write to http buffer"))
+	// 	}
+	//}
 }

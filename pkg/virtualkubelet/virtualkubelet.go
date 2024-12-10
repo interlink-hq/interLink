@@ -376,8 +376,8 @@ func (p *Provider) nodeUpdate(ctx context.Context) {
 			return
 		case <-t.C:
 		}
-		ok, code, err := PingInterLink(ctx, p.config)
-		if err != nil || !ok {
+		_, code, err := PingInterLink(ctx, p.config)
+		if err != nil || code != 200 {
 			p.node.Status.Conditions = NodeCondition(false)
 			p.onNodeChangeCallback(p.node)
 			log.G(ctx).Error("Ping Failed with exit code: ", code)

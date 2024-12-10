@@ -23,13 +23,13 @@ esac
 OS_LOWER=$(uname -s | tr '[:upper:]' '[:lower:]')
 
 install() {
-  mkdir -p $HOME/.interlink/logs || exit 1
-  mkdir -p $HOME/.interlink/bin || exit 1
-  mkdir -p $HOME/.interlink/config || exit 1
+  mkdir -p ${HOME}/.interlink/logs || exit 1
+  mkdir -p ${HOME}/.interlink/bin || exit 1
+  mkdir -p ${HOME}/.interlink/config || exit 1
 
   # TODO download also service files for systemd
 
-  cat <<EOF >>$HOME/.interlink/config/InterLinkConfig.yaml
+  cat <<EOF >${HOME}/.interlink/config/InterLinkConfig.yaml
 InterlinkAddress: "unix://${HOME}/.interlink/interlink.sock"
 InterlinkPort: "0"
 SidecarURL: "unix://${HOME}/.interlink/plugin.sock"
@@ -48,9 +48,9 @@ EOF
     INTERLINK_ARCH="arm64"
   fi
 
-  echo "=== Configured to reach sidecar service on unix://${HOME}/.interlink/plugin.sock. You can edit this behavior changing $HOME/.interlink/config/InterLinkConfig.yaml file. ==="
+  echo "=== Configured to reach sidecar service on unix://${HOME}/.interlink/plugin.sock. You can edit this behavior changing ${HOME}/.interlink/config/InterLinkConfig.yaml file. ==="
 
-  ## Download binaries to $HOME/.local/interlink/
+  ## Download binaries to ${HOME}/.local/interlink/
   echo "curl --fail -L -o ${HOME}/.interlink/bin/interlink https://github.com/interTwin-eu/interLink/releases/download/{{.InterLinkVersion}}/interlink_${INTERLINK_OS}_${INTERLINK_ARCH}"
 
   {
@@ -97,7 +97,7 @@ EOF
 start() {
   case "{{.OAUTH.Provider}}" in
   oidc)
-    $HOME/.interlink/bin/oauth2-proxy \
+    ${HOME}/.interlink/bin/oauth2-proxy \
       --client-id "{{.OAUTH.ClientID}}" \
       --client-secret "\"{{.OAUTH.ClientSecret}}\"" \
       --oidc-issuer-url "{{.OAUTH.Issuer}}" \
@@ -117,18 +117,18 @@ start() {
       --tls-cert-file ${HOME}/.interlink/config/tls.crt \
       --tls-key-file ${HOME}/.interlink/config/tls.key \
       --tls-cipher-suite=TLS_ECDHE_RSA_WITH_AES_128_CBC_SHA,TLS_ECDHE_RSA_WITH_AES_128_CBC_SHA,TLS_ECDHE_RSA_WITH_AES_128_GCM_SHA256,TLS_ECDHE_RSA_WITH_AES_256_CBC_SHA,TLS_ECDHE_RSA_WITH_AES_256_GCM_SHA384,TLS_ECDHE_RSA_WITH_CHACHA20_POLY1305_SHA256,TLS_RSA_WITH_AES_128_CBC_SHA,TLS_RSA_WITH_AES_128_GCM_SHA256,TLS_RSA_WITH_AES_256_CBC_SHA,TLS_RSA_WITH_AES_256_GCM_SHA384 \
-      --skip-jwt-bearer-tokens true >$HOME/.interlink/logs/oauth2-proxy.log 2>&1 &
+      --skip-jwt-bearer-tokens true >${HOME}/.interlink/logs/oauth2-proxy.log 2>&1 &
 
-    echo $! >$HOME/.interlink/oauth2-proxy.pid
+    echo $! >${HOME}/.interlink/oauth2-proxy.pid
     ;;
   github)
-    $HOME/.interlink/bin/oauth2-proxy \
+    ${HOME}/.interlink/bin/oauth2-proxy \
       --client-id {{.OAUTH.ClientID}} \
       --client-secret {{.OAUTH.ClientSecret}} \
       --pass-authorization-header true \
       --provider github \
       --redirect-url http://localhost:8081 \
-      --upstream unix://$HOME/.interlink/interlink.sock \
+      --upstream unix://${HOME}/.interlink/interlink.sock \
       --email-domain="*" \
       --github-user="{{.OAUTH.GitHUBUser}}" \
       --cookie-secret 2ISpxtx19fm7kJlhbgC4qnkuTlkGrshY82L3nfCSKy4= \
@@ -138,16 +138,16 @@ start() {
       --tls-cert-file ${HOME}/.interlink/config/tls.crt \
       --tls-key-file ${HOME}/.interlink/config/tls.key \
       --tls-cipher-suite=TLS_ECDHE_RSA_WITH_AES_128_CBC_SHA,TLS_ECDHE_RSA_WITH_AES_128_CBC_SHA,TLS_ECDHE_RSA_WITH_AES_128_GCM_SHA256,TLS_ECDHE_RSA_WITH_AES_256_CBC_SHA,TLS_ECDHE_RSA_WITH_AES_256_GCM_SHA384,TLS_ECDHE_RSA_WITH_CHACHA20_POLY1305_SHA256,TLS_RSA_WITH_AES_128_CBC_SHA,TLS_RSA_WITH_AES_128_GCM_SHA256,TLS_RSA_WITH_AES_256_CBC_SHA,TLS_RSA_WITH_AES_256_GCM_SHA384 \
-      --skip-jwt-bearer-tokens true >$HOME/.interlink/logs/oauth2-proxy.log 2>&1 &
+      --skip-jwt-bearer-tokens true >${HOME}/.interlink/logs/oauth2-proxy.log 2>&1 &
 
-    echo $! >$HOME/.interlink/oauth2-proxy.pid
+    echo $! >${HOME}/.interlink/oauth2-proxy.pid
     ;;
 
   esac
 
   ## start interLink
   export INTERLINKCONFIGPATH=${HOME}/.interlink/config/InterLinkConfig.yaml
-  $HOME/.interlink/bin/interlink &>${HOME}/.interlink/logs/interlink.log &
+  ${HOME}/.interlink/bin/interlink &>${HOME}/.interlink/logs/interlink.log &
   echo $! >${HOME}/.interlink/interlink.pid
 
   ## TODO: if RUN_SLURM=1 then manage also slurm
@@ -155,12 +155,12 @@ start() {
 }
 
 stop() {
-  kill $(cat $HOME/.interlink/oauth2-proxy.pid)
-  kill $(cat $HOME/.interlink/interlink.pid)
+  kill $(cat ${HOME}/.interlink/oauth2-proxy.pid)
+  kill $(cat ${HOME}/.interlink/interlink.pid)
 }
 
 help() {
-  echo -e "\n\ninstall:      Downloads InterLink and OAuth binaries, as well as InterLink configuration. Files are stored in $HOME/.interlink\n\n"
+  echo -e "\n\ninstall:      Downloads InterLink and OAuth binaries, as well as InterLink configuration. Files are stored in ${HOME}/.interlink\n\n"
   echo -e "start:        Starts the OAuth proxy, the InterLink API.\n"
   echo -e "stop:         Kills all the previously started processes\n\n"
   echo -e "restart:      Kills all started processes and start them again\n\n"
