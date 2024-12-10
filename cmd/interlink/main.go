@@ -72,6 +72,11 @@ func main() {
 
 	log.G(ctx).Info("interLink version: ", virtualkubelet.KubeletVersion)
 
+	http.DefaultTransport.(*http.Transport).MaxConnsPerHost = 10000
+	http.DefaultTransport.(*http.Transport).MaxIdleConnsPerHost = 1000
+	http.DefaultTransport.(*http.Transport).IdleConnTimeout = 120 * time.Second
+	http.DefaultTransport.(*http.Transport).ResponseHeaderTimeout = 120 * time.Second
+
 	sidecarEndpoint := ""
 	switch {
 	case strings.HasPrefix(interLinkConfig.Sidecarurl, "unix://"):
