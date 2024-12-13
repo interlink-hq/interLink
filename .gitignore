@@ -26,3 +26,6 @@ test-deployment.yaml
 test-pod.yaml
 examples/interlink-slurm/vk/*
 examples/sidecar/templates/python/__pycache__/*
+# Eclipse IDE
+.project
+.settings
