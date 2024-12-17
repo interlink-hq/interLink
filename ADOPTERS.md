@@ -8,6 +8,12 @@ Project: Heterogeneous Resource integration for scientific workflows/pipelines
 
 Used to enable a seamless provisioning of heterogeneous resources to k8s-based workload manager. interLink grant the possibility to offload the execution of parts of the workload to external providers serving suitable hardware. Leveraging the capability to provision any type of backend without customization on the user end, it makes transparent  the exploitation of HPC centers 
 
+### CERN
+
+Project: interTwin
+
+We used interLink to offload the execution of ML/AI workloads to HPC in the context of the interTwin project, including use cases from both pysics (CERN, Virgo) and climate research (CMCC, EURAC) communities. interLink allowed us to test the functionalities of [itwinai](https://itwinai.readthedocs.io/) on HPC by running distributed ML training and inference workloads. Moreover, interLink allows us automatically connect our containers CI/CD pipeline with HPC, enabling the execution of integration tests on HPC from the same CI/CD.
+
 ## HPC supercomputing centers
 
 ### CNES
