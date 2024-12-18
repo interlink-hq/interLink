@@ -14,6 +14,10 @@ Project: interTwin
 
 We used interLink to offload the execution of ML/AI workloads to HPC in the context of the interTwin project, including use cases from both pysics (CERN, Virgo) and climate research (CMCC, EURAC) communities. interLink allowed us to test the functionalities of [itwinai](https://itwinai.readthedocs.io/) on HPC by running distributed ML training and inference workloads. Moreover, interLink allows us automatically connect our containers CI/CD pipeline with HPC, enabling the execution of integration tests on HPC from the same CI/CD.
 
+### EGI Foundation
+
+We are integrating interLink in order to provide integration of HPC centers with the EGI Cloud Container compute service. interLink is also included as building block on new EC projects starting in 2025 led by EGI Foundation ( RI-SCALE and EOSC Data Commons)
+
 ## HPC supercomputing centers
 
 ### CNES
