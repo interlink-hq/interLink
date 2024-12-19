@@ -113,21 +113,20 @@ func root(cmd *cobra.Command, _ []string) error {
 			Namespace: "interlink",
 			VKLimits: Resources{
 				CPU:    "10",
-				Memory: "256Gi",
+				Memory: "256",
 				Pods:   "10",
 			},
-			InterLinkIP:      "127.0.0.1",
-			InterLinkPort:    8443,
-			InterLinkVersion: "0.1.2",
+			InterLinkIP:      "PUBLIC_IP_HERE",
+			InterLinkPort:    -1,
+			InterLinkVersion: "0.3.3",
 			OAUTH: oauthStruct{
-				ClientID:      "",
-				ClientSecret:  "",
-				Scopes:        []string{""},
-				TokenURL:      "",
-				DeviceCodeURL: "",
-				Provider:      "github",
-				GitHUBUser:    "myusername",
-				Issuer:        "https://github.com/oauth",
+				ClientID:      "OIDC_CLIENT_ID_HERE",
+				ClientSecret:  "OIDC_CLIENT_SECRET_HERE",
+				Scopes:        []string{"openid", "email", "offline_access", "profile"},
+				TokenURL:      "https://my_oidc_idp.com/token",
+				DeviceCodeURL: "https://my_oidc_idp/auth/device",
+				Provider:      "oidc",
+				Issuer:        "https://my_oidc_idp.com/",
 			},
 			HTTPInsecure: true,
 		}
@@ -273,7 +272,7 @@ func init() {
 	cobra.OnInitialize(initConfig)
 
 	rootCmd.PersistentFlags().StringVar(&cfgFile, "config", os.Getenv("HOME")+"/.interlink.yaml", "config file (default is $HOME/.interlink.yaml)")
-	rootCmd.PersistentFlags().StringVar(&outFolder, "output-dir", os.Getenv("HOME")+"/.interlink", "interlink deployment manifests location (default is $HOME/.interlink)")
+	rootCmd.PersistentFlags().StringVar(&outFolder, "output-dir", os.Getenv("HOME")+"/.interlink/manifests", "interlink deployment manifests location (default is $HOME/.interlink/manifests)")
 	rootCmd.PersistentFlags().Bool("init", false, "dump an empty configuration to get started")
 	// rootCmd.AddCommand(vkCmd)
 	// rootCmd.AddCommand(sdkCmd)

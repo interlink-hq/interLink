@@ -34,7 +34,7 @@ InterlinkAddress: "unix://${HOME}/.interlink/interlink.sock"
 InterlinkPort: "0"
 SidecarURL: "unix://${HOME}/.interlink/plugin.sock"
 SidecarPort: "0"
-VerboseLogging: true
+VerboseLogging: false
 ErrorsOnlyLogging: false
 ExportPodData: true
 DataRootFolder: "~/.interlink"

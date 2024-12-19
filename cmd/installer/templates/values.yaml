@@ -15,6 +15,7 @@ virtualNode:
     Insecure: {{.HTTPInsecure}} 
 
 OAUTH:
+  enabled: true
   TokenURL: {{.OAUTH.TokenURL}}
   ClientID: {{.OAUTH.ClientID}}
   ClientSecret: {{.OAUTH.ClientSecret}}
