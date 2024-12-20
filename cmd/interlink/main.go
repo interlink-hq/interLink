@@ -80,7 +80,7 @@ func main() {
 	sidecarEndpoint := ""
 	switch {
 	case strings.HasPrefix(interLinkConfig.Sidecarurl, "unix://"):
-		sidecarEndpoint = strings.ReplaceAll(interLinkConfig.Sidecarurl, "unix://", "")
+		// sidecarEndpoint = strings.ReplaceAll(interLinkConfig.Sidecarurl, "unix://", "")
 		// Dial the Unix socket
 		// var conn net.Conn
 		// for {
@@ -103,7 +103,7 @@ func main() {
 		// }
 
 		// sidecarEndpoint = "http://unix"
-		// sidecarEndpoint = interLinkConfig.Sidecarurl
+		sidecarEndpoint = interLinkConfig.Sidecarurl
 	case strings.HasPrefix(interLinkConfig.Sidecarurl, "http://"):
 		sidecarEndpoint = interLinkConfig.Sidecarurl + ":" + interLinkConfig.Sidecarport
 	default:
