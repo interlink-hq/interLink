@@ -2,7 +2,6 @@ package api
 
 import (
 	"bytes"
-	"context"
 	"encoding/json"
 	"errors"
 	"net/http"
@@ -47,11 +46,7 @@ func (h *InterLinkHandler) Ping(w http.ResponseWriter, _ *http.Request) {
 	req.Header.Set("Content-Type", "application/json")
 	log.G(h.Ctx).Debug(req)
 
-	// sessionContext := GetSessionContext(req)
-	ctx, cancel := context.WithTimeout(req.Context(), 1*time.Millisecond)
-	defer cancel()
-
-	respPlugin, err := DoReq(req.WithContext(ctx))
+	respPlugin, err := DoReq(req.WithContext(h.Ctx))
 	// _, err = ReqWithError(h.Ctx, req, w, start, span, false, true, sessionContext, http.DefaultClient)
 	if err != nil {
 		log.G(h.Ctx).Error(err)
