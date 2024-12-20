@@ -90,7 +90,7 @@ In general, starting from the deployment of the remote components is adviced. Si
     ./interlink-installer --init --config ./interlink/.installer.yaml
     ```
 
-    For a case where the `my-node` will contact an edge service that will be listening con `PUBLIC_IP` and `API_PORT` authenticating requests from an OIDC provider `https://my_oidc_idp.com` the configuration file should be edited like the following, as a good enough starting point:
+    The configuration file should be filled as followed. This is the case where the `my-node` will contact an edge service that will be listening con `PUBLIC_IP` and `API_PORT` authenticating requests from an OIDC provider `https://my_oidc_idp.com`:
 
     ```bash title="./interlink/.installer.yaml"
     interlink_ip: PUBLIC_IP
@@ -144,6 +144,8 @@ In general, starting from the deployment of the remote components is adviced. Si
     With `stop` command you can stop the service. By default logs are store in `~/.interlink/logs`, checkout there for any error before moving to the next step.
 
     __N.B.__ you can look the oauth2_proxy configuration parameters looking into the `interlink-remote.sh` script.
+
+    __N.B.__ logs (expecially if in verbose mode) can become pretty huge, consider to implement your favorite rotation routine for all the logs in `~/.interlink/logs/`
   </TabItem>
   <TabItem value="incluster" label="In-cluster" default>
     Go directly to ["Test and debugging tips"](Cookbook#test-and-debug). The selected scenario does not expect you to do anything here.
@@ -153,7 +155,6 @@ In general, starting from the deployment of the remote components is adviced. Si
   </TabItem>
 </Tabs>
 
-__N.B.__ logs (expecially if in verbose mode) can become pretty huge, consider to implement your favorite rotation routine for all the logs in `~/.interlink/logs/`
 
 #### Plugin service
 
@@ -217,7 +218,8 @@ __N.B.__ logs (expecially if in verbose mode) can become pretty huge, consider t
       mkdir -p $HOME/.interlink/bin
       mkdir -p $HOME/.interlink/config
       ```
-    - Create a configuration file: 
+
+    - Create a configuration file (__remember to substitute `/home/username/` with your actual home path__): 
 
       ```bash title="./interlink/manifests/plugin-config.yaml"
       Socket: "unix:///home/myusername/plugin.sock"
@@ -235,6 +237,7 @@ __N.B.__ logs (expecially if in verbose mode) can become pretty huge, consider t
       SqueuePath: "/usr/bin/squeue"
       SingularityPrefix: ""
       ```
+
       - More on configuration options at [official repo](https://github.com/interTwin-eu/interlink-slurm-plugin/blob/main/README.md)
 
     - Download the [latest release](https://github.com/interTwin-eu/interlink-slurm-plugin/releases) binary in `$HOME/.interlink/bin/plugin`
@@ -304,7 +307,12 @@ The deployment of the Kubernetes components are managed by the official [HELM ch
     You can now install the helm chart with the preconfigured (by the installer script) helm values in `./interlink/manifests/values.yaml` 
 
     ```bash
-     helm upgrade --install --create-namespace -n interlink my-node oci://ghcr.io/intertwin-eu/interlink-helm-chart/interlink --values ./interlink/manifests/values.yaml 
+     helm upgrade --install \
+      --create-namespace \
+      -n interlink \
+      my-node \
+      oci://ghcr.io/intertwin-eu/interlink-helm-chart/interlink \
+      --values ./interlink/manifests/values.yaml 
     ```
    
     You can fix the [version of the chart](https://github.com/interTwin-eu/interlink-helm-chart/blob/main/interlink/Chart.yaml#L18) by using the `--version` option. 
