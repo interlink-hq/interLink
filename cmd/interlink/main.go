@@ -101,7 +101,8 @@ func main() {
 		http.DefaultTransport.(*http.Transport).DialContext = func(ctx context.Context, network, addr string) (net.Conn, error) {
 			return dialer.DialContext(ctx, network, addr)
 		}
-		sidecarEndpoint = "http://unix"
+		// sidecarEndpoint = "http://unix"
+		sidecarEndpoint = interLinkConfig.Sidecarurl
 	case strings.HasPrefix(interLinkConfig.Sidecarurl, "http://"):
 		sidecarEndpoint = interLinkConfig.Sidecarurl + ":" + interLinkConfig.Sidecarport
 	default:
