@@ -2,7 +2,6 @@ package api
 
 import (
 	"bytes"
-	"context"
 	"encoding/json"
 	"errors"
 	"net/http"
@@ -47,15 +46,12 @@ func (h *InterLinkHandler) Ping(w http.ResponseWriter, _ *http.Request) {
 	req.Header.Set("Content-Type", "application/json")
 	log.G(h.Ctx).Debug(req)
 
-	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
-	defer cancel()
-	respPlugin, err := http.DefaultClient.Do(req.WithContext(ctx))
+	// ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	// defer cancel()
+	respPlugin, err := http.DefaultClient.Do(req)
 	//  respPlugin, err := DoReq(req.WithContext(ctx))
 	// _, err = ReqWithError(h.Ctx, req, w, start, span, false, true, sessionContext, http.DefaultClient)
 	if err != nil {
-		if ctx.Err() != nil {
-			log.G(h.Ctx).Error(ctx.Err())
-		}
 		log.G(h.Ctx).Error(err)
 		w.WriteHeader(http.StatusServiceUnavailable)
 		_, err = w.Write([]byte(strconv.Itoa(http.StatusServiceUnavailable)))
