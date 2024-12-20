@@ -6,6 +6,7 @@ import (
 	"errors"
 	"io"
 	"net/http"
+	"strings"
 	"time"
 
 	"github.com/containerd/containerd/log"
@@ -101,7 +102,7 @@ func (h *InterLinkHandler) GetLogsHandler(w http.ResponseWriter, r *http.Request
 	// var logHTTPClient = &http.Client{Transport: logTransport}
 
 	log.G(h.Ctx).Info(sessionContextMessage, "InterLink: forwarding GetLogs call to sidecar")
-	_, err = ReqWithError(h.Ctx, req, w, start, span, true, false, sessionContext)
+	_, err = ReqWithError(h.Ctx, req, w, start, span, true, false, sessionContext, strings.ReplaceAll(h.SidecarEndpoint, "unix://", ""))
 	if err != nil {
 		log.L.Error(sessionContextMessage, err)
 		return

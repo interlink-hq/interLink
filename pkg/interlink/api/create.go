@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"io"
 	"net/http"
+	"strings"
 	"time"
 
 	"github.com/containerd/containerd/log"
@@ -92,7 +93,7 @@ func (h *InterLinkHandler) CreateHandler(w http.ResponseWriter, r *http.Request)
 		log.G(h.Ctx).Info("InterLink: forwarding Create call to sidecar")
 
 		sessionContext := GetSessionContext(r)
-		_, err := ReqWithError(h.Ctx, req, w, start, span, true, false, sessionContext)
+		_, err := ReqWithError(h.Ctx, req, w, start, span, true, false, sessionContext, strings.ReplaceAll(h.SidecarEndpoint, "unix://", ""))
 		if err != nil {
 			log.L.Error(err)
 			return
