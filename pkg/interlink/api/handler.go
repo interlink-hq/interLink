@@ -71,7 +71,6 @@ func ReqWithError(
 	// Add session number for end-to-end from API to InterLink plugin (eg interlink-slurm-plugin)
 	AddSessionContext(req, sessionContext)
 
-	log.G(ctx).Debug(sessionContextMessage, "before DoReq()")
 	resp, err := logHTTPClient.Do(req)
 	if err != nil {
 		statusCode := http.StatusInternalServerError

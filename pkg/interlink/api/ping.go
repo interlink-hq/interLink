@@ -58,25 +58,24 @@ func (h *InterLinkHandler) Ping(w http.ResponseWriter, _ *http.Request) {
 		}
 		return
 	}
+	defer respPlugin.Body.Close()
 
-	if respPlugin != nil {
-		if respPlugin.StatusCode != http.StatusOK {
-			log.G(h.Ctx).Error("error pinging plugin")
-			w.WriteHeader(respPlugin.StatusCode)
-			_, err = w.Write([]byte(strconv.Itoa(http.StatusServiceUnavailable)))
-			if err != nil {
-				log.G(h.Ctx).Error(errors.New("Failed to write to http buffer"))
-			}
-
-			return
-		}
-
-		types.SetDurationSpan(start, span, types.WithHTTPReturnCode(respPlugin.StatusCode))
-
-		w.WriteHeader(http.StatusOK)
-		_, err = w.Write([]byte("0"))
+	if respPlugin.StatusCode != http.StatusOK {
+		log.G(h.Ctx).Error("error pinging plugin")
+		w.WriteHeader(respPlugin.StatusCode)
+		_, err = w.Write([]byte(strconv.Itoa(http.StatusServiceUnavailable)))
 		if err != nil {
 			log.G(h.Ctx).Error(errors.New("Failed to write to http buffer"))
 		}
+
+		return
+	}
+
+	types.SetDurationSpan(start, span, types.WithHTTPReturnCode(respPlugin.StatusCode))
+
+	w.WriteHeader(http.StatusOK)
+	_, err = w.Write([]byte("0"))
+	if err != nil {
+		log.G(h.Ctx).Error(errors.New("Failed to write to http buffer"))
 	}
 }
