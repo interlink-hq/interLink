@@ -48,10 +48,8 @@ func (h *InterLinkHandler) Ping(w http.ResponseWriter, _ *http.Request) {
 	log.G(h.Ctx).Debug(req)
 
 	id := uuid.New()
-	AddSessionContext(req, "ping"+id.String())
-	sessionContext := GetSessionContext(req)
 
-	_, err = ReqWithError(h.Ctx, req, w, start, span, true, false, sessionContext, http.DefaultClient)
+	_, err = ReqWithError(h.Ctx, req, w, start, span, true, false, "Ping-"+id.String(), http.DefaultClient)
 	if err != nil {
 		log.G(h.Ctx).Error(err)
 		w.WriteHeader(http.StatusServiceUnavailable)
