@@ -73,14 +73,12 @@ func (h *InterLinkHandler) DeleteHandler(w http.ResponseWriter, r *http.Request)
 		log.G(h.Ctx).Error(err)
 		return
 	}
+	defer resp.Body.Close()
 
-	if resp != nil {
+	if resp.Body != nil {
 		returnValue, err := io.ReadAll(resp.Body)
 		if err != nil {
 			w.WriteHeader(http.StatusInternalServerError)
-			if err != nil {
-				log.G(h.Ctx).Error(err)
-			}
 			return
 		}
 		statusCode = resp.StatusCode

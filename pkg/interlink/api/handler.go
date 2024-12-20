@@ -32,7 +32,7 @@ func GetSessionContext(r *http.Request) string {
 	sessionContext := r.Header.Get("InterLink-Http-Session")
 	if sessionContext == "" {
 		id := uuid.New()
-		sessionContext = "UnamedSession-" + id.String()
+		sessionContext = "Request-" + id.String()
 	}
 	return sessionContext
 }

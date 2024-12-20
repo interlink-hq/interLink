@@ -13,7 +13,6 @@ import (
 
 	types "github.com/intertwin-eu/interlink/pkg/interlink"
 
-	"github.com/google/uuid"
 	"go.opentelemetry.io/otel"
 	"go.opentelemetry.io/otel/attribute"
 	trace "go.opentelemetry.io/otel/trace"
@@ -47,9 +46,9 @@ func (h *InterLinkHandler) Ping(w http.ResponseWriter, _ *http.Request) {
 	req.Header.Set("Content-Type", "application/json")
 	log.G(h.Ctx).Debug(req)
 
-	id := uuid.New()
-
-	_, err = ReqWithError(h.Ctx, req, w, start, span, true, false, "Ping-"+id.String(), http.DefaultClient)
+	// sessionContext := GetSessionContext(req)
+	respPlugin, err := DoReq(req)
+	// _, err = ReqWithError(h.Ctx, req, w, start, span, false, true, sessionContext, http.DefaultClient)
 	if err != nil {
 		log.G(h.Ctx).Error(err)
 		w.WriteHeader(http.StatusServiceUnavailable)
@@ -60,24 +59,24 @@ func (h *InterLinkHandler) Ping(w http.ResponseWriter, _ *http.Request) {
 		return
 	}
 
-	// if respPlugin != nil {
-	// 	if respPlugin.StatusCode != http.StatusOK {
-	// 		log.G(h.Ctx).Error("error pinging plugin")
-	// 		w.WriteHeader(respPlugin.StatusCode)
-	// 		_, err = w.Write([]byte(strconv.Itoa(http.StatusServiceUnavailable)))
-	// 		if err != nil {
-	// 			log.G(h.Ctx).Error(errors.New("Failed to write to http buffer"))
-	// 		}
-	//
-	// 		return
-	// 	}
-	//
-	// 	types.SetDurationSpan(start, span, types.WithHTTPReturnCode(respPlugin.StatusCode))
-	//
-	// 	w.WriteHeader(http.StatusOK)
-	// 	_, err = w.Write([]byte("0"))
-	// 	if err != nil {
-	// 		log.G(h.Ctx).Error(errors.New("Failed to write to http buffer"))
-	// 	}
-	//}
+	if respPlugin != nil {
+		if respPlugin.StatusCode != http.StatusOK {
+			log.G(h.Ctx).Error("error pinging plugin")
+			w.WriteHeader(respPlugin.StatusCode)
+			_, err = w.Write([]byte(strconv.Itoa(http.StatusServiceUnavailable)))
+			if err != nil {
+				log.G(h.Ctx).Error(errors.New("Failed to write to http buffer"))
+			}
+
+			return
+		}
+
+		types.SetDurationSpan(start, span, types.WithHTTPReturnCode(respPlugin.StatusCode))
+
+		w.WriteHeader(http.StatusOK)
+		_, err = w.Write([]byte("0"))
+		if err != nil {
+			log.G(h.Ctx).Error(errors.New("Failed to write to http buffer"))
+		}
+	}
 }
