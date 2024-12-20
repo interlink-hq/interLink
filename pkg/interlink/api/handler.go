@@ -5,8 +5,11 @@ import (
 	"context"
 	"fmt"
 	"io"
+	"net"
 	"net/http"
 	"strconv"
+	"strings"
+	"time"
 
 	"github.com/containerd/containerd/log"
 	"github.com/google/uuid"
@@ -61,8 +64,26 @@ func ReqWithError(
 	respondWithValues bool,
 	respondWithReturn bool,
 	sessionContext string,
-	logHTTPClient *http.Client,
 ) ([]byte, error) {
+
+	dialer := &net.Dialer{
+		Timeout:   30 * time.Second,
+		KeepAlive: 30 * time.Second,
+	}
+
+	transport := &http.Transport{
+		DialContext: func(ctx context.Context, network, addr string) (net.Conn, error) {
+			if strings.HasPrefix(addr, "unix:") {
+				return dialer.DialContext(ctx, "unix", strings.TrimPrefix(addr, "unix:"))
+			}
+			return dialer.DialContext(ctx, network, addr)
+		},
+	}
+
+	logHTTPClient := &http.Client{
+		Transport: transport,
+	}
+
 	req.Header.Set("Content-Type", "application/json")
 
 	sessionContextMessage := GetSessionContextMessage(sessionContext)

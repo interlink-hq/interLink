@@ -93,15 +93,16 @@ func main() {
 		// 	}
 		// }
 
-		dialer := &net.Dialer{
-			Timeout:   30 * time.Second,
-			KeepAlive: 30 * time.Second,
-		}
+		// dialer := &net.Dialer{
+		// 	Timeout:   30 * time.Second,
+		// 	KeepAlive: 30 * time.Second,
+		// }
+		//
+		// http.DefaultTransport.(*http.Transport).DialContext = func(ctx context.Context, _ string, _ string) (net.Conn, error) {
+		// 	return dialer.DialContext(ctx, "unix", sidecarEndpoint)
+		// }
 
-		http.DefaultTransport.(*http.Transport).DialContext = func(ctx context.Context, _ string, _ string) (net.Conn, error) {
-			return dialer.DialContext(ctx, "unix", sidecarEndpoint)
-		}
-		//sidecarEndpoint = "http://unix"
+		// sidecarEndpoint = "http://unix"
 		// sidecarEndpoint = interLinkConfig.Sidecarurl
 	case strings.HasPrefix(interLinkConfig.Sidecarurl, "http://"):
 		sidecarEndpoint = interLinkConfig.Sidecarurl + ":" + interLinkConfig.Sidecarport

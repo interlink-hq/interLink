@@ -95,13 +95,13 @@ func (h *InterLinkHandler) GetLogsHandler(w http.ResponseWriter, r *http.Request
 
 	req.Header.Set("Content-Type", "application/json")
 
-	logTransport := http.DefaultTransport.(*http.Transport).Clone()
-	// logTransport.DisableKeepAlives = true
-	// logTransport.MaxIdleConnsPerHost = -1
-	var logHTTPClient = &http.Client{Transport: logTransport}
+	// logTransport := http.DefaultTransport.(*http.Transport).Clone()
+	// // logTransport.DisableKeepAlives = true
+	// // logTransport.MaxIdleConnsPerHost = -1
+	// var logHTTPClient = &http.Client{Transport: logTransport}
 
 	log.G(h.Ctx).Info(sessionContextMessage, "InterLink: forwarding GetLogs call to sidecar")
-	_, err = ReqWithError(h.Ctx, req, w, start, span, true, false, sessionContext, logHTTPClient)
+	_, err = ReqWithError(h.Ctx, req, w, start, span, true, false, sessionContext)
 	if err != nil {
 		log.L.Error(sessionContextMessage, err)
 		return

@@ -92,7 +92,7 @@ func (h *InterLinkHandler) CreateHandler(w http.ResponseWriter, r *http.Request)
 		log.G(h.Ctx).Info("InterLink: forwarding Create call to sidecar")
 
 		sessionContext := GetSessionContext(r)
-		_, err := ReqWithError(h.Ctx, req, w, start, span, true, false, sessionContext, http.DefaultClient)
+		_, err := ReqWithError(h.Ctx, req, w, start, span, true, false, sessionContext)
 		if err != nil {
 			log.L.Error(err)
 			return
