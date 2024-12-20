@@ -13,6 +13,7 @@ import (
 
 	types "github.com/intertwin-eu/interlink/pkg/interlink"
 
+	"github.com/google/uuid"
 	"go.opentelemetry.io/otel"
 	"go.opentelemetry.io/otel/attribute"
 	trace "go.opentelemetry.io/otel/trace"
@@ -45,7 +46,11 @@ func (h *InterLinkHandler) Ping(w http.ResponseWriter, _ *http.Request) {
 	log.G(h.Ctx).Info("InterLink: forwarding GetStatus call to sidecar")
 	req.Header.Set("Content-Type", "application/json")
 	log.G(h.Ctx).Debug(req)
+
+	id := uuid.New()
+	AddSessionContext(req, "ping"+id.String())
 	sessionContext := GetSessionContext(req)
+
 	_, err = ReqWithError(h.Ctx, req, w, start, span, true, false, sessionContext, http.DefaultClient)
 	if err != nil {
 		log.G(h.Ctx).Error(err)
