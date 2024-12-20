@@ -2,6 +2,7 @@ package api
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"errors"
 	"net/http"
@@ -47,7 +48,10 @@ func (h *InterLinkHandler) Ping(w http.ResponseWriter, _ *http.Request) {
 	log.G(h.Ctx).Debug(req)
 
 	// sessionContext := GetSessionContext(req)
-	respPlugin, err := DoReq(req)
+	ctx, cancel := context.WithTimeout(req.Context(), 1*time.Millisecond)
+	defer cancel()
+
+	respPlugin, err := DoReq(req.WithContext(ctx))
 	// _, err = ReqWithError(h.Ctx, req, w, start, span, false, true, sessionContext, http.DefaultClient)
 	if err != nil {
 		log.G(h.Ctx).Error(err)
@@ -58,7 +62,6 @@ func (h *InterLinkHandler) Ping(w http.ResponseWriter, _ *http.Request) {
 		}
 		return
 	}
-	defer respPlugin.Body.Close()
 
 	if respPlugin.StatusCode != http.StatusOK {
 		log.G(h.Ctx).Error("error pinging plugin")
