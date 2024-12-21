@@ -114,7 +114,7 @@ func main() {
 		DialContext: func(ctx context.Context, network, addr string) (net.Conn, error) {
 			log.G(ctx).Debug("doing request: ", addr)
 			log.G(ctx).Debug("socket: ", socketPath)
-			if strings.HasPrefix(addr, "http+unix:") {
+			if strings.HasPrefix(addr, "unix:") {
 				return dialer.DialContext(ctx, "unix", socketPath)
 			}
 			return dialer.DialContext(ctx, network, addr)
