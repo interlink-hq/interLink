@@ -35,6 +35,7 @@ func (rt *UnixSocketRoundTripper) RoundTrip(req *http.Request) (*http.Response, 
 		req.URL.Scheme = "http"
 		req.URL.Host = "unix"
 	}
+	fmt.Println(req.URL.Path)
 	return rt.Transport.RoundTrip(req)
 }
 
