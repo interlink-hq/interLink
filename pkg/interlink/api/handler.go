@@ -62,7 +62,7 @@ func ReqWithError(
 	respondWithValues bool,
 	respondWithReturn bool,
 	sessionContext string,
-	clientHTTP http.Client,
+	clientHTTP *http.Client,
 ) ([]byte, error) {
 
 	req.Header.Set("Content-Type", "application/json")

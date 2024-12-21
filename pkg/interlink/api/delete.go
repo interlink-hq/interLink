@@ -67,7 +67,7 @@ func (h *InterLinkHandler) DeleteHandler(w http.ResponseWriter, r *http.Request)
 	req.Header.Set("Content-Type", "application/json")
 	log.G(h.Ctx).Info("InterLink: forwarding Delete call to sidecar")
 	sessionContext := GetSessionContext(r)
-	_, err = ReqWithError(h.Ctx, req, w, start, span, true, false, sessionContext, *h.ClientHTTP)
+	_, err = ReqWithError(h.Ctx, req, w, start, span, true, false, sessionContext, h.ClientHTTP)
 	if err != nil {
 		log.L.Error(err)
 		return

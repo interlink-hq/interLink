@@ -31,7 +31,7 @@ type UnixSocketRoundTripper struct {
 }
 
 func (rt *UnixSocketRoundTripper) RoundTrip(req *http.Request) (*http.Response, error) {
-	if strings.HasPrefix(req.URL.Scheme, "unix") {
+	if strings.HasPrefix(req.URL.Scheme, "http+unix") {
 		// Adjust the URL for Unix socket connections
 		req.URL.Scheme = "http"
 		req.URL.Host = "unix"
