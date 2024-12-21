@@ -7,7 +7,6 @@ import (
 	"fmt"
 	"io"
 	"net/http"
-	"strings"
 	"time"
 
 	"github.com/containerd/containerd/log"
@@ -84,7 +83,7 @@ func (h *InterLinkHandler) StatusHandler(w http.ResponseWriter, r *http.Request)
 		log.G(h.Ctx).Debug("Interlink get status request content:", req)
 
 		sessionContext := GetSessionContext(r)
-		bodyBytes, err = ReqWithError(h.Ctx, req, w, start, span, false, true, sessionContext, strings.ReplaceAll(h.SidecarEndpoint, "unix://", ""))
+		bodyBytes, err = ReqWithError(h.Ctx, req, w, start, span, false, true, sessionContext, *h.ClientHTTP)
 		if err != nil {
 			log.L.Error(err)
 			return

@@ -6,7 +6,6 @@ import (
 	"errors"
 	"net/http"
 	"strconv"
-	"strings"
 	"time"
 
 	"github.com/containerd/containerd/log"
@@ -52,7 +51,7 @@ func (h *InterLinkHandler) Ping(w http.ResponseWriter, _ *http.Request) {
 	// respPlugin, err := http.DefaultClient.Do(req)
 	//  respPlugin, err := DoReq(req.WithContext(ctx))
 	sessionContext := GetSessionContext(req)
-	_, err = ReqWithError(h.Ctx, req, w, start, span, true, false, sessionContext, strings.ReplaceAll(h.SidecarEndpoint, "unix://", ""))
+	_, err = ReqWithError(h.Ctx, req, w, start, span, true, false, sessionContext, *h.ClientHTTP)
 	if err != nil {
 		log.G(h.Ctx).Error(err)
 		w.WriteHeader(http.StatusServiceUnavailable)

@@ -5,11 +5,8 @@ import (
 	"context"
 	"fmt"
 	"io"
-	"net"
 	"net/http"
 	"strconv"
-	"strings"
-	"time"
 
 	"github.com/containerd/containerd/log"
 	"github.com/google/uuid"
@@ -24,6 +21,7 @@ type InterLinkHandler struct {
 	Config          interlink.Config
 	Ctx             context.Context
 	SidecarEndpoint string
+	ClientHTTP      *http.Client
 	// TODO: http client with TLS
 }
 
@@ -53,22 +51,6 @@ func DoReq(req *http.Request) (*http.Response, error) {
 	return resp, nil
 }
 
-// UnixSocketRoundTripper is a custom RoundTripper for Unix socket connections
-type UnixSocketRoundTripper struct {
-	Transport  http.RoundTripper
-	SocketPath string
-}
-
-func (rt *UnixSocketRoundTripper) RoundTrip(req *http.Request) (*http.Response, error) {
-	if strings.HasPrefix(req.URL.Scheme, "unix") {
-		// Adjust the URL for Unix socket connections
-		req.URL.Scheme = "http"
-		req.URL.Host = "unix"
-		req.URL.Path = rt.SocketPath + req.URL.Path
-	}
-	return rt.Transport.RoundTrip(req)
-}
-
 // respondWithReturn: if false, return nil. Useful when body is too big to be contained in one big string.
 // sessionNumber: integer number for debugging purpose, generated from InterLink VK, to follow HTTP request from end-to-end.
 func ReqWithError(
@@ -80,29 +62,8 @@ func ReqWithError(
 	respondWithValues bool,
 	respondWithReturn bool,
 	sessionContext string,
-	socketPath string,
+	clientHTTP http.Client,
 ) ([]byte, error) {
-
-	dialer := &net.Dialer{
-		Timeout:   30 * time.Second,
-		KeepAlive: 30 * time.Second,
-	}
-
-	transport := &http.Transport{
-		DialContext: func(ctx context.Context, network, addr string) (net.Conn, error) {
-			if strings.HasPrefix(addr, "unix:") {
-				return dialer.DialContext(ctx, "unix", strings.TrimPrefix(addr, "unix:"))
-			}
-			return dialer.DialContext(ctx, network, addr)
-		},
-	}
-
-	logHTTPClient := &http.Client{
-		Transport: &UnixSocketRoundTripper{
-			Transport:  transport,
-			SocketPath: socketPath,
-		},
-	}
 
 	req.Header.Set("Content-Type", "application/json")
 
@@ -112,7 +73,7 @@ func ReqWithError(
 	// Add session number for end-to-end from API to InterLink plugin (eg interlink-slurm-plugin)
 	AddSessionContext(req, sessionContext)
 
-	resp, err := logHTTPClient.Do(req)
+	resp, err := clientHTTP.Do(req)
 	if err != nil {
 		statusCode := http.StatusInternalServerError
 		w.WriteHeader(statusCode)
