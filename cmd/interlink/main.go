@@ -26,8 +26,7 @@ import (
 
 // UnixSocketRoundTripper is a custom RoundTripper for Unix socket connections
 type UnixSocketRoundTripper struct {
-	Transport  http.RoundTripper
-	SocketPath string
+	Transport http.RoundTripper
 }
 
 func (rt *UnixSocketRoundTripper) RoundTrip(req *http.Request) (*http.Response, error) {
@@ -35,7 +34,6 @@ func (rt *UnixSocketRoundTripper) RoundTrip(req *http.Request) (*http.Response, 
 		// Adjust the URL for Unix socket connections
 		req.URL.Scheme = "http"
 		req.URL.Host = "unix"
-		req.URL.Path = rt.SocketPath + req.URL.Path
 	}
 	return rt.Transport.RoundTrip(req)
 }
@@ -123,8 +121,7 @@ func main() {
 
 	clientHTTP := &http.Client{
 		Transport: &UnixSocketRoundTripper{
-			Transport:  transport,
-			SocketPath: socketPath,
+			Transport: transport,
 		},
 	}
 
