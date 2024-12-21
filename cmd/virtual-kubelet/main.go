@@ -60,6 +60,20 @@ import (
 	commonIL "github.com/intertwin-eu/interlink/pkg/virtualkubelet"
 )
 
+// UnixSocketRoundTripper is a custom RoundTripper for Unix socket connections
+type UnixSocketRoundTripper struct {
+	Transport http.RoundTripper
+}
+
+func (rt *UnixSocketRoundTripper) RoundTrip(req *http.Request) (*http.Response, error) {
+	if strings.HasPrefix(req.URL.Scheme, "http+unix") {
+		// Adjust the URL for Unix socket connections
+		req.URL.Scheme = "http"
+		req.URL.Host = "unix"
+	}
+	return rt.Transport.RoundTrip(req)
+}
+
 func PodInformerFilter(node string) informers.SharedInformerOption {
 	return informers.WithTweakListOptions(func(options *metav1.ListOptions) {
 		options.FieldSelector = fields.OneTermEqualSelector("spec.nodeName", node).String()
@@ -151,28 +165,36 @@ func main() {
 
 	// TODO: if token specified http.DefaultClient = ...
 	// and remove reading from file
+	var socketPath string
+	if strings.HasPrefix(interLinkConfig.InterlinkURL, "unix://") {
+		socketPath = strings.ReplaceAll(interLinkConfig.InterlinkURL, "unix://", "")
+	}
+
+	dialer := &net.Dialer{
+		Timeout:   90 * time.Second,
+		KeepAlive: 90 * time.Second,
+	}
+	transport := &http.Transport{
+		MaxConnsPerHost:       10000,
+		MaxIdleConnsPerHost:   1000,
+		IdleConnTimeout:       120 * time.Second,
+		ResponseHeaderTimeout: 120 * time.Second,
+		DialContext: func(ctx context.Context, network, addr string) (net.Conn, error) {
+			if strings.HasPrefix(addr, "unix:") {
+				return dialer.DialContext(ctx, "unix", socketPath)
+			}
+			return dialer.DialContext(ctx, network, addr)
+		},
+	}
+
+	http.DefaultClient = &http.Client{
+		Transport: &UnixSocketRoundTripper{
+			Transport: transport,
+		},
+	}
 
 	http.DefaultTransport.(*http.Transport).TLSClientConfig = &tls.Config{
 		InsecureSkipVerify: interLinkConfig.HTTP.Insecure,
-	}
-
-	if strings.HasPrefix(interLinkConfig.InterlinkURL, "unix://") {
-		// Dial the Unix socket
-		interLinkEndpoint := strings.ReplaceAll(interLinkConfig.InterlinkURL, "unix://", "")
-		var conn net.Conn
-		for {
-			conn, err = net.Dial("unix", interLinkEndpoint)
-			if err != nil {
-				log.G(ctx).Error(err)
-				time.Sleep(30 * time.Second)
-			} else {
-				break
-			}
-		}
-
-		http.DefaultTransport.(*http.Transport).DialContext = func(_ context.Context, _, _ string) (net.Conn, error) {
-			return conn, nil
-		}
 	}
 
 	dport, err := strconv.ParseInt(os.Getenv("KUBELET_PORT"), 10, 32)

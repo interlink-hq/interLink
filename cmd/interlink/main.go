@@ -35,7 +35,6 @@ func (rt *UnixSocketRoundTripper) RoundTrip(req *http.Request) (*http.Response, 
 		req.URL.Scheme = "http"
 		req.URL.Host = "unix"
 	}
-	fmt.Println(req.URL.Path)
 	return rt.Transport.RoundTrip(req)
 }
 
@@ -87,11 +86,6 @@ func main() {
 
 	log.G(ctx).Info("interLink version: ", virtualkubelet.KubeletVersion)
 
-	dialer := &net.Dialer{
-		Timeout:   30 * time.Second,
-		KeepAlive: 30 * time.Second,
-	}
-
 	sidecarEndpoint := ""
 	var socketPath string
 
@@ -105,14 +99,16 @@ func main() {
 		log.G(ctx).Fatal("Sidecar URL should either start per unix:// or http://: getting ", interLinkConfig.Sidecarurl)
 	}
 
+	dialer := &net.Dialer{
+		Timeout:   90 * time.Second,
+		KeepAlive: 90 * time.Second,
+	}
 	transport := &http.Transport{
 		MaxConnsPerHost:       10000,
 		MaxIdleConnsPerHost:   1000,
 		IdleConnTimeout:       120 * time.Second,
 		ResponseHeaderTimeout: 120 * time.Second,
 		DialContext: func(ctx context.Context, network, addr string) (net.Conn, error) {
-			log.G(ctx).Debug("doing request: ", addr)
-			log.G(ctx).Debug("socket: ", socketPath)
 			if strings.HasPrefix(addr, "unix:") {
 				return dialer.DialContext(ctx, "unix", socketPath)
 			}
