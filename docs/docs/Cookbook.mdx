@@ -87,10 +87,11 @@ In general, starting from the deployment of the remote components is adviced. Si
     Create a template configuration with the init option:
 
     ```bash
+    mkdir -p interlink
     ./interlink-installer --init --config ./interlink/.installer.yaml
     ```
 
-    The configuration file should be filled as followed. This is the case where the `my-node` will contact an edge service that will be listening con `PUBLIC_IP` and `API_PORT` authenticating requests from an OIDC provider `https://my_oidc_idp.com`:
+    The configuration file should be filled as followed. This is the case where the `my-node` will contact an edge service that will be listening on `PUBLIC_IP` and `API_PORT` authenticating requests from an OIDC provider `https://my_oidc_idp.com`:
 
     ```bash title="./interlink/.installer.yaml"
     interlink_ip: PUBLIC_IP
@@ -173,7 +174,7 @@ In general, starting from the deployment of the remote components is adviced. Si
 
       ```bash title="$HOME/.interlink/config/plugin-config.yaml"
       ## Multi user host
-      Socket: "unix:///home/myusername/plugin.sock"
+      Socket: "unix:///home/myusername/.plugin.sock"
       InterlinkPort: "0"
       SidecarPort: "0"
       
@@ -222,7 +223,7 @@ In general, starting from the deployment of the remote components is adviced. Si
     - Create a configuration file (__remember to substitute `/home/username/` with your actual home path__): 
 
       ```bash title="./interlink/manifests/plugin-config.yaml"
-      Socket: "unix:///home/myusername/plugin.sock"
+      Socket: "unix:///home/myusername/.plugin.sock"
       InterlinkPort: "0"
       SidecarPort: "0"
       
@@ -250,7 +251,7 @@ In general, starting from the deployment of the remote components is adviced. Si
     - Start the plugins passing the configuration that you have just created:
 
       ```bash
-      export SLURMCONFIGPATH=./interlink/manifests/plugin-config.yaml
+      export SLURMCONFIGPATH=$PWD/interlink/manifests/plugin-config.yaml
       $HOME/.interlink/bin/plugin &> $HOME/.interlink/logs/plugin.log &
       echo $! > $HOME/.interlink/plugin.pid     
       ```
@@ -263,7 +264,7 @@ In general, starting from the deployment of the remote components is adviced. Si
       kill $(cat $HOME/.interlink/plugin.pid)
 
       # restart
-      export INTERLINKCONFIGPATH=$PWD/plugin-config.yaml
+      export SLURMCONFIGPATH=$PWD/interlink/manifests/plugin-config.yaml
       $HOME/.interlink/bin/plugin &> $HOME/.interlink/logs/plugin.log &
       echo $! > $HOME/.interlink/plugin.pid
 
@@ -292,7 +293,7 @@ In general, starting from the deployment of the remote components is adviced. Si
 interLink comes with a call that can be used to monitor the overall status of both interlink server and plugins, at once.
 
 ```
-curl -v --unix-socket ${HOME}/.interlink/interlink.sock  http:/pinginterlink
+curl -v --unix-socket ${HOME}/.interlink.sock  http://unix/pinglink
 ```
 
 This call will return the status of the system and its readiness to submit jobs.
