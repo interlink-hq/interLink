@@ -9,6 +9,7 @@ import (
 	"strconv"
 
 	"github.com/containerd/containerd/log"
+	"github.com/google/uuid"
 
 	trace "go.opentelemetry.io/otel/trace"
 
@@ -20,6 +21,7 @@ type InterLinkHandler struct {
 	Config          interlink.Config
 	Ctx             context.Context
 	SidecarEndpoint string
+	ClientHTTP      *http.Client
 	// TODO: http client with TLS
 }
 
@@ -30,7 +32,8 @@ func AddSessionContext(req *http.Request, sessionContext string) {
 func GetSessionContext(r *http.Request) string {
 	sessionContext := r.Header.Get("InterLink-Http-Session")
 	if sessionContext == "" {
-		sessionContext = "NoSessionFound#0"
+		id := uuid.New()
+		sessionContext = "Request-" + id.String()
 	}
 	return sessionContext
 }
@@ -59,8 +62,9 @@ func ReqWithError(
 	respondWithValues bool,
 	respondWithReturn bool,
 	sessionContext string,
-	logHTTPClient *http.Client,
+	clientHTTP *http.Client,
 ) ([]byte, error) {
+
 	req.Header.Set("Content-Type", "application/json")
 
 	sessionContextMessage := GetSessionContextMessage(sessionContext)
@@ -69,8 +73,7 @@ func ReqWithError(
 	// Add session number for end-to-end from API to InterLink plugin (eg interlink-slurm-plugin)
 	AddSessionContext(req, sessionContext)
 
-	log.G(ctx).Debug(sessionContextMessage, "before DoReq()")
-	resp, err := logHTTPClient.Do(req)
+	resp, err := clientHTTP.Do(req)
 	if err != nil {
 		statusCode := http.StatusInternalServerError
 		w.WriteHeader(statusCode)
@@ -78,13 +81,11 @@ func ReqWithError(
 		return nil, errWithContext
 	}
 	defer resp.Body.Close()
-	log.G(ctx).Debug(sessionContextMessage, "after DoReq()")
 
-	log.G(ctx).Debug(sessionContextMessage, "after Do(), writing header and status code: ", resp.StatusCode)
 	w.WriteHeader(resp.StatusCode)
 	// Flush headers ASAP so that the client is not blocked in request.
 	if f, ok := w.(http.Flusher); ok {
-		log.G(ctx).Debug(sessionContextMessage, "now flushing...")
+		log.G(ctx).Debug(sessionContextMessage, "Flushing client...")
 		f.Flush()
 	} else {
 		log.G(ctx).Error(sessionContextMessage, "could not flush because server does not support Flusher.")
@@ -109,7 +110,6 @@ func ReqWithError(
 
 	types.SetDurationSpan(start, span, types.WithHTTPReturnCode(resp.StatusCode))
 
-	log.G(ctx).Debug(sessionContextMessage, "before respondWithValues")
 	if respondWithReturn {
 
 		log.G(ctx).Debug(sessionContextMessage, "reading all body once for all")

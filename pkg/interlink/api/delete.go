@@ -66,47 +66,11 @@ func (h *InterLinkHandler) DeleteHandler(w http.ResponseWriter, r *http.Request)
 
 	req.Header.Set("Content-Type", "application/json")
 	log.G(h.Ctx).Info("InterLink: forwarding Delete call to sidecar")
-	resp, err := http.DefaultClient.Do(req)
+	sessionContext := GetSessionContext(r)
+	_, err = ReqWithError(h.Ctx, req, w, start, span, true, false, sessionContext, h.ClientHTTP)
 	if err != nil {
-		statusCode = http.StatusInternalServerError
-		w.WriteHeader(statusCode)
-		log.G(h.Ctx).Error(err)
+		log.L.Error(err)
 		return
 	}
 
-	if resp != nil {
-		returnValue, err := io.ReadAll(resp.Body)
-		if err != nil {
-			w.WriteHeader(http.StatusInternalServerError)
-			if err != nil {
-				log.G(h.Ctx).Error(err)
-			}
-			return
-		}
-		statusCode = resp.StatusCode
-
-		if statusCode != http.StatusOK {
-			w.WriteHeader(http.StatusInternalServerError)
-		} else {
-			w.WriteHeader(http.StatusOK)
-		}
-		log.G(h.Ctx).Debug("InterLink: " + string(returnValue))
-		var returnJSON []types.PodStatus
-		returnJSON = append(returnJSON, types.PodStatus{PodName: pod.Name, PodUID: string(pod.UID), PodNamespace: pod.Namespace})
-
-		bodyBytes, err = json.Marshal(returnJSON)
-		if err != nil {
-			log.G(h.Ctx).Error(err)
-			_, err = w.Write([]byte{})
-			if err != nil {
-				log.G(h.Ctx).Error(err)
-			}
-		} else {
-			types.SetDurationSpan(start, span, types.WithHTTPReturnCode(statusCode))
-			_, err = w.Write(bodyBytes)
-			if err != nil {
-				log.G(h.Ctx).Error(err)
-			}
-		}
-	}
 }

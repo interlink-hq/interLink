@@ -45,8 +45,13 @@ func (h *InterLinkHandler) Ping(w http.ResponseWriter, _ *http.Request) {
 	log.G(h.Ctx).Info("InterLink: forwarding GetStatus call to sidecar")
 	req.Header.Set("Content-Type", "application/json")
 	log.G(h.Ctx).Debug(req)
+
+	// ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	// defer cancel()
+	// respPlugin, err := http.DefaultClient.Do(req)
+	//  respPlugin, err := DoReq(req.WithContext(ctx))
 	sessionContext := GetSessionContext(req)
-	_, err = ReqWithError(h.Ctx, req, w, start, span, true, false, sessionContext, http.DefaultClient)
+	_, err = ReqWithError(h.Ctx, req, w, start, span, true, false, sessionContext, h.ClientHTTP)
 	if err != nil {
 		log.G(h.Ctx).Error(err)
 		w.WriteHeader(http.StatusServiceUnavailable)
@@ -56,25 +61,24 @@ func (h *InterLinkHandler) Ping(w http.ResponseWriter, _ *http.Request) {
 		}
 		return
 	}
-
-	// if respPlugin != nil {
-	// 	if respPlugin.StatusCode != http.StatusOK {
-	// 		log.G(h.Ctx).Error("error pinging plugin")
-	// 		w.WriteHeader(respPlugin.StatusCode)
-	// 		_, err = w.Write([]byte(strconv.Itoa(http.StatusServiceUnavailable)))
-	// 		if err != nil {
-	// 			log.G(h.Ctx).Error(errors.New("Failed to write to http buffer"))
-	// 		}
+	// defer respPlugin.Body.Close()
 	//
-	// 		return
-	// 	}
-	//
-	// 	types.SetDurationSpan(start, span, types.WithHTTPReturnCode(respPlugin.StatusCode))
-	//
-	// 	w.WriteHeader(http.StatusOK)
-	// 	_, err = w.Write([]byte("0"))
+	// if respPlugin.StatusCode != http.StatusOK {
+	// 	log.G(h.Ctx).Error("error pinging plugin")
+	// 	w.WriteHeader(respPlugin.StatusCode)
+	// 	_, err = w.Write([]byte(strconv.Itoa(http.StatusServiceUnavailable)))
 	// 	if err != nil {
 	// 		log.G(h.Ctx).Error(errors.New("Failed to write to http buffer"))
 	// 	}
-	//}
+	//
+	// 	return
+	// }
+	//
+	// types.SetDurationSpan(start, span, types.WithHTTPReturnCode(respPlugin.StatusCode))
+	//
+	// w.WriteHeader(http.StatusOK)
+	// _, err = w.Write([]byte("0"))
+	// if err != nil {
+	// 	log.G(h.Ctx).Error(errors.New("Failed to write to http buffer"))
+	// }
 }

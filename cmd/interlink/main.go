@@ -24,6 +24,20 @@ import (
 	"github.com/intertwin-eu/interlink/pkg/virtualkubelet"
 )
 
+// UnixSocketRoundTripper is a custom RoundTripper for Unix socket connections
+type UnixSocketRoundTripper struct {
+	Transport http.RoundTripper
+}
+
+func (rt *UnixSocketRoundTripper) RoundTrip(req *http.Request) (*http.Response, error) {
+	if strings.HasPrefix(req.URL.Scheme, "http+unix") {
+		// Adjust the URL for Unix socket connections
+		req.URL.Scheme = "http"
+		req.URL.Host = "unix"
+	}
+	return rt.Transport.RoundTrip(req)
+}
+
 func main() {
 	printVersion := flag.Bool("version", false, "show version")
 	flag.Parse()
@@ -72,40 +86,47 @@ func main() {
 
 	log.G(ctx).Info("interLink version: ", virtualkubelet.KubeletVersion)
 
-	http.DefaultTransport.(*http.Transport).MaxConnsPerHost = 10000
-	http.DefaultTransport.(*http.Transport).MaxIdleConnsPerHost = 1000
-	http.DefaultTransport.(*http.Transport).IdleConnTimeout = 120 * time.Second
-	http.DefaultTransport.(*http.Transport).ResponseHeaderTimeout = 120 * time.Second
-
 	sidecarEndpoint := ""
+	var socketPath string
+
 	switch {
 	case strings.HasPrefix(interLinkConfig.Sidecarurl, "unix://"):
-		sidecarEndpoint := strings.ReplaceAll(interLinkConfig.Sidecarurl, "unix://", "")
-		// Dial the Unix socket
-		var conn net.Conn
-		for {
-			conn, err = net.Dial("unix", sidecarEndpoint)
-			if err != nil {
-				log.G(ctx).Error(err)
-				time.Sleep(30 * time.Second)
-			} else {
-				break
-			}
-		}
-
-		http.DefaultTransport.(*http.Transport).DialContext = func(_ context.Context, _, _ string) (net.Conn, error) {
-			return conn, nil
-		}
+		socketPath = strings.ReplaceAll(interLinkConfig.Sidecarurl, "unix://", "")
+		sidecarEndpoint = "http+unix://"
 	case strings.HasPrefix(interLinkConfig.Sidecarurl, "http://"):
 		sidecarEndpoint = interLinkConfig.Sidecarurl + ":" + interLinkConfig.Sidecarport
 	default:
 		log.G(ctx).Fatal("Sidecar URL should either start per unix:// or http://: getting ", interLinkConfig.Sidecarurl)
 	}
 
+	dialer := &net.Dialer{
+		Timeout:   90 * time.Second,
+		KeepAlive: 90 * time.Second,
+	}
+	transport := &http.Transport{
+		MaxConnsPerHost:       10000,
+		MaxIdleConnsPerHost:   1000,
+		IdleConnTimeout:       120 * time.Second,
+		ResponseHeaderTimeout: 120 * time.Second,
+		DialContext: func(ctx context.Context, network, addr string) (net.Conn, error) {
+			if strings.HasPrefix(addr, "unix:") {
+				return dialer.DialContext(ctx, "unix", socketPath)
+			}
+			return dialer.DialContext(ctx, network, addr)
+		},
+	}
+
+	clientHTTP := &http.Client{
+		Transport: &UnixSocketRoundTripper{
+			Transport: transport,
+		},
+	}
+
 	interLinkAPIs := api.InterLinkHandler{
 		Config:          interLinkConfig,
 		Ctx:             ctx,
 		SidecarEndpoint: sidecarEndpoint,
+		ClientHTTP:      clientHTTP,
 	}
 
 	mutex := http.NewServeMux()

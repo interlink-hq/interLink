@@ -30,11 +30,11 @@ install() {
   # TODO download also service files for systemd
 
   cat <<EOF >${HOME}/.interlink/config/InterLinkConfig.yaml
-InterlinkAddress: "unix://${HOME}/.interlink/interlink.sock"
+InterlinkAddress: "unix://${HOME}/.interlink.sock"
 InterlinkPort: "0"
-SidecarURL: "unix://${HOME}/.interlink/plugin.sock"
+SidecarURL: "unix://${HOME}/.plugin.sock"
 SidecarPort: "0"
-VerboseLogging: true
+VerboseLogging: false
 ErrorsOnlyLogging: false
 ExportPodData: true
 DataRootFolder: "~/.interlink"
@@ -48,7 +48,7 @@ EOF
     INTERLINK_ARCH="arm64"
   fi
 
-  echo "=== Configured to reach sidecar service on unix://${HOME}/.interlink/plugin.sock. You can edit this behavior changing ${HOME}/.interlink/config/InterLinkConfig.yaml file. ==="
+  echo "=== Configured to reach sidecar service on unix://${HOME}/.plugin.sock. You can edit this behavior changing ${HOME}/.interlink/config/InterLinkConfig.yaml file. ==="
 
   ## Download binaries to ${HOME}/.local/interlink/
   echo "curl --fail -L -o ${HOME}/.interlink/bin/interlink https://github.com/interTwin-eu/interLink/releases/download/{{.InterLinkVersion}}/interlink_${INTERLINK_OS}_${INTERLINK_ARCH}"
@@ -105,7 +105,7 @@ start() {
       --provider oidc \
       --redirect-url http://localhost:8081 \
       --oidc-extra-audience {{.OAUTH.Audience}} \
-      --upstream unix://${HOME}/.interlink/interlink.sock \
+      --upstream unix://${HOME}/.interlink.sock \
       --allowed-group {{.OAUTH.Group}} \
       --validate-url {{.OAUTH.TokenURL}} \
       --oidc-groups-claim {{.OAUTH.GroupClaim}} \
@@ -128,7 +128,7 @@ start() {
       --pass-authorization-header true \
       --provider github \
       --redirect-url http://localhost:8081 \
-      --upstream unix://${HOME}/.interlink/interlink.sock \
+      --upstream unix://${HOME}/.interlink.sock \
       --email-domain="*" \
       --github-user="{{.OAUTH.GitHUBUser}}" \
       --cookie-secret 2ISpxtx19fm7kJlhbgC4qnkuTlkGrshY82L3nfCSKy4= \
