@@ -52,7 +52,7 @@ const FeatureList: FeatureItem[] = [
     ),
   },
   {
-    title: 'AOB',
+    title: 'HELIX',
     Svg: require('@site/static/img/cern-logo.svg').default,
     description: (
       <>
