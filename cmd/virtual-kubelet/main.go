@@ -185,16 +185,15 @@ func main() {
 			}
 			return dialer.DialContext(ctx, network, addr)
 		},
+		TLSClientConfig: &tls.Config{
+			InsecureSkipVerify: interLinkConfig.HTTP.Insecure,
+		},
 	}
 
 	http.DefaultClient = &http.Client{
 		Transport: &UnixSocketRoundTripper{
 			Transport: transport,
 		},
-	}
-
-	http.DefaultTransport.(*http.Transport).TLSClientConfig = &tls.Config{
-		InsecureSkipVerify: interLinkConfig.HTTP.Insecure,
 	}
 
 	dport, err := strconv.ParseInt(os.Getenv("KUBELET_PORT"), 10, 32)

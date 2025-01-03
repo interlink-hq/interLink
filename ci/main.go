@@ -62,13 +62,13 @@ type Interlink struct {
 // New initializes the Dagger module at each call
 func New(name string,
 	// +optional
-	// +default="ghcr.io/intertwin-eu/interlink/virtual-kubelet-inttw:0.3.1-rc1"
+	// +default="ghcr.io/intertwin-eu/interlink/virtual-kubelet-inttw:0.3.4"
 	VirtualKubeletRef string,
 	// +optional
-	// +default="ghcr.io/intertwin-eu/interlink/interlink:0.3.1-rc1"
+	// +default="ghcr.io/intertwin-eu/interlink/interlink:0.3.4"
 	InterlinkRef string,
 	// +optional
-	// +default="ghcr.io/intertwin-eu/interlink-sidecar-slurm/interlink-sidecar-slurm:0.3.6"
+	// +default="ghcr.io/intertwin-eu/interlink-sidecar-slurm/interlink-sidecar-slurm:0.3.7"
 	pluginRef string,
 ) *Interlink {
 

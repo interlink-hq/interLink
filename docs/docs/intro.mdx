@@ -47,19 +47,6 @@ Our solution is designed to target a wide range of providers with container exec
 
 ## Deployment scenarios
 
-### In-cluster mode
-
-This scenario involves deploying a Virtual Kubelet along with the interLink API server and the plugin to interact with a remote API. This setup allows Kubernetes pods to be executed on remote resources while all other components sits inside the Kubernetes cluster.
-
-<ThemedImage 
-        alt="Docusaurus themed image"
-        sources={{
-          light: useBaseUrl('/img/scenario-2_light.svg'),
-          dark: useBaseUrl('/img/scenario-2_dark.svg'),
-        }}
-/>
-
-
 ### Service remote edge node
 
 In this scenario, the Virtual Kubelet communicates with remote services deployed on a dedicate edge node exposing authenticated interLink APIs and its associated plugin. This setup is ideal for scenarios where edge computing resources are utilized for controlled communication b/w the Kubernetes cluster and the remote resources.
@@ -69,6 +56,18 @@ In this scenario, the Virtual Kubelet communicates with remote services deployed
         sources={{
           light: useBaseUrl('/img/scenario-1_light.svg'),
           dark: useBaseUrl('/img/scenario-1_dark.svg'),
+        }}
+/>
+
+### In-cluster mode
+
+This scenario involves deploying a Virtual Kubelet along with the interLink API server and the plugin to interact with a remote API. This setup allows Kubernetes pods to be executed on remote resources while all other components sits inside the Kubernetes cluster.
+
+<ThemedImage 
+        alt="Docusaurus themed image"
+        sources={{
+          light: useBaseUrl('/img/scenario-2_light.svg'),
+          dark: useBaseUrl('/img/scenario-2_dark.svg'),
         }}
 />
 
