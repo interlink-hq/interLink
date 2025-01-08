@@ -19,7 +19,7 @@ import (
 )
 
 // Ping is just a very basic Ping function
-func (h *InterLinkHandler) Ping(w http.ResponseWriter, _ *http.Request) {
+func (h *InterLinkHandler) Ping(w http.ResponseWriter, r *http.Request) {
 	start := time.Now().UnixMicro()
 	tracer := otel.Tracer("interlink-API")
 	_, span := tracer.Start(h.Ctx, "PingAPI", trace.WithAttributes(
@@ -27,6 +27,7 @@ func (h *InterLinkHandler) Ping(w http.ResponseWriter, _ *http.Request) {
 	))
 	defer span.End()
 	defer types.SetDurationSpan(start, span)
+	defer types.SetInfoFromHeaders(span, &r.Header)
 
 	log.G(h.Ctx).Info("InterLink: received Ping call")
 

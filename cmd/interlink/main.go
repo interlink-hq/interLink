@@ -67,7 +67,7 @@ func main() {
 	defer cancel()
 
 	if os.Getenv("ENABLE_TRACING") == "1" {
-		shutdown, err := interlink.InitTracer(ctx)
+		shutdown, err := interlink.InitTracer(ctx, "InterLink-Plugin-")
 		if err != nil {
 			log.G(ctx).Fatal(err)
 		}

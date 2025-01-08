@@ -26,6 +26,7 @@ func (h *InterLinkHandler) DeleteHandler(w http.ResponseWriter, r *http.Request)
 	))
 	defer span.End()
 	defer types.SetDurationSpan(start, span)
+	defer types.SetInfoFromHeaders(span, &r.Header)
 
 	log.G(h.Ctx).Info("InterLink: received Delete call")
 

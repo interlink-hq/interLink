@@ -36,7 +36,7 @@ type Config struct {
 	DataRootFolder    string `yaml:"DataRootFolder"`
 }
 
-func SetupTelemetry(ctx context.Context) (*sdktrace.TracerProvider, error) {
+func SetupTelemetry(ctx context.Context, serviceName string) (*sdktrace.TracerProvider, error) {
 	log.G(ctx).Info("Tracing is enabled, setting up the TracerProvider")
 
 	// Get the TELEMETRY_UNIQUE_ID from the environment, if it is not set, use the hostname
@@ -45,23 +45,19 @@ func SetupTelemetry(ctx context.Context) (*sdktrace.TracerProvider, error) {
 		log.G(ctx).Info("No TELEMETRY_UNIQUE_ID set, generating a new one")
 		newUUID := uuid.New()
 		uniqueID = newUUID.String()
-		log.G(ctx).Info("Generated unique ID: ", uniqueID, " use VK-InterLink-"+uniqueID+" as service name from Grafana")
+		log.G(ctx).Info("Generated unique ID: ", uniqueID, " use "+serviceName+"-"+uniqueID+" as service name from Grafana")
 	}
-	// Create a new resource with the service name set to the TELEMETRY_UNIQUE_ID
-	// The nomenclature VK-InterLink-<TELEMETRY_UNIQUE_ID> is used to identify the service in Grafana.
-	// VK-InterLink-<TELEMETRY_UNIQUE_ID> means that the traces are coming from Virtual Kubelet
-	// and are related to the call that are made for the InterLink API service
 
-	serviceName := "VK-InterLink-" + uniqueID
+	fullServiceName := serviceName + uniqueID
 
 	res, err := resource.New(ctx,
 		resource.WithAttributes(
 			// the service name used to display traces in backends
-			semconv.ServiceName(serviceName),
+			semconv.ServiceName(fullServiceName),
 		),
 	)
 	if err != nil {
-		return &sdktrace.TracerProvider{}, fmt.Errorf("failed to create resource: %w", err)
+		return nil, fmt.Errorf("failed to create resource: %w", err)
 	}
 
 	ctx, cancel := context.WithTimeout(ctx, time.Second)
@@ -113,24 +109,20 @@ func SetupTelemetry(ctx context.Context) (*sdktrace.TracerProvider, error) {
 			Certificates:       []tls.Certificate{cert},
 			RootCAs:            certPool,
 			MinVersion:         tls.VersionTLS12,
-			InsecureSkipVerify: false,
-		}
-		creds := credentials.NewTLS(tlsConfig)
-		conn, err = grpc.NewClient(otlpEndpoint, grpc.WithTransportCredentials(creds))
-		if err != nil {
-			return nil, fmt.Errorf("Failed to connect to open telemetry connector: %w", err)
+			InsecureSkipVerify: true,
 		}
 
+		creds := credentials.NewTLS(tlsConfig)
+		conn, err = grpc.NewClient(otlpEndpoint, grpc.WithTransportCredentials(creds))
 	} else {
-		// if the CA certificate is not provided, use an insecure connection
-		// this means that the telemetry collector is not using a certificate, i.e. is inside the k8s cluster
 		conn, err = grpc.NewClient(otlpEndpoint, grpc.WithTransportCredentials(insecure.NewCredentials()))
-		if err != nil {
-			return nil, fmt.Errorf("Failed to connect to open telemetry connector: %w", err)
-		}
 	}
 
 	conn.WaitForStateChange(ctx, connectivity.Ready)
+
+	if err != nil {
+		return nil, fmt.Errorf("failed to create gRPC connection to collector: %w", err)
+	}
 
 	// Set up a trace exporter
 	traceExporter, err := otlptracegrpc.New(ctx, otlptracegrpc.WithGRPCConn(conn))
@@ -150,12 +142,13 @@ func SetupTelemetry(ctx context.Context) (*sdktrace.TracerProvider, error) {
 
 	// set global propagator to tracecontext (the default is no-op).
 	otel.SetTextMapPropagator(propagation.TraceContext{})
+
 	return tracerProvider, nil
 }
 
-func InitTracer(ctx context.Context) (func(context.Context) error, error) {
+func InitTracer(ctx context.Context, serviceName string) (func(context.Context) error, error) {
 	// Get the TELEMETRY_UNIQUE_ID from the environment, if it is not set, use the hostname
-	tracerProvider, err := SetupTelemetry(ctx)
+	tracerProvider, err := SetupTelemetry(ctx, serviceName)
 	if err != nil {
 		return nil, err
 	}

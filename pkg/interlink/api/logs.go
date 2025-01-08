@@ -25,6 +25,7 @@ func (h *InterLinkHandler) GetLogsHandler(w http.ResponseWriter, r *http.Request
 	))
 	defer span.End()
 	defer types.SetDurationSpan(start, span)
+	defer types.SetInfoFromHeaders(span, &r.Header)
 
 	sessionContext := GetSessionContext(r)
 	sessionContextMessage := GetSessionContextMessage(sessionContext)

@@ -27,6 +27,7 @@ func (h *InterLinkHandler) StatusHandler(w http.ResponseWriter, r *http.Request)
 	))
 	defer span.End()
 	defer types.SetDurationSpan(start, span)
+	defer types.SetInfoFromHeaders(span, &r.Header)
 	statusCode := http.StatusOK
 	var pods []*v1.Pod
 	log.G(h.Ctx).Info("InterLink: received GetStatus call")
