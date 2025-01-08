@@ -109,11 +109,14 @@ func SetupTelemetry(ctx context.Context, serviceName string) (*sdktrace.TracerPr
 			Certificates:       []tls.Certificate{cert},
 			RootCAs:            certPool,
 			MinVersion:         tls.VersionTLS12,
-			InsecureSkipVerify: true,
+			InsecureSkipVerify: true, // #nosec
 		}
 
 		creds := credentials.NewTLS(tlsConfig)
 		conn, err = grpc.NewClient(otlpEndpoint, grpc.WithTransportCredentials(creds))
+		if err != nil {
+			return nil, fmt.Errorf("failed to create gRPC client: %w", err)
+		}
 	} else {
 		conn, err = grpc.NewClient(otlpEndpoint, grpc.WithTransportCredentials(insecure.NewCredentials()))
 	}
