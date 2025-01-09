@@ -114,7 +114,7 @@ func SetupTelemetry(ctx context.Context, serviceName string) (*sdktrace.TracerPr
 			Certificates:       []tls.Certificate{cert},
 			RootCAs:            certPool,
 			MinVersion:         tls.VersionTLS12,
-			InsecureSkipVerify: insecureSkipVerify,
+			InsecureSkipVerify: insecureSkipVerify, // #nosec
 		}
 
 		creds := credentials.NewTLS(tlsConfig)
