@@ -95,6 +95,11 @@ func SetupTelemetry(ctx context.Context, serviceName string) (*sdktrace.TracerPr
 			return nil, fmt.Errorf("client certificate file path not provided. Since a CA certificate is provided, a client certificate is required for mutual TLS")
 		}
 
+		insecureSkipVerify := false
+		if os.Getenv("TELEMETRY_INSECURE_SKIP_VERIFY") == "true" {
+			insecureSkipVerify = true
+		}
+
 		certPool := x509.NewCertPool()
 		if !certPool.AppendCertsFromPEM(caCert) {
 			return nil, fmt.Errorf("failed to append CA certificate")
@@ -109,7 +114,7 @@ func SetupTelemetry(ctx context.Context, serviceName string) (*sdktrace.TracerPr
 			Certificates:       []tls.Certificate{cert},
 			RootCAs:            certPool,
 			MinVersion:         tls.VersionTLS12,
-			InsecureSkipVerify: true, // #nosec
+			InsecureSkipVerify: insecureSkipVerify,
 		}
 
 		creds := credentials.NewTLS(tlsConfig)
