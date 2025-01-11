@@ -80,7 +80,7 @@ In general, starting from the deployment of the remote components is adviced. Si
 
     ```bash
     export VERSION=$(curl -s https://api.github.com/repos/intertwin-eu/interlink/releases/latest  | jq -r .name)
-    wget -O interlink-installer https://github.com/interTwin-eu/interLink/releases/download/$VERSION/interlink-installer_Linux_amd64
+    wget -O interlink-installer https://github.com/interTwin-eu/interLink/releases/download/$VERSION/interlink-installer_Linux_x86_64
     chmod +x interlink-installer
     ```
 
