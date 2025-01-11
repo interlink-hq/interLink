@@ -110,6 +110,10 @@ func (m *Interlink) NewInterlink(
 	if localRegistry != nil {
 		m.Registry = localRegistry
 	}
+	if m.Registry == nil {
+		m.Registry = dag.Container().From("registry").
+			WithExposedPort(5000).AsService()
+	}
 
 	var err error
 	if pluginEndpoint == nil {
