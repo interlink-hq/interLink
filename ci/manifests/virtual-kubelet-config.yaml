@@ -8,7 +8,6 @@ data:
     #InterlinkURL: unix:///var/run/interlink.socket
     InterlinkURL: "http://interlink"
     InterlinkPort: "3000" 
-    ExportPodData: true
     VerboseLogging: true
     ErrorsOnlyLogging: false
     ServiceAccount: "virtual-kubelet"

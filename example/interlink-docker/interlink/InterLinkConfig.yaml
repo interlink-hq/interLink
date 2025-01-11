@@ -3,7 +3,6 @@ InterlinkAddress: "http://XXX.XXX.XXX.XXX"
 SidecarURL: "http://docker-sidecar"
 InterlinkPort: "3000"
 SidecarPort: "4000"
-ExportPodData: true
 DataRootFolder: ".local/interlink/jobs/"
 VerboseLogging: true
 ErrorsOnlyLogging: false

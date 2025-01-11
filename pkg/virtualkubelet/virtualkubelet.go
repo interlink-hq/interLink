@@ -225,6 +225,7 @@ type Provider struct {
 	notifier             func(*v1.Pod)
 	onNodeChangeCallback func(*v1.Node)
 	clientSet            *kubernetes.Clientset
+	clientHTTPTransport  *http.Transport
 }
 
 // NewProviderConfig takes user-defined configuration and fills the Virtual Kubelet provider struct
@@ -235,6 +236,7 @@ func NewProviderConfig(
 	operatingSystem string,
 	internalIP string,
 	daemonEndpointPort int32,
+	clientHTTPTransport *http.Transport,
 ) (*Provider, error) {
 
 	SetDefaultResource(&config)
@@ -276,14 +278,15 @@ func NewProviderConfig(
 	}
 
 	provider := Provider{
-		nodeName:           nodeName,
-		node:               &node,
-		operatingSystem:    operatingSystem,
-		internalIP:         internalIP,
-		daemonEndpointPort: daemonEndpointPort,
-		pods:               make(map[string]*v1.Pod),
-		config:             config,
-		startTime:          time.Now(),
+		nodeName:            nodeName,
+		node:                &node,
+		operatingSystem:     operatingSystem,
+		internalIP:          internalIP,
+		daemonEndpointPort:  daemonEndpointPort,
+		pods:                make(map[string]*v1.Pod),
+		config:              config,
+		startTime:           time.Now(),
+		clientHTTPTransport: clientHTTPTransport,
 	}
 
 	return &provider, nil
@@ -298,13 +301,22 @@ func NewProvider(
 	operatingSystem string,
 	internalIP string,
 	daemonEndpointPort int32,
+	clientHTTPTransport *http.Transport,
 ) (*Provider, error) {
 	config, err := LoadConfig(ctx, providerConfig)
 	if err != nil {
 		return nil, err
 	}
 	log.G(ctx).Info("Init server with config:", config)
-	return NewProviderConfig(config, nodeName, nodeVersion, operatingSystem, internalIP, daemonEndpointPort)
+	return NewProviderConfig(
+		config,
+		nodeName,
+		nodeVersion,
+		operatingSystem,
+		internalIP,
+		daemonEndpointPort,
+		clientHTTPTransport,
+	)
 }
 
 // LoadConfig loads the given json configuration files and return a VirtualKubeletConfig struct
@@ -727,7 +739,7 @@ func (p *Provider) GetLogs(ctx context.Context, namespace, podName, containerNam
 		Opts:          types.ContainerLogOpts(opts),
 	}
 
-	return LogRetrieval(ctx, p.config, logsRequest, sessionContext)
+	return LogRetrieval(ctx, p.config, logsRequest, p.clientHTTPTransport, sessionContext)
 }
 
 // GetStatsSummary returns dummy stats for all pods known by this provider.

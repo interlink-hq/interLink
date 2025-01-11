@@ -4,7 +4,6 @@ SbatchPath: "/usr/bin/sbatch"
 ScancelPath: "/usr/bin/scancel"
 SqueuePath: "/usr/bin/squeue"
 CommandPrefix: ""
-ExportPodData: true
 DataRootFolder: ".local/interlink/jobs/"
 Tsocks: false
 TsocksPath: "$WORK/tsocks-1.8beta5+ds1/libtsocks.so"

@@ -42,15 +42,6 @@ func GetSessionContextMessage(sessionContext string) string {
 	return "HTTP InterLink session " + sessionContext + ": "
 }
 
-func DoReq(req *http.Request) (*http.Response, error) {
-	resp, err := http.DefaultClient.Do(req)
-	if err != nil {
-		return nil, err
-	}
-
-	return resp, nil
-}
-
 // respondWithReturn: if false, return nil. Useful when body is too big to be contained in one big string.
 // sessionNumber: integer number for debugging purpose, generated from InterLink VK, to follow HTTP request from end-to-end.
 func ReqWithError(
