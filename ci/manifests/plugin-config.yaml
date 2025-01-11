@@ -4,7 +4,6 @@ SidecarURL: "http://0.0.0.0"
 SidecarPort: "4000"
 VerboseLogging: true
 ErrorsOnlyLogging: false
-ExportPodData: true
 # NEEDED PATH FOR GITHUB ACTIONS
 #DataRootFolder: "/home/runner/work/interLink/interLink/.interlink/"
 # on your host use something like:

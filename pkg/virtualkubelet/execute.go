@@ -339,7 +339,13 @@ func statusRequest(ctx context.Context, config Config, podsList []*v1.Pod, token
 // LogRetrieval performs a REST call to the InterLink API when the user ask for a log retrieval. Compared to create/delete/status request, a way smaller struct is marshalled and sent.
 // This struct only includes a minimum data set needed to identify the job/container to get the logs from.
 // Returns the call response and/or the first encountered error
-func LogRetrieval(ctx context.Context, config Config, logsRequest types.LogStruct, sessionContext string) (io.ReadCloser, error) {
+func LogRetrieval(
+	ctx context.Context,
+	config Config,
+	logsRequest types.LogStruct,
+	clientHTTPTransport *http.Transport,
+	sessionContext string,
+) (io.ReadCloser, error) {
 	tracer := otel.Tracer("interlink-service")
 	interLinkEndpoint := getSidecarEndpoint(ctx, config.InterlinkURL, config.Interlinkport)
 
@@ -386,10 +392,9 @@ func LogRetrieval(ctx context.Context, config Config, logsRequest types.LogStruc
 	// Add session number for end-to-end from VK to API to InterLink plugin (eg interlink-slurm-plugin)
 	AddSessionContext(req, sessionContext)
 
-	logTransport := http.DefaultTransport.(*http.Transport).Clone()
-	// logTransport.DisableKeepAlives = true
-	// logTransport.MaxIdleConnsPerHost = -1
-	var logHTTPClient = &http.Client{Transport: logTransport}
+	clientHTTPTransport.DisableKeepAlives = true
+	clientHTTPTransport.MaxIdleConnsPerHost = -1
+	var logHTTPClient = &http.Client{Transport: clientHTTPTransport}
 
 	resp, err := doRequestWithClient(req, token, logHTTPClient)
 	if err != nil {

@@ -245,6 +245,7 @@ func main() {
 		cfg.OperatingSystem,
 		cfg.InternalIP,
 		cfg.DaemonPort,
+		transport.Clone(),
 	)
 	if err != nil {
 		log.G(ctx).Fatal(err)
