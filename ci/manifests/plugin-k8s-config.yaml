@@ -11,6 +11,7 @@ data:
       SidecarPort: "4000"
       VerboseLogging: true
       ErrorsOnlyLogging: false
+      ExportPodData: true
       DataRootFolder: "/home/runner/work/interLink/interLink/.interlink/"
       SbatchPath: "/usr/bin/sbatch"
       ScancelPath: "/usr/bin/scancel"

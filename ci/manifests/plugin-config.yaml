@@ -8,6 +8,7 @@ ErrorsOnlyLogging: false
 #DataRootFolder: "/home/runner/work/interLink/interLink/.interlink/"
 # on your host use something like:
 DataRootFolder: "/home/ubuntu/.interlink/"
+ExportPodData: true
 SbatchPath: "/usr/bin/sbatch"
 ScancelPath: "/usr/bin/scancel"
 SqueuePath: "/usr/bin/squeue"
