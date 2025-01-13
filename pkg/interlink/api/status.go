@@ -80,7 +80,6 @@ func (h *InterLinkHandler) StatusHandler(w http.ResponseWriter, r *http.Request)
 
 		log.G(h.Ctx).Info("InterLink: forwarding GetStatus call to sidecar")
 		req.Header.Set("Content-Type", "application/json")
-		log.G(h.Ctx).Debug("Interlink get status request content:", req)
 
 		sessionContext := GetSessionContext(r)
 		bodyBytes, err = ReqWithError(h.Ctx, req, w, start, span, false, true, sessionContext, h.ClientHTTP)
@@ -127,7 +126,6 @@ func (h *InterLinkHandler) StatusHandler(w http.ResponseWriter, r *http.Request)
 		log.G(h.Ctx).Error(err)
 		return
 	}
-	log.G(h.Ctx).Debug("InterLink: status " + string(returnValue))
 
 	w.WriteHeader(statusCode)
 	_, err = w.Write(returnValue)

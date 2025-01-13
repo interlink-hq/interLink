@@ -15,11 +15,12 @@ type PodCreateRequests struct {
 
 // PodStatus is a simplified v1.Pod struct, holding only necessary variables to uniquely identify a job/service in the sidecar. It is used to request
 type PodStatus struct {
-	PodName      string               `json:"name"`
-	PodUID       string               `json:"UID"`
-	PodNamespace string               `json:"namespace"`
-	JobID        string               `json:"JID"`
-	Containers   []v1.ContainerStatus `json:"containers"`
+	PodName        string               `json:"name"`
+	PodUID         string               `json:"UID"`
+	PodNamespace   string               `json:"namespace"`
+	JobID          string               `json:"JID"`
+	Containers     []v1.ContainerStatus `json:"containers"`
+	InitContainers []v1.ContainerStatus `json:"initContainers"`
 }
 
 // CreateStruct is the response to be received from interLink whenever asked to create a pod. It will allow for mapping remote ID with the pod UUID
