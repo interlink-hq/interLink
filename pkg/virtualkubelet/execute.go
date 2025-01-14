@@ -86,7 +86,7 @@ func getSidecarEndpoint(ctx context.Context, interLinkURL string, interLinkPort 
 // PingInterLink pings the InterLink API and returns true if there's an answer. The second return value is given by the answer provided by the API.
 func PingInterLink(ctx context.Context, config Config) (bool, int, error) {
 	tracer := otel.Tracer("interlink-service")
-	interLinkEndpoint := getSidecarEndpoint(ctx, config.InterlinkURL, config.Interlinkport)
+	interLinkEndpoint := getSidecarEndpoint(ctx, config.InterlinkURL, config.InterlinkPort)
 	log.G(ctx).Info("Pinging: " + interLinkEndpoint + "/pinglink")
 	retVal := -1
 	req, err := http.NewRequest(http.MethodPost, interLinkEndpoint+"/pinglink", nil)
@@ -144,7 +144,7 @@ func updateCacheRequest(ctx context.Context, config Config, pod v1.Pod, token st
 		return err
 	}
 
-	interLinkEndpoint := getSidecarEndpoint(ctx, config.InterlinkURL, config.Interlinkport)
+	interLinkEndpoint := getSidecarEndpoint(ctx, config.InterlinkURL, config.InterlinkPort)
 	reader := bytes.NewReader(bodyBytes)
 	req, err := http.NewRequest(http.MethodPost, interLinkEndpoint+"/updateCache", reader)
 	if err != nil {
@@ -182,7 +182,7 @@ func updateCacheRequest(ctx context.Context, config Config, pod v1.Pod, token st
 // Returns the call response expressed in bytes and/or the first encountered error
 func createRequest(ctx context.Context, config Config, pod types.PodCreateRequests, token string) ([]byte, error) {
 	tracer := otel.Tracer("interlink-service")
-	interLinkEndpoint := getSidecarEndpoint(ctx, config.InterlinkURL, config.Interlinkport)
+	interLinkEndpoint := getSidecarEndpoint(ctx, config.InterlinkURL, config.InterlinkPort)
 
 	bodyBytes, err := json.Marshal(pod)
 	if err != nil {
@@ -231,7 +231,7 @@ func createRequest(ctx context.Context, config Config, pod types.PodCreateReques
 // deleteRequest performs a REST call to the InterLink API when a Pod is deleted from the VK. It Marshals the standard v1.Pod struct and sends it to InterLink.
 // Returns the call response expressed in bytes and/or the first encountered error
 func deleteRequest(ctx context.Context, config Config, pod *v1.Pod, token string) ([]byte, error) {
-	interLinkEndpoint := getSidecarEndpoint(ctx, config.InterlinkURL, config.Interlinkport)
+	interLinkEndpoint := getSidecarEndpoint(ctx, config.InterlinkURL, config.InterlinkPort)
 	var returnValue []byte
 	bodyBytes, err := json.Marshal(pod)
 	if err != nil {
@@ -287,7 +287,7 @@ func deleteRequest(ctx context.Context, config Config, pod *v1.Pod, token string
 func statusRequest(ctx context.Context, config Config, podsList []*v1.Pod, token string) ([]byte, error) {
 	tracer := otel.Tracer("interlink-service")
 
-	interLinkEndpoint := getSidecarEndpoint(ctx, config.InterlinkURL, config.Interlinkport)
+	interLinkEndpoint := getSidecarEndpoint(ctx, config.InterlinkURL, config.InterlinkPort)
 
 	bodyBytes, err := json.Marshal(podsList)
 	if err != nil {
@@ -348,7 +348,7 @@ func LogRetrieval(
 	sessionContext string,
 ) (io.ReadCloser, error) {
 	tracer := otel.Tracer("interlink-service")
-	interLinkEndpoint := getSidecarEndpoint(ctx, config.InterlinkURL, config.Interlinkport)
+	interLinkEndpoint := getSidecarEndpoint(ctx, config.InterlinkURL, config.InterlinkPort)
 
 	token := ""
 
