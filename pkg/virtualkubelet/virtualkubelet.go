@@ -30,17 +30,16 @@ import (
 )
 
 const (
-	DefaultCPUCapacity       = "100"
-	DefaultMemoryCapacity    = "3000G"
-	DefaultPodCapacity       = "10000"
-	DefaultNvidiaGPUCapacity = "0"
-	DefaultAMDGPUCapacity    = "0"
-	DefaultIntelGPUCapacity  = "0"
-	DefaultListenPort        = 10250
-	NamespaceKey             = "namespace"
-	NameKey                  = "name"
-	CREATE                   = 0
-	DELETE                   = 1
+	DefaultCPUCapacity    = "100"
+	DefaultMemoryCapacity = "3000G"
+	DefaultPodCapacity    = "10000"
+	DefaultGPUCapacity    = "0"
+	DefaultFPGACapacity   = "0"
+	DefaultListenPort     = 10250
+	NamespaceKey          = "namespace"
+	NameKey               = "name"
+	CREATE                = 0
+	DELETE                = 1
 )
 
 func TracerUpdate(ctx *context.Context, name string, pod *v1.Pod) {
@@ -175,12 +174,14 @@ func NodeCondition(ready bool) []v1.NodeCondition {
 func GetResources(config Config) v1.ResourceList {
 
 	return v1.ResourceList{
-		"cpu":            resource.MustParse(config.Resources.CPU),
-		"memory":         resource.MustParse(config.Resources.Memory),
-		"pods":           resource.MustParse(config.Resources.Pods),
-		"nvidia.com/gpu": resource.MustParse(config.Resources.NvidiaGPU),
-		"amd.com/gpu":    resource.MustParse(config.Resources.AMDGPU),
-		"intel.com/gpu":  resource.MustParse(config.Resources.IntelGPU),
+		"cpu":             resource.MustParse(config.Resources.CPU),
+		"memory":          resource.MustParse(config.Resources.Memory),
+		"pods":            resource.MustParse(config.Resources.Pods),
+		"nvidia.com/gpu":  resource.MustParse(config.Resources.GPU.Nvidia),
+		"amd.com/gpu":     resource.MustParse(config.Resources.GPU.AMD),
+		"intel.com/gpu":   resource.MustParse(config.Resources.GPU.Intel),
+		"xilinx.com/fpga": resource.MustParse(config.Resources.FPGA.Xilinx),
+		"intel.com/fpga":  resource.MustParse(config.Resources.FPGA.Intel),
 	}
 
 }
@@ -195,14 +196,20 @@ func SetDefaultResource(config *Config) {
 	if config.Resources.Pods == "" {
 		config.Resources.Pods = DefaultPodCapacity
 	}
-	if config.Resources.NvidiaGPU == "" {
-		config.Resources.NvidiaGPU = DefaultNvidiaGPUCapacity
+	if config.Resources.GPU.Nvidia == "" {
+		config.Resources.GPU.Nvidia = DefaultGPUCapacity
 	}
-	if config.Resources.AMDGPU == "" {
-		config.Resources.AMDGPU = DefaultAMDGPUCapacity
+	if config.Resources.GPU.AMD == "" {
+		config.Resources.GPU.AMD = DefaultGPUCapacity
 	}
-	if config.Resources.IntelGPU == "" {
-		config.Resources.IntelGPU = DefaultIntelGPUCapacity
+	if config.Resources.GPU.Intel == "" {
+		config.Resources.GPU.Intel = DefaultGPUCapacity
+	}
+	if config.Resources.FPGA.Xilinx == "" {
+		config.Resources.FPGA.Xilinx = DefaultFPGACapacity
+	}
+	if config.Resources.FPGA.Intel == "" {
+		config.Resources.FPGA.Intel = DefaultFPGACapacity
 	}
 }
 
@@ -400,14 +407,20 @@ func LoadConfig(ctx context.Context, providerConfig string) (config Config, err 
 	if _, err = resource.ParseQuantity(config.Resources.Pods); err != nil {
 		return config, fmt.Errorf("invalid pods value %v", config.Resources.Pods)
 	}
-	if _, err = resource.ParseQuantity(config.Resources.NvidiaGPU); err != nil {
-		return config, fmt.Errorf("invalid Nvidia GPU value %v", config.Resources.NvidiaGPU)
+	if _, err = resource.ParseQuantity(config.Resources.GPU.Nvidia); err != nil {
+		return config, fmt.Errorf("invalid Nvidia GPU value %v", config.Resources.GPU.Nvidia)
 	}
-	if _, err = resource.ParseQuantity(config.Resources.AMDGPU); err != nil {
-		return config, fmt.Errorf("invalid AMD GPU value %v", config.Resources.AMDGPU)
+	if _, err = resource.ParseQuantity(config.Resources.GPU.AMD); err != nil {
+		return config, fmt.Errorf("invalid AMD GPU value %v", config.Resources.GPU.AMD)
 	}
-	if _, err = resource.ParseQuantity(config.Resources.IntelGPU); err != nil {
-		return config, fmt.Errorf("invalid Intel GPU value %v", config.Resources.IntelGPU)
+	if _, err = resource.ParseQuantity(config.Resources.GPU.Intel); err != nil {
+		return config, fmt.Errorf("invalid Intel GPU value %v", config.Resources.GPU.Intel)
+	}
+	if _, err = resource.ParseQuantity(config.Resources.FPGA.Xilinx); err != nil {
+		return config, fmt.Errorf("invalid Intel FPGA value %v", config.Resources.FPGA.Xilinx)
+	}
+	if _, err = resource.ParseQuantity(config.Resources.FPGA.Intel); err != nil {
+		return config, fmt.Errorf("invalid Xilinx FPGA value %v", config.Resources.FPGA.Intel)
 	}
 
 	return config, nil
