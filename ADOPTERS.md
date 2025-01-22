@@ -24,6 +24,12 @@ We are integrating interLink in order to provide integration of HPC centers with
 
 ## HPC supercomputing centers
 
+### IJS & IZUM
+
+Project: interTwin
+
+EuroHPC Vega is the first operational system under the EuroHPC initiative and an early adopter of interTwin framework providing resources through interLink service. It provides critical support and counseling from both project partners (JSI & IZUM), infrastructure, and edge VM for the development and utilization of interLink, fostering the exploitation of the HPC Vega environment within the InterTwin project. 
+
 ### CNES
 
 Project: LISA DDPC
