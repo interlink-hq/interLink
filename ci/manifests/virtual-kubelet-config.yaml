@@ -6,18 +6,18 @@ metadata:
 data:
   InterLinkConfig.yaml: |
     #InterlinkURL: unix:///var/run/interlink.socket
-    InterlinkURL: "http://interlink"
-    InterlinkPort: "3000" 
-    VerboseLogging: true
-    ErrorsOnlyLogging: false
-    ServiceAccount: "virtual-kubelet"
-    Namespace: interlink 
-    VKTokenFile: ""
-    CPU: "100"
-    Memory: "128Gi"
-    Pods: "100"
+    interlinkURL: "http://interlink"
+    interlinkPort: "3000" 
+    verboseLogging: true
+    errorsOnlyLogging: false
+    serviceAccount: "virtual-kubelet"
+    namespace: interlink 
+    vKTokenFile: ""
+    cpu: "100"
+    memory: "128Gi"
+    pods: "100"
     HTTP:
       Insecure: true
-    KubeletHTTP:
+    kubeletHTTP:
       Insecure: true
 
