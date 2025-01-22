@@ -6,11 +6,11 @@
 # data:
 #   InterLinkConfig.yaml: |
     #InterlinkAddress: "unix:///var/run/interlink.socket"
-InterlinkAddress: "http://0.0.0.0"
-InterlinkPort: "3000"
-#SidecarURL: "http://plugin"
-SidecarURL: "http://0.0.0.0"
-SidecarPort: "4000"
-VerboseLogging: true
-ErrorsOnlyLogging: false
-DataRootFolder: "~/.interlink"
+interlinkAddress: "http://0.0.0.0"
+interlinkPort: "3000"
+#sidecarURL: "http://plugin"
+sidecarURL: "http://0.0.0.0"
+sidecarPort: "4000"
+verboseLogging: true
+errorsOnlyLogging: false
+dataRootFolder: "~/.interlink"
