@@ -172,18 +172,42 @@ func NodeCondition(ready bool) []v1.NodeCondition {
 }
 
 func GetResources(config Config) v1.ResourceList {
+	gpuCount := map[string]int{}
+	fpgaCount := map[string]int{}
 
-	return v1.ResourceList{
-		"cpu":             resource.MustParse(config.Resources.CPU),
-		"memory":          resource.MustParse(config.Resources.Memory),
-		"pods":            resource.MustParse(config.Resources.Pods),
-		"nvidia.com/gpu":  resource.MustParse(config.Resources.GPU.Nvidia),
-		"amd.com/gpu":     resource.MustParse(config.Resources.GPU.AMD),
-		"intel.com/gpu":   resource.MustParse(config.Resources.GPU.Intel),
-		"xilinx.com/fpga": resource.MustParse(config.Resources.FPGA.Xilinx),
-		"intel.com/fpga":  resource.MustParse(config.Resources.FPGA.Intel),
+	for _, accelerator := range config.Resources.Accelerators {
+		switch accelerator.ResourceType {
+		case "nvidia.com/gpu", "amd.com/gpu", "intel.com/gpu":
+			gpuCount[accelerator.ResourceType] += accelerator.Available
+		case "xilinx.com/fpga", "intel.com/fpga":
+			fpgaCount[accelerator.ResourceType] += accelerator.Available
+		}
 	}
 
+	resourceList := v1.ResourceList{
+		"cpu":    resource.MustParse(config.Resources.CPU),
+		"memory": resource.MustParse(config.Resources.Memory),
+		"pods":   resource.MustParse(config.Resources.Pods),
+	}
+
+	for resourceType, count := range gpuCount {
+		if count > 0 {
+			resourceList[v1.ResourceName(resourceType)] = *resource.NewQuantity(int64(count), resource.DecimalSI)
+		}
+	}
+
+	for resourceType, count := range fpgaCount {
+		if count > 0 {
+			resourceList[v1.ResourceName(resourceType)] = *resource.NewQuantity(int64(count), resource.DecimalSI)
+		}
+	}
+
+	// log the resource list
+	for key, value := range resourceList {
+		log.G(context.Background()).Infof("Resource %s: %s", key, value.String())
+	}
+
+	return resourceList
 }
 
 func SetDefaultResource(config *Config) {
@@ -196,20 +220,26 @@ func SetDefaultResource(config *Config) {
 	if config.Resources.Pods == "" {
 		config.Resources.Pods = DefaultPodCapacity
 	}
-	if config.Resources.GPU.Nvidia == "" {
-		config.Resources.GPU.Nvidia = DefaultGPUCapacity
-	}
-	if config.Resources.GPU.AMD == "" {
-		config.Resources.GPU.AMD = DefaultGPUCapacity
-	}
-	if config.Resources.GPU.Intel == "" {
-		config.Resources.GPU.Intel = DefaultGPUCapacity
-	}
-	if config.Resources.FPGA.Xilinx == "" {
-		config.Resources.FPGA.Xilinx = DefaultFPGACapacity
-	}
-	if config.Resources.FPGA.Intel == "" {
-		config.Resources.FPGA.Intel = DefaultFPGACapacity
+
+	for i, accelerator := range config.Resources.Accelerators {
+		if accelerator.Available == 0 {
+			switch accelerator.ResourceType {
+			case "nvidia.com/gpu", "amd.com/gpu", "intel.com/gpu":
+				defaultGPUCapacity, err := strconv.Atoi(DefaultGPUCapacity)
+				if err != nil {
+					log.G(context.Background()).Errorf("Invalid default GPU capacity: %v", err)
+					defaultGPUCapacity = 0
+				}
+				config.Resources.Accelerators[i].Available = defaultGPUCapacity
+			case "xilinx.com/fpga", "intel.com/fpga":
+				defaultFPGACapacity, err := strconv.Atoi(DefaultFPGACapacity)
+				if err != nil {
+					log.G(context.Background()).Errorf("Invalid default FPGA capacity: %v", err)
+					defaultFPGACapacity = 0
+				}
+				config.Resources.Accelerators[i].Available = defaultFPGACapacity
+			}
+		}
 	}
 }
 
@@ -270,13 +300,24 @@ func NewProviderConfig(
 	// Add custom labels from config
 	for _, label := range config.NodeLabels {
 
-		log.G(context.Background()).Infof("Adding label %q", label)
-
 		parts := strings.SplitN(label, "=", 2)
 		if len(parts) == 2 {
 			lbls[parts[0]] = parts[1]
 		} else {
 			log.G(context.Background()).Warnf("Node label %q is not in the correct format. Should be key=value", label)
+		}
+	}
+
+	for _, accelerator := range config.Resources.Accelerators {
+		switch strings.ToLower(accelerator.ResourceType) {
+		case "nvidia.com/gpu":
+			lbls["nvidia-gpu-type"] = accelerator.Model
+		case "xilinx.com/fpga":
+			lbls["xilinx-fpga-type"] = accelerator.Model
+		case "intel.com/fpga":
+			lbls["intel-fpga-type"] = accelerator.Model
+		default:
+			log.G(context.Background()).Warnf("Unhandled accelerator resource type: %q", accelerator.ResourceType)
 		}
 	}
 
@@ -290,7 +331,6 @@ func NewProviderConfig(
 	for _, taint := range config.NodeTaints {
 		log.G(context.Background()).Infof("Adding taint key=%q value=%q effect=%q", taint.Key, taint.Value, taint.Effect)
 
-		// Handle the effect and convert it to the appropriate TaintEffect
 		var effect v1.TaintEffect
 
 		switch taint.Effect {
@@ -301,7 +341,6 @@ func NewProviderConfig(
 		case "NoExecute":
 			effect = v1.TaintEffectNoExecute
 		default:
-			// If the effect is not recognized, set it to NoSchedule by default or handle as needed
 			effect = v1.TaintEffectNoSchedule
 			log.G(context.Background()).Warnf("Unknown taint effect %q, defaulting to NoSchedule", taint.Effect)
 		}
@@ -317,7 +356,6 @@ func NewProviderConfig(
 		ObjectMeta: metav1.ObjectMeta{
 			Name:   nodeName,
 			Labels: lbls,
-			//Annotations: cfg.ExtraAnnotations,
 		},
 		Spec: v1.NodeSpec{
 			Taints: taints,
@@ -407,20 +445,20 @@ func LoadConfig(ctx context.Context, providerConfig string) (config Config, err 
 	if _, err = resource.ParseQuantity(config.Resources.Pods); err != nil {
 		return config, fmt.Errorf("invalid pods value %v", config.Resources.Pods)
 	}
-	if _, err = resource.ParseQuantity(config.Resources.GPU.Nvidia); err != nil {
-		return config, fmt.Errorf("invalid Nvidia GPU value %v", config.Resources.GPU.Nvidia)
+	if _, err = resource.ParseQuantity(config.Resources.CPU); err != nil {
+		return config, fmt.Errorf("invalid CPU value %v", config.Resources.CPU)
 	}
-	if _, err = resource.ParseQuantity(config.Resources.GPU.AMD); err != nil {
-		return config, fmt.Errorf("invalid AMD GPU value %v", config.Resources.GPU.AMD)
+	if _, err = resource.ParseQuantity(config.Resources.Memory); err != nil {
+		return config, fmt.Errorf("invalid memory value %v", config.Resources.Memory)
 	}
-	if _, err = resource.ParseQuantity(config.Resources.GPU.Intel); err != nil {
-		return config, fmt.Errorf("invalid Intel GPU value %v", config.Resources.GPU.Intel)
+	if _, err = resource.ParseQuantity(config.Resources.Pods); err != nil {
+		return config, fmt.Errorf("invalid pods value %v", config.Resources.Pods)
 	}
-	if _, err = resource.ParseQuantity(config.Resources.FPGA.Xilinx); err != nil {
-		return config, fmt.Errorf("invalid Intel FPGA value %v", config.Resources.FPGA.Xilinx)
-	}
-	if _, err = resource.ParseQuantity(config.Resources.FPGA.Intel); err != nil {
-		return config, fmt.Errorf("invalid Xilinx FPGA value %v", config.Resources.FPGA.Intel)
+	for _, accelerator := range config.Resources.Accelerators {
+		quantity := resource.NewQuantity(int64(accelerator.Available), resource.DecimalSI)
+		if _, err = resource.ParseQuantity(quantity.String()); err != nil {
+			return config, fmt.Errorf("invalid value for accelerator %v (model: %v): %v", accelerator.ResourceType, accelerator.Model, err)
+		}
 	}
 
 	return config, nil

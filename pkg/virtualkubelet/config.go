@@ -21,27 +21,22 @@ type Config struct {
 type HTTP struct {
 	Insecure bool `yaml:"insecure"`
 }
+
 type Resources struct {
-	CPU    string `yaml:"cpu,omitempty"`
-	Memory string `yaml:"memory,omitempty"`
-	Pods   string `yaml:"pods,omitempty"`
-	GPU    GPU    `yaml:"gpu,omitempty"`
-	FPGA   FPGA   `yaml:"fpga,omitempty"`
+	CPU          string        `yaml:"cpu,omitempty"`
+	Memory       string        `yaml:"memory,omitempty"`
+	Pods         string        `yaml:"pods,omitempty"`
+	Accelerators []Accelerator `yaml:"accelerators"`
 }
 
-type GPU struct {
-	Nvidia string `yaml:"nvidia,omitempty"`
-	AMD    string `yaml:"amd,omitempty"`
-	Intel  string `yaml:"intel,omitempty"`
-}
-
-type FPGA struct {
-	Xilinx string `yaml:"xilinx,omitempty"`
-	Intel  string `yaml:"intel,omitempty"`
+type Accelerator struct {
+	ResourceType string `yaml:"resource_type"`
+	Model        string `yaml:"model"`
+	Available    int    `yaml:"available"`
 }
 
 type TaintSpec struct {
 	Key    string `yaml:"key"`
 	Value  string `yaml:"value"`
-	Effect string `yaml:"effect"` // E.g., "NoSchedule"
+	Effect string `yaml:"effect"`
 }
