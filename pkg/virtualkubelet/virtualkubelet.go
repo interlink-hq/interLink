@@ -40,6 +40,11 @@ const (
 	NameKey               = "name"
 	CREATE                = 0
 	DELETE                = 1
+	nvidiaGPU             = "nvidia.com/gpu"
+	amdGPU                = "amd.com/gpu"
+	intelGPU              = "intel.com/gpu"
+	xilinxFPGA            = "xilinx.com/fpga"
+	intelFPGA             = "intel.com/fpga"
 )
 
 func TracerUpdate(ctx *context.Context, name string, pod *v1.Pod) {
@@ -177,9 +182,9 @@ func GetResources(config Config) v1.ResourceList {
 
 	for _, accelerator := range config.Resources.Accelerators {
 		switch accelerator.ResourceType {
-		case "nvidia.com/gpu", "amd.com/gpu", "intel.com/gpu":
+		case nvidiaGPU, amdGPU, intelGPU:
 			gpuCount[accelerator.ResourceType] += accelerator.Available
-		case "xilinx.com/fpga", "intel.com/fpga":
+		case xilinxFPGA, intelFPGA:
 			fpgaCount[accelerator.ResourceType] += accelerator.Available
 		}
 	}
