@@ -25,6 +25,7 @@ import (
 )
 
 const PodPhaseInitialize = "Initializing"
+const PodPhaseCompleted = "Completed"
 
 func failedMount(ctx context.Context, failed *bool, name string, pod *v1.Pod, p *Provider) error {
 	*failed = true
@@ -539,13 +540,132 @@ func RemoteExecution(ctx context.Context, config Config, p *Provider, pod *v1.Po
 	return nil
 }
 
+func handleInitContainersUpdate(ctx context.Context, podRemoteStatus types.PodStatus, podRefInCluster *v1.Pod, nInitContainersInPod int) (bool, bool, bool, string, int) {
+	log.G(ctx).Debug("Init containers detected, going to check them first")
+
+	counterOfTerminatedInitContainers := 0
+	podErrored := false
+	failedReason := ""
+	podWaitingForInitContainers := false
+	podInit := false
+
+	for _, containerRemoteStatus := range podRemoteStatus.InitContainers {
+		index := 0
+		foundCt := false
+
+		for i, checkedContainer := range podRefInCluster.Status.InitContainerStatuses {
+			if checkedContainer.Name == containerRemoteStatus.Name {
+				foundCt = true
+				index = i
+				break
+			}
+		}
+
+		if !foundCt {
+			podRefInCluster.Status.InitContainerStatuses = append(podRefInCluster.Status.InitContainerStatuses, containerRemoteStatus)
+		} else {
+			podRefInCluster.Status.InitContainerStatuses[index] = containerRemoteStatus
+		}
+
+		switch {
+		case containerRemoteStatus.State.Terminated != nil:
+			counterOfTerminatedInitContainers++
+			podRefInCluster.Status.InitContainerStatuses[index].State.Terminated.ExitCode = containerRemoteStatus.State.Terminated.ExitCode
+			podRefInCluster.Status.InitContainerStatuses[index].State.Terminated.Reason = PodPhaseCompleted
+			if containerRemoteStatus.State.Terminated.ExitCode != 0 {
+				podErrored = true
+				failedReason = "Error: " + strconv.Itoa(int(containerRemoteStatus.State.Terminated.ExitCode))
+				podRefInCluster.Status.InitContainerStatuses[index].State.Terminated.Reason = failedReason
+				log.G(ctx).Error("Container " + containerRemoteStatus.Name + " exited with error: " + strconv.Itoa(int(containerRemoteStatus.State.Terminated.ExitCode)))
+			}
+		case containerRemoteStatus.State.Waiting != nil:
+			log.G(ctx).Info("Pod " + podRemoteStatus.PodName + ": Service " + containerRemoteStatus.Name + " is setting up on Sidecar")
+			podWaitingForInitContainers = true
+			podRefInCluster.Status.InitContainerStatuses[index].State.Waiting = containerRemoteStatus.State.Waiting
+		case containerRemoteStatus.State.Running != nil:
+			podInit = true
+			log.G(ctx).Debug("Pod " + podRemoteStatus.PodName + ": Service " + containerRemoteStatus.Name + " is running on Sidecar")
+			podRefInCluster.Status.InitContainerStatuses[index].State.Running = containerRemoteStatus.State.Running
+			podRefInCluster.Status.InitContainerStatuses[index].State.Waiting = nil
+		}
+	}
+	if counterOfTerminatedInitContainers == nInitContainersInPod {
+		podWaitingForInitContainers = false
+	}
+
+	return podWaitingForInitContainers, podInit, podErrored, failedReason, counterOfTerminatedInitContainers
+}
+
+func handleContainersUpdate(ctx context.Context, podRemoteStatus types.PodStatus, podRefInCluster *v1.Pod, podWaitingForInitContainers bool, podInit bool, nInitContainersInPod int, counterOfTerminatedInitContainers int) (int, bool, string, bool) {
+
+	counterOfTerminatedContainers := 0
+	podErrored := false
+	failedReason := ""
+	podRunning := false
+
+	for _, containerRemoteStatus := range podRemoteStatus.Containers {
+		index := 0
+		foundCt := false
+
+		for i, checkedContainer := range podRefInCluster.Status.ContainerStatuses {
+			if checkedContainer.Name == containerRemoteStatus.Name {
+				foundCt = true
+				index = i
+				break
+			}
+		}
+
+		// if it is the first time checking the container, append it to the pod containers, otherwise just update the correct item
+		if !foundCt {
+			podRefInCluster.Status.ContainerStatuses = append(podRefInCluster.Status.ContainerStatuses, containerRemoteStatus)
+		} else {
+			podRefInCluster.Status.ContainerStatuses[index] = containerRemoteStatus
+		}
+
+		// if the pod is waiting for the starting of the init containers or some of them are still running
+		// all the other containers are in waiting state
+		if podWaitingForInitContainers || podInit {
+			podRefInCluster.Status.ContainerStatuses[index].State.Waiting = &v1.ContainerStateWaiting{Reason: "Waiting for init containers"}
+			podRefInCluster.Status.ContainerStatuses[index].State.Running = nil
+			podRefInCluster.Status.ContainerStatuses[index].State.Terminated = nil
+			if podInit {
+				podRefInCluster.Status.ContainerStatuses[index].State.Waiting.Reason = "Init:" + strconv.Itoa(counterOfTerminatedInitContainers) + "/" + strconv.Itoa(nInitContainersInPod)
+			} else {
+				podRefInCluster.Status.ContainerStatuses[index].State.Waiting.Reason = "PodInitializing"
+			}
+		} else {
+			// if plugin cannot return any non-terminated container set the status to terminated
+			// if the exit code is != 0 get the error  and set error reason + rememeber to set pod to failed
+			switch {
+			case containerRemoteStatus.State.Terminated != nil:
+				log.G(ctx).Debug("Pod " + podRemoteStatus.PodName + ": Service " + containerRemoteStatus.Name + " is not running on Plugin side")
+				counterOfTerminatedContainers++
+				podRefInCluster.Status.ContainerStatuses[index].State.Terminated.Reason = PodPhaseCompleted
+				if containerRemoteStatus.State.Terminated.ExitCode != 0 {
+					podErrored = true
+					failedReason = "Error: " + strconv.Itoa(int(containerRemoteStatus.State.Terminated.ExitCode))
+					podRefInCluster.Status.ContainerStatuses[index].State.Terminated.Reason = failedReason
+					log.G(ctx).Error("Container " + containerRemoteStatus.Name + " exited with error: " + strconv.Itoa(int(containerRemoteStatus.State.Terminated.ExitCode)))
+				}
+			case containerRemoteStatus.State.Waiting != nil:
+				log.G(ctx).Info("Pod " + podRemoteStatus.PodName + ": Service " + containerRemoteStatus.Name + " is setting up on Sidecar")
+				podRunning = true
+			case containerRemoteStatus.State.Running != nil:
+				podRunning = true
+				log.G(ctx).Debug("Pod " + podRemoteStatus.PodName + ": Service " + containerRemoteStatus.Name + " is running on Sidecar")
+				podRefInCluster.Status.ContainerStatuses[index].Ready = true
+			}
+		}
+	}
+
+	return counterOfTerminatedContainers, podErrored, failedReason, podRunning
+}
+
 // checkPodsStatus is regularly called by the VK itself at regular intervals of time to query InterLink for Pods' status.
 // It basically append all available pods registered to the VK to a slice and passes this slice to the statusRequest function.
 // After the statusRequest returns a response, this function uses that response to update every Pod and Container status.
 func checkPodsStatus(ctx context.Context, p *Provider, podsList []*v1.Pod, token string, config Config) ([]types.PodStatus, error) {
 	var ret []types.PodStatus
-	// commented out because it's too verbose. uncomment to see all registered pods
-	// log.G(ctx).Debug(p.pods)
 
 	// retrieve pod status from remote interlink
 	returnVal, err := statusRequest(ctx, config, podsList, token)
@@ -567,103 +687,113 @@ func checkPodsStatus(ctx context.Context, p *Provider, podsList []*v1.Pod, token
 
 				log.G(ctx).Debug(fmt.Sprintln("Get status from remote status len: ", len(podRemoteStatus.Containers)))
 				// avoid asking for status too early, when etcd as not been updated
-				if podRemoteStatus.PodName != "" {
 
-					// get pod reference from cluster etcd
-					podRefInCluster, err := p.GetPod(ctx, podRemoteStatus.PodNamespace, podRemoteStatus.PodName)
-					if err != nil {
-						log.G(ctx).Warning(err)
-						continue
+				if podRemoteStatus.PodName == "" {
+					log.G(ctx).Warning("PodName is empty, skipping")
+					continue
+				}
+
+				// get pod reference from cluster etcd
+				podRefInCluster, err := p.GetPod(ctx, podRemoteStatus.PodNamespace, podRemoteStatus.PodName)
+				if err != nil {
+					log.G(ctx).Warning(err)
+					continue
+				}
+				log.G(ctx).Debug(fmt.Sprintln("Get pod from k8s cluster status: ", podRefInCluster.Status.ContainerStatuses))
+
+				// if the PodUID match with the one in etcd we are talking of the same thing. GOOD
+				if podRemoteStatus.PodUID == string(podRefInCluster.UID) {
+					podInit := false    // if a init container is running, the other containers phase is PodInitializing
+					podRunning := false // if a normale container is running, the phase is PodRunning
+					podErrored := false
+					podInitErrored := false              // if a container is in error, the phase is PodFailed
+					podCompleted := false                // if all containers are terminated, the phase is PodSucceeded, but if one is in error, the phase is PodFailed
+					podWaitingForInitContainers := false // if init containers are waiting, the phase is PodPending
+					failedReason := ""
+					failedReasonInit := ""
+
+					nContainersInPod := len(podRemoteStatus.Containers)
+					counterOfTerminatedContainers := 0
+
+					nInitContainersInPod := len(podRemoteStatus.InitContainers)
+					counterOfTerminatedInitContainers := 0
+
+					log.G(ctx).Debug("Number of containers in POD:      " + strconv.Itoa(nContainersInPod))
+					log.G(ctx).Debug("Number of init containers in POD: " + strconv.Itoa(nInitContainersInPod))
+
+					// if there are init containers, we need to check them first
+					if nInitContainersInPod > 0 {
+						podWaitingForInitContainers, podInit, podInitErrored, failedReasonInit, counterOfTerminatedInitContainers = handleInitContainersUpdate(ctx, podRemoteStatus, podRefInCluster, nInitContainersInPod)
 					}
-					log.G(ctx).Debug(fmt.Sprintln("Get pod from k8s cluster status: ", podRefInCluster.Status.ContainerStatuses))
 
-					// if the PodUID match with the one in etcd we are talking of the same thing. GOOD
-					if podRemoteStatus.PodUID == string(podRefInCluster.UID) {
-						podRunning := false
-						podErrored := false
-						podCompleted := false
-						failedReason := ""
+					if podInitErrored {
+						log.G(ctx).Error("At least one init container is in error with reason: " + failedReasonInit)
+					}
 
-						// For each container of the pod we check if there is a previous state known by K8s
-						for _, containerRemoteStatus := range podRemoteStatus.Containers {
-							index := 0
-							foundCt := false
+					// call handleContainersUpdate to update the status of the containers
+					counterOfTerminatedContainers, podErrored, failedReason, podRunning = handleContainersUpdate(ctx, podRemoteStatus, podRefInCluster, podWaitingForInitContainers, podInit, nInitContainersInPod, counterOfTerminatedInitContainers)
 
-							for i, checkedContainer := range podRefInCluster.Status.ContainerStatuses {
-								if checkedContainer.Name == containerRemoteStatus.Name {
-									foundCt = true
-									index = i
-								}
-							}
+					if counterOfTerminatedContainers == nContainersInPod {
+						podCompleted = true
+					}
 
-							// if it is the first time checking the container, append it to the pod containers, otherwise just update the correct item
-							if !foundCt {
-								podRefInCluster.Status.ContainerStatuses = append(podRefInCluster.Status.ContainerStatuses, containerRemoteStatus)
-							} else {
-								podRefInCluster.Status.ContainerStatuses[index] = containerRemoteStatus
-							}
-
-							log.G(ctx).Debug(containerRemoteStatus.State.Running)
-
-							// if plugin cannot return any non-terminated container set the status to terminated
-							// if the exit code is != 0 get the error  and set error reason + rememeber to set pod to failed
-							switch {
-							case containerRemoteStatus.State.Terminated != nil:
-								log.G(ctx).Debug("Pod " + podRemoteStatus.PodName + ": Service " + containerRemoteStatus.Name + " is not running on Plugin side")
-								podCompleted = true
-								podRefInCluster.Status.ContainerStatuses[index].State.Terminated.Reason = "Completed"
-								if containerRemoteStatus.State.Terminated.ExitCode != 0 {
-									podErrored = true
-									failedReason = "Error: " + strconv.Itoa(int(containerRemoteStatus.State.Terminated.ExitCode))
-									podRefInCluster.Status.ContainerStatuses[index].State.Terminated.Reason = failedReason
-									log.G(ctx).Error("Container " + containerRemoteStatus.Name + " exited with error: " + strconv.Itoa(int(containerRemoteStatus.State.Terminated.ExitCode)))
-								}
-							case containerRemoteStatus.State.Waiting != nil:
-								log.G(ctx).Info("Pod " + podRemoteStatus.PodName + ": Service " + containerRemoteStatus.Name + " is setting up on Sidecar")
-								podRunning = true
-							case containerRemoteStatus.State.Running != nil:
-								podRunning = true
-								log.G(ctx).Debug("Pod " + podRemoteStatus.PodName + ": Service " + containerRemoteStatus.Name + " is running on Sidecar")
-							}
-
-							// if this is the first time you see a container running/errored/completed, update the status of the pod.
-							switch {
-							case podRunning && podRefInCluster.Status.Phase != v1.PodRunning:
-								podRefInCluster.Status.Phase = v1.PodRunning
-								podRefInCluster.Status.Conditions = append(podRefInCluster.Status.Conditions, v1.PodCondition{Type: v1.PodReady, Status: v1.ConditionTrue})
-							case podErrored && podRefInCluster.Status.Phase != v1.PodFailed:
-								podRefInCluster.Status.Phase = v1.PodFailed
+					if podCompleted {
+						// it means that all containers are terminated, check if some of them are errored
+						if podErrored || podInitErrored {
+							podRefInCluster.Status.Phase = v1.PodFailed
+							if podErrored {
 								podRefInCluster.Status.Reason = failedReason
-							case podCompleted && podRefInCluster.Status.Phase != v1.PodSucceeded:
-								podRefInCluster.Status.Conditions = append(podRefInCluster.Status.Conditions, v1.PodCondition{Type: v1.PodReady, Status: v1.ConditionFalse})
-								podRefInCluster.Status.Phase = v1.PodSucceeded
-								podRefInCluster.Status.Reason = "Completed"
+							} else {
+								podRefInCluster.Status.Reason = failedReasonInit
 							}
-
+							// override all the ContainerStatuses to set Reason to failedReason or failedReasonInit
+							for i := range podRefInCluster.Status.ContainerStatuses {
+								if podErrored {
+									podRefInCluster.Status.ContainerStatuses[i].State.Terminated.Reason = failedReason
+								} else {
+									podRefInCluster.Status.ContainerStatuses[i].State.Terminated.Reason = failedReasonInit
+								}
+							}
+						} else {
+							podRefInCluster.Status.Conditions = append(podRefInCluster.Status.Conditions, v1.PodCondition{Type: v1.PodReady, Status: v1.ConditionFalse})
+							podRefInCluster.Status.Phase = v1.PodSucceeded
+							podRefInCluster.Status.Reason = PodPhaseCompleted
 						}
 					} else {
-
-						// if you don't now any UID yet, collect the status and updated the status cache
-						list, err := p.clientSet.CoreV1().Pods(podRemoteStatus.PodNamespace).List(ctx, metav1.ListOptions{})
-						if err != nil {
-							log.G(ctx).Error(err)
-							return nil, err
+						if podInit {
+							podRefInCluster.Status.Phase = v1.PodPending
+							podRefInCluster.Status.Reason = "Init"
 						}
+						if podWaitingForInitContainers {
+							podRefInCluster.Status.Phase = v1.PodPending
+							podRefInCluster.Status.Reason = "Waiting for init containers"
+						}
+						if podRunning && podRefInCluster.Status.Phase != v1.PodRunning { // do not update the status if it is already running
+							podRefInCluster.Status.Phase = v1.PodRunning
+							podRefInCluster.Status.Conditions = append(podRefInCluster.Status.Conditions, v1.PodCondition{Type: v1.PodReady, Status: v1.ConditionTrue})
+						}
+					}
+				} else {
+					list, err := p.clientSet.CoreV1().Pods(podRemoteStatus.PodNamespace).List(ctx, metav1.ListOptions{})
+					if err != nil {
+						log.G(ctx).Error(err)
+						return nil, err
+					}
 
-						pods := list.Items
+					pods := list.Items
 
-						for _, pod := range pods {
-							if string(pod.UID) == podRemoteStatus.PodUID {
-								err = updateCacheRequest(ctx, config, pod, token)
-								if err != nil {
-									log.G(ctx).Error(err)
-									continue
-								}
+					for _, pod := range pods {
+						if string(pod.UID) == podRemoteStatus.PodUID {
+							err = updateCacheRequest(ctx, config, pod, token)
+							if err != nil {
+								log.G(ctx).Error(err)
+								continue
 							}
 						}
-
 					}
+
 				}
+
 			}
 			log.G(ctx).Info("No errors while getting statuses")
 			log.G(ctx).Debug(ret)
