@@ -1,0 +1,97 @@
+---
+sidebar_position: 3
+---
+import Tabs from '@theme/Tabs';
+import TabItem from '@theme/TabItem';
+import ThemedImage from '@theme/ThemedImage';
+import useBaseUrl from '@docusaurus/useBaseUrl';
+
+
+# In-cluster deployment
+
+<ThemedImage 
+        alt="Docusaurus themed image"
+        sources={{
+          light: useBaseUrl('/img/scenario-2_light.svg'),
+          dark: useBaseUrl('/img/scenario-2_dark.svg'),
+        }}
+/>
+
+
+## Install interLink
+
+### Deploy Remote components
+
+In general, starting from the deployment of the remote components is adviced. Since the kubernetes virtual node won't reach the `Ready` status until all the stack is successfully deployed.
+
+#### Interlink API server
+
+:::note
+Go directly to ["Test and debugging tips"](Cookbook#test-and-debug). 
+The selected scenario does not expect you to do anything here.
+:::
+
+
+#### Plugin service
+
+:::note
+Go directly to ["Test and debugging tips"](Cookbook#test-and-debug). 
+The selected scenario does not expect you to do anything here.
+:::
+
+
+
+#### Test interLink stack health
+
+interLink comes with a call that can be used to monitor the overall status of both interlink server and plugins, at once.
+
+```
+curl -v --unix-socket ${HOME}/.interlink.sock  http://unix/pinglink
+```
+
+This call will return the status of the system and its readiness to submit jobs.
+
+
+### Deploy Kubernetes components
+
+The deployment of the Kubernetes components are managed by the official [HELM chart](https://github.com/interTwin-eu/interlink-helm-chart). Depending on the scenario you selected, there might be additional operations to be done.
+
+- Create an helm values file:
+
+```yaml title="values.yaml"
+nodeName: interlink-with-socket
+
+plugin:
+  enabled: true
+  image: "plugin docker image here"
+  command: ["/bin/bash", "-c"]
+  args: ["/app/plugin"]
+  config: |
+    your plugin
+    configuration
+    goes here!!!
+  socket: unix:///var/run/plugin.sock
+
+interlink:
+  enabled: true
+  socket: unix:///var/run/interlink.sock
+```
+
+Eventually deploy the latest release of the official [helm chart](https://github.com/interTwin-eu/interlink-helm-chart):
+
+```bash
+helm upgrade --install --create-namespace \
+      -n interlink my-virtual-node oci://ghcr.io/intertwin-eu/interlink-helm-chart/interlink \
+      --values ./values.yaml
+```
+
+You can fix the [version of the chart](https://github.com/interTwin-eu/interlink-helm-chart/blob/main/interlink/Chart.yaml#L18) 
+by using the `--version` option. 
+
+Whenever you see the node ready, you are good to go!
+
+To start debugging in case of problems we suggest starting from the pod containers logs!
+
+## Test the setup
+
+Please find a demo pod to test your setup [here](./guides/develop-a-plugin#lets-test-is-out).
