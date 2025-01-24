@@ -1,6 +1,7 @@
 interlink-install
 vendor
 dist/*
+docs/yarn.lock
 report/*
 __pycache__/*
 vendor/*
