@@ -654,6 +654,7 @@ func handleContainersUpdate(ctx context.Context, podRemoteStatus types.PodStatus
 				podRunning = true
 				log.G(ctx).Debug("Pod " + podRemoteStatus.PodName + ": Service " + containerRemoteStatus.Name + " is running on Sidecar")
 				podRefInCluster.Status.ContainerStatuses[index].Ready = true
+				podRefInCluster.Status.ContainerStatuses[index].State.Running = containerRemoteStatus.State.Running
 			}
 		}
 	}
@@ -712,10 +713,16 @@ func checkPodsStatus(ctx context.Context, p *Provider, podsList []*v1.Pod, token
 					failedReason := ""
 					failedReasonInit := ""
 
-					nContainersInPod := len(podRemoteStatus.Containers)
+					nContainersInPod := 0
+					if podRemoteStatus.Containers != nil {
+						nContainersInPod = len(podRemoteStatus.Containers)
+					}
 					counterOfTerminatedContainers := 0
 
-					nInitContainersInPod := len(podRemoteStatus.InitContainers)
+					nInitContainersInPod := 0
+					if podRemoteStatus.InitContainers != nil {
+						nInitContainersInPod = len(podRemoteStatus.InitContainers)
+					}
 					counterOfTerminatedInitContainers := 0
 
 					log.G(ctx).Debug("Number of containers in POD:      " + strconv.Itoa(nContainersInPod))
@@ -771,6 +778,7 @@ func checkPodsStatus(ctx context.Context, p *Provider, podsList []*v1.Pod, token
 						if podRunning && podRefInCluster.Status.Phase != v1.PodRunning { // do not update the status if it is already running
 							podRefInCluster.Status.Phase = v1.PodRunning
 							podRefInCluster.Status.Conditions = append(podRefInCluster.Status.Conditions, v1.PodCondition{Type: v1.PodReady, Status: v1.ConditionTrue})
+							podRefInCluster.Status.Reason = "Running"
 						}
 					}
 				} else {
