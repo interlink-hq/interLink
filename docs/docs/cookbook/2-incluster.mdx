@@ -27,7 +27,7 @@ In general, starting from the deployment of the remote components is adviced. Si
 #### Interlink API server
 
 :::note
-Go directly to ["Test and debugging tips"](Cookbook#test-and-debug). 
+Go directly to ["Test and debugging tips"](#test-and-debug). 
 The selected scenario does not expect you to do anything here.
 :::
 
@@ -35,7 +35,7 @@ The selected scenario does not expect you to do anything here.
 #### Plugin service
 
 :::note
-Go directly to ["Test and debugging tips"](Cookbook#test-and-debug). 
+Go directly to ["Test and debugging tips"](#test-and-debug). 
 The selected scenario does not expect you to do anything here.
 :::
 
@@ -43,7 +43,8 @@ The selected scenario does not expect you to do anything here.
 
 #### Test interLink stack health
 
-interLink comes with a call that can be used to monitor the overall status of both interlink server and plugins, at once.
+InterLink comes with a call that can be used to monitor the overall status of 
+both interlink server and plugins, at once.
 
 ```
 curl -v --unix-socket ${HOME}/.interlink.sock  http://unix/pinglink
@@ -54,7 +55,9 @@ This call will return the status of the system and its readiness to submit jobs.
 
 ### Deploy Kubernetes components
 
-The deployment of the Kubernetes components are managed by the official [HELM chart](https://github.com/interTwin-eu/interlink-helm-chart). Depending on the scenario you selected, there might be additional operations to be done.
+The deployment of the Kubernetes components are managed by the official 
+[HELM chart](https://github.com/interTwin-eu/interlink-helm-chart). 
+Depending on the scenario you selected, there might be additional operations to be done.
 
 - Create an helm values file:
 
@@ -77,7 +80,8 @@ interlink:
   socket: unix:///var/run/interlink.sock
 ```
 
-Eventually deploy the latest release of the official [helm chart](https://github.com/interTwin-eu/interlink-helm-chart):
+Eventually deploy the latest release of the official 
+[helm chart](https://github.com/interTwin-eu/interlink-helm-chart):
 
 ```bash
 helm upgrade --install --create-namespace \
@@ -92,6 +96,6 @@ Whenever you see the node ready, you are good to go!
 
 To start debugging in case of problems we suggest starting from the pod containers logs!
 
-## Test the setup
+## Test and debug
 
-Please find a demo pod to test your setup [here](./guides/develop-a-plugin#lets-test-is-out).
+Please find a demo pod to test your setup [here](../guides/develop-a-plugin#lets-test-is-out).
