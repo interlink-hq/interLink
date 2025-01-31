@@ -73,7 +73,7 @@ func getData(ctx context.Context, config types.Config, pod types.PodCreateReques
 // retrieveData retrieves ConfigMaps, Secrets and EmptyDirs.
 // The config is needed to specify the EmptyDirs mounting point.
 // It returns the retrieved data in a variable of type commonIL.RetrievedContainer and the first encountered error.
-func retrieveData(ctx context.Context, config types.Config, pod types.PodCreateRequests, container v1.Container) (types.RetrievedContainer, error) {
+func retrieveData(ctx context.Context, _ types.Config, pod types.PodCreateRequests, container v1.Container) (types.RetrievedContainer, error) {
 	retrievedData := types.RetrievedContainer{}
 	retrievedData.Name = container.Name
 	for _, mountVar := range container.VolumeMounts {
