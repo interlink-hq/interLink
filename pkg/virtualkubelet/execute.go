@@ -429,7 +429,7 @@ KUBERNETES_SERVICE_PORT_HTTPS=443
 KUBERNETES_SERVICE_HOST=10.96.0.1
 */
 func addKubernetesServicesEnvVars(ctx context.Context, config Config, pod *v1.Pod) {
-	if config.KubernetesApiAddr == "" || config.KubernetesApiPort == "" {
+	if config.KubernetesAPIAddr == "" || config.KubernetesAPIPort == "" {
 		log.G(ctx).Info("InterLink configuration does not contains both KubernetesApiAddr and KubernetesApiPort, so no env var like KUBERNETES_SERVICE_HOST is added.")
 		return
 	}
@@ -443,23 +443,23 @@ func addKubernetesServicesEnvVars(ctx context.Context, config Config, pod *v1.Po
 	}
 	appendEnvVars := func(containersPtr *[]v1.Container, index int) {
 		containers := *containersPtr
-		//container := containers[index]
+		// container := containers[index]
 		envsPtr := &containers[index].Env
 
-		appendEnvVar(envsPtr, "KUBERNETES_PORT", "tcp://"+config.KubernetesApiAddr+":"+config.KubernetesApiPort)
-		appendEnvVar(envsPtr, "KUBERNETES_SERVICE_PORT", config.KubernetesApiPort)
-		appendEnvVar(envsPtr, "KUBERNETES_PORT_443_TCP_ADDR", config.KubernetesApiAddr)
-		appendEnvVar(envsPtr, "KUBERNETES_PORT_443_TCP_PORT", config.KubernetesApiPort)
+		appendEnvVar(envsPtr, "KUBERNETES_PORT", "tcp://"+config.KubernetesAPIAddr+":"+config.KubernetesAPIPort)
+		appendEnvVar(envsPtr, "KUBERNETES_SERVICE_PORT", config.KubernetesAPIPort)
+		appendEnvVar(envsPtr, "KUBERNETES_PORT_443_TCP_ADDR", config.KubernetesAPIAddr)
+		appendEnvVar(envsPtr, "KUBERNETES_PORT_443_TCP_PORT", config.KubernetesAPIPort)
 		appendEnvVar(envsPtr, "KUBERNETES_PORT_443_TCP_PROTO", "tcp")
-		appendEnvVar(envsPtr, "KUBERNETES_PORT_443_TCP", "tcp://"+config.KubernetesApiAddr+":"+config.KubernetesApiPort)
-		appendEnvVar(envsPtr, "KUBERNETES_SERVICE_PORT_HTTPS", config.KubernetesApiPort)
-		appendEnvVar(envsPtr, "KUBERNETES_SERVICE_HOST", config.KubernetesApiAddr)
+		appendEnvVar(envsPtr, "KUBERNETES_PORT_443_TCP", "tcp://"+config.KubernetesAPIAddr+":"+config.KubernetesAPIPort)
+		appendEnvVar(envsPtr, "KUBERNETES_SERVICE_PORT_HTTPS", config.KubernetesAPIPort)
+		appendEnvVar(envsPtr, "KUBERNETES_SERVICE_HOST", config.KubernetesAPIAddr)
 	}
 	// Warning: loop range copy value, so to modify original containers, we must use index instead.
-	for i, _ := range pod.Spec.InitContainers {
+	for i := range pod.Spec.InitContainers {
 		appendEnvVars(&pod.Spec.InitContainers, i)
 	}
-	for i, _ := range pod.Spec.Containers {
+	for i := range pod.Spec.Containers {
 		appendEnvVars(&pod.Spec.Containers, i)
 	}
 
@@ -477,7 +477,7 @@ func addKubernetesServicesEnvVars(ctx context.Context, config Config, pod *v1.Po
 		}
 	}
 	log.G(ctx).Info("InterLink VK added a set of environment variables (e.g.: KUBERNETES_SERVICE_HOST) to all containers of pod ",
-		pod.Name, " k8s addr ", config.KubernetesApiAddr, " k8s port ", config.KubernetesApiPort)
+		pod.Name, " k8s addr ", config.KubernetesAPIAddr, " k8s port ", config.KubernetesAPIPort)
 }
 
 // Handle projected sources and fills the projectedVolume object.
@@ -541,15 +541,15 @@ func remoteExecutionHandleProjectedSource(
 		       name: kube-root-ca.crt
 		*/
 		for _, item := range source.ConfigMap.Items {
-			KUBE_CA_CRT := "kube-root-ca.crt"
-			overrideCaCrt := p.config.KubernetesApiCaCrt
-			if source.ConfigMap.Name == KUBE_CA_CRT && overrideCaCrt != "" {
+			const kubeCaCrt = "kube-root-ca.crt"
+			overrideCaCrt := p.config.KubernetesAPICaCrt
+			if source.ConfigMap.Name == kubeCaCrt && overrideCaCrt != "" {
 				log.G(ctx).Debug("handling special case of Kubernetes API kube-root-ca.crt, override found, using provided ca.crt:, ", overrideCaCrt)
 				projectedVolume.Data[item.Path] = overrideCaCrt
 			} else {
 				// This gets the usual certificate for K8s API, but it is restricted to whatever usual IP/FQDN of K8S API URL.
 				// With InterLink, the Kubernetes internal network is not accessible so this default ca.crt is probably useless.
-				log.G(ctx).Warning("using default Kubernetes API kube-root-ca.crt (no override found), but the default one might not be compatible with the subject: ", p.config.KubernetesApiAddr)
+				log.G(ctx).Warning("using default Kubernetes API kube-root-ca.crt (no override found), but the default one might not be compatible with the subject: ", p.config.KubernetesAPIAddr)
 				cfgmap, err := p.clientSet.CoreV1().ConfigMaps(pod.Namespace).Get(ctx, source.ConfigMap.Name, metav1.GetOptions{})
 				if err != nil {
 					return fmt.Errorf("error during retrieval of ConfigMap %s error: %w", source.ConfigMap.Name, err)
@@ -651,9 +651,8 @@ func remoteExecutionHandleVolumes(ctx context.Context, p *Provider, pod *v1.Pod,
 						err := remoteExecutionHandleProjectedSource(ctx, p, pod, source, &projectedVolume)
 						if err != nil {
 							return err
-						} else {
-							failedAndWait = false
 						}
+						failedAndWait = false
 						log.G(ctx).Debug("ProjectedVolumeMaps len: ", len(req.ProjectedVolumeMaps))
 					}
 

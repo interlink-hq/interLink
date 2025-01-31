@@ -2,7 +2,6 @@ package api
 
 import (
 	"context"
-	"path/filepath"
 	"strings"
 	"sync"
 	"time"
@@ -139,8 +138,8 @@ func retrieveData(ctx context.Context, config types.Config, pod types.PodCreateR
 
 				case vol.EmptyDir != nil:
 					// Deprecated: EmptyDirs is useless at VK level. It should be moved to plugin level.
-					edPath := filepath.Join(config.DataRootFolder, pod.Pod.Namespace+"-"+string(pod.Pod.UID), "emptyDirs", vol.Name)
-					retrievedData.EmptyDirs = append(retrievedData.EmptyDirs, edPath)
+					// edPath := filepath.Join(config.DataRootFolder, pod.Pod.Namespace+"-"+string(pod.Pod.UID), "emptyDirs", vol.Name)
+					// retrievedData.EmptyDirs = append(retrievedData.EmptyDirs, edPath)
 
 				default:
 					log.G(ctx).Warning("ignoring unsupported volume type for ", mountVar.Name)
