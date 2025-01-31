@@ -13,5 +13,4 @@ SidecarURL: "http://0.0.0.0"
 SidecarPort: "4000"
 VerboseLogging: true
 ErrorsOnlyLogging: false
-ExportPodData: true
 DataRootFolder: "~/.interlink"

@@ -163,6 +163,53 @@ func main() {
 		trace.T = opentelemetry.Adapter{}
 	}
 
+	dport, err := strconv.ParseInt(os.Getenv("KUBELET_PORT"), 10, 32)
+	if err != nil {
+		log.G(ctx).Fatal(err)
+	}
+
+	cfg := Config{
+		ConfigPath:      configpath,
+		NodeName:        nodename,
+		NodeVersion:     commonIL.KubeletVersion,
+		OperatingSystem: "Linux",
+		// https://github.com/liqotech/liqo/blob/d8798732002abb7452c2ff1c99b3e5098f848c93/deployments/liqo/templates/liqo-gateway-deployment.yaml#L69
+		InternalIP: os.Getenv("POD_IP"),
+		DaemonPort: int32(dport),
+	}
+
+	mux := http.NewServeMux()
+	// retriever, err := newCertificateRetriever(localClient, certificates.KubeletServingSignerName, cfg.NodeName, parsedIP)
+	// if err != nil {
+	//	log.G(ctx).Fatal("failed to initialize certificate manager: %w", err)
+	// }
+	// TODO: create a csr auto approver https://github.com/liqotech/liqo/blob/master/cmd/liqo-controller-manager/main.go#L498
+	retriever := commonIL.NewSelfSignedCertificateRetriever(cfg.NodeName, net.ParseIP(cfg.InternalIP))
+
+	kubeletPort := os.Getenv("KUBELET_PORT")
+
+	server := &http.Server{
+		Addr:              fmt.Sprintf("0.0.0.0:%s", kubeletPort),
+		Handler:           mux,
+		ReadTimeout:       30 * time.Second,
+		ReadHeaderTimeout: 10 * time.Second, // Required to limit the effects of the Slowloris attack.
+		TLSConfig: &tls.Config{
+			GetCertificate:     retriever,
+			MinVersion:         tls.VersionTLS12,
+			InsecureSkipVerify: interLinkConfig.KubeletHTTP.Insecure,
+		},
+	}
+
+	go func() {
+		log.G(ctx).Infof("Starting the virtual kubelet HTTPs server listening on %q", server.Addr)
+
+		// Key and certificate paths are not specified, since already configured as part of the TLSConfig.
+		if err := server.ListenAndServeTLS("", ""); err != nil {
+			log.G(ctx).Errorf("Failed to start the HTTPs server: %v", err)
+			os.Exit(1)
+		}
+	}()
+
 	// TODO: if token specified http.DefaultClient = ...
 	// and remove reading from file
 	var socketPath string
@@ -194,21 +241,6 @@ func main() {
 		Transport: &UnixSocketRoundTripper{
 			Transport: transport,
 		},
-	}
-
-	dport, err := strconv.ParseInt(os.Getenv("KUBELET_PORT"), 10, 32)
-	if err != nil {
-		log.G(ctx).Fatal(err)
-	}
-
-	cfg := Config{
-		ConfigPath:      configpath,
-		NodeName:        nodename,
-		NodeVersion:     commonIL.KubeletVersion,
-		OperatingSystem: "Linux",
-		// https://github.com/liqotech/liqo/blob/d8798732002abb7452c2ff1c99b3e5098f848c93/deployments/liqo/templates/liqo-gateway-deployment.yaml#L69
-		InternalIP: os.Getenv("POD_IP"),
-		DaemonPort: int32(dport),
 	}
 
 	var kubecfg *rest.Config
@@ -245,6 +277,7 @@ func main() {
 		cfg.OperatingSystem,
 		cfg.InternalIP,
 		cfg.DaemonPort,
+		transport.Clone(),
 	)
 	if err != nil {
 		log.G(ctx).Fatal(err)
@@ -331,8 +364,6 @@ func main() {
 		GetStatsSummary:  nodeProvider.GetStatsSummary,
 	}
 
-	mux := http.NewServeMux()
-
 	podRoutes := api.PodHandlerConfig{
 		GetContainerLogs: handlerPodConfig.GetContainerLogs,
 		GetStatsSummary:  handlerPodConfig.GetStatsSummary,
@@ -340,37 +371,6 @@ func main() {
 	}
 
 	api.AttachPodRoutes(podRoutes, mux, true)
-
-	// retriever, err := newCertificateRetriever(localClient, certificates.KubeletServingSignerName, cfg.NodeName, parsedIP)
-	// if err != nil {
-	//	log.G(ctx).Fatal("failed to initialize certificate manager: %w", err)
-	// }
-	// TODO: create a csr auto approver https://github.com/liqotech/liqo/blob/master/cmd/liqo-controller-manager/main.go#L498
-	retriever := commonIL.NewSelfSignedCertificateRetriever(cfg.NodeName, net.ParseIP(cfg.InternalIP))
-
-	kubeletPort := os.Getenv("KUBELET_PORT")
-
-	server := &http.Server{
-		Addr:              fmt.Sprintf("0.0.0.0:%s", kubeletPort),
-		Handler:           mux,
-		ReadTimeout:       30 * time.Second,
-		ReadHeaderTimeout: 10 * time.Second, // Required to limit the effects of the Slowloris attack.
-		TLSConfig: &tls.Config{
-			GetCertificate:     retriever,
-			MinVersion:         tls.VersionTLS12,
-			InsecureSkipVerify: interLinkConfig.KubeletHTTP.Insecure,
-		},
-	}
-
-	go func() {
-		log.G(ctx).Infof("Starting the virtual kubelet HTTPs server listening on %q", server.Addr)
-
-		// Key and certificate paths are not specified, since already configured as part of the TLSConfig.
-		if err := server.ListenAndServeTLS("", ""); err != nil {
-			log.G(ctx).Errorf("Failed to start the HTTPs server: %v", err)
-			os.Exit(1)
-		}
-	}()
 
 	pc, err := node.NewPodController(podControllerConfig) // <-- instatiates the pod controller
 	if err != nil {

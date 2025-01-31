@@ -57,15 +57,12 @@ func (h *InterLinkHandler) CreateHandler(w http.ResponseWriter, r *http.Request)
 
 	var retrievedData []types.RetrievedPodData
 
-	data := types.RetrievedPodData{}
-	if h.Config.ExportPodData {
-		data, err = getData(h.Ctx, h.Config, pod, span)
-		if err != nil {
-			statusCode = http.StatusInternalServerError
-			log.G(h.Ctx).Error(err)
-			w.WriteHeader(statusCode)
-			return
-		}
+	data, err := getData(h.Ctx, h.Config, pod, span)
+	if err != nil {
+		statusCode = http.StatusInternalServerError
+		log.G(h.Ctx).Error(err)
+		w.WriteHeader(statusCode)
+		return
 	}
 
 	retrievedData = append(retrievedData, data)

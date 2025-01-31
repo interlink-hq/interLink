@@ -36,7 +36,6 @@ SidecarURL: "unix://${HOME}/.plugin.sock"
 SidecarPort: "0"
 VerboseLogging: false
 ErrorsOnlyLogging: false
-ExportPodData: true
 DataRootFolder: "~/.interlink"
 EOF
 

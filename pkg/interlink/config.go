@@ -30,7 +30,6 @@ type Config struct {
 	Interlinkport     string `yaml:"InterlinkPort"`
 	Sidecarurl        string `yaml:"SidecarURL"`
 	Sidecarport       string `yaml:"SidecarPort"`
-	ExportPodData     bool   `yaml:"ExportPodData"`
 	VerboseLogging    bool   `yaml:"VerboseLogging"`
 	ErrorsOnlyLogging bool   `yaml:"ErrorsOnlyLogging"`
 	DataRootFolder    string `yaml:"DataRootFolder"`

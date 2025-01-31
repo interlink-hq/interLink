@@ -79,8 +79,8 @@ In general, starting from the deployment of the remote components is adviced. Si
     First of all download the [latest release](https://github.com/interTwin-eu/interLink/releases) of the interLink installer:
 
     ```bash
-    export VERSION=0.3.3
-    wget -O interlink-installer https://github.com/interTwin-eu/interLink/releases/download/$VERSION/interlink-installer_Linux_amd64
+    export VERSION=$(curl -s https://api.github.com/repos/intertwin-eu/interlink/releases/latest  | jq -r .name)
+    wget -O interlink-installer https://github.com/interTwin-eu/interLink/releases/download/$VERSION/interlink-installer_Linux_x86_64
     chmod +x interlink-installer
     ```
 
@@ -179,7 +179,6 @@ In general, starting from the deployment of the remote components is adviced. Si
       SidecarPort: "0"
       
       CommandPrefix: ""
-      ExportPodData: true
       DataRootFolder: "/home/myusername/.interlink/jobs/"
       BashPath: /bin/bash
       VerboseLogging: false
@@ -228,7 +227,6 @@ In general, starting from the deployment of the remote components is adviced. Si
       SidecarPort: "0"
       
       CommandPrefix: ""
-      ExportPodData: true
       DataRootFolder: "/home/myusername/.interlink/jobs/"
       BashPath: /bin/bash
       VerboseLogging: false
@@ -244,7 +242,7 @@ In general, starting from the deployment of the remote components is adviced. Si
     - Download the [latest release](https://github.com/interTwin-eu/interlink-slurm-plugin/releases) binary in `$HOME/.interlink/bin/plugin`
 
       ```bash 
-      export PLUGIN_VERSION=0.3.8
+      export PLUGIN_VERSION=$(curl -s https://api.github.com/repos/intertwin-eu/interlink-slurm-plugin/releases/latest  | jq -r .name)
       wget -O $HOME/.interlink/bin/plugin https://github.com/interTwin-eu/interlink-slurm-plugin/releases/download/${PLUGIN_VERSION}/interlink-sidecar-slurm_Linux_x86_64 
       ```
 

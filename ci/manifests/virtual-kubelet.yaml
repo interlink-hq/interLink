@@ -38,7 +38,7 @@ spec:
         - name: NODENAME
           value: virtual-kubelet 
         - name: KUBELET_PORT
-          value: "10255"
+          value: "10251"
         - name: POD_IP
           valueFrom:
             fieldRef:
