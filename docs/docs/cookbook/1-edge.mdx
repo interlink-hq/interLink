@@ -9,6 +9,9 @@ import useBaseUrl from '@docusaurus/useBaseUrl';
 
 # Edge node deployment
 
+Deploy interLink API server on an edge node, dispatching jobs on a remote system 
+according to an interLink plugin.
+
 <ThemedImage 
         alt="Docusaurus themed image"
         sources={{
@@ -18,27 +21,31 @@ import useBaseUrl from '@docusaurus/useBaseUrl';
 />
 
 
-
 ## Install interLink
 
 ### Deploy Remote components
 
-In general, starting from the deployment of the remote components is adviced. Since the kubernetes virtual node won't reach the `Ready` 
+In general, starting from the deployment of the remote components is adviced. 
+Since the kubernetes virtual node won't reach the `Ready` 
 status until all the stack is successfully deployed.
 
 #### Interlink API server
 
-__For this deployment mode the remote host has to allow the kubernetes cluster to connect to the Oauth2 proxy service port 
+__For this deployment mode the remote host has to allow the kubernetes cluster 
+to connect to the Oauth2 proxy service port 
 (30443 if you use the automatic script for installation)__
 
 You first need to initialize an OIDC client with you Identity Provider (IdP).  
 
-Since any OIDC provider working with [OAuth2 Proxy](https://oauth2-proxy.github.io/oauth2-proxy/) tool will do the work, we are going 
-to put the configuration for a generic OIDC identity provider in this cookbook. Nevertheless you can find more detailed on dedicated 
-pages with instructions ready for [GitHub](./guides/deploy-interlink#create-an-oauth-github-app), [EGI checkin](./guides/oidc-IAM), 
-[INFN IAM](./guides/oidc-IAM).
+Since any OIDC provider working with [OAuth2 Proxy](https://oauth2-proxy.github.io/oauth2-proxy/) 
+tool will do the work, we are going 
+to put the configuration for a generic OIDC identity provider in this cookbook. 
+Nevertheless you can find more detailed on dedicated 
+pages with instructions ready for [GitHub](../guides/deploy-interlink#create-an-oauth-github-app), 
+[EGI checkin](../guides/oidc-IAM), [INFN IAM](../guides/oidc-IAM).
 
-First of all download the [latest release](https://github.com/interTwin-eu/interLink/releases) of the interLink installer:
+First of all download the [latest release](https://github.com/interTwin-eu/interLink/releases) 
+of the interLink installer:
 
 ```bash
 export VERSION=$(curl -s https://api.github.com/repos/intertwin-eu/interlink/releases/latest  | jq -r .name)
@@ -53,8 +60,10 @@ mkdir -p interlink
 ./interlink-installer --init --config ./interlink/.installer.yaml
 ```
 
-The configuration file should be filled as followed. This is the case where the `my-node` will contact an edge service that will be 
-listening on `PUBLIC_IP` and `API_PORT` authenticating requests from an OIDC provider `https://my_oidc_idp.com`:
+The configuration file should be filled as followed. This is the case where the 
+`my-node` will contact an edge service that will be 
+listening on `PUBLIC_IP` and `API_PORT` authenticating requests from an 
+OIDC provider `https://my_oidc_idp.com`:
 
 ```bash title="./interlink/.installer.yaml"
 interlink_ip: PUBLIC_IP
@@ -105,11 +114,14 @@ Then start the services with:
 ./interlink/manifests/interlink-remote.sh start
 ```
 
-With `stop` command you can stop the service. By default logs are store in `~/.interlink/logs`, checkout there for any error before moving to the next step.
+With `stop` command you can stop the service. By default logs are store in 
+`~/.interlink/logs`, checkout there for any error before moving to the next step.
 
-__N.B.__ you can look the oauth2_proxy configuration parameters looking into the `interlink-remote.sh` script.
+__N.B.__ you can look the oauth2_proxy configuration parameters looking into 
+the `interlink-remote.sh` script.
 
-__N.B.__ logs (expecially if in verbose mode) can become pretty huge, consider to implement your favorite rotation routine for all the logs in `~/.interlink/logs/`
+__N.B.__ logs (expecially if in verbose mode) can become pretty huge, consider 
+to implement your favorite rotation routine for all the logs in `~/.interlink/logs/`.
 
 
 #### Plugin service
@@ -141,11 +153,13 @@ Select here the featured plugin you want to try:
       VerboseLogging: false
       ErrorsOnlyLogging: false
       ```
-      - __N.B.__ Depending on wheter you edge is single user or not, you should know by previous steps which section to uncomment here. 
-      - More on configuration options at [official repo](https://github.com/interTwin-eu/interlink-docker-plugin/blob/main/README.md)
+      - __N.B.__ Depending on wheter you edge is single user or not, 
+      you should know by previous steps which section to uncomment here. 
+      - More on configuration options at 
+      [official repo](https://github.com/interTwin-eu/interlink-docker-plugin/blob/main/README.md)
 
-    - Download the [latest release](https://github.com/interTwin-eu/interlink-docker-plugin/releases) binary in 
-    `$HOME/.interlink/bin/plugin` for either GPU host or CPU host (tags ending with `no-GPU`)
+    - Download the [latest release](https://github.com/interTwin-eu/interlink-docker-plugin/releases) 
+    binary in `$HOME/.interlink/bin/plugin` for either GPU host or CPU host (tags ending with `no-GPU`)
     - Start the plugins passing the configuration that you have just created:
 
       ```bash
@@ -199,10 +213,11 @@ Select here the featured plugin you want to try:
       SingularityPrefix: ""
       ```
 
-      - More on configuration options at [official repo](https://github.com/interTwin-eu/interlink-slurm-plugin/blob/main/README.md)
+      - More on configuration options at 
+      [official repo](https://github.com/interTwin-eu/interlink-slurm-plugin/blob/main/README.md)
 
-    - Download the [latest release](https://github.com/interTwin-eu/interlink-slurm-plugin/releases) binary in 
-    `$HOME/.interlink/bin/plugin`
+    - Download the [latest release](https://github.com/interTwin-eu/interlink-slurm-plugin/releases) 
+    binary in `$HOME/.interlink/bin/plugin`
 
       ```bash 
       export PLUGIN_VERSION=$(curl -s https://api.github.com/repos/intertwin-eu/interlink-slurm-plugin/releases/latest  | jq -r .name)
@@ -248,7 +263,8 @@ Select here the featured plugin you want to try:
 ##### 3rd-party plugins
 
 There are more 3rd-party plugins developed that you can get inspired by or even use out of the box.
-You can find some ref in the [quick start section](guides/deploy-interlink#attach-your-favorite-plugin-or-develop-one)  
+You can find some ref in the 
+[quick start section](../guides/deploy-interlink#attach-your-favorite-plugin-or-develop-one)  
 
 
 #### Test interLink stack health
@@ -264,10 +280,12 @@ This call will return the status of the system and its readiness to submit jobs.
 
 ### Deploy Kubernetes components
 
-The deployment of the Kubernetes components are managed by the official [HELM chart](https://github.com/interTwin-eu/interlink-helm-chart). 
+The deployment of the Kubernetes components are managed by the official 
+[HELM chart](https://github.com/interTwin-eu/interlink-helm-chart). 
 Depending on the scenario you selected, there might be additional operations to be done.
 
-You can now install the helm chart with the preconfigured (by the installer script) helm values in `./interlink/manifests/values.yaml` 
+You can now install the helm chart with the preconfigured (by the installer script)
+helm values in `./interlink/manifests/values.yaml` 
 
 ```bash
   helm upgrade --install \
@@ -287,6 +305,6 @@ To start debugging in case of problems we suggest starting from the pod containe
 
 ## Test the setup
 
-Please find a demo pod to test your setup [here](./guides/develop-a-plugin#lets-test-is-out).
+Please find a demo pod to test your setup [here](../guides/develop-a-plugin#lets-test-is-out).
 
 
