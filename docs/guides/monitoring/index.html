@@ -4,7 +4,7 @@
 <meta charset="UTF-8">
 <meta name="generator" content="Docusaurus v3.0.1">
 <title data-rh="true">InterLink Monitoring System | interLink</title><meta data-rh="true" name="viewport" content="width=device-width,initial-scale=1"><meta data-rh="true" name="twitter:card" content="summary_large_image"><meta data-rh="true" property="og:image" content="https://intertwin-eu.github.io/interLink/img/img/interlink_logo.png"><meta data-rh="true" name="twitter:image" content="https://intertwin-eu.github.io/interLink/img/img/interlink_logo.png"><meta data-rh="true" property="og:url" content="https://intertwin-eu.github.io/interLink/docs/guides/monitoring"><meta data-rh="true" property="og:locale" content="en"><meta data-rh="true" name="docusaurus_locale" content="en"><meta data-rh="true" name="docsearch:language" content="en"><meta data-rh="true" name="docusaurus_version" content="current"><meta data-rh="true" name="docusaurus_tag" content="docs-default-current"><meta data-rh="true" name="docsearch:version" content="current"><meta data-rh="true" name="docsearch:docusaurus_tag" content="docs-default-current"><meta data-rh="true" property="og:title" content="InterLink Monitoring System | interLink"><meta data-rh="true" name="description" content="Description"><meta data-rh="true" property="og:description" content="Description"><link data-rh="true" rel="icon" href="/interLink/img/favicon.ico"><link data-rh="true" rel="canonical" href="https://intertwin-eu.github.io/interLink/docs/guides/monitoring"><link data-rh="true" rel="alternate" href="https://intertwin-eu.github.io/interLink/docs/guides/monitoring" hreflang="en"><link data-rh="true" rel="alternate" href="https://intertwin-eu.github.io/interLink/docs/guides/monitoring" hreflang="x-default"><link rel="stylesheet" href="/interLink/assets/css/styles.ae0a76fe.css">
-<script src="/interLink/assets/js/runtime~main.a832bb6e.js" defer="defer"></script>
+<script src="/interLink/assets/js/runtime~main.0984ce8c.js" defer="defer"></script>
 <script src="/interLink/assets/js/main.0d12cf44.js" defer="defer"></script>
 </head>
 <body class="navigation-with-keyboard">
@@ -62,7 +62,13 @@ In particular, the Grafana service is exposed using an Ingress resource.</p>
 <ol start="5">
 <li>
 <p>Deploy (or re-deploy) your Virtual Kubelet stack setting the <code>TELEMETRY_ENDPOINT</code> Environment Variable to your actual endpoint.
-If not set, it defaults to <code>localhost:4317</code>. Remember to enable the monitoring by also setting <code>ENABLE_TRACING</code> to 1.</p>
+If not set, it defaults to <code>localhost:4317</code>. Remember to enable the monitoring by also setting <code>ENABLE_TRACING</code> to 1.
+If you are using an external Tempo instance which is not in the same cluster as the VK and mutual TLS is enabled, you have to set the
+<code>TELEMETRY_CA_CRT_FILEPATH</code> that points to the CA certificate file used by Tempo to sign the certificates,
+the <code>TELEMETRY_CLIENT_KEY_FILEPATH</code> that points to the client key file used by the VK to authenticate itself to Tempo and
+the <code>TELEMETRY_CLIENT_CRT_FILEPATH</code> that points to the client certificate file used by the VK to authenticate itself to Tempo.
+Finally, if the TLS certificate on Tempo are not verfied by unknown authorities, you can set the <code>TELEMETRY_INSECURE_SKIP_VERIFY</code>
+to true.</p>
 </li>
 <li>
 <p>Access Grafana dashboard through the domain you defined in the <code>values.yaml</code> file with the credentials you defined in the <code>values.yaml</code> file.</p>
