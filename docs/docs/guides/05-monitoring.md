@@ -93,6 +93,12 @@ helm upgrade --install helm-vk-monitoring-release interlink-monitoring-stack/ -n
 
 5. Deploy (or re-deploy) your Virtual Kubelet stack setting the ```TELEMETRY_ENDPOINT``` Environment Variable to your actual endpoint. 
 If not set, it defaults to ```localhost:4317```. Remember to enable the monitoring by also setting ```ENABLE_TRACING``` to 1.
+If you are using an external Tempo instance which is not in the same cluster as the VK and mutual TLS is enabled, you have to set the
+```TELEMETRY_CA_CRT_FILEPATH``` that points to the CA certificate file used by Tempo to sign the certificates, 
+the ```TELEMETRY_CLIENT_KEY_FILEPATH``` that points to the client key file used by the VK to authenticate itself to Tempo and
+the ```TELEMETRY_CLIENT_CRT_FILEPATH``` that points to the client certificate file used by the VK to authenticate itself to Tempo.
+Finally, if the TLS certificate on Tempo are not verfied by unknown authorities, you can set the ```TELEMETRY_INSECURE_SKIP_VERIFY```
+to true.
 
 6. Access Grafana dashboard through the domain you defined in the `values.yaml` file with the credentials you defined in the `values.yaml` file. 
 
