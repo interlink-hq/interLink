@@ -26,13 +26,13 @@ import (
 
 // Config holds the whole configuration
 type Config struct {
-	InterlinkAddress  string `yaml:"interlinkAddress"`
-	Interlinkport     string `yaml:"interlinkPort"`
-	Sidecarurl        string `yaml:"sidecarURL"`
-	Sidecarport       string `yaml:"sidecarPort"`
-	VerboseLogging    bool   `yaml:"verboseLogging"`
-	ErrorsOnlyLogging bool   `yaml:"errorsOnlyLogging"`
-	DataRootFolder    string `yaml:"dataRootFolder"`
+	InterlinkAddress  string `yaml:"InterlinkAddress"`
+	Interlinkport     string `yaml:"InterlinkPort"`
+	Sidecarurl        string `yaml:"SidecarURL"`
+	Sidecarport       string `yaml:"SidecarPort"`
+	VerboseLogging    bool   `yaml:"VerboseLogging"`
+	ErrorsOnlyLogging bool   `yaml:"ErrorsOnlyLogging"`
+	DataRootFolder    string `yaml:"DataRootFolder"`
 }
 
 func SetupTelemetry(ctx context.Context) (*sdktrace.TracerProvider, error) {
