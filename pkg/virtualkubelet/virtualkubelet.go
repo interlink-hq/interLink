@@ -244,10 +244,11 @@ func NewProviderConfig(
 	lbls := map[string]string{
 		"alpha.service-controller.kubernetes.io/exclude-balancer": "true",
 		"beta.kubernetes.io/os":                                   "linux",
+		"kubernetes.io/os":                                        "linux",
 		"kubernetes.io/hostname":                                  nodeName,
 		"kubernetes.io/role":                                      "agent",
 		"node.kubernetes.io/exclude-from-external-load-balancers": "true",
-		"type": "virtual-kubelet",
+		"virtual-node.interlink/type":                             "virtual-kubelet",
 	}
 
 	node := v1.Node{
@@ -257,6 +258,7 @@ func NewProviderConfig(
 			//Annotations: cfg.ExtraAnnotations,
 		},
 		Spec: v1.NodeSpec{
+			ProviderID: "external:///" + nodeName,
 			Taints: []v1.Taint{{
 				Key:    "virtual-node.interlink/no-schedule",
 				Value:  strconv.FormatBool(true),
