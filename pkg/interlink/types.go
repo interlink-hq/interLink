@@ -11,6 +11,9 @@ type PodCreateRequests struct {
 	Pod        v1.Pod         `json:"pod"`
 	ConfigMaps []v1.ConfigMap `json:"configmaps"`
 	Secrets    []v1.Secret    `json:"secrets"`
+	// The projected volumes are those created by ServiceAccounts (in K8S >= 1.24). They are automatically added in the pod from kubelet code.
+	// Here the configmap will hold the files name (as key) and content (as value).
+	ProjectedVolumeMaps []v1.ConfigMap `json:"projectedvolumesmaps"`
 }
 
 // PodStatus is a simplified v1.Pod struct, holding only necessary variables to uniquely identify a job/service in the sidecar. It is used to request
@@ -31,10 +34,14 @@ type CreateStruct struct {
 
 // RetrievedContainer is used in InterLink to rearrange data structure in a suitable way for the sidecar
 type RetrievedContainer struct {
-	Name       string         `json:"name"`
-	ConfigMaps []v1.ConfigMap `json:"configMaps"`
-	Secrets    []v1.Secret    `json:"secrets"`
-	EmptyDirs  []string       `json:"emptyDirs"`
+	Name                string         `json:"name"`
+	ConfigMaps          []v1.ConfigMap `json:"configMaps"`
+	ProjectedVolumeMaps []v1.ConfigMap `json:"projectedvolumemaps"`
+	Secrets             []v1.Secret    `json:"secrets"`
+	// Deprecated: EmptyDirs should be built on plugin side.
+	// Currently, it holds the DATA_ROOT_DIR/emptydirs/volumeName, but this should be a plugin choice instead,
+	// like it currently is for ConfigMaps, ProjectedVolumeMaps, Secrets.
+	EmptyDirs []string `json:"emptyDirs"`
 }
 
 // RetrievedPoData is used in InterLink to rearrange data structure in a suitable way for the sidecar
