@@ -30,7 +30,7 @@ const PodPhaseCompleted = "Completed"
 
 func failedMount(ctx context.Context, failedAndWait *bool, name string, pod *v1.Pod, p *Provider, err error) error {
 	*failedAndWait = true
-	log.G(ctx).Warningf("Unable to find ConfigMap %s for pod %s. Waiting for it to be initialized. Error was: %w. Current phase: %s", name, pod.Name, err, pod.Status.Phase)
+	log.G(ctx).Warningf("Unable to find ConfigMap %s for pod %s. Waiting for it to be initialized. Error was: %v. Current phase: %s", name, pod.Name, err, pod.Status.Phase)
 	if pod.Status.Phase != PodPhaseInitialize {
 		pod.Status.Phase = PodPhaseInitialize
 		err := p.UpdatePod(ctx, pod)
