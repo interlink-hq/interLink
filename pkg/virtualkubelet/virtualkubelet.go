@@ -229,14 +229,14 @@ func SetDefaultResource(config *Config) {
 	for i, accelerator := range config.Resources.Accelerators {
 		if accelerator.Available == 0 {
 			switch accelerator.ResourceType {
-			case "nvidia.com/gpu", "amd.com/gpu", "intel.com/gpu":
+			case nvidiaGPU, amdGPU, intelGPU:
 				defaultGPUCapacity, err := strconv.Atoi(DefaultGPUCapacity)
 				if err != nil {
 					log.G(context.Background()).Errorf("Invalid default GPU capacity: %v", err)
 					defaultGPUCapacity = 0
 				}
 				config.Resources.Accelerators[i].Available = defaultGPUCapacity
-			case "xilinx.com/fpga", "intel.com/fpga":
+			case xilinxFPGA, intelFPGA:
 				defaultFPGACapacity, err := strconv.Atoi(DefaultFPGACapacity)
 				if err != nil {
 					log.G(context.Background()).Errorf("Invalid default FPGA capacity: %v", err)
