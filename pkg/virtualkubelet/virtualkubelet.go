@@ -296,10 +296,11 @@ func NewProviderConfig(
 	lbls := map[string]string{
 		"alpha.service-controller.kubernetes.io/exclude-balancer": "true",
 		"beta.kubernetes.io/os":                                   "linux",
+		"kubernetes.io/os":                                        "linux",
 		"kubernetes.io/hostname":                                  nodeName,
 		"kubernetes.io/role":                                      "agent",
 		"node.kubernetes.io/exclude-from-external-load-balancers": "true",
-		"type": "virtual-kubelet",
+		"virtual-node.interlink/type":                             "virtual-kubelet",
 	}
 
 	// Add custom labels from config
@@ -357,13 +358,62 @@ func NewProviderConfig(
 		})
 	}
 
+	// Add custom labels from config
+	for _, label := range config.NodeLabels {
+
+		parts := strings.SplitN(label, "=", 2)
+		if len(parts) == 2 {
+			lbls[parts[0]] = parts[1]
+		} else {
+			log.G(context.Background()).Warnf("Node label %q is not in the correct format. Should be key=value", label)
+		}
+	}
+
+	for _, accelerator := range config.Resources.Accelerators {
+		switch strings.ToLower(accelerator.ResourceType) {
+		case "nvidia.com/gpu":
+			lbls["nvidia-gpu-type"] = accelerator.Model
+		case "xilinx.com/fpga":
+			lbls["xilinx-fpga-type"] = accelerator.Model
+		case "intel.com/fpga":
+			lbls["intel-fpga-type"] = accelerator.Model
+		default:
+			log.G(context.Background()).Warnf("Unhandled accelerator resource type: %q", accelerator.ResourceType)
+		}
+	}
+
+	for _, taint := range config.NodeTaints {
+		log.G(context.Background()).Infof("Adding taint key=%q value=%q effect=%q", taint.Key, taint.Value, taint.Effect)
+
+		var effect v1.TaintEffect
+
+		switch taint.Effect {
+		case "NoSchedule":
+			effect = v1.TaintEffectNoSchedule
+		case "PreferNoSchedule":
+			effect = v1.TaintEffectPreferNoSchedule
+		case "NoExecute":
+			effect = v1.TaintEffectNoExecute
+		default:
+			effect = v1.TaintEffectNoSchedule
+			log.G(context.Background()).Warnf("Unknown taint effect %q, defaulting to NoSchedule", taint.Effect)
+		}
+
+		taints = append(taints, v1.Taint{
+			Key:    taint.Key,
+			Value:  taint.Value,
+			Effect: effect,
+		})
+	}
+
 	node := v1.Node{
 		ObjectMeta: metav1.ObjectMeta{
 			Name:   nodeName,
 			Labels: lbls,
 		},
 		Spec: v1.NodeSpec{
-			Taints: taints,
+			ProviderID: "external:///" + nodeName,
+			Taints:     taints,
 		},
 		Status: v1.NodeStatus{
 			NodeInfo: v1.NodeSystemInfo{

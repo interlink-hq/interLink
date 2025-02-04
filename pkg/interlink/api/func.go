@@ -2,7 +2,7 @@ package api
 
 import (
 	"context"
-	"path/filepath"
+	"strings"
 	"sync"
 	"time"
 
@@ -35,10 +35,10 @@ func getData(ctx context.Context, config types.Config, pod types.PodCreateReques
 		startContainer := time.Now().UnixMicro()
 		log.G(ctx).Info("- Retrieving Secrets and ConfigMaps for the Docker Sidecar. InitContainer: " + container.Name)
 		log.G(ctx).Debug(container.VolumeMounts)
-		data, InterlinkIP := retrieveData(ctx, config, pod, container)
-		if InterlinkIP != nil {
-			log.G(ctx).Error(InterlinkIP)
-			return types.RetrievedPodData{}, InterlinkIP
+		data, err := retrieveData(ctx, config, pod, container)
+		if err != nil {
+			log.G(ctx).Error(err)
+			return types.RetrievedPodData{}, err
 		}
 		retrievedData.Containers = append(retrievedData.Containers, data)
 
@@ -73,42 +73,78 @@ func getData(ctx context.Context, config types.Config, pod types.PodCreateReques
 // retrieveData retrieves ConfigMaps, Secrets and EmptyDirs.
 // The config is needed to specify the EmptyDirs mounting point.
 // It returns the retrieved data in a variable of type commonIL.RetrievedContainer and the first encountered error.
-func retrieveData(ctx context.Context, config types.Config, pod types.PodCreateRequests, container v1.Container) (types.RetrievedContainer, error) {
+func retrieveData(ctx context.Context, _ types.Config, pod types.PodCreateRequests, container v1.Container) (types.RetrievedContainer, error) {
 	retrievedData := types.RetrievedContainer{}
+	retrievedData.Name = container.Name
 	for _, mountVar := range container.VolumeMounts {
-		log.G(ctx).Debug("-- Retrieving data for mountpoint " + mountVar.Name)
+		log.G(ctx).Debug("-- Retrieving data for mountpoint ", mountVar.Name)
 
+	loopVolumes:
 		for _, vol := range pod.Pod.Spec.Volumes {
 			if vol.Name == mountVar.Name {
 				switch {
 				case vol.ConfigMap != nil:
-
-					log.G(ctx).Info("--- Retrieving ConfigMap " + vol.ConfigMap.Name)
-					retrievedData.Name = container.Name
+					log.G(ctx).Info("--- Retrieving ConfigMap ", vol.ConfigMap.Name)
 					for _, cfgMap := range pod.ConfigMaps {
 						if cfgMap.Name == vol.ConfigMap.Name {
-							retrievedData.Name = container.Name
+							log.G(ctx).Debug("configMap found! Name: ", cfgMap.Name)
 							retrievedData.ConfigMaps = append(retrievedData.ConfigMaps, cfgMap)
+							break loopVolumes
 						}
 					}
+					// This should not happen, error. Building error context.
+					var configMapsKeys []string
+					for _, cfgMap := range pod.ConfigMaps {
+						configMapsKeys = append(configMapsKeys, cfgMap.Name)
+					}
+					log.G(ctx).Errorf("could not find in retrievedData the matching object for volume: %s (pod: %s container: %s configMap: %s) retrievedData keys: %s", vol.Name,
+						pod.Pod.Name, container.Name, vol.ConfigMap.Name, strings.Join(configMapsKeys, ","))
+
+				case vol.Projected != nil:
+					log.G(ctx).Info("--- Retrieving ProjectedVolume ", vol.Name)
+					for _, projectedVolumeMap := range pod.ProjectedVolumeMaps {
+						log.G(ctx).Debug("Comparing projectedVolumeMap.Name: ", projectedVolumeMap.Name, " with vol.Name: ", vol.Name)
+						if projectedVolumeMap.Name == vol.Name {
+							log.G(ctx).Debug("projectedVolumeMap found! Name: ", projectedVolumeMap.Name)
+
+							retrievedData.ProjectedVolumeMaps = append(retrievedData.ProjectedVolumeMaps, projectedVolumeMap)
+							break loopVolumes
+						}
+					}
+					// This should not happen, error. Building error context.
+					var projectedVolumeMapsKeys []string
+					for _, projectedVolumeMap := range pod.ProjectedVolumeMaps {
+						projectedVolumeMapsKeys = append(projectedVolumeMapsKeys, projectedVolumeMap.Name)
+					}
+					log.G(ctx).Errorf("could not find in retrievedData the matching object for  volume: %s (pod: %s container: %s projectedVolumeMap) retrievedData keys: %s",
+						vol.Name, pod.Pod.Name, container.Name, strings.Join(projectedVolumeMapsKeys, ","))
 
 				case vol.Secret != nil:
-
-					log.G(ctx).Info("--- Retrieving Secret " + vol.Secret.SecretName)
-					retrievedData.Name = container.Name
+					log.G(ctx).Info("--- Retrieving Secret ", vol.Secret.SecretName)
 					for _, secret := range pod.Secrets {
 						if secret.Name == vol.Secret.SecretName {
-							retrievedData.Name = container.Name
+							log.G(ctx).Debug("secret found! Name: ", secret.Name)
 							retrievedData.Secrets = append(retrievedData.Secrets, secret)
+							break loopVolumes
 						}
 					}
+					// This should not happen, error. Building error context.
+					var secretKeys []string
+					for _, secret := range pod.Secrets {
+						secretKeys = append(secretKeys, secret.Name)
+					}
+					log.G(ctx).Errorf("could not find in retrievedData the matching object for volume: %s (pod: %s container: %s secret: %s) retrievedData keys: %s",
+						pod.Pod.Name, container.Name, vol.Name, vol.Secret.SecretName, strings.Join(secretKeys, ","))
 
 				case vol.EmptyDir != nil:
-					edPath := filepath.Join(config.DataRootFolder, pod.Pod.Namespace+"-"+string(pod.Pod.UID)+"/"+"emptyDirs/"+vol.Name)
+					// Deprecated: EmptyDirs is useless at VK level. It should be moved to plugin level.
+					// edPath := filepath.Join(config.DataRootFolder, pod.Pod.Namespace+"-"+string(pod.Pod.UID), "emptyDirs", vol.Name)
+					// retrievedData.EmptyDirs = append(retrievedData.EmptyDirs, edPath)
 
-					retrievedData.Name = container.Name
-					retrievedData.EmptyDirs = append(retrievedData.EmptyDirs, edPath)
+				default:
+					log.G(ctx).Warning("ignoring unsupported volume type for ", mountVar.Name)
 				}
+
 			}
 		}
 	}

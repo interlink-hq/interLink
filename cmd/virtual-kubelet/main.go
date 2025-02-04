@@ -147,7 +147,7 @@ func main() {
 	log.G(ctx).Info("Config dump", interLinkConfig)
 
 	if os.Getenv("ENABLE_TRACING") == "1" {
-		shutdown, err := interlink.InitTracer(ctx)
+		shutdown, err := interlink.InitTracer(ctx, "VK-InterLink-")
 		if err != nil {
 			log.G(ctx).Fatal(err)
 		}

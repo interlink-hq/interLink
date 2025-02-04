@@ -29,6 +29,18 @@ jobs:
       - name: Get Repo Owner
         id: get_repo_owner
         run: echo ::set-output name=repo_owner::$(echo ${{ github.repository_owner }} | tr '[:upper:]' '[:lower:]')
+
+      # See https://docs.docker.com/build/ci/github-actions/cache/ for cache to speed go build
+      - name: Go Build Cache for Docker
+        uses: actions/cache@v4
+        with:
+          path: go-build-cache
+          key: ${{ runner.os }}-go-build-cache-${{ hashFiles('**/go.sum') }}
+      - name: Inject go-build-cache
+        uses: reproducible-containers/buildkit-cache-dance@4b2444fec0c0fb9dbf175a96c094720a692ef810 # v2.1.4
+        with:
+          cache-source: go-build-cache
+
       - name: Build container base image vk
         uses: docker/build-push-action@v5
         with:

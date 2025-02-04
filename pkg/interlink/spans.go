@@ -1,6 +1,7 @@
 package interlink
 
 import (
+	"net/http"
 	"time"
 
 	"go.opentelemetry.io/otel/attribute"
@@ -29,4 +30,18 @@ func SetDurationSpan(startTime int64, span trace.Span, opts ...SpanOption) {
 	if config.SetHTTPCode {
 		span.SetAttributes(attribute.Int("exit.code", config.HTTPReturnCode))
 	}
+}
+
+func SetInfoFromHeaders(span trace.Span, h *http.Header) {
+	var xForwardedEmail, xForwardedUser string
+	if xForwardedEmail = h.Get("X-Forwarded-Email"); xForwardedEmail == "" {
+		xForwardedEmail = "unknown"
+	}
+	if xForwardedUser = h.Get("X-Forwarded-User"); xForwardedUser == "" {
+		xForwardedUser = "unknown"
+	}
+	span.SetAttributes(
+		attribute.String("X-Forwarded-Email", xForwardedEmail),
+		attribute.String("X-Forwarded-User", xForwardedUser),
+	)
 }
