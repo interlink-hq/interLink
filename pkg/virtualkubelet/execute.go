@@ -28,9 +28,9 @@ import (
 const PodPhaseInitialize = "Initializing"
 const PodPhaseCompleted = "Completed"
 
-func failedMount(ctx context.Context, failedAndWait *bool, name string, pod *v1.Pod, p *Provider) error {
+func failedMount(ctx context.Context, failedAndWait *bool, name string, pod *v1.Pod, p *Provider, err error) error {
 	*failedAndWait = true
-	log.G(ctx).Warning("Unable to find ConfigMap " + name + " for pod " + pod.Name + ". Waiting for it to be initialized")
+	log.G(ctx).Warningf("Unable to find ConfigMap %s for pod %s. Waiting for it to be initialized. Error was: %w. Current phase: %s", name, pod.Name, err, pod.Status.Phase)
 	if pod.Status.Phase != PodPhaseInitialize {
 		pod.Status.Phase = PodPhaseInitialize
 		err := p.UpdatePod(ctx, pod)
@@ -609,8 +609,8 @@ func remoteExecutionHandleProjectedSource(
 
 func remoteExecutionHandleVolumes(ctx context.Context, p *Provider, pod *v1.Pod, req *types.PodCreateRequests) error {
 	startTime := time.Now()
+	endTime := startTime.Add(5 * time.Minute)
 
-	timeNow := time.Now()
 	_, err := p.clientSet.CoreV1().Pods(pod.Namespace).Get(ctx, pod.Name, metav1.GetOptions{})
 	if err != nil {
 		log.G(ctx).Warning("Deleted Pod before actual creation")
@@ -625,12 +625,12 @@ func remoteExecutionHandleVolumes(ctx context.Context, p *Provider, pod *v1.Pod,
 		log.G(ctx).Debug("Looking at volume ", volume)
 		for {
 			failedAndWait = false
-			if timeNow.Sub(startTime).Seconds() < time.Hour.Minutes()*5 {
+			if time.Now().Before(endTime) {
 				switch {
 				case volume.ConfigMap != nil:
 					cfgmap, err := p.clientSet.CoreV1().ConfigMaps(pod.Namespace).Get(ctx, volume.ConfigMap.Name, metav1.GetOptions{})
 					if err != nil {
-						err = failedMount(ctx, &failedAndWait, volume.ConfigMap.Name, pod, p)
+						err = failedMount(ctx, &failedAndWait, volume.ConfigMap.Name, pod, p, err)
 						if err != nil {
 							return err
 						}
@@ -640,6 +640,12 @@ func remoteExecutionHandleVolumes(ctx context.Context, p *Provider, pod *v1.Pod,
 
 				case volume.Projected != nil:
 					// The service account token uses the projected volume in K8S >= 1.24.
+
+					if p.config.DisableProjectedVolumes {
+						// This flag disable doing anything about Projected Volumes.
+						log.G(ctx).Warning("Flag DisableProjectedVolumes set to true, so not handing Projected Volume: ", volume)
+						break
+					}
 
 					var projectedVolume v1.ConfigMap
 					projectedVolume.Name = volume.Name
@@ -659,7 +665,7 @@ func remoteExecutionHandleVolumes(ctx context.Context, p *Provider, pod *v1.Pod,
 				case volume.Secret != nil:
 					scrt, err := p.clientSet.CoreV1().Secrets(pod.Namespace).Get(ctx, volume.Secret.SecretName, metav1.GetOptions{})
 					if err != nil {
-						err = failedMount(ctx, &failedAndWait, volume.Secret.SecretName, pod, p)
+						err = failedMount(ctx, &failedAndWait, volume.Secret.SecretName, pod, p, err)
 						if err != nil {
 							return err
 						}
@@ -675,7 +681,8 @@ func remoteExecutionHandleVolumes(ctx context.Context, p *Provider, pod *v1.Pod,
 				}
 
 				if failedAndWait {
-					time.Sleep(time.Second)
+					log.G(ctx).Warningf("volume %s not ready, sleeping 2s, attempt %f / 5 minutes max", volume.Name, time.Since(startTime).Minutes())
+					time.Sleep(2 * time.Second)
 					continue
 				}
 				pod.Status.Phase = v1.PodPending
@@ -695,7 +702,7 @@ func remoteExecutionHandleVolumes(ctx context.Context, p *Provider, pod *v1.Pod,
 			if err != nil {
 				return err
 			}
-			return errors.New("unable to retrieve ConfigMaps or Secrets. Check logs")
+			return errors.New("unable to retrieve ConfigMaps or Secrets after 5m. Check logs")
 		}
 	}
 	return nil
