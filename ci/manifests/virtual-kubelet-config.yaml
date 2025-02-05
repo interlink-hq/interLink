@@ -13,9 +13,10 @@ data:
     ServiceAccount: "virtual-kubelet"
     Namespace: interlink 
     VKTokenFile: ""
-    CPU: "100"
-    Memory: "128Gi"
-    Pods: "100"
+    Resources:
+      CPU: "100"
+      Memory: "128Gi"
+      Pods: "100"
     HTTP:
       Insecure: true
     KubeletHTTP:
