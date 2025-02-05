@@ -22,6 +22,12 @@ We used interLink to offload the execution of ML/AI workloads to HPC in the cont
 
 We are integrating interLink in order to provide integration of HPC centers with the EGI Cloud Container compute service. interLink is also included as building block on new EC projects starting in 2025 led by EGI Foundation ( RI-SCALE and EOSC Data Commons)
 
+### Universitat Politècnica de València
+
+Project: interTwin
+
+We integrated interLink capabilities in [OSCAR](https://github.com/grycap/oscar) (Open Source Event-Driven Serverless Computing for Data-Processing Applications) to be able to offload workloads defined as OSCAR Services to HPC clusters. This integration allows OSCAR to leverage interLink's seamless provisioning of heterogeneous resources, enabling efficient execution of data-processing applications on HPC infrastructure.
+
 ## HPC supercomputing centers
 
 ### IJS & IZUM
