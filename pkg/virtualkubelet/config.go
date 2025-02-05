@@ -2,24 +2,24 @@ package virtualkubelet
 
 // Config holds the whole configuration
 type Config struct {
-	InterlinkURL       string      `yaml:"InterlinkURL"`
-	InterlinkPort      string      `yaml:"InterlinkPort"`
-	KubernetesAPIAddr  string      `yaml:"KubernetesApiAddr"`
-	KubernetesAPIPort  string      `yaml:"KubernetesApiPort"`
-	KubernetesAPICaCrt string      `yaml:"KubernetesApiCaCrt"`
-	DisableProjectedVolumes bool   `yaml:"DisableProjectedVolumes"`
-	VKConfigPath       string      `yaml:"VKConfigPath"`
-	VKTokenFile        string      `yaml:"VKTokenFile"`
-	ServiceAccount     string      `yaml:"ServiceAccount"`
-	Namespace          string      `yaml:"Namespace"`
-	PodIP              string      `yaml:"PodIP"`
-	VerboseLogging     bool        `yaml:"VerboseLogging"`
-	ErrorsOnlyLogging  bool        `yaml:"ErrorsOnlyLogging"`
-	HTTP               HTTP        `yaml:"HTTP"`
-	KubeletHTTP        HTTP        `yaml:"KubeletHTTP"`
-	Resources          Resources   `yaml:"Resources"`
-	NodeLabels         []string    `yaml:"NodeLabels"`
-	NodeTaints         []TaintSpec `yaml:"NodeTaints"`
+	InterlinkURL            string      `yaml:"InterlinkURL"`
+	InterlinkPort           string      `yaml:"InterlinkPort"`
+	KubernetesAPIAddr       string      `yaml:"KubernetesApiAddr"`
+	KubernetesAPIPort       string      `yaml:"KubernetesApiPort"`
+	KubernetesAPICaCrt      string      `yaml:"KubernetesApiCaCrt"`
+	DisableProjectedVolumes bool        `yaml:"DisableProjectedVolumes"`
+	VKConfigPath            string      `yaml:"VKConfigPath"`
+	VKTokenFile             string      `yaml:"VKTokenFile"`
+	ServiceAccount          string      `yaml:"ServiceAccount"`
+	Namespace               string      `yaml:"Namespace"`
+	PodIP                   string      `yaml:"PodIP"`
+	VerboseLogging          bool        `yaml:"VerboseLogging"`
+	ErrorsOnlyLogging       bool        `yaml:"ErrorsOnlyLogging"`
+	HTTP                    HTTP        `yaml:"HTTP"`
+	KubeletHTTP             HTTP        `yaml:"KubeletHTTP"`
+	Resources               Resources   `yaml:"Resources"`
+	NodeLabels              []string    `yaml:"NodeLabels"`
+	NodeTaints              []TaintSpec `yaml:"NodeTaints"`
 }
 
 type HTTP struct {
