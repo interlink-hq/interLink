@@ -7,6 +7,7 @@ type Config struct {
 	KubernetesAPIAddr  string      `yaml:"KubernetesApiAddr"`
 	KubernetesAPIPort  string      `yaml:"KubernetesApiPort"`
 	KubernetesAPICaCrt string      `yaml:"KubernetesApiCaCrt"`
+	DisableProjectedVolumes bool   `yaml:"DisableProjectedVolumes"`
 	VKConfigPath       string      `yaml:"VKConfigPath"`
 	VKTokenFile        string      `yaml:"VKTokenFile"`
 	ServiceAccount     string      `yaml:"ServiceAccount"`
