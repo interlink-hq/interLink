@@ -303,60 +303,12 @@ func NewProviderConfig(
 		"virtual-node.interlink/type":                             "virtual-kubelet",
 	}
 
-	// Add custom labels from config
-	for _, label := range config.NodeLabels {
-
-		parts := strings.SplitN(label, "=", 2)
-		if len(parts) == 2 {
-			lbls[parts[0]] = parts[1]
-		} else {
-			log.G(context.Background()).Warnf("Node label %q is not in the correct format. Should be key=value", label)
-		}
-	}
-
-	for _, accelerator := range config.Resources.Accelerators {
-		switch strings.ToLower(accelerator.ResourceType) {
-		case "nvidia.com/gpu":
-			lbls["nvidia-gpu-type"] = accelerator.Model
-		case "xilinx.com/fpga":
-			lbls["xilinx-fpga-type"] = accelerator.Model
-		case "intel.com/fpga":
-			lbls["intel-fpga-type"] = accelerator.Model
-		default:
-			log.G(context.Background()).Warnf("Unhandled accelerator resource type: %q", accelerator.ResourceType)
-		}
-	}
-
 	taints := []v1.Taint{
 		{
 			Key:    "virtual-node.interlink/no-schedule",
 			Value:  strconv.FormatBool(false),
 			Effect: v1.TaintEffectNoSchedule,
 		}}
-
-	for _, taint := range config.NodeTaints {
-		log.G(context.Background()).Infof("Adding taint key=%q value=%q effect=%q", taint.Key, taint.Value, taint.Effect)
-
-		var effect v1.TaintEffect
-
-		switch taint.Effect {
-		case "NoSchedule":
-			effect = v1.TaintEffectNoSchedule
-		case "PreferNoSchedule":
-			effect = v1.TaintEffectPreferNoSchedule
-		case "NoExecute":
-			effect = v1.TaintEffectNoExecute
-		default:
-			effect = v1.TaintEffectNoSchedule
-			log.G(context.Background()).Warnf("Unknown taint effect %q, defaulting to NoSchedule", taint.Effect)
-		}
-
-		taints = append(taints, v1.Taint{
-			Key:    taint.Key,
-			Value:  taint.Value,
-			Effect: effect,
-		})
-	}
 
 	// Add custom labels from config
 	for _, label := range config.NodeLabels {
