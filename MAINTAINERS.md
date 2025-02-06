@@ -11,3 +11,5 @@
 - Mauro Gattari - INFN - mauro.gattari\<at\>infn.it
 - Antoine Tran - Thales for CNES - no public email, but can be contacted through InterLink Slack channel or in github issue to @antoinetran
 - Lucio Anderlini - INFN - lucio.anderlini\<at\>fi.infn.it
+- Sergio Langarita - UPV - Worked on test use cases for Slurm. [@SergioLangaritaBenitez](https://www.github.com/SergioLangaritaBenitez)
+- Estíbaliz Parcero - UPV - Worked on test use cases for Slurm. [@esparig](https://www.github.com/esparig)
