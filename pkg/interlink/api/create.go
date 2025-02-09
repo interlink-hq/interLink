@@ -79,6 +79,11 @@ func (h *InterLinkHandler) CreateHandler(w http.ResponseWriter, r *http.Request)
 	retrievedData = append(retrievedData, data)
 
 	if retrievedData != nil {
+		podIP, ok := retrievedData[0].Pod.Annotations["interlink.eu/pod-ip"]
+		if ok {
+			retrievedData[0].Pod.DeepCopy().Status.PodIP = podIP
+		}
+
 		bodyBytes, err = json.Marshal(retrievedData)
 		if err != nil {
 			w.WriteHeader(http.StatusInternalServerError)

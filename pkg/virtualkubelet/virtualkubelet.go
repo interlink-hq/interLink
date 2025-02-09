@@ -69,7 +69,7 @@ func TracerUpdate(ctx *context.Context, name string, pod *v1.Pod) {
 
 }
 
-func PodPhase(p Provider, phase string) (v1.PodStatus, error) {
+func PodPhase(p Provider, phase string, podIP string) (v1.PodStatus, error) {
 	now := metav1.NewTime(time.Now())
 
 	var podPhase v1.PodPhase
@@ -99,8 +99,8 @@ func PodPhase(p Provider, phase string) (v1.PodStatus, error) {
 
 	return v1.PodStatus{
 		Phase:     podPhase,
-		HostIP:    p.internalIP,
-		PodIP:     p.internalIP,
+		HostIP:    podIP,
+		PodIP:     podIP,
 		StartTime: &now,
 		Conditions: []v1.PodCondition{
 			{
@@ -601,13 +601,19 @@ func (p *Provider) CreatePod(ctx context.Context, pod *v1.Pod) error {
 	}
 	state = runningState
 
+	podIP := "127.0.0.1"
+
+	if ip, ok := pod.Annotations["interlink.eu/pod-ip"]; ok {
+		podIP = ip
+	}
+
 	// in case we have initContainers we need to stop main containers from executing for now ...
 	if len(pod.Spec.InitContainers) > 0 {
 		state = waitingState
 		hasInitContainers = true
 
 		// we put the phase in running but initialization phase to false
-		pod.Status, err = PodPhase(*p, "Running")
+		pod.Status, err = PodPhase(*p, "Running", podIP)
 		if err != nil {
 			log.G(ctx).Error(err)
 			return err
@@ -615,7 +621,7 @@ func (p *Provider) CreatePod(ctx context.Context, pod *v1.Pod) error {
 	} else {
 
 		// if no init containers are there, go head and set phase to initialized
-		pod.Status, err = PodPhase(*p, "Pending")
+		pod.Status, err = PodPhase(*p, "Pending", podIP)
 		if err != nil {
 			log.G(ctx).Error(err)
 			return err
@@ -633,7 +639,7 @@ func (p *Provider) CreatePod(ctx context.Context, pod *v1.Pod) error {
 			} else {
 				// TODO if node in NotReady put it to Unknown/pending?
 				log.G(ctx).Error(err)
-				pod.Status, err = PodPhase(*p, "Failed")
+				pod.Status, err = PodPhase(*p, "Failed", podIP)
 				if err != nil {
 					log.G(ctx).Error(err)
 					return
