@@ -24,15 +24,50 @@ import (
 	"gopkg.in/yaml.v2"
 )
 
+type VolumesOptions struct {
+	ScratchArea                 string
+	ApptainerCacheDir           string
+	ImageDir                    string
+	AdditionalDirectoriesInPath []string
+	FuseSleepSeconds            int
+}
+
+type SingularityHubConfig struct {
+	Server               string
+	MasterToken          string
+	CacheValiditySeconds int
+}
+
+type ApptainerOptions struct {
+	Executable    string
+	Fakeroot      bool
+	ContainerAll  bool
+	FuseMode      string
+	NoInit        bool
+	NoHome        bool
+	NoPrivs       bool
+	NvidiaSupport bool
+	Cleanenv      bool
+	Unsquash      bool
+}
+
+type ScriptBuildConfig struct {
+	SingularityHub   SingularityHubConfig
+	ApptainerOptions ApptainerOptions
+	VolumesOptions   VolumesOptions
+}
+
 // Config holds the whole configuration
 type Config struct {
-	InterlinkAddress  string `yaml:"InterlinkAddress"`
-	Interlinkport     string `yaml:"InterlinkPort"`
-	Sidecarurl        string `yaml:"SidecarURL"`
-	Sidecarport       string `yaml:"SidecarPort"`
-	VerboseLogging    bool   `yaml:"VerboseLogging"`
-	ErrorsOnlyLogging bool   `yaml:"ErrorsOnlyLogging"`
-	DataRootFolder    string `yaml:"DataRootFolder"`
+	InterlinkAddress     string             `yaml:"InterlinkAddress"`
+	Interlinkport        string             `yaml:"InterlinkPort"`
+	Sidecarurl           string             `yaml:"SidecarURL"`
+	Sidecarport          string             `yaml:"SidecarPort"`
+	JobScriptBuildConfig *ScriptBuildConfig `yaml:"JobScriptBuildConfig,omitempty"`
+	JobScriptTemplate    string             `yaml:"JobScriptTemplate,omitempty"`
+	VerboseLogging       bool               `yaml:"VerboseLogging"`
+	ErrorsOnlyLogging    bool               `yaml:"ErrorsOnlyLogging"`
+	DataRootFolder       string             `yaml:"DataRootFolder"`
 }
 
 func SetupTelemetry(ctx context.Context, serviceName string) (*sdktrace.TracerProvider, error) {

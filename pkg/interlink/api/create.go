@@ -3,8 +3,10 @@ package api
 import (
 	"bytes"
 	"encoding/json"
+	"fmt"
 	"io"
 	"net/http"
+	"text/template"
 	"time"
 
 	"github.com/containerd/containerd/log"
@@ -74,6 +76,63 @@ func (h *InterLinkHandler) CreateHandler(w http.ResponseWriter, r *http.Request)
 				log.G(h.Ctx).Debug("InterLink VK environment variable to pod ", pod.Pod.Name, " container: ", container.Name, " env: ", envVar.Name, " value: ", envVar.Value)
 			}
 		}
+	}
+
+	// Here we fill the job.sh template is passed.
+	switch {
+	case pod.JobScriptBuilderURL != "":
+		if h.Config.JobScriptBuildConfig == nil {
+			log.L.Error(fmt.Errorf("JobScript URL requested, but interlink does not have any Script build config set"))
+			return
+		}
+		log.G(h.Ctx).Info("InterLink: asking JobScriptURL for job.sh")
+
+		bodyBytes, err = json.Marshal(data)
+		if err != nil {
+			w.WriteHeader(http.StatusInternalServerError)
+			log.G(h.Ctx).Error(err)
+			return
+		}
+		log.G(h.Ctx).Debug(string(bodyBytes))
+		reader := bytes.NewReader(bodyBytes)
+		req, err = http.NewRequest(http.MethodPost, h.SidecarEndpoint+"/create", reader)
+		if err != nil {
+			log.L.Error(err)
+			return
+		}
+
+		sessionContext := GetSessionContext(r)
+
+		bodyBytesResp, err := ReqWithError(h.Ctx, req, w, start, span, true, false, sessionContext, http.DefaultClient)
+		if err != nil {
+			log.L.Error(err)
+			return
+		}
+
+		data.JobScript = string(bodyBytesResp)
+
+	case h.Config.JobScriptTemplate != "":
+
+		tmp, err := template.ParseFiles(h.Config.JobScriptTemplate)
+
+		if err != nil {
+			statusCode = http.StatusInternalServerError
+			log.G(h.Ctx).Error(err)
+			w.WriteHeader(statusCode)
+			return
+		}
+
+		var tpl bytes.Buffer
+		err = tmp.Execute(&tpl, data)
+
+		if err != nil {
+			statusCode = http.StatusInternalServerError
+			log.G(h.Ctx).Error(err)
+			w.WriteHeader(statusCode)
+			return
+		}
+
+		data.JobScript = tpl.String()
 	}
 
 	retrievedData = append(retrievedData, data)

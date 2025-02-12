@@ -14,6 +14,8 @@ type PodCreateRequests struct {
 	// The projected volumes are those created by ServiceAccounts (in K8S >= 1.24). They are automatically added in the pod from kubelet code.
 	// Here the configmap will hold the files name (as key) and content (as value).
 	ProjectedVolumeMaps []v1.ConfigMap `json:"projectedvolumesmaps"`
+	// If a JobScriptBuilderURL is passed, vk is asking interLink to contact an endpoint for preparing the job.sh to be offloaded
+	JobScriptBuilderURL string `json:"jobscriptURL"`
 }
 
 // PodStatus is a simplified v1.Pod struct, holding only necessary variables to uniquely identify a job/service in the sidecar. It is used to request
@@ -46,8 +48,10 @@ type RetrievedContainer struct {
 
 // RetrievedPoData is used in InterLink to rearrange data structure in a suitable way for the sidecar
 type RetrievedPodData struct {
-	Pod        v1.Pod               `json:"pod"`
-	Containers []RetrievedContainer `json:"container"`
+	Pod            v1.Pod               `json:"pod"`
+	Containers     []RetrievedContainer `json:"container"`
+	JobScriptBuild ScriptBuildConfig    `json:"jobConfig,omitempty"`
+	JobScript      string               `json:"jobScript,omitempty"`
 }
 
 // ContainerLogOpts is a struct in which it is possible to specify options to retrieve logs from the sidecar

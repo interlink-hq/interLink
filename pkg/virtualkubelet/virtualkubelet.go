@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"io"
 	"math/rand"
+	"net"
 	"net/http"
 	"os"
 	"strconv"
@@ -46,6 +47,30 @@ const (
 	xilinxFPGA            = "xilinx.com/fpga"
 	intelFPGA             = "intel.com/fpga"
 )
+
+// Increment the given IP address
+func incrementIP(ip net.IP) {
+	for j := len(ip) - 1; j >= 0; j-- {
+		ip[j]++
+		if ip[j] > 0 {
+			break
+		}
+	}
+}
+
+func findFirstFreeIP(ipList, usedIPs []string) string {
+	usedIPSet := make(map[string]bool)
+	for _, ip := range usedIPs {
+		usedIPSet[ip] = true
+	}
+
+	for _, ip := range ipList {
+		if !usedIPSet[ip] {
+			return ip
+		}
+	}
+	return ""
+}
 
 func TracerUpdate(ctx *context.Context, name string, pod *v1.Pod) {
 	start := time.Now().Unix()
@@ -278,6 +303,7 @@ type Provider struct {
 	onNodeChangeCallback func(*v1.Node)
 	clientSet            *kubernetes.Clientset
 	clientHTTPTransport  *http.Transport
+	podIPs               []string
 }
 
 // NewProviderConfig takes user-defined configuration and fills the Virtual Kubelet provider struct
@@ -603,7 +629,45 @@ func (p *Provider) CreatePod(ctx context.Context, pod *v1.Pod) error {
 
 	podIP := "127.0.0.1"
 
-	if ip, ok := pod.Annotations["interlink.eu/pod-ip"]; ok {
+	if _, ok := pod.Annotations["interlink.eu/pod-vpn"]; ok {
+		podsVPN, err := p.clientSet.CoreV1().Pods("").List(ctx, metav1.ListOptions{})
+		if err != nil {
+			log.G(ctx).Warning("Get all pods attached to the VPN")
+			return nil
+		}
+
+		log.G(ctx).Debug("Pod lists with pod-vpn enabled has len ", len(podsVPN.Items))
+
+		for _, podVPN := range podsVPN.Items {
+			if ip, ok := podVPN.Annotations["interlink.eu/pod-ip"]; ok {
+				p.podIPs = append(p.podIPs, ip)
+			}
+		}
+
+		// Define the subnet
+		_, subnet, err := net.ParseCIDR("10.244.12.0/24")
+		if err != nil {
+			return err
+		}
+
+		var ipList []string
+		for ip := subnet.IP.Mask(subnet.Mask); subnet.Contains(ip); incrementIP(ip) {
+			ipList = append(ipList, ip.String())
+		}
+		// Remove network address and broadcast address
+		ipList = ipList[2 : len(ipList)-1]
+
+		freeIP := findFirstFreeIP(ipList, p.podIPs)
+		if freeIP != "" {
+			log.G(ctx).Info("First free IP: ", freeIP)
+		} else {
+			return fmt.Errorf("no free IP found")
+		}
+
+		p.podIPs = append(p.podIPs, freeIP)
+		pod.Annotations["interlink.eu/pod-ip"] = freeIP
+		podIP = freeIP
+	} else if ip, ok := pod.Annotations["interlink.eu/pod-ip"]; ok {
 		podIP = ip
 	}
 
@@ -830,6 +894,21 @@ func (p *Provider) statusLoop(ctx context.Context) {
 		case <-ctx.Done():
 			return
 		case <-t.C:
+		}
+
+		p.podIPs = []string{}
+
+		podsVPN, err := p.clientSet.CoreV1().Pods("").List(ctx, metav1.ListOptions{})
+		if err != nil {
+			log.G(ctx).Error(err)
+		}
+
+		log.G(ctx).Debug("Pod lists with pod-vpn enabled has len ", len(podsVPN.Items))
+
+		for _, podVPN := range podsVPN.Items {
+			if ip, ok := podVPN.Annotations["interlink.eu/pod-ip"]; ok {
+				p.podIPs = append(p.podIPs, ip)
+			}
 		}
 
 		token := ""
