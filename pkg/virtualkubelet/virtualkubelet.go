@@ -306,7 +306,7 @@ func NewProviderConfig(
 	taints := []v1.Taint{
 		{
 			Key:    "virtual-node.interlink/no-schedule",
-			Value:  strconv.FormatBool(false),
+			Value:  strconv.FormatBool(true),
 			Effect: v1.TaintEffectNoSchedule,
 		}}
 
