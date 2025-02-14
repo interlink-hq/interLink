@@ -81,11 +81,14 @@ func (h *InterLinkHandler) CreateHandler(w http.ResponseWriter, r *http.Request)
 	// Here we fill the job.sh template is passed.
 	switch {
 	case pod.JobScriptBuilderURL != "":
+		log.G(h.Ctx).Info("JobScriptBuilderURL: ", pod.JobScriptBuilderURL)
 		if h.Config.JobScriptBuildConfig == nil {
 			log.L.Error(fmt.Errorf("JobScript URL requested, but interlink does not have any Script build config set"))
 			return
 		}
 		log.G(h.Ctx).Info("InterLink: asking JobScriptURL for job.sh")
+
+		data.JobScriptBuild = *h.Config.JobScriptBuildConfig
 
 		bodyBytes, err = json.Marshal(data)
 		if err != nil {
@@ -95,7 +98,7 @@ func (h *InterLinkHandler) CreateHandler(w http.ResponseWriter, r *http.Request)
 		}
 		log.G(h.Ctx).Debug(string(bodyBytes))
 		reader := bytes.NewReader(bodyBytes)
-		req, err = http.NewRequest(http.MethodPost, h.SidecarEndpoint+"/create", reader)
+		req, err = http.NewRequest(http.MethodPost, pod.JobScriptBuilderURL, reader)
 		if err != nil {
 			log.L.Error(err)
 			return

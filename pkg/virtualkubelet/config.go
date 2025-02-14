@@ -8,7 +8,7 @@ type Config struct {
 	KubernetesAPIPort       string      `yaml:"KubernetesApiPort"`
 	KubernetesAPICaCrt      string      `yaml:"KubernetesApiCaCrt"`
 	DisableProjectedVolumes bool        `yaml:"DisableProjectedVolumes"`
-	JobScriptBuilderURL     string      `yaml:"JobscriptURL,omitempty"`
+	JobScriptBuilderURL     string      `yaml:"JobScriptBuilderURL,omitempty"`
 	VKConfigPath            string      `yaml:"VKConfigPath"`
 	VKTokenFile             string      `yaml:"VKTokenFile"`
 	ServiceAccount          string      `yaml:"ServiceAccount"`
