@@ -3,16 +3,18 @@ nodeName: {{.VKName}}
 interlink:
   address: https://{{.InterLinkIP}}
   port: {{.InterLinkPort}}
+  disableProjectVolumes: {{ .disableProjectVolumes }}
 
 virtualNode:
-  Resources:
-    CPU: {{.VKLimits.CPU}}
-    Memory: {{.VKLimits.Memory}}
-    Pods: {{.VKLimits.Pods}}
+  resources:
+    CPUs: {{.VKLimits.CPU}}
+    memGiB: {{.VKLimits.Memory}}
+    pods: {{.VKLimits.Pods}}
   HTTPProxies:
     HTTP: null
     HTTPs: null
   HTTP:
+    CACert: {{ .CACert }}
     Insecure: {{.HTTPInsecure}} 
 
 OAUTH:
