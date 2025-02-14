@@ -112,7 +112,7 @@ func (h *InterLinkHandler) CreateHandler(w http.ResponseWriter, r *http.Request)
 			return
 		}
 
-		data.JobScript = string(bodyBytesResp)
+		data.JobScript = bodyBytesResp
 
 	case h.Config.JobScriptTemplate != "":
 
@@ -135,7 +135,7 @@ func (h *InterLinkHandler) CreateHandler(w http.ResponseWriter, r *http.Request)
 			return
 		}
 
-		data.JobScript = tpl.String()
+		data.JobScript = tpl.Bytes()
 	}
 
 	retrievedData = append(retrievedData, data)

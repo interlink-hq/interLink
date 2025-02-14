@@ -54,7 +54,7 @@ type ApptainerOptions struct {
 type ScriptBuildConfig struct {
 	SingularityHub   SingularityHubConfig `yaml:"singularity_hub"`
 	ApptainerOptions ApptainerOptions     `yaml:"apptainer_options"`
-	VolumesOptions   VolumesOptions       `yaml:"volume_options"`
+	VolumesOptions   VolumesOptions       `yaml:"volumes_options"`
 }
 
 // Config holds the whole configuration
