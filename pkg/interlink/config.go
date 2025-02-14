@@ -25,36 +25,36 @@ import (
 )
 
 type VolumesOptions struct {
-	ScratchArea                 string
-	ApptainerCacheDir           string
-	ImageDir                    string
-	AdditionalDirectoriesInPath []string
-	FuseSleepSeconds            int
+	ScratchArea                 string   `yaml:"scratch_area"`
+	ApptainerCacheDir           string   `yaml:"apptainer_cachedir"`
+	ImageDir                    string   `yaml:"image_dire"`
+	AdditionalDirectoriesInPath []string `yaml:"additional_directories_in_path"`
+	FuseSleepSeconds            int      `yaml:"fuse_sleep_seconds"`
 }
 
 type SingularityHubConfig struct {
-	Server               string
-	MasterToken          string
-	CacheValiditySeconds int
+	Server               string `yaml:"server"`
+	MasterToken          string `yaml:"master_token"`
+	CacheValiditySeconds int    `yaml:"cache_validity_seconds"`
 }
 
 type ApptainerOptions struct {
-	Executable    string
-	Fakeroot      bool
-	ContainerAll  bool
-	FuseMode      string
-	NoInit        bool
-	NoHome        bool
-	NoPrivs       bool
-	NvidiaSupport bool
-	Cleanenv      bool
-	Unsquash      bool
+	Executable    string `yaml:"executable"`
+	Fakeroot      bool   `yaml:"fakeroot"`
+	ContainerAll  bool   `yaml:"container_all"`
+	FuseMode      string `yaml:"fuse_mode"`
+	NoInit        bool   `yaml:"no_init"`
+	NoHome        bool   `yaml:"no_home"`
+	NoPrivs       bool   `yaml:"no_privs"`
+	NvidiaSupport bool   `yaml:"nvidia_support"`
+	Cleanenv      bool   `yaml:"clean_env"`
+	Unsquash      bool   `yaml:"unsquash"`
 }
 
 type ScriptBuildConfig struct {
-	SingularityHub   SingularityHubConfig
-	ApptainerOptions ApptainerOptions
-	VolumesOptions   VolumesOptions
+	SingularityHub   SingularityHubConfig `yaml:"singularity_hub"`
+	ApptainerOptions ApptainerOptions     `yaml:"apptainer_options"`
+	VolumesOptions   VolumesOptions       `yaml:"volume_options"`
 }
 
 // Config holds the whole configuration

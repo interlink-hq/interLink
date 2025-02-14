@@ -24,7 +24,8 @@ type Config struct {
 }
 
 type HTTP struct {
-	Insecure bool `yaml:"Insecure"`
+	Insecure bool   `yaml:"Insecure"`
+	CaCert   string `yaml:"CaCert"`
 }
 
 type Resources struct {

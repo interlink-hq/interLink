@@ -18,6 +18,7 @@ package main
 import (
 	"context"
 	"crypto/tls"
+	"crypto/x509"
 	"flag"
 	"fmt"
 	"net"
@@ -205,8 +206,7 @@ func main() {
 
 		// Key and certificate paths are not specified, since already configured as part of the TLSConfig.
 		if err := server.ListenAndServeTLS("", ""); err != nil {
-			log.G(ctx).Errorf("Failed to start the HTTPs server: %v", err)
-			os.Exit(1)
+			log.G(ctx).Fatalf("Failed to start the HTTPs server: %v", err)
 		}
 	}()
 
@@ -215,6 +215,25 @@ func main() {
 	var socketPath string
 	if strings.HasPrefix(interLinkConfig.InterlinkURL, "unix://") {
 		socketPath = strings.ReplaceAll(interLinkConfig.InterlinkURL, "unix://", "")
+	}
+
+	certPool, err := x509.SystemCertPool()
+	if err != nil {
+		log.G(ctx).Fatalf("Failed to parse system rootCAs for client: %v", err)
+	}
+
+	if interLinkConfig.HTTP.CaCert != "" {
+
+		certContent, err := os.ReadFile(interLinkConfig.HTTP.CaCert)
+		if err != nil {
+			log.G(ctx).Fatalf("Failed to read config-provided rootCAs for client: %v", err)
+		}
+
+		certFromConfig, err := x509.ParseCertificate(certContent)
+		if err != nil {
+			log.G(ctx).Fatalf("Failed to parse config-provided rootCAs for client: %v", err)
+		}
+		certPool.AddCert(certFromConfig)
 	}
 
 	dialer := &net.Dialer{
@@ -234,6 +253,7 @@ func main() {
 		},
 		TLSClientConfig: &tls.Config{
 			InsecureSkipVerify: interLinkConfig.HTTP.Insecure,
+			RootCAs:            certPool,
 		},
 	}
 
