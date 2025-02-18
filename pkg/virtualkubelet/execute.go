@@ -907,6 +907,7 @@ func handleContainersUpdate(ctx context.Context, podRemoteStatus types.PodStatus
 			case containerRemoteStatus.State.Running != nil:
 				podRunning = true
 				log.G(ctx).Debug("Pod " + podRemoteStatus.PodName + ": Service " + containerRemoteStatus.Name + " is running on Sidecar")
+				podRefInCluster.Status.Phase = v1.PodPhase(v1.PodReady)
 				podRefInCluster.Status.ContainerStatuses[index].Ready = true
 				podRefInCluster.Status.ContainerStatuses[index].State.Running = containerRemoteStatus.State.Running
 			}

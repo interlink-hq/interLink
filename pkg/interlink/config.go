@@ -27,7 +27,7 @@ import (
 type VolumesOptions struct {
 	ScratchArea                 string   `yaml:"scratch_area"`
 	ApptainerCacheDir           string   `yaml:"apptainer_cachedir"`
-	ImageDir                    string   `yaml:"image_dire"`
+	ImageDir                    string   `yaml:"image_dir"`
 	AdditionalDirectoriesInPath []string `yaml:"additional_directories_in_path"`
 	FuseSleepSeconds            int      `yaml:"fuse_sleep_seconds"`
 }
@@ -41,13 +41,13 @@ type SingularityHubConfig struct {
 type ApptainerOptions struct {
 	Executable    string `yaml:"executable"`
 	Fakeroot      bool   `yaml:"fakeroot"`
-	ContainerAll  bool   `yaml:"container_all"`
+	ContainAll    bool   `yaml:"containall"`
 	FuseMode      string `yaml:"fuse_mode"`
 	NoInit        bool   `yaml:"no_init"`
 	NoHome        bool   `yaml:"no_home"`
 	NoPrivs       bool   `yaml:"no_privs"`
 	NvidiaSupport bool   `yaml:"nvidia_support"`
-	Cleanenv      bool   `yaml:"clean_env"`
+	Cleanenv      bool   `yaml:"cleanenv"`
 	Unsquash      bool   `yaml:"unsquash"`
 }
 

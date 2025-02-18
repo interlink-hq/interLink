@@ -321,10 +321,9 @@ func NewProviderConfig(
 
 	lbls := map[string]string{
 		"alpha.service-controller.kubernetes.io/exclude-balancer": "true",
-		"beta.kubernetes.io/os":                                   "linux",
-		"kubernetes.io/os":                                        "linux",
-		"kubernetes.io/hostname":                                  nodeName,
-		"kubernetes.io/role":                                      "agent",
+		"kubernetes.io/os":       "virtual-node",
+		"kubernetes.io/hostname": nodeName,
+		"kubernetes.io/role":     "agent",
 		"node.kubernetes.io/exclude-from-external-load-balancers": "true",
 		"virtual-node.interlink/type":                             "virtual-kubelet",
 	}

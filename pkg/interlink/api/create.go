@@ -106,6 +106,7 @@ func (h *InterLinkHandler) CreateHandler(w http.ResponseWriter, r *http.Request)
 
 		sessionContext := GetSessionContext(r)
 
+		req.Header.Set("Content-Type", "application/json")
 		bodyBytesResp, err := ReqWithError(h.Ctx, req, w, start, span, true, false, sessionContext, http.DefaultClient)
 		if err != nil {
 			log.L.Error(err)
