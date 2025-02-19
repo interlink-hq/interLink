@@ -25,36 +25,36 @@ import (
 )
 
 type VolumesOptions struct {
-	ScratchArea                 string   `yaml:"scratch_area"`
-	ApptainerCacheDir           string   `yaml:"apptainer_cachedir"`
-	ImageDir                    string   `yaml:"image_dir"`
-	AdditionalDirectoriesInPath []string `yaml:"additional_directories_in_path"`
-	FuseSleepSeconds            int      `yaml:"fuse_sleep_seconds"`
+	ScratchArea                 string   `json:"scratch_area" yaml:"scratch_area"`
+	ApptainerCacheDir           string   `json:"apptainer_cachedir" yaml:"apptainer_cachedir"`
+	ImageDir                    string   `json:"image_dir" yaml:"image_dir"`
+	AdditionalDirectoriesInPath []string `json:"additional_directories_in_path" yaml:"additional_directories_in_path"`
+	FuseSleepSeconds            int      `json:"fuse_sleep_seconds" yaml:"fuse_sleep_seconds"`
 }
 
 type SingularityHubConfig struct {
-	Server               string `yaml:"server"`
-	MasterToken          string `yaml:"master_token"`
-	CacheValiditySeconds int    `yaml:"cache_validity_seconds"`
+	Server               string `json:"server" yaml:"server"`
+	MasterToken          string `json:"master_token" yaml:"master_token"`
+	CacheValiditySeconds int    `json:"cache_validity_seconds" yaml:"cache_validity_seconds"`
 }
 
 type ApptainerOptions struct {
-	Executable    string `yaml:"executable"`
-	Fakeroot      bool   `yaml:"fakeroot"`
-	ContainAll    bool   `yaml:"containall"`
-	FuseMode      string `yaml:"fuse_mode"`
-	NoInit        bool   `yaml:"no_init"`
-	NoHome        bool   `yaml:"no_home"`
-	NoPrivs       bool   `yaml:"no_privs"`
-	NvidiaSupport bool   `yaml:"nvidia_support"`
-	Cleanenv      bool   `yaml:"cleanenv"`
-	Unsquash      bool   `yaml:"unsquash"`
+	Executable    string `json:"executable" yaml:"executable"`
+	Fakeroot      bool   `json:"fakeroot" yaml:"fakeroot"`
+	ContainAll    bool   `json:"containall" yaml:"containall"`
+	FuseMode      string `json:"fuseMode" yaml:"fuse_mode"`
+	NoInit        bool   `json:"noInit" yaml:"no_init"`
+	NoHome        bool   `json:"noHome" yaml:"no_home"`
+	NoPrivs       bool   `json:"noPrivs" yaml:"no_privs"`
+	NvidiaSupport bool   `json:"nvidiaSupport" yaml:"nvidia_support"`
+	Cleanenv      bool   `json:"cleanenv" yaml:"cleanenv"`
+	Unsquash      bool   `json:"unsquash" yaml:"unsquash"`
 }
 
 type ScriptBuildConfig struct {
-	SingularityHub   SingularityHubConfig `yaml:"singularity_hub"`
-	ApptainerOptions ApptainerOptions     `yaml:"apptainer_options"`
-	VolumesOptions   VolumesOptions       `yaml:"volumes_options"`
+	SingularityHub   SingularityHubConfig `json:"SingularityHubProxy" yaml:"singularity_hub"`
+	ApptainerOptions ApptainerOptions     `json:"ApptainerOptions" yaml:"apptainer_options"`
+	VolumesOptions   VolumesOptions       `json:"Volumes" yaml:"volumes_options"`
 }
 
 // Config holds the whole configuration

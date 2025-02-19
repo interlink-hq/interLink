@@ -107,13 +107,13 @@ func (h *InterLinkHandler) CreateHandler(w http.ResponseWriter, r *http.Request)
 		sessionContext := GetSessionContext(r)
 
 		req.Header.Set("Content-Type", "application/json")
-		bodyBytesResp, err := ReqWithError(h.Ctx, req, w, start, span, true, false, sessionContext, http.DefaultClient)
+		bodyBytesResp, err := ReqWithError(h.Ctx, req, w, start, span, false, true, sessionContext, http.DefaultClient)
 		if err != nil {
 			log.L.Error(err)
 			return
 		}
 
-		data.JobScript = bodyBytesResp
+		data.JobScript = string(bodyBytesResp)
 
 	case h.Config.JobScriptTemplate != "":
 
@@ -136,7 +136,7 @@ func (h *InterLinkHandler) CreateHandler(w http.ResponseWriter, r *http.Request)
 			return
 		}
 
-		data.JobScript = tpl.Bytes()
+		data.JobScript = tpl.String()
 	}
 
 	retrievedData = append(retrievedData, data)
@@ -156,7 +156,6 @@ func (h *InterLinkHandler) CreateHandler(w http.ResponseWriter, r *http.Request)
 		log.G(h.Ctx).Debug(string(bodyBytes))
 		reader := bytes.NewReader(bodyBytes)
 
-		log.G(h.Ctx).Info(req)
 		req, err = http.NewRequest(http.MethodPost, h.SidecarEndpoint+"/create", reader)
 
 		if err != nil {

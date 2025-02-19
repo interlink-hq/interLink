@@ -51,7 +51,7 @@ type RetrievedPodData struct {
 	Pod            v1.Pod               `json:"pod"`
 	Containers     []RetrievedContainer `json:"container"`
 	JobScriptBuild ScriptBuildConfig    `json:"jobConfig,omitempty"`
-	JobScript      []byte               `json:"jobScript,omitempty"`
+	JobScript      string               `json:"jobScript,omitempty"`
 }
 
 // ContainerLogOpts is a struct in which it is possible to specify options to retrieve logs from the sidecar
