@@ -55,14 +55,16 @@ type oauthStruct struct {
 
 // TODO: insert in-cluster and socket option e.g. --> no need OAUTH
 type dataStruct struct {
-	InterLinkIP      string      `yaml:"interlink_ip"`
-	InterLinkPort    int         `yaml:"interlink_port"`
-	InterLinkVersion string      `yaml:"interlink_version"`
-	VKName           string      `yaml:"kubelet_node_name"`
-	Namespace        string      `yaml:"kubernetes_namespace,omitempty"`
-	VKLimits         Resources   `yaml:"node_limits"`
-	OAUTH            oauthStruct `yaml:"oauth,omitempty"`
-	HTTPInsecure     bool        `default:"true" yaml:"insecure_http"`
+	InterLinkIP             string      `yaml:"interlink_ip"`
+	InterLinkPort           int         `yaml:"interlink_port"`
+	InterLinkVersion        string      `yaml:"interlink_version"`
+	VKName                  string      `yaml:"kubelet_node_name"`
+	Namespace               string      `yaml:"kubernetes_namespace,omitempty"`
+	VKLimits                Resources   `yaml:"node_limits"`
+	OAUTH                   oauthStruct `yaml:"oauth,omitempty"`
+	HTTPInsecure            bool        `default:"true" yaml:"insecure_http"`
+	CACert                  string      `default: "" yaml:"ca_cert"`
+	DisableProjectedVolumes bool        `default:"true" yaml:"disable_projected_volumes"`
 }
 
 func evalManifest(path string, dataStruct dataStruct) (string, error) {

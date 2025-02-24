@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"io"
 	"math/rand"
+	"net"
 	"net/http"
 	"os"
 	"strconv"
@@ -47,6 +48,30 @@ const (
 	intelFPGA             = "intel.com/fpga"
 )
 
+// Increment the given IP address
+func incrementIP(ip net.IP) {
+	for j := len(ip) - 1; j >= 0; j-- {
+		ip[j]++
+		if ip[j] > 0 {
+			break
+		}
+	}
+}
+
+func findFirstFreeIP(ipList, usedIPs []string) string {
+	usedIPSet := make(map[string]bool)
+	for _, ip := range usedIPs {
+		usedIPSet[ip] = true
+	}
+
+	for _, ip := range ipList {
+		if !usedIPSet[ip] {
+			return ip
+		}
+	}
+	return ""
+}
+
 func TracerUpdate(ctx *context.Context, name string, pod *v1.Pod) {
 	start := time.Now().Unix()
 	tracer := otel.Tracer("interlink-service")
@@ -69,7 +94,7 @@ func TracerUpdate(ctx *context.Context, name string, pod *v1.Pod) {
 
 }
 
-func PodPhase(p Provider, phase string) (v1.PodStatus, error) {
+func PodPhase(p Provider, phase string, podIP string) (v1.PodStatus, error) {
 	now := metav1.NewTime(time.Now())
 
 	var podPhase v1.PodPhase
@@ -99,8 +124,8 @@ func PodPhase(p Provider, phase string) (v1.PodStatus, error) {
 
 	return v1.PodStatus{
 		Phase:     podPhase,
-		HostIP:    p.internalIP,
-		PodIP:     p.internalIP,
+		HostIP:    podIP,
+		PodIP:     podIP,
 		StartTime: &now,
 		Conditions: []v1.PodCondition{
 			{
@@ -278,6 +303,7 @@ type Provider struct {
 	onNodeChangeCallback func(*v1.Node)
 	clientSet            *kubernetes.Clientset
 	clientHTTPTransport  *http.Transport
+	podIPs               []string
 }
 
 // NewProviderConfig takes user-defined configuration and fills the Virtual Kubelet provider struct
@@ -295,10 +321,9 @@ func NewProviderConfig(
 
 	lbls := map[string]string{
 		"alpha.service-controller.kubernetes.io/exclude-balancer": "true",
-		"beta.kubernetes.io/os":                                   "linux",
-		"kubernetes.io/os":                                        "linux",
-		"kubernetes.io/hostname":                                  nodeName,
-		"kubernetes.io/role":                                      "agent",
+		"kubernetes.io/os":       "virtual-node",
+		"kubernetes.io/hostname": nodeName,
+		"kubernetes.io/role":     "agent",
 		"node.kubernetes.io/exclude-from-external-load-balancers": "true",
 		"virtual-node.interlink/type":                             "virtual-kubelet",
 	}
@@ -601,13 +626,57 @@ func (p *Provider) CreatePod(ctx context.Context, pod *v1.Pod) error {
 	}
 	state = runningState
 
+	podIP := "127.0.0.1"
+
+	if _, ok := pod.Annotations["interlink.eu/pod-vpn"]; ok {
+		podsVPN, err := p.clientSet.CoreV1().Pods("").List(ctx, metav1.ListOptions{})
+		if err != nil {
+			log.G(ctx).Warning("Get all pods attached to the VPN")
+			return nil
+		}
+
+		log.G(ctx).Debug("Pod lists with pod-vpn enabled has len ", len(podsVPN.Items))
+
+		for _, podVPN := range podsVPN.Items {
+			if ip, ok := podVPN.Annotations["interlink.eu/pod-ip"]; ok {
+				p.podIPs = append(p.podIPs, ip)
+			}
+		}
+
+		// Define the subnet
+		_, subnet, err := net.ParseCIDR("10.244.12.0/24")
+		if err != nil {
+			return err
+		}
+
+		var ipList []string
+		for ip := subnet.IP.Mask(subnet.Mask); subnet.Contains(ip); incrementIP(ip) {
+			ipList = append(ipList, ip.String())
+		}
+		// Remove network address and broadcast address
+		ipList = ipList[2 : len(ipList)-1]
+
+		freeIP := findFirstFreeIP(ipList, p.podIPs)
+		if freeIP != "" {
+			log.G(ctx).Info("First free IP: ", freeIP)
+		} else {
+			return fmt.Errorf("no free IP found")
+		}
+
+		p.podIPs = append(p.podIPs, freeIP)
+		pod.Annotations["interlink.eu/pod-ip"] = freeIP
+		podIP = freeIP
+	} else if ip, ok := pod.Annotations["interlink.eu/pod-ip"]; ok {
+		podIP = ip
+	}
+
 	// in case we have initContainers we need to stop main containers from executing for now ...
 	if len(pod.Spec.InitContainers) > 0 {
 		state = waitingState
 		hasInitContainers = true
 
 		// we put the phase in running but initialization phase to false
-		pod.Status, err = PodPhase(*p, "Running")
+		pod.Status, err = PodPhase(*p, "Running", podIP)
 		if err != nil {
 			log.G(ctx).Error(err)
 			return err
@@ -615,7 +684,7 @@ func (p *Provider) CreatePod(ctx context.Context, pod *v1.Pod) error {
 	} else {
 
 		// if no init containers are there, go head and set phase to initialized
-		pod.Status, err = PodPhase(*p, "Pending")
+		pod.Status, err = PodPhase(*p, "Pending", podIP)
 		if err != nil {
 			log.G(ctx).Error(err)
 			return err
@@ -633,7 +702,7 @@ func (p *Provider) CreatePod(ctx context.Context, pod *v1.Pod) error {
 			} else {
 				// TODO if node in NotReady put it to Unknown/pending?
 				log.G(ctx).Error(err)
-				pod.Status, err = PodPhase(*p, "Failed")
+				pod.Status, err = PodPhase(*p, "Failed", podIP)
 				if err != nil {
 					log.G(ctx).Error(err)
 					return
@@ -824,6 +893,21 @@ func (p *Provider) statusLoop(ctx context.Context) {
 		case <-ctx.Done():
 			return
 		case <-t.C:
+		}
+
+		p.podIPs = []string{}
+
+		podsVPN, err := p.clientSet.CoreV1().Pods("").List(ctx, metav1.ListOptions{})
+		if err != nil {
+			log.G(ctx).Error(err)
+		}
+
+		log.G(ctx).Debug("Pod lists with pod-vpn enabled has len ", len(podsVPN.Items))
+
+		for _, podVPN := range podsVPN.Items {
+			if ip, ok := podVPN.Annotations["interlink.eu/pod-ip"]; ok {
+				p.podIPs = append(p.podIPs, ip)
+			}
 		}
 
 		token := ""

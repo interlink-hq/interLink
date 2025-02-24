@@ -8,6 +8,7 @@ type Config struct {
 	KubernetesAPIPort       string      `yaml:"KubernetesApiPort"`
 	KubernetesAPICaCrt      string      `yaml:"KubernetesApiCaCrt"`
 	DisableProjectedVolumes bool        `yaml:"DisableProjectedVolumes"`
+	JobScriptBuilderURL     string      `yaml:"JobScriptBuilderURL,omitempty"`
 	VKConfigPath            string      `yaml:"VKConfigPath"`
 	VKTokenFile             string      `yaml:"VKTokenFile"`
 	ServiceAccount          string      `yaml:"ServiceAccount"`
@@ -23,7 +24,8 @@ type Config struct {
 }
 
 type HTTP struct {
-	Insecure bool `yaml:"Insecure"`
+	Insecure bool   `yaml:"Insecure"`
+	CaCert   string `yaml:"CaCert"`
 }
 
 type Resources struct {

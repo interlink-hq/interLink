@@ -3,8 +3,10 @@ package api
 import (
 	"bytes"
 	"encoding/json"
+	"fmt"
 	"io"
 	"net/http"
+	"text/template"
 	"time"
 
 	"github.com/containerd/containerd/log"
@@ -76,9 +78,75 @@ func (h *InterLinkHandler) CreateHandler(w http.ResponseWriter, r *http.Request)
 		}
 	}
 
+	// Here we fill the job.sh template is passed.
+	switch {
+	case pod.JobScriptBuilderURL != "":
+		log.G(h.Ctx).Info("JobScriptBuilderURL: ", pod.JobScriptBuilderURL)
+		if h.Config.JobScriptBuildConfig == nil {
+			log.L.Error(fmt.Errorf("JobScript URL requested, but interlink does not have any Script build config set"))
+			return
+		}
+		log.G(h.Ctx).Info("InterLink: asking JobScriptURL for job.sh")
+
+		data.JobScriptBuild = *h.Config.JobScriptBuildConfig
+
+		bodyBytes, err = json.Marshal(data)
+		if err != nil {
+			w.WriteHeader(http.StatusInternalServerError)
+			log.G(h.Ctx).Error(err)
+			return
+		}
+		log.G(h.Ctx).Debug(string(bodyBytes))
+		reader := bytes.NewReader(bodyBytes)
+		req, err = http.NewRequest(http.MethodPost, pod.JobScriptBuilderURL, reader)
+		if err != nil {
+			log.L.Error(err)
+			return
+		}
+
+		sessionContext := GetSessionContext(r)
+
+		req.Header.Set("Content-Type", "application/json")
+		bodyBytesResp, err := ReqWithError(h.Ctx, req, w, start, span, false, true, sessionContext, http.DefaultClient)
+		if err != nil {
+			log.L.Error(err)
+			return
+		}
+
+		data.JobScript = string(bodyBytesResp)
+
+	case h.Config.JobScriptTemplate != "":
+
+		tmp, err := template.ParseFiles(h.Config.JobScriptTemplate)
+
+		if err != nil {
+			statusCode = http.StatusInternalServerError
+			log.G(h.Ctx).Error(err)
+			w.WriteHeader(statusCode)
+			return
+		}
+
+		var tpl bytes.Buffer
+		err = tmp.Execute(&tpl, data)
+
+		if err != nil {
+			statusCode = http.StatusInternalServerError
+			log.G(h.Ctx).Error(err)
+			w.WriteHeader(statusCode)
+			return
+		}
+
+		data.JobScript = tpl.String()
+	}
+
 	retrievedData = append(retrievedData, data)
 
 	if retrievedData != nil {
+		podIP, ok := retrievedData[0].Pod.Annotations["interlink.eu/pod-ip"]
+		if ok {
+			retrievedData[0].Pod.DeepCopy().Status.PodIP = podIP
+		}
+
 		bodyBytes, err = json.Marshal(retrievedData)
 		if err != nil {
 			w.WriteHeader(http.StatusInternalServerError)
@@ -88,7 +156,6 @@ func (h *InterLinkHandler) CreateHandler(w http.ResponseWriter, r *http.Request)
 		log.G(h.Ctx).Debug(string(bodyBytes))
 		reader := bytes.NewReader(bodyBytes)
 
-		log.G(h.Ctx).Info(req)
 		req, err = http.NewRequest(http.MethodPost, h.SidecarEndpoint+"/create", reader)
 
 		if err != nil {
