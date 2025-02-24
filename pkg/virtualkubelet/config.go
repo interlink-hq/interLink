@@ -14,6 +14,7 @@ type Config struct {
 	ServiceAccount          string      `yaml:"ServiceAccount"`
 	Namespace               string      `yaml:"Namespace"`
 	PodIP                   string      `yaml:"PodIP"`
+	PodCIDR                 string      `yaml:"PodCIDR"`
 	VerboseLogging          bool        `yaml:"VerboseLogging"`
 	ErrorsOnlyLogging       bool        `yaml:"ErrorsOnlyLogging"`
 	HTTP                    HTTP        `yaml:"HTTP"`
