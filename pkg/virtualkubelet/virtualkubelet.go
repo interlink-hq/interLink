@@ -439,6 +439,7 @@ func NewProviderConfig(
 		Spec: v1.NodeSpec{
 			ProviderID: "external:///" + nodeName,
 			Taints:     taints,
+			PodCIDR:    config.PodCIDR,
 		},
 		Status: v1.NodeStatus{
 			NodeInfo: v1.NodeSystemInfo{
@@ -643,8 +644,13 @@ func (p *Provider) CreatePod(ctx context.Context, pod *v1.Pod) error {
 			}
 		}
 
-		// Define the subnet
-		_, subnet, err := net.ParseCIDR("10.244.12.0/24")
+		// Get the CIDR of the virtual node
+		podCIDR := p.node.Spec.PodCIDR
+		if podCIDR == "" {
+			return fmt.Errorf("node podCIDR not found")
+		}
+
+		_, subnet, err := net.ParseCIDR(podCIDR)
 		if err != nil {
 			return err
 		}
