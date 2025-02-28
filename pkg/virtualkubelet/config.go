@@ -14,7 +14,7 @@ type Config struct {
 	ServiceAccount          string      `yaml:"ServiceAccount"`
 	Namespace               string      `yaml:"Namespace"`
 	PodIP                   string      `yaml:"PodIP"`
-	PodCIDR                 string      `yaml:"PodCIDR"`
+	PodCIDR                 PodCIDR     `yaml:"PodCIDR"`
 	VerboseLogging          bool        `yaml:"VerboseLogging"`
 	ErrorsOnlyLogging       bool        `yaml:"ErrorsOnlyLogging"`
 	HTTP                    HTTP        `yaml:"HTTP"`
@@ -46,4 +46,10 @@ type TaintSpec struct {
 	Key    string `yaml:"Key"`
 	Value  string `yaml:"Value"`
 	Effect string `yaml:"Effect"`
+}
+
+type PodCIDR struct {
+	Subnet string `yaml:"Subnet"`
+	MaxIP  int    `yaml:"MaxIP"`
+	MinIP  int    `yaml:"MinIP"`
 }

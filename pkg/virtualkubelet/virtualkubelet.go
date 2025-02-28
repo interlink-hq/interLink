@@ -58,17 +58,38 @@ func incrementIP(ip net.IP) {
 	}
 }
 
-func findFirstFreeIP(ipList, usedIPs []string) string {
+func findFirstFreeIP(ipList, usedIPs []string, minIP, maxIP int) string {
+
 	usedIPSet := make(map[string]bool)
 	for _, ip := range usedIPs {
 		usedIPSet[ip] = true
 	}
 
 	for _, ip := range ipList {
-		if !usedIPSet[ip] {
-			return ip
+		if usedIPSet[ip] {
+			continue
 		}
+
+		var numStr string
+		if strings.Contains(ip, ".") {
+			parts := strings.Split(ip, ".")
+			numStr = parts[len(parts)-1]
+		} else {
+			numStr = ip
+		}
+
+		ipNum, err := strconv.Atoi(numStr)
+		if err != nil {
+			continue
+		}
+
+		if ipNum < minIP || ipNum > maxIP {
+			continue
+		}
+
+		return ip
 	}
+
 	return ""
 }
 
@@ -439,7 +460,7 @@ func NewProviderConfig(
 		Spec: v1.NodeSpec{
 			ProviderID: "external:///" + nodeName,
 			Taints:     taints,
-			PodCIDR:    config.PodCIDR,
+			PodCIDR:    config.PodCIDR.Subnet,
 		},
 		Status: v1.NodeStatus{
 			NodeInfo: v1.NodeSystemInfo{
@@ -662,7 +683,21 @@ func (p *Provider) CreatePod(ctx context.Context, pod *v1.Pod) error {
 		// Remove network address and broadcast address
 		ipList = ipList[2 : len(ipList)-1]
 
-		freeIP := findFirstFreeIP(ipList, p.podIPs)
+		// get the minIP and maxIP from the config
+		minIP := p.config.PodCIDR.MinIP
+		maxIP := p.config.PodCIDR.MaxIP
+
+		if minIP < 2 {
+			log.G(ctx).Warn("MinIP is less than 2, setting it to 2")
+			minIP = 2
+		}
+
+		if maxIP > 250 {
+			log.G(ctx).Warn("MaxIP is greater than 250, setting it to 250")
+			maxIP = 250
+		}
+
+		freeIP := findFirstFreeIP(ipList, p.podIPs, minIP, maxIP)
 		if freeIP != "" {
 			log.G(ctx).Info("First free IP: ", freeIP)
 		} else {
