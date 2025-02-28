@@ -22,26 +22,40 @@ interLink is in early development phase, thus subject to breaking changes with n
 
 :::
 
+InterLink is a Kubernetes plugin that enables the offloading of containers to 
+remote systems. 
+
+It is designed to extend the capabilities of Kubernetes clusters by allowing 
+pods to run on external resources, such as high-performance computing (HPC) systems, 
+remote Kubernetes clusters, or serverless computing services. 
+
+InterLink provides a flexible and scalable way to distribute workloads across 
+different environments, optimizing resource utilization and performance.
+
+
 ## Overview
 
-We are running a Kubernetes cluster that we are going to consider "local".
-And we want to offload some of the containers to other (remote) systems -- 
-another K8S cluster, or an HPC cluster.
+InterLink necessary needs a Kubernetes cluster to run on, this cluster will be 
+considered the "local" cluster.
+The "remote" system can be another Kubernetes cluster, an HPC system, or a 
+serverless computing service.
+The remote system will be running a plugin that will define how the containers 
+will run on the remote system.
 
-The containers being offloaded are batch (or "job") containers -- with a pre-defined 
-lifecycle, non-interactive containers (see [Targets](#targets)).
-The dispatching to the other (remote) system is done through a combination of 
-[Virtual Kubelets](https://virtual-kubelet.io/) and interLink' API and 
-plugins.
-Plugins will define the how the containers will run on the remote system
+The containers being offloaded are batch (or "job") containers with a predefined 
+lifecycle and are non-interactive (see [Targets](#targets)). 
+Dispatching to the remote system is achieved through a combination of 
+[Virtual Kubelets](https://virtual-kubelet.io/), interLink's API, and plugins. 
+These plugins define how the containers will run on the remote system 
 (see [Target providers](#target-providers)).
 
-InterLink API and the plugin can be arranged in three different ways across the local cluster
-and the remote system:
+The InterLink API and plugins can be deployed in three different configurations 
+across the local cluster and the remote system:
 
-- both deployed remote (**[Edge-node](#edge-node)**)
-- both deployed local (**[In-cluster](#in-cluster)**)
+- Both deployed remotely (**[Edge-node](#edge-node)**)
+- Both deployed locally (**[In-cluster](#in-cluster)**)
 - API local, plugin remote (**[Tunneled](#tunneled)**)
+
 
 ```
 +---------------------------+  +----------------------------+
