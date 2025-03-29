@@ -1,0 +1,54 @@
+{
+  "formatters": {
+    "enable": [
+      "goimports"
+    ],
+    "exclusions": {
+      "generated": "lax",
+      "paths": [
+        "ci",
+        "third_party$",
+        "builtin$",
+        "examples$"
+      ]
+    }
+  },
+  "linters": {
+    "enable": [
+      "goconst",
+      "gocritic",
+      "gocyclo",
+      "gosec",
+      "revive",
+      "unconvert"
+    ],
+    "exclusions": {
+      "generated": "lax",
+      "paths": [
+        "ci",
+        "third_party$",
+        "builtin$",
+        "examples$"
+      ],
+      "presets": [
+        "comments",
+        "common-false-positives",
+        "legacy",
+        "std-error-handling"
+      ]
+    },
+    "settings": {
+      "errcheck": {
+        "check-blank": true
+      },
+      "gocyclo": {
+        "min-complexity": 30
+      },
+      "gosec": {
+        "confidence": "high",
+        "severity": "medium"
+      }
+    }
+  },
+  "version": "2"
+}

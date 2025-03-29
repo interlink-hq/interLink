@@ -12,7 +12,7 @@ import (
 	"strings"
 	"time"
 
-	"gopkg.in/yaml.v2"
+	yaml "gopkg.in/yaml.v2"
 
 	"github.com/containerd/containerd/log"
 	"github.com/virtual-kubelet/virtual-kubelet/errdefs"
@@ -59,7 +59,6 @@ func incrementIP(ip net.IP) {
 }
 
 func findFirstFreeIP(ipList, usedIPs []string, minIP, maxIP int) string {
-
 	usedIPSet := make(map[string]bool)
 	for _, ip := range usedIPs {
 		usedIPSet[ip] = true
@@ -112,10 +111,9 @@ func TracerUpdate(ctx *context.Context, name string, pod *v1.Pod) {
 	}
 	defer span.End()
 	defer types.SetDurationSpan(start, span)
-
 }
 
-func PodPhase(p Provider, phase string, podIP string) (v1.PodStatus, error) {
+func PodPhase(_ Provider, phase string, podIP string) (v1.PodStatus, error) {
 	now := metav1.NewTime(time.Now())
 
 	var podPhase v1.PodPhase
@@ -140,7 +138,7 @@ func PodPhase(p Provider, phase string, podIP string) (v1.PodStatus, error) {
 		ready = v1.ConditionFalse
 		scheduled = v1.ConditionFalse
 	default:
-		return v1.PodStatus{}, fmt.Errorf("Invalid pod phase specified: %s", phase)
+		return v1.PodStatus{}, fmt.Errorf("invalid pod phase specified: %s", phase)
 	}
 
 	return v1.PodStatus{
@@ -163,11 +161,9 @@ func PodPhase(p Provider, phase string, podIP string) (v1.PodStatus, error) {
 			},
 		},
 	}, nil
-
 }
 
 func NodeCondition(ready bool) []v1.NodeCondition {
-
 	var readyType v1.ConditionStatus
 	var netType v1.ConditionStatus
 	if ready {
@@ -337,7 +333,6 @@ func NewProviderConfig(
 	daemonEndpointPort int32,
 	clientHTTPTransport *http.Transport,
 ) (*Provider, error) {
-
 	SetDefaultResource(&config)
 
 	lbls := map[string]string{
@@ -378,7 +373,8 @@ func NewProviderConfig(
 			Key:    "virtual-node.interlink/no-schedule",
 			Value:  strconv.FormatBool(false),
 			Effect: v1.TaintEffectNoSchedule,
-		}}
+		},
+	}
 
 	for _, taint := range config.NodeTaints {
 		log.G(context.Background()).Infof("Adding taint key=%q value=%q effect=%q", taint.Key, taint.Value, taint.Effect)
@@ -520,7 +516,6 @@ func NewProvider(
 
 // LoadConfig loads the given json configuration files and return a VirtualKubeletConfig struct
 func LoadConfig(ctx context.Context, providerConfig string) (config Config, err error) {
-
 	log.G(ctx).Info("Loading Virtual Kubelet config from " + providerConfig)
 	data, err := os.ReadFile(providerConfig)
 	if err != nil {
@@ -529,7 +524,6 @@ func LoadConfig(ctx context.Context, providerConfig string) (config Config, err 
 
 	config = Config{}
 	err = yaml.Unmarshal(data, &config)
-
 	if err != nil {
 		log.G(ctx).Fatal(err)
 		return config, err
@@ -580,7 +574,6 @@ func (p *Provider) NotifyNodeStatus(ctx context.Context, f func(*v1.Node)) {
 
 // nodeUpdate continously checks for node status and availability
 func (p *Provider) nodeUpdate(ctx context.Context) {
-
 	t := time.NewTimer(5 * time.Second)
 	if !t.Stop() {
 		<-t.C
@@ -616,7 +609,6 @@ func (p *Provider) nodeUpdate(ctx context.Context) {
 		}
 		log.G(ctx).Info("endNodeLoop")
 	}
-
 }
 
 // Ping the kubelet from the cluster, this will always be ok by design probably
@@ -628,7 +620,7 @@ func (p *Provider) Ping(_ context.Context) error {
 func (p *Provider) CreatePod(ctx context.Context, pod *v1.Pod) error {
 	TracerUpdate(&ctx, "CreatePodVK", pod)
 
-	var hasInitContainers = false
+	hasInitContainers := false
 	var state v1.ContainerState
 
 	key, err := buildKey(pod)
@@ -761,7 +753,6 @@ func (p *Provider) CreatePod(ctx context.Context, pod *v1.Pod) error {
 
 	// set pod containers status to notReady and waiting if there is an initContainer to be executed first
 	for _, container := range pod.Spec.Containers {
-
 		pod.Status.ContainerStatuses = append(pod.Status.ContainerStatuses, v1.ContainerStatus{
 			Name:         container.Name,
 			Image:        container.Image,
@@ -769,7 +760,6 @@ func (p *Provider) CreatePod(ctx context.Context, pod *v1.Pod) error {
 			RestartCount: 0,
 			State:        state,
 		})
-
 	}
 
 	p.pods[key] = pod
@@ -1160,7 +1150,6 @@ func CheckIfAnnotationExists(pod *v1.Pod, key string) bool {
 	_, ok := pod.Annotations[key]
 
 	return ok
-
 }
 
 func (p *Provider) initClientSet(ctx context.Context) error {

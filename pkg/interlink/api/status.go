@@ -131,7 +131,6 @@ func (h *InterLinkHandler) StatusHandler(w http.ResponseWriter, r *http.Request)
 	w.WriteHeader(statusCode)
 	_, err = w.Write(returnValue)
 	if err != nil {
-		log.G(h.Ctx).Error(errors.New("Failed to write to http buffer"))
+		log.G(h.Ctx).Error(errors.New("failed to write to http buffer"))
 	}
-
 }

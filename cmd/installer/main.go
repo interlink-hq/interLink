@@ -13,7 +13,7 @@ import (
 
 	"github.com/spf13/cobra"
 	"golang.org/x/oauth2"
-	"gopkg.in/yaml.v3"
+	yaml "gopkg.in/yaml.v3"
 )
 
 var (
@@ -63,12 +63,11 @@ type dataStruct struct {
 	VKLimits                Resources   `yaml:"node_limits"`
 	OAUTH                   oauthStruct `yaml:"oauth,omitempty"`
 	HTTPInsecure            bool        `default:"true" yaml:"insecure_http"`
-	CACert                  string      `default: "" yaml:"ca_cert"`
+	CACert                  string      `yaml:"ca_cert,omitempty"`
 	DisableProjectedVolumes bool        `default:"true" yaml:"disable_projected_volumes"`
 }
 
 func evalManifest(path string, dataStruct dataStruct) (string, error) {
-
 	tmpl, err := template.ParseFS(templates, path)
 	if err != nil {
 		return "", err
@@ -107,7 +106,7 @@ func root(cmd *cobra.Command, _ []string) error {
 	if onlyInit {
 
 		if _, err = os.Stat(cfgFile); err == nil {
-			return fmt.Errorf("File config file exists. Please remove it before trying init again: %w", err)
+			return fmt.Errorf("file config file exists. Please remove it before trying init again: %w", err)
 		}
 
 		dumpConfig := dataStruct{
@@ -267,7 +266,6 @@ func root(cmd *cobra.Command, _ []string) error {
 	fmt.Println("\n\n=== Installation script for remote interLink APIs stored at: " + outFolder + "/interlink-remote.sh ===\n\n  Please execute the script on the remote server: " + configCLI.InterLinkIP + "\n\n  \"./interlink-remote.sh install\" followed by \"interlink-remote.sh start\"")
 
 	return nil
-
 }
 
 func init() {
@@ -284,10 +282,8 @@ func initConfig() {
 }
 
 func main() {
-
 	err := rootCmd.Execute()
 	if err != nil {
 		log.Fatal(err)
 	}
-
 }
