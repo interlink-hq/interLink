@@ -4,6 +4,7 @@
 
 - Diego Ciangottini - INFN - diego.ciangottini\<at\>pg.infn.it
 - Giulio Bianchini - INFN - giulio.bianchini\<at\>pg.infn.it
+- Daniele Spiga - INFN - daniele.spiga\<at\>pg.infn.it
 
 ## Contributors
 
