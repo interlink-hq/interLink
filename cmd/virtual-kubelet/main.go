@@ -297,7 +297,7 @@ func main() {
 	go func() {
 		err = nc.Run(ctx)
 		if err != nil {
-			log.G(ctx).Fatalf("error running the node: %w", err)
+			log.G(ctx).Fatalf("error running the node: %v", err)
 		}
 	}()
 
