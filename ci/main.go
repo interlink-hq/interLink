@@ -373,7 +373,7 @@ func (m *Interlink) Lint(
 
 	lintCache := dag.CacheVolume(m.Name + "_lint")
 
-	return dag.Container().From("golangci/golangci-lint:v1.61.0").
+	return dag.Container().From("golangci/golangci-lint:v2.1.1").
 		WithMountedDirectory("/app", sourceFolder).
 		WithMountedCache("/root/.cache", lintCache).
 		WithWorkdir("/app").
