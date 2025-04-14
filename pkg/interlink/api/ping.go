@@ -58,7 +58,7 @@ func (h *InterLinkHandler) Ping(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusServiceUnavailable)
 		_, err = w.Write([]byte(strconv.Itoa(http.StatusServiceUnavailable)))
 		if err != nil {
-			log.G(h.Ctx).Error(errors.New("Failed to write to http buffer"))
+			log.G(h.Ctx).Error(errors.New("failed to write to http buffer"))
 		}
 		return
 	}
