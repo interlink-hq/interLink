@@ -21,6 +21,7 @@ import (
 	"flag"
 	"fmt"
 	"net"
+	"net/http"
 	"os"
 	"path"
 	"strconv"
@@ -38,8 +39,6 @@ import (
 	"k8s.io/client-go/tools/record"
 
 	// certificates "k8s.io/api/certificates/v1"
-
-	"net/http"
 
 	"k8s.io/client-go/kubernetes"
 	"k8s.io/client-go/rest"
@@ -125,7 +124,7 @@ func main() {
 	case os.Getenv("NODENAME") != "":
 		nodename = os.Getenv("NODENAME")
 	default:
-		panic(fmt.Errorf("You must specify a Node name"))
+		panic(fmt.Errorf("you must specify a Node name"))
 	}
 
 	interLinkConfig, err := commonIL.LoadConfig(ctx, configpath)
@@ -380,5 +379,4 @@ func main() {
 	if err != nil {
 		log.G(ctx).Fatal(err)
 	}
-
 }
