@@ -20,4 +20,4 @@ jobs:
           verb: call
           args: -s --name slurm-test build-images new-interlink test stdout
           cloud-token: ${{ secrets.DAGGER_CLOUD_TOKEN }}
-          version: "0.15.1"
+          version: "0.18.3"
