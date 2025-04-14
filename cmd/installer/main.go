@@ -5,7 +5,7 @@
 // manifests, and installation scripts needed to set up interLink in various
 // deployment scenarios (Edge-node, In-cluster, Tunneled).
 //
-// The installer creates Helm chart values for Kubernetes deployment, 
+// The installer creates Helm chart values for Kubernetes deployment,
 // and generates installation scripts for remote interLink APIs.
 package main
 
@@ -28,7 +28,7 @@ import (
 var (
 	// cfgFile is the path to the configuration file
 	cfgFile string
-	
+
 	// outFolder is the directory where deployment manifests will be stored
 	outFolder string
 
@@ -39,7 +39,7 @@ var (
 		Long:  `interLink cloud tools allows to extend kubernetes cluster over any remote resource`,
 		RunE:  root,
 	}
-	
+
 	//go:embed templates
 	// templates contains the embedded template files used for generating
 	// deployment manifests and installation scripts
@@ -51,56 +51,56 @@ var (
 // to pods running on the virtual node.
 type Resources struct {
 	// CPU is the maximum CPU cores available on the virtual node
-	CPU    string `yaml:"cpu"`
-	
+	CPU string `yaml:"cpu"`
+
 	// Memory is the maximum memory in GiB available on the virtual node
 	Memory string `yaml:"memory"`
-	
+
 	// Pods is the maximum number of pods that can run on the virtual node
-	Pods   string `yaml:"pods"`
+	Pods string `yaml:"pods"`
 }
 
 // oauthStruct defines the OAuth configuration for authentication.
 // It supports both OIDC and GitHub authentication providers.
 type oauthStruct struct {
 	// Provider specifies the OAuth provider (e.g., "oidc", "github")
-	Provider      string   `yaml:"provider"`
-	
+	Provider string `yaml:"provider"`
+
 	// GrantType specifies the OAuth grant type (e.g., "authorization_code", "client_credentials")
-	GrantType     string   `default:"authorization_code" yaml:"grant_type"`
-	
+	GrantType string `default:"authorization_code" yaml:"grant_type"`
+
 	// Issuer is the OIDC issuer URL (only used with OIDC provider)
-	Issuer        string   `yaml:"issuer,omitempty"`
-	
+	Issuer string `yaml:"issuer,omitempty"`
+
 	// RefreshToken is the OAuth refresh token obtained during authentication
-	RefreshToken  string   `yaml:"refresh_token,omitempty"`
-	
+	RefreshToken string `yaml:"refresh_token,omitempty"`
+
 	// Audience is the intended audience for the token (only used with OIDC provider)
-	Audience      string   `yaml:"audience,omitempty"`
-	
+	Audience string `yaml:"audience,omitempty"`
+
 	// Group is the required group membership for authentication
-	Group         string   `yaml:"group,omitempty"`
-	
+	Group string `yaml:"group,omitempty"`
+
 	// GroupClaim is the claim name in the token that contains group information
-	GroupClaim    string   `default:"groups" yaml:"group_claim"`
-	
+	GroupClaim string `default:"groups" yaml:"group_claim"`
+
 	// Scopes are the OAuth scopes requested during authentication
-	Scopes        []string `yaml:"scopes"`
-	
+	Scopes []string `yaml:"scopes"`
+
 	// GitHUBUser is the GitHub username (only used with GitHub provider)
-	GitHUBUser    string   `yaml:"github_user"`
-	
+	GitHUBUser string `yaml:"github_user"`
+
 	// TokenURL is the OAuth token endpoint URL
-	TokenURL      string   `yaml:"token_url"`
-	
+	TokenURL string `yaml:"token_url"`
+
 	// DeviceCodeURL is the OAuth device code endpoint URL
-	DeviceCodeURL string   `yaml:"device_code_url"`
-	
+	DeviceCodeURL string `yaml:"device_code_url"`
+
 	// ClientID is the OAuth client ID
-	ClientID      string   `yaml:"client_id"`
-	
+	ClientID string `yaml:"client_id"`
+
 	// ClientSecret is the OAuth client secret
-	ClientSecret  string   `yaml:"client_secret"`
+	ClientSecret string `yaml:"client_secret"`
 }
 
 // dataStruct is the main configuration structure for interLink deployment.
@@ -110,28 +110,28 @@ type oauthStruct struct {
 // TODO: insert in-cluster and socket option e.g. --> no need OAUTH
 type dataStruct struct {
 	// InterLinkIP is the IP address where the interLink API will be exposed
-	InterLinkIP      string      `yaml:"interlink_ip"`
-	
+	InterLinkIP string `yaml:"interlink_ip"`
+
 	// InterLinkPort is the port where the interLink API will be exposed
-	InterLinkPort    int         `yaml:"interlink_port"`
-	
+	InterLinkPort int `yaml:"interlink_port"`
+
 	// InterLinkVersion is the version of interLink to deploy
-	InterLinkVersion string      `yaml:"interlink_version"`
-	
+	InterLinkVersion string `yaml:"interlink_version"`
+
 	// VKName is the name of the virtual kubelet node
-	VKName           string      `yaml:"kubelet_node_name"`
-	
+	VKName string `yaml:"kubelet_node_name"`
+
 	// Namespace is the Kubernetes namespace where interLink will be deployed
-	Namespace        string      `yaml:"kubernetes_namespace,omitempty"`
-	
+	Namespace string `yaml:"kubernetes_namespace,omitempty"`
+
 	// VKLimits defines the resource limits for the virtual kubelet node
-	VKLimits         Resources   `yaml:"node_limits"`
-	
+	VKLimits Resources `yaml:"node_limits"`
+
 	// OAUTH contains the OAuth configuration for authentication
-	OAUTH            oauthStruct `yaml:"oauth,omitempty"`
-	
+	OAUTH oauthStruct `yaml:"oauth,omitempty"`
+
 	// HTTPInsecure determines whether to allow insecure HTTP connections
-	HTTPInsecure     bool        `default:"true" yaml:"insecure_http"`
+	HTTPInsecure bool `default:"true" yaml:"insecure_http"`
 }
 
 // evalManifest evaluates a template file using the provided configuration data.
@@ -200,7 +200,7 @@ func root(cmd *cobra.Command, _ []string) error {
 	if onlyInit {
 		// Check if the configuration file already exists
 		if _, err = os.Stat(cfgFile); err == nil {
-			return fmt.Errorf("File config file exists. Please remove it before trying init again: %w", err)
+			return fmt.Errorf("file config file exists. Please remove it before trying init again: %w", err)
 		}
 
 		// Create a default configuration with placeholder values
@@ -236,7 +236,7 @@ func root(cmd *cobra.Command, _ []string) error {
 
 		// Print the YAML configuration to stdout
 		fmt.Println(string(yamlData))
-		
+
 		// Write the YAML configuration to the specified file
 		file, err := os.OpenFile(cfgFile, os.O_CREATE|os.O_WRONLY|os.O_TRUNC, 0644)
 		if err != nil {
@@ -274,7 +274,7 @@ func root(cmd *cobra.Command, _ []string) error {
 	// Handle OAuth authentication based on the grant type
 	var token *oauth2.Token
 	ctx := context.Background()
-	
+
 	switch configCLI.OAUTH.GrantType {
 	case "authorization_code":
 		// Set up OAuth configuration for device authorization flow
@@ -297,13 +297,13 @@ func root(cmd *cobra.Command, _ []string) error {
 
 		// Prompt the user to enter the code at the verification URI
 		fmt.Printf("please enter code %s at %s\n", response.UserCode, response.VerificationURI)
-		
+
 		// Exchange the device code for an access token and refresh token
 		token, err = cfg.DeviceAccessToken(ctx, response, oauth2.AccessTypeOffline)
 		if err != nil {
 			panic(err)
 		}
-		
+
 		// Store the refresh token in the configuration
 		// The refresh token is used for obtaining new access tokens without user interaction
 		configCLI.OAUTH.RefreshToken = token.RefreshToken
@@ -332,7 +332,7 @@ func root(cmd *cobra.Command, _ []string) error {
 	if err != nil {
 		panic(err)
 	}
-	
+
 	// Create the values.yaml file and use bufio.NewWriter for efficient writing
 	f, err := os.Create(outFolder + "/values.yaml")
 	if err != nil {
@@ -368,7 +368,7 @@ func root(cmd *cobra.Command, _ []string) error {
 
 	// Close the file when the function returns
 	defer fInterlinkScript.Close()
-	
+
 	// Execute the template with the configuration data
 	err = tmpl.Execute(fInterlinkScript, configCLI)
 	if err != nil {
@@ -390,7 +390,7 @@ func init() {
 	rootCmd.PersistentFlags().StringVar(&cfgFile, "config", os.Getenv("HOME")+"/.interlink.yaml", "config file (default is $HOME/.interlink.yaml)")
 	rootCmd.PersistentFlags().StringVar(&outFolder, "output-dir", os.Getenv("HOME")+"/.interlink/manifests", "interlink deployment manifests location (default is $HOME/.interlink/manifests)")
 	rootCmd.PersistentFlags().Bool("init", false, "dump an empty configuration to get started")
-	
+
 	// Commented out commands that might be added in the future
 	// rootCmd.AddCommand(vkCmd)
 	// rootCmd.AddCommand(sdkCmd)

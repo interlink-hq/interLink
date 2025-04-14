@@ -19,7 +19,6 @@ import (
 	"github.com/virtual-kubelet/virtual-kubelet/trace/opentelemetry"
 
 	"github.com/intertwin-eu/interlink/pkg/interlink"
-	types "github.com/intertwin-eu/interlink/pkg/interlink"
 	"github.com/intertwin-eu/interlink/pkg/interlink/api"
 	"github.com/intertwin-eu/interlink/pkg/virtualkubelet"
 )
@@ -47,9 +46,9 @@ func main() {
 		return
 	}
 	var cancel context.CancelFunc
-	api.PodStatuses.Statuses = make(map[string]types.PodStatus)
+	api.PodStatuses.Statuses = make(map[string]interlink.PodStatus)
 
-	interLinkConfig, err := types.NewInterLinkConfig()
+	interLinkConfig, err := interlink.NewInterLinkConfig()
 	if err != nil {
 		panic(err)
 	}
@@ -176,7 +175,6 @@ func main() {
 		}
 
 		err = server.ListenAndServe()
-
 		if err != nil {
 			log.G(ctx).Fatal(err)
 		}
