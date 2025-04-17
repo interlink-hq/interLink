@@ -135,10 +135,9 @@ func (m *Interlink) NewInterlink(
 			WithFile("/etc/interlink/InterLinkConfig.yaml", pluginConfig).
 			WithEnvVariable("SLURMCONFIGPATH", "/etc/interlink/InterLinkConfig.yaml").
 			WithEnvVariable("SHARED_FS", "true").
-			WithExposedPort(4000).
-			WithExec([]string{}, dagger.ContainerWithExecOpts{UseEntrypoint: true, InsecureRootCapabilities: true})
+			WithExposedPort(4000)
 
-		pluginEndpoint, err = m.PluginContainer.AsService().Start(ctx)
+		pluginEndpoint, err = m.PluginContainer.AsService(dagger.ContainerAsServiceOpts{Args: []string{}, UseEntrypoint: true, InsecureRootCapabilities: true}).Start(ctx)
 		if err != nil {
 			return nil, err
 		}
@@ -149,10 +148,9 @@ func (m *Interlink) NewInterlink(
 			WithFile("/etc/interlink/InterLinkConfig.yaml", interlinkConfig).
 			WithServiceBinding("plugin", pluginEndpoint).
 			WithEnvVariable("INTERLINKCONFIGPATH", "/etc/interlink/InterLinkConfig.yaml").
-			WithExposedPort(3000).
-			WithExec([]string{}, dagger.ContainerWithExecOpts{UseEntrypoint: true, InsecureRootCapabilities: true})
+			WithExposedPort(3000)
 
-		interlinkEndpoint, err = interlink.AsService().Start(ctx)
+		interlinkEndpoint, err = interlink.AsService(dagger.ContainerAsServiceOpts{Args: []string{}, UseEntrypoint: true, InsecureRootCapabilities: true}).Start(ctx)
 		if err != nil {
 			return nil, err
 		}
