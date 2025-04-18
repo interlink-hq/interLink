@@ -20,7 +20,7 @@ var interLinkChart = `
 nodeName: virtual-node 
 
 interlink:
-  address: http://interlink
+  address: http://{{.InterLinkURL}}
   port: "3000"
   disableProjectedVolumes: true
 
@@ -55,6 +55,7 @@ OAUTH:
 type patchSchema struct {
 	InterLinkRef      string
 	VirtualKubeletRef string
+	InterLinkURL      string
 }
 
 // Interlink struct for initialization and internal variables
@@ -152,10 +153,21 @@ func (m *Interlink) NewInterlink(
 			WithEnvVariable("INTERLINKCONFIGPATH", "/etc/interlink/InterLinkConfig.yaml").
 			WithExposedPort(3000)
 
-		interlinkEndpoint, err = interlink.AsService(dagger.ContainerAsServiceOpts{Args: []string{}, UseEntrypoint: true, InsecureRootCapabilities: true}).Start(ctx)
+		interlinkEndpoint, err = interlink.
+			AsService(
+				dagger.ContainerAsServiceOpts{
+					Args:                     []string{},
+					UseEntrypoint:            true,
+					InsecureRootCapabilities: true,
+				}).Start(ctx)
 		if err != nil {
 			return nil, err
 		}
+
+	}
+	interlinkURL, err := interlinkEndpoint.Endpoint(ctx, dagger.ServiceEndpointOpts{})
+	if err != nil {
+		return nil, err
 	}
 
 	K3s := dag.K3S(m.Name).With(func(k *dagger.K3S) *dagger.K3S {
@@ -188,6 +200,7 @@ EOF`}).
 	patch := patchSchema{
 		InterLinkRef:      m.InterlinkRef,
 		VirtualKubeletRef: m.VirtualKubeletRef,
+		InterLinkURL:      strings.Split(interlinkURL, ":")[0],
 	}
 
 	bufferIL := new(bytes.Buffer)
