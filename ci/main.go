@@ -133,6 +133,7 @@ func (m *Interlink) NewInterlink(
 	if pluginEndpoint == nil {
 		m.PluginContainer = dag.Container().From(m.PluginRef).
 			WithFile("/etc/interlink/InterLinkConfig.yaml", pluginConfig).
+			WithEnvVariable("BUST", time.Now().String()).
 			WithEnvVariable("SLURMCONFIGPATH", "/etc/interlink/InterLinkConfig.yaml").
 			WithEnvVariable("SHARED_FS", "true").
 			WithExposedPort(4000)
@@ -146,6 +147,7 @@ func (m *Interlink) NewInterlink(
 	if interlinkEndpoint == nil {
 		interlink := m.InterlinkContainer.
 			WithFile("/etc/interlink/InterLinkConfig.yaml", interlinkConfig).
+			WithEnvVariable("BUST", time.Now().String()).
 			WithServiceBinding("plugin", pluginEndpoint).
 			WithEnvVariable("INTERLINKCONFIGPATH", "/etc/interlink/InterLinkConfig.yaml").
 			WithExposedPort(3000)
@@ -204,7 +206,7 @@ EOF`}).
 
 	fmt.Println(bufferVK.String())
 
-	kubectl := dag.Container().From("bitnami/kubectl:1.29.7-debian-12-r3").
+	kubectl := dag.Container().From("bitnami/kubectl:1.32-debian-12").
 		WithServiceBinding("registry", m.Registry).
 		WithServiceBinding("plugin", pluginEndpoint).
 		WithServiceBinding("interlink", interlinkEndpoint).
@@ -225,17 +227,10 @@ EOF`}).
 
 	m.Kubectl = kubectl
 
-	ns, _ := kubectl.WithExec([]string{"create", "ns", "interlink"}, dagger.ContainerWithExecOpts{UseEntrypoint: true}).Stdout(ctx)
-	fmt.Println(ns)
-
-	sa, err := kubectl.WithExec([]string{"apply", "-f", "/manifests/service-account.yaml"}, dagger.ContainerWithExecOpts{UseEntrypoint: true}).Stdout(ctx)
-	if err != nil {
-		return nil, err
-	}
-	fmt.Println(sa)
-
 	dag.Container().From("alpine/helm:3.16.1").
 		WithMountedFile("/.kube/config", m.KubeConfig).
+		WithEnvVariable("BUST", time.Now().String()).
+		WithEnvVariable("KUBECONFIG", "/.kube/config").
 		WithNewFile("/manifests/vk_helm_chart.yaml", bufferVK.String(), dagger.ContainerWithNewFileOpts{
 			Permissions: 0o755,
 		}).
@@ -308,6 +303,7 @@ func (m *Interlink) BuildImages(
 		WithEntrypoint([]string{"/bin/interlink"})
 
 	_, err := dag.Container().From("quay.io/skopeo/stable").
+		WithEnvVariable("BUST", time.Now().String()).
 		WithServiceBinding("registry", m.Registry).
 		WithMountedFile("image.tar", m.InterlinkContainer.AsTarball()).
 		WithExec([]string{"copy", "--dest-tls-verify=false", "docker-archive:image.tar", "docker://" + m.InterlinkRef}, dagger.ContainerWithExecOpts{UseEntrypoint: true}).
@@ -335,6 +331,7 @@ func (m *Interlink) BuildImages(
 		WithEntrypoint([]string{"/bin/vk"})
 
 	_, err = dag.Container().From("quay.io/skopeo/stable").
+		WithEnvVariable("BUST", time.Now().String()).
 		WithServiceBinding("registry", m.Registry).
 		WithMountedFile("image.tar", m.VKContainer.AsTarball()).
 		WithExec([]string{"copy", "--dest-tls-verify=false", "docker-archive:image.tar", "docker://" + m.VirtualKubeletRef}, dagger.ContainerWithExecOpts{UseEntrypoint: true}).
