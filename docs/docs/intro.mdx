@@ -22,7 +22,51 @@ interLink is in early development phase, thus subject to breaking changes with n
 
 :::
 
+## Overview
+
+We are running a Kubernetes cluster that we are going to consider "local".
+And we want to offload some of the containers to other (remote) systems -- 
+another K8S cluster, or an HPC cluster.
+
+The containers being offloaded are batch (or "job") containers -- with a pre-defined 
+lifecycle, non-interactive containers (see [Targets](#targets)).
+The dispatching to the other (remote) system is done through a combination of 
+[Virtual Kubelets](https://virtual-kubelet.io/) and interLink' API and 
+plugins.
+Plugins will define the how the containers will run on the remote system
+(see [Target providers](#target-providers)).
+
+InterLink API and the plugin can be arranged in three different ways across the local cluster
+and the remote system:
+
+- both deployed remote (**[Edge-node](#edge-node)**)
+- both deployed local (**[In-cluster](#in-cluster)**)
+- API local, plugin remote (**[Tunneled](#tunneled)**)
+
+```
++---------------------------+  +----------------------------+
+| Virtual Node              |  |     Pod Containers Runtime |
+|                           |  |                            |
+|                           |  |                            |
+|                           |  |                            |
+|        +-----------------------------------------+        |
+|        | (API + plugin) interLink                |        |
+|        |          (API) interLink (plugin)       |        |
+|        |                interLink (API + plugin) |        |
+|        +-----------------------------------------+        |
+|                           |  |                            |
+|                           |  |                            |
+|                           |  |                            |
+|                           |  |                            |
+|                           |  |                            |
+|                           |  |                            |
++---------------------------+  +----------------------------+
+```
+
+
+
 ## Targets
+> rename to Applications
 
 - __K8s applications with tasks to be executed on HPC systems__: This target focuses on Kubernetes applications that require high-performance computing (HPC) resources for executing tasks. These tasks might involve complex computations, simulations, or data processing that benefit from the specialized hardware and optimized performance of HPC systems.
 
@@ -31,15 +75,17 @@ interLink is in early development phase, thus subject to breaking changes with n
 - __Lambda-like functions calling on external resources__: This target involves running containers on demand with specific computing needs. Now these resources might also be outside of the Kubernetes cluster thanks to interLink functionality.
 
 ## Target providers
+> rename to Runtime providers
 
 Our solution is designed to target a wide range of providers with container execution capabilities, including but not limited to:
 
 - __SLURM or HTCondor batch systems with Apptainer, Enroot, or Singularity__: These batch systems are widely used in high-performance computing environments to manage and schedule jobs. By integrating with container runtimes like Apptainer, Enroot, or Singularity, our solution can efficiently execute containerized tasks on these systems.
-- __Remote/on-demand virtual machines with any container runtime__: This includes virtual machines that can be provisioned on-demand and support container runtimes such as Docker, Podman, or others. This flexibility allows for scalable and dynamic resource allocation based on workload requirements.
+- __On-demand virtual machines with any container runtime__: This includes virtual machines that can be provisioned on-demand and support container runtimes such as Docker, Podman, or others. This flexibility allows for scalable and dynamic resource allocation based on workload requirements.
 - __Remote Kubernetes clusters__: Our solution can extend the capabilities of existing Kubernetes clusters, enabling them to offload workloads to another remote cluster. This is particularly useful for distributing workloads across multiple clusters for better resource utilization and fault tolerance.
 - __Lambda-like services__: These are serverless computing services that execute code in response to events and automatically manage the underlying compute resources. By targeting these services, our solution can leverage the scalability and efficiency of serverless architectures for containerized workloads. All of this, while exposing a bare Kubernetes API kind of orchestration.
 
 ## NOT a target
+> rename to non an application
 
 - __Long-running services__: Our solution is not designed for services that need to run continuously for extended periods. It is optimized for tasks that have a defined start and end, rather than persistent services exposing intra-cluster communication endpoints.
 - __Kubernetes Federation__: We do not aim to support Kubernetes Federation, which involves managing multiple Kubernetes clusters as a single entity. Our focus is on enabling Kubernetes pods to execute on remote resources, not on federating all kind of resources on multiple clusters.
@@ -47,7 +93,7 @@ Our solution is designed to target a wide range of providers with container exec
 
 ## Deployment scenarios
 
-### Service remote edge node
+### Edge-node
 
 In this scenario, the Virtual Kubelet communicates with remote services deployed on a dedicate edge node exposing authenticated interLink APIs and its associated plugin. This setup is ideal for scenarios where edge computing resources are utilized for controlled communication b/w the Kubernetes cluster and the remote resources.
 
@@ -59,7 +105,7 @@ In this scenario, the Virtual Kubelet communicates with remote services deployed
         }}
 />
 
-### In-cluster mode
+### In-cluster
 
 This scenario involves deploying a Virtual Kubelet along with the interLink API server and the plugin to interact with a remote API. This setup allows Kubernetes pods to be executed on remote resources while all other components sits inside the Kubernetes cluster.
 
@@ -71,7 +117,7 @@ This scenario involves deploying a Virtual Kubelet along with the interLink API 
         }}
 />
 
-### Tunneled mode
+### Tunneled
 
 This deployment involves the Virtual Kubelet connecting to a remote interLink API server and its plugin through a secure tunnel. This setup ensures secure communication between the Kubernetes cluster and the remote resources, making it suitable for environments with strict security requirements or to host services on a multi user host like a login node.
 
