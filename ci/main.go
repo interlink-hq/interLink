@@ -17,7 +17,7 @@ import (
 )
 
 var interLinkChart = `
-nodeName: virtual-node 
+nodeName: virtual-kubelet
 
 interlink:
   address: http://{{.InterLinkURL}}
@@ -222,6 +222,7 @@ EOF`}).
 	kubectl := dag.Container().From("bitnami/kubectl:1.32-debian-12").
 		WithServiceBinding("registry", m.Registry).
 		WithServiceBinding("plugin", pluginEndpoint).
+		WithEnvVariable("BUST", time.Now().String()).
 		WithServiceBinding("interlink", interlinkEndpoint).
 		WithUser("root").
 		WithExec([]string{"mkdir", "-p", "/opt/user"}).
@@ -376,6 +377,7 @@ func (m *Interlink) Run(
 		WithExec([]string{"apt", "update"}).
 		WithExec([]string{"apt", "update"}).
 		WithExec([]string{"apt", "install", "-y", "curl", "python3", "python3-pip", "python3-venv", "git", "vim"}).
+		WithEnvVariable("BUST", time.Now().String()).
 		WithMountedFile("/.kube/config", dag.K3S(m.Name).Config(dagger.K3SConfigOpts{Local: false})).
 		WithExec([]string{"chown", "1001:0", "/.kube/config"}).
 		WithUser("1001").
