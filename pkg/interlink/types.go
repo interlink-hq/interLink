@@ -11,6 +11,7 @@ type PodCreateRequests struct {
 	Pod        v1.Pod         `json:"pod"`
 	ConfigMaps []v1.ConfigMap `json:"configmaps"`
 	Secrets    []v1.Secret    `json:"secrets"`
+	PersistentVolumeClaims []v1.PersistentVolumeClaim `json:"persistentvolumes"`
 	// The projected volumes are those created by ServiceAccounts (in K8S >= 1.24). They are automatically added in the pod from kubelet code.
 	// Here the configmap will hold the files name (as key) and content (as value).
 	ProjectedVolumeMaps []v1.ConfigMap `json:"projectedvolumesmaps"`
@@ -41,7 +42,8 @@ type RetrievedContainer struct {
 	// Deprecated: EmptyDirs should be built on plugin side.
 	// Currently, it holds the DATA_ROOT_DIR/emptydirs/volumeName, but this should be a plugin choice instead,
 	// like it currently is for ConfigMaps, ProjectedVolumeMaps, Secrets.
-	EmptyDirs []string `json:"emptyDirs"`
+	EmptyDirs              []string                   `json:"emptyDirs"`
+	PersistentVolumeClaims []v1.PersistentVolumeClaim `json:"persistentVolumeClaims"`
 }
 
 // RetrievedPoData is used in InterLink to rearrange data structure in a suitable way for the sidecar

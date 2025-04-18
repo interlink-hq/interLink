@@ -676,6 +676,17 @@ func remoteExecutionHandleVolumes(ctx context.Context, p *Provider, pod *v1.Pod,
 				case volume.EmptyDir != nil:
 					log.G(ctx).Debugf("empty dir found, nothing to do for volume %s for Pod %s", volume.Name, pod.Name)
 
+				case volume.PersistentVolumeClaim != nil:
+					pvc, err := p.clientSet.CoreV1().PersistentVolumeClaims(pod.Namespace).Get(ctx, volume.PersistentVolumeClaim.ClaimName, metav1.GetOptions{})
+					if err != nil {
+						err = failedMount(ctx, &failedAndWait, volume.PersistentVolumeClaim.ClaimName, pod, p, err)
+						if err != nil {
+							return err
+						}
+					} else {
+						req.PersistentVolumeClaims = append(req.PersistentVolumeClaims, *pvc)
+					}
+
 				default:
 					log.G(ctx).Warningf("ignoring unsupported volume %s for Pod %s", volume.Name, pod.Name)
 				}

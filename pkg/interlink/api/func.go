@@ -141,6 +141,22 @@ func retrieveData(ctx context.Context, _ types.Config, pod types.PodCreateReques
 					// edPath := filepath.Join(config.DataRootFolder, pod.Pod.Namespace+"-"+string(pod.Pod.UID), "emptyDirs", vol.Name)
 					// retrievedData.EmptyDirs = append(retrievedData.EmptyDirs, edPath)
 
+				case vol.PersistentVolumeClaim != nil:
+					log.G(ctx).Info("--- Retrieving PersistentVolumeClaim ", vol.PersistentVolumeClaim.ClaimName)
+					for _, pvc := range pod.PersistentVolumeClaims {
+						if pvc.Name == vol.PersistentVolumeClaim.ClaimName {
+							log.G(ctx).Debug("PersistentVolumeClaim found! Name: ", pvc.Name)
+							retrievedData.PersistentVolumeClaims = append(retrievedData.PersistentVolumeClaims, pvc)
+							break loopVolumes
+						}
+					}
+					// Log error if persistent volume claim is not found.
+					var pvcNames []string
+					for _, pvc := range pod.PersistentVolumeClaims {
+						pvcNames = append(pvcNames, pvc.Name)
+					}
+					log.G(ctx).Errorf("could not find a matching PersistentVolumeClaim for volume: %s (pod: %s container: %s persistent volume claim: %s) available keys: %s",
+						vol.Name, pod.Pod.Name, container.Name, vol.PersistentVolumeClaim.ClaimName, strings.Join(pvcNames, ","))
 				default:
 					log.G(ctx).Warning("ignoring unsupported volume type for ", mountVar.Name)
 				}

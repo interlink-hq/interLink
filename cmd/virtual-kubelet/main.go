@@ -30,6 +30,7 @@ import (
 	// "k8s.io/client-go/rest"
 
 	v1 "k8s.io/api/core/v1"
+	"k8s.io/apimachinery/pkg/api/resource"
 	"k8s.io/apimachinery/pkg/fields"
 	"k8s.io/client-go/kubernetes/scheme"
 	lease "k8s.io/client-go/kubernetes/typed/coordination/v1"
@@ -58,6 +59,7 @@ import (
 
 	"github.com/intertwin-eu/interlink/pkg/interlink"
 	commonIL "github.com/intertwin-eu/interlink/pkg/virtualkubelet"
+	apierrors "k8s.io/apimachinery/pkg/api/errors"
 )
 
 // UnixSocketRoundTripper is a custom RoundTripper for Unix socket connections
@@ -347,6 +349,9 @@ func main() {
 		return
 	}
 
+	log.G(ctx).Info("Before running the PVC placeholder controller")
+	go runPVCPlaceholderController(ctx, localClient, cfg.NodeName)
+
 	// // DEBUG
 	// lister := podInformerFactory.Core().V1().Pods().Lister().Pods("")
 	// pods, err := lister.List(labels.Everything())
@@ -372,13 +377,205 @@ func main() {
 
 	api.AttachPodRoutes(podRoutes, mux, true)
 
-	pc, err := node.NewPodController(podControllerConfig) // <-- instatiates the pod controller
+	pc, err := node.NewPodController(podControllerConfig)
 	if err != nil {
 		log.G(ctx).Fatal(err)
 	}
-	err = pc.Run(ctx, 1) // <-- starts watching for pods to be scheduled on the node
+	err = pc.Run(ctx, 1)
 	if err != nil {
 		log.G(ctx).Fatal(err)
+	}
+}
+
+func runPVCPlaceholderController(ctx context.Context, client kubernetes.Interface, nodeName string) {
+
+	log.G(ctx).Info("Starting PVC placeholder controller")
+
+	ticker := time.NewTicker(20 * time.Second)
+	defer ticker.Stop()
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-ticker.C:
+
+			namespaces, err := client.CoreV1().Namespaces().List(ctx, metav1.ListOptions{})
+			if err != nil {
+				log.G(ctx).Error("Error listing namespaces: ", err)
+				continue
+			}
+
+			for _, ns := range namespaces.Items {
+
+				if ns.Name == "kube-system" {
+					log.G(ctx).Debugf("Skipping kube-system namespace")
+					continue
+				}
+				if ns.Name == "default" {
+					log.G(ctx).Debugf("Skipping default namespace")
+					continue
+				}
+
+				podList, err := client.CoreV1().Pods(ns.Name).List(ctx, metav1.ListOptions{})
+				if err != nil {
+					log.G(ctx).Error("Error listing pods: ", err)
+					continue
+				}
+
+				var matchingPods []v1.Pod
+				for _, pod := range podList.Items {
+					if pod.Spec.NodeSelector != nil {
+						if val, ok := pod.Spec.NodeSelector["kubernetes.io/hostname"]; ok && val == nodeName {
+							matchingPods = append(matchingPods, pod)
+						}
+					}
+				}
+
+				if len(matchingPods) == 0 {
+					log.G(ctx).Info("No pods with nodeSelector kubernetes.io/hostname=" + nodeName + " found in namespace " + ns.Name)
+				} else {
+					log.G(ctx).Infof("Found %d pods with nodeSelector kubernetes.io/hostname=%s in namespace %s", len(matchingPods), nodeName, ns.Name)
+				}
+
+				log.G(ctx).Debugf("Pods in namespace %s: %d", ns.Name, len(matchingPods))
+
+				if err != nil {
+					log.G(ctx).Error("Error listing pods: ", err)
+					continue
+				}
+				for _, pod := range matchingPods {
+
+					log.G(ctx).Debugf("Checking pod %s in namespace %s", pod.Name, pod.Namespace)
+
+					if !hasVirtualNodeToleration(&pod) {
+						log.G(ctx).Debugf("Pod %s does not have the virtual node toleration, skipping", pod.Name)
+						continue
+					}
+
+					if pod.Status.Phase != v1.PodPending {
+						log.G(ctx).Debugf("Pod %s is not in Pending state, skipping", pod.Name)
+						continue
+					}
+
+					for _, vol := range pod.Spec.Volumes {
+						if vol.PersistentVolumeClaim != nil {
+
+							log.G(ctx).Debugf("Checking PV %s for pod %s", vol.PersistentVolumeClaim.ClaimName, pod.Name)
+							_, err := client.CoreV1().PersistentVolumes().Get(ctx, vol.PersistentVolumeClaim.ClaimName, metav1.GetOptions{})
+							if err != nil {
+								log.G(ctx).Debugf("PV %s not found for pod %s", vol.PersistentVolumeClaim.ClaimName, pod.Name)
+								if apierrors.IsNotFound(err) {
+									log.G(ctx).Infof("PV %s not found for pod %s, creating placeholder", vol.PersistentVolumeClaim.ClaimName, pod.Name)
+									_, err = createTempPv(ctx, client, &pod, vol)
+									if err != nil {
+										log.G(ctx).Error("Failed to create placeholder PV for pod ", pod.Name, ": ", err)
+									}
+								} else {
+									log.G(ctx).Errorf("Error getting PV %s for pod %s: %v", vol.PersistentVolumeClaim.ClaimName, pod.Name, err)
+								}
+							}
+
+							log.G(ctx).Debugf("Checking PVC %s for pod %s", vol.PersistentVolumeClaim.ClaimName, pod.Name)
+							_, err = client.CoreV1().PersistentVolumeClaims(pod.Namespace).Get(ctx, vol.PersistentVolumeClaim.ClaimName, metav1.GetOptions{})
+							if err != nil {
+								log.G(ctx).Debugf("PVC %s not found for pod %s", vol.PersistentVolumeClaim.ClaimName, pod.Name)
+								if apierrors.IsNotFound(err) {
+									log.G(ctx).Infof("PVC %s not found for pod %s, creating placeholder", vol.PersistentVolumeClaim.ClaimName, pod.Name)
+									_, err = createTempPVC(ctx, client, &pod, vol)
+									if err != nil {
+										log.G(ctx).Error("Failed to create placeholder PVC for pod ", pod.Name, ": ", err)
+									}
+								} else {
+									log.G(ctx).Errorf("Error getting PVC %s for pod %s: %v", vol.PersistentVolumeClaim.ClaimName, pod.Name, err)
+								}
+							}
+						}
+					}
+				}
+			}
+		}
+	}
+}
+
+func hasVirtualNodeToleration(pod *v1.Pod) bool {
+	for _, tol := range pod.Spec.Tolerations {
+		if tol.Key == "virtual-node.interlink/no-schedule" && tol.Operator == v1.TolerationOpExists {
+			return true
+		}
+	}
+	return false
+}
+
+func createTempPVC(ctx context.Context, client kubernetes.Interface, pod *v1.Pod, volume v1.Volume) (*v1.PersistentVolumeClaim, error) {
+	tempPVC := &v1.PersistentVolumeClaim{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      volume.PersistentVolumeClaim.ClaimName,
+			Namespace: pod.Namespace,
+			Labels: map[string]string{
+				"temporary": "true",
+			},
+		},
+		Spec: v1.PersistentVolumeClaimSpec{
+			AccessModes: []v1.PersistentVolumeAccessMode{
+				v1.ReadWriteOnce,
+			},
+			Resources: v1.VolumeResourceRequirements{
+				Requests: v1.ResourceList{
+					"storage": resource.MustParse("1Gi"),
+				},
+			},
+		},
 	}
 
+	createdPVC, err := client.CoreV1().PersistentVolumeClaims(pod.Namespace).Create(ctx, tempPVC, metav1.CreateOptions{})
+	if err != nil {
+		log.G(ctx).Error("failed to create temporary PVC: ", err)
+		return nil, err
+	}
+
+	log.G(ctx).Infof("Temporary PVC %s created for pod %s", createdPVC.Name, pod.Name)
+
+	return createdPVC, nil
+}
+
+func createTempPv(ctx context.Context, client kubernetes.Interface, pod *v1.Pod, volume v1.Volume) (*v1.PersistentVolume, error) {
+
+	pvName := "temp-pv-" + volume.PersistentVolumeClaim.ClaimName
+	tempPV := &v1.PersistentVolume{
+		ObjectMeta: metav1.ObjectMeta{
+			Name: pvName,
+			Labels: map[string]string{
+				"temporary": "true",
+			},
+		},
+		Spec: v1.PersistentVolumeSpec{
+			Capacity: v1.ResourceList{
+				"storage": resource.MustParse("1Gi"),
+			},
+			AccessModes: []v1.PersistentVolumeAccessMode{
+				v1.ReadWriteOnce,
+			},
+			PersistentVolumeReclaimPolicy: v1.PersistentVolumeReclaimDelete,
+			PersistentVolumeSource: v1.PersistentVolumeSource{
+				HostPath: &v1.HostPathVolumeSource{
+					Path: "/tmp/" + volume.PersistentVolumeClaim.ClaimName,
+				},
+			},
+			ClaimRef: &v1.ObjectReference{
+				Kind:      "PersistentVolumeClaim",
+				Namespace: pod.Namespace,
+				Name:      volume.PersistentVolumeClaim.ClaimName,
+			},
+		},
+	}
+
+	createdPV, err := client.CoreV1().PersistentVolumes().Create(ctx, tempPV, metav1.CreateOptions{})
+	if err != nil {
+		log.G(ctx).Infof("failed to create temporary PV: ", err)
+		return nil, err
+	}
+
+	log.G(ctx).Infof("Temporary PV %s created for PVC %s", pvName, createdPV.Name)
+
+	return createdPV, nil
 }
