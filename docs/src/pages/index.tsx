@@ -39,7 +39,7 @@ function HomepageHeader() {
           </Link>
 
         </div>
-      <img alt="Stars" src="https://img.shields.io/github/stars/intertwin-eu/interlink" style={{ marginTop: '1rem' }} onClick={() => window.location.href='https://github.com/interTwin-eu/interLink'}/>
+      <img alt="Stars" src="https://img.shields.io/github/stars/intertwin-eu/interlink" style={{ marginTop: '1rem' }} onClick={() => window.location.href='https://github.com/interlink-hq/interLink'}/>
       <br/>
       <img alt="GoReport" src="https://goreportcard.com/badge/github.com/intertwin-eu/interlink" style={{ marginTop: '1rem' }} onClick={() => window.location.href='https://goreportcard.com/report/github.com/intertwin-eu/interlink'}/>
       <br/>

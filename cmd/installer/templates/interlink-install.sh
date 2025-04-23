@@ -50,11 +50,11 @@ EOF
   echo "=== Configured to reach sidecar service on unix://${HOME}/.plugin.sock. You can edit this behavior changing ${HOME}/.interlink/config/InterLinkConfig.yaml file. ==="
 
   ## Download binaries to ${HOME}/.local/interlink/
-  echo "curl --fail -L -o ${HOME}/.interlink/bin/interlink https://github.com/interTwin-eu/interLink/releases/download/{{.InterLinkVersion}}/interlink_${INTERLINK_OS}_${INTERLINK_ARCH}"
+  echo "curl --fail -L -o ${HOME}/.interlink/bin/interlink https://github.com/interlink-hq/interLink/releases/download/{{.InterLinkVersion}}/interlink_${INTERLINK_OS}_${INTERLINK_ARCH}"
 
   {
     {
-      curl --fail -L -o ${HOME}/.interlink/bin/interlink https://github.com/interTwin-eu/interLink/releases/download/{{.InterLinkVersion}}/interlink_${INTERLINK_OS}_${INTERLINK_ARCH}
+      curl --fail -L -o ${HOME}/.interlink/bin/interlink https://github.com/interlink-hq/interLink/releases/download/{{.InterLinkVersion}}/interlink_${INTERLINK_OS}_${INTERLINK_ARCH}
       chmod +x ${HOME}/.interlink/bin/interlink
     } || {
       echo "Error downloading InterLink binaries, exiting..."

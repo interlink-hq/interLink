@@ -11,7 +11,7 @@ contribute are also welcome.
 ## Feedback and Questions
 
 If you wish to discuss anything related to the project, please open a
-[GitHub issue](https://github.com/interTwin-eu/interlink/issues/new).
+[GitHub issue](https://github.com/interlink-hq/interlink/issues/new).
 
 ## Contribution Process
 
@@ -31,7 +31,8 @@ you submit the pull request). We have a 3 steps process for contributions.
    understanding and appreciating your pull request, please use the template to
    explain _why_ you are making this contribution, rather than just _what_ the
    contribution entails.
-2. **Run E2E tests with success**. You can follow the steps described [here](https://intertwin-eu.github.io/interLink/docs/Developers)
+2. **Run E2E tests with success**. You can follow the steps described
+   [here](https://intertwin-eu.github.io/interLink/docs/Developers)
 
 ### Code Review Process
 
@@ -77,7 +78,8 @@ purpose of changes to the code.
       values, and it is older than "old stable" debian release
 ```
 
-__N.B.__ please always check for you commits to be [signed](https://docs.github.com/en/authentication/managing-commit-signature-verification/signing-commits)
+**N.B.** please always check for you commits to be
+[signed](https://docs.github.com/en/authentication/managing-commit-signature-verification/signing-commits)
 
 ## Release cycle
 

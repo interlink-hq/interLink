@@ -384,7 +384,7 @@ func (m *Interlink) Run(
 		WithDirectory("/manifests", manifests).
 		WithEntrypoint([]string{"kubectl"}).
 		WithWorkdir("/opt/user").
-		WithExec([]string{"bash", "-c", "git clone https://github.com/interTwin-eu/vk-test-set.git"}).
+		WithExec([]string{"bash", "-c", "git clone https://github.com/interlink-hq/vk-test-set.git"}).
 		WithExec([]string{"bash", "-c", "cp /manifests/vktest_config.yaml /opt/user/vk-test-set/vktest_config.yaml"}).
 		WithWorkdir("/opt/user/vk-test-set").
 		WithExec([]string{"bash", "-c", "python3 -m venv .venv && source .venv/bin/activate && pip3 install -e ./ "}), nil

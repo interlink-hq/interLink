@@ -1,94 +1,121 @@
 ---
 sidebar_position: 1
 ---
-import ThemedImage from '@theme/ThemedImage';
-import useBaseUrl from '@docusaurus/useBaseUrl';
+
+import ThemedImage from "@theme/ThemedImage";
+import useBaseUrl from "@docusaurus/useBaseUrl";
 
 # Deploy interLink virtual nodes
 
-Learn how to deploy interLink virtual nodes on your cluster. In this tutorial you are going to setup all the needed components to be able to either __develop__ or __deploy__ the plugin for container management on a **remote** host via a **local** kubernetes cluster.
+Learn how to deploy interLink virtual nodes on your cluster. In this tutorial
+you are going to setup all the needed components to be able to either
+**develop** or **deploy** the plugin for container management on a **remote**
+host via a **local** kubernetes cluster.
 
-The installation script that we are going to configure will take care of providing you with a complete Kubernetes manifest to instantiate the virtual node interface. Also you will get an installation bash script to be executed on the remote host where you want to delegate your container execution. That script is already configured to **automatically** authenticate the incoming request from the virtual node component, and forward the correct instructions to the openAPI interface of the [interLink plugin](./api-reference) (a.k.a. sidecar) of your choice. Thus you can use this setup also for directly [developing a plugin](./develop-a-plugin), without caring for anything else.
+The installation script that we are going to configure will take care of
+providing you with a complete Kubernetes manifest to instantiate the virtual
+node interface. Also you will get an installation bash script to be executed on
+the remote host where you want to delegate your container execution. That script
+is already configured to **automatically** authenticate the incoming request
+from the virtual node component, and forward the correct instructions to the
+openAPI interface of the [interLink plugin](./api-reference) (a.k.a. sidecar) of
+your choice. Thus you can use this setup also for directly
+[developing a plugin](./develop-a-plugin), without caring for anything else.
 
-For a complete guide on all the possible scenarios, please refer to the [Cookbook](/docs/category/cookbook).
+For a complete guide on all the possible scenarios, please refer to the
+[Cookbook](/docs/category/cookbook).
 
 ## Requirements
 
-- __kubectl host__: an host with MiniKube installed and running
+- **kubectl host**: an host with MiniKube installed and running
 - A GitHub account
-- __remote host__: A "remote" machine with a port that is reachable by the MiniKube host
-
+- **remote host**: A "remote" machine with a port that is reachable by the
+  MiniKube host
 
 ## Create an OAuth GitHub app
 
-:::warning
-In this tutorial GitHub tokens are just an example of authentication mechanism, any OpenID compliant identity provider is also supported with the very same deployment script, see [examples here](./oidc-IAM).
-:::
+:::warning In this tutorial GitHub tokens are just an example of authentication
+mechanism, any OpenID compliant identity provider is also supported with the
+very same deployment script, see [examples here](./oidc-IAM). :::
 
-As a first step, you need to create a GitHub OAuth application to allow interLink to make authentication between your Kubernetes cluster and the remote endpoint.
+As a first step, you need to create a GitHub OAuth application to allow
+interLink to make authentication between your Kubernetes cluster and the remote
+endpoint.
 
-Head to [https://github.com/settings/apps](https://github.com/settings/apps) and click on `New GitHub App`. You should now be looking at a form like this:
+Head to [https://github.com/settings/apps](https://github.com/settings/apps) and
+click on `New GitHub App`. You should now be looking at a form like this:
 
-<ThemedImage 
-        alt="Docusaurus themed image"
-        sources={{
-          light: useBaseUrl('/img/github-app-new.png'),
-          dark: useBaseUrl('/img/github-app-new.png'),
-        }}
+<ThemedImage
+  alt="Docusaurus themed image"
+  sources={{
+    light: useBaseUrl("/img/github-app-new.png"),
+    dark: useBaseUrl("/img/github-app-new.png"),
+  }}
 />
 
-Provide a name for the OAuth2 application, e.g. `interlink-demo-test`, and you can skip the description, unless you want to provide one for future reference. 
-For our purpose Homepage reference is also not used, so fill free to put there `https://intertwin-eu.github.io/interLink/`.
+Provide a name for the OAuth2 application, e.g. `interlink-demo-test`, and you
+can skip the description, unless you want to provide one for future reference.
+For our purpose Homepage reference is also not used, so fill free to put there
+`https://intertwin-eu.github.io/interLink/`.
 
 Check now that refresh token and device flow authentication:
 
-
-<ThemedImage 
-        alt="Docusaurus themed image"
-        sources={{
-          light: useBaseUrl('/img/github-app-new2.png'),
-          dark: useBaseUrl('/img/github-app-new2.png'),
-        }}
+<ThemedImage
+  alt="Docusaurus themed image"
+  sources={{
+    light: useBaseUrl("/img/github-app-new2.png"),
+    dark: useBaseUrl("/img/github-app-new2.png"),
+  }}
 />
 
 Disable webhooks and save clicking on `Create GitHub App`
 
-<ThemedImage 
-        alt="Docusaurus themed image"
-        sources={{
-          light: useBaseUrl('/img/github-app-new3.png'),
-          dark: useBaseUrl('/img/github-app-new3.png'),
-        }}
+<ThemedImage
+  alt="Docusaurus themed image"
+  sources={{
+    light: useBaseUrl("/img/github-app-new3.png"),
+    dark: useBaseUrl("/img/github-app-new3.png"),
+  }}
 />
 
-You can click then on your application that should now appear at [https://github.com/settings/apps](https://github.com/settings/apps) and you need to save two strings: the `Client ID` and clicking on `Generate a new client secret` you should be able to note down the relative `Client Secret`.  
+You can click then on your application that should now appear at
+[https://github.com/settings/apps](https://github.com/settings/apps) and you
+need to save two strings: the `Client ID` and clicking on
+`Generate a new client secret` you should be able to note down the relative
+`Client Secret`.
 
 Now it's all set for the next steps.
 
 ## Configuring your virtual kubelet setup (remote host)
 
-Login into the machine and and download the interLink **installer CLI** for your OS and processor architecture from the [release page](https://github.com/interTwin-eu/interLink/releases), looking for the binaries starting with `interlink-installer`. For instance, if on a `Linux` platform with `x86_64` processor:
+Login into the machine and and download the interLink **installer CLI** for your
+OS and processor architecture from the
+[release page](https://github.com/interlink-hq/interLink/releases), looking for
+the binaries starting with `interlink-installer`. For instance, if on a `Linux`
+platform with `x86_64` processor:
 
 ```bash
 export VERSION=$(curl -s https://api.github.com/repos/intertwin-eu/interlink/releases/latest  | jq -r .name)
-wget -O interlink-installer https://github.com/interTwin-eu/interLink/releases/download/$VERSION/interlink-installer_Linux_x86_64
+wget -O interlink-installer https://github.com/interlink-hq/interLink/releases/download/$VERSION/interlink-installer_Linux_x86_64
 chmod +x interlink-installer
 ```
 
-The CLI offers a utility option to initiate an empty config file for the installation at `$HOME/.interlink.yaml`:
+The CLI offers a utility option to initiate an empty config file for the
+installation at `$HOME/.interlink.yaml`:
 
 ```bash
 ./interlink-installer --init
 ```
 
-You are now ready to go ahead and edit the produced file with all the setup information.
+You are now ready to go ahead and edit the produced file with all the setup
+information.
 
 Let's take the following as an example of a valid configuration file:
 
-:::warning
-see [release page](https://github.com/interTwin-eu/interLink/releases) to get the latest one! And change the value accordingly!
-If you follow the steps above, `echo $VERSION` should be enough to get the correct value.
-:::
+:::warning see
+[release page](https://github.com/interlink-hq/interLink/releases) to get the
+latest one! And change the value accordingly! If you follow the steps above,
+`echo $VERSION` should be enough to get the correct value. :::
 
 ```yaml title="$HOME/.interlink.yaml"
 interlink_ip: x.x.x.x
@@ -97,48 +124,57 @@ interlink_version: 0.3.3
 kubelet_node_name: my-node
 kubernetes_namespace: interlink
 node_limits:
-    cpu: "10"
-    memory: 256
-    pods: "10"
+  cpu: "10"
+  memory: 256
+  pods: "10"
 oauth:
-    provider: github
-    issuer: https://github.com/oauth
-    grant_type: authorization_code
-    scopes:
-      - "read:user"
-    github_user: "dciangot"
-    token_url: "https://github.com/login/oauth/access_token"
-    device_code_url: "https://github.com/login/device/code"
-    client_id: "XXXXXXX"
-    client_secret: "XXXXXXXX"
+  provider: github
+  issuer: https://github.com/oauth
+  grant_type: authorization_code
+  scopes:
+    - "read:user"
+  github_user: "dciangot"
+  token_url: "https://github.com/login/oauth/access_token"
+  device_code_url: "https://github.com/login/device/code"
+  client_id: "XXXXXXX"
+  client_secret: "XXXXXXXX"
 insecure_http: true
 ```
 
 This config file has the following meaning:
-- the remote components (where the pods will be "offloaded") will listen on the ip address `x.x.x.x` on the port `30443`
-- deploy all the components from interlink release 0.3.3 (see [release page](https://github.com/interTwin-eu/interLink/releases) to get the latest one)
+
+- the remote components (where the pods will be "offloaded") will listen on the
+  ip address `x.x.x.x` on the port `30443`
+- deploy all the components from interlink release 0.3.3 (see
+  [release page](https://github.com/interlink-hq/interLink/releases) to get the
+  latest one)
 - the virtual node will appear in the cluster under the name `my-node`
 - the in-cluster components will run under `interlink` namespace
 - the virtual node will show the following static resources availability:
   - 10 cores
   - 256GiB RAM
   - a maximum of 10 pods
-- the cluster-to-interlink communication will be authenticated via github provider, with a token with minimum capabilities (scope `read:user` only), and only the tokens for user `dciangot` will be allowed to talk to the interlink APIs
+- the cluster-to-interlink communication will be authenticated via github
+  provider, with a token with minimum capabilities (scope `read:user` only), and
+  only the tokens for user `dciangot` will be allowed to talk to the interlink
+  APIs
 - `token_url` and `device_code_url` should be left like that if you use GitHub
 - `cliend_id` and `client_secret` noted down at the beginning of the tutorial
 
-You are ready now to go ahead generating the needed manifests and script for the deployment.
-
+You are ready now to go ahead generating the needed manifests and script for the
+deployment.
 
 ## Deploy the interLink core components (remote host)
 
-Login into the machine and generate the manifests and the automatic interlink installation script with:
+Login into the machine and generate the manifests and the automatic interlink
+installation script with:
 
 ```bash
 ./interlink-installer
 ```
 
-follow the instruction to authenticate with the device code flow and, if everything went well, you should get an output like the following:
+follow the instruction to authenticate with the device code flow and, if
+everything went well, you should get an output like the following:
 
 ```text
 please enter code XXXX-XXXX at https://github.com/login/device
@@ -157,7 +193,6 @@ please enter code XXXX-XXXX at https://github.com/login/device
   "./interlink-remote.sh install" followed by "interlink-remote.sh start"
 ```
 
-
 Start installing all the needed binaries and configurations:
 
 ```bash
@@ -167,43 +202,51 @@ chmod +x ./.interlink/interlink-remote.sh
 
 :::warning
 
-By default the script will generate self-signed certificates for your ip adrress. If you want to use yours you can place them in `~/.interlink/config/tls.{crt,key}`.
+By default the script will generate self-signed certificates for your ip
+adrress. If you want to use yours you can place them in
+`~/.interlink/config/tls.{crt,key}`.
 
 :::
 
-Now it's time to star the components (namely oauth2_proxy and interlink API server):
+Now it's time to star the components (namely oauth2_proxy and interlink API
+server):
 
 ```bash
 ./interlink-remote.sh start
 ```
 
-Check that no errors appear in the logs located in `~/.interlink/logs`. You should also start seeing ping requests coming in from your kubernetes cluster.
+Check that no errors appear in the logs located in `~/.interlink/logs`. You
+should also start seeing ping requests coming in from your kubernetes cluster.
 
 To stop or restart the components you can use the dedicated commands:
 
 ```bash
 ./interlink-remote.sh stop
-./interlink-remote.sh restart 
+./interlink-remote.sh restart
 ```
-__N.B.__ you can look the oauth2_proxy configuration parameters looking into the `interlink-remote.sh` script.
-__N.B.__ logs (expecially if in verbose mode) can become pretty huge, consider to implement your favorite rotation routine for all the logs in `~/.interlink/logs/`
+
+**N.B.** you can look the oauth2_proxy configuration parameters looking into the
+`interlink-remote.sh` script. **N.B.** logs (expecially if in verbose mode) can
+become pretty huge, consider to implement your favorite rotation routine for all
+the logs in `~/.interlink/logs/`
 
 ## Attach your favorite plugin or develop one! (remote host)
 
-[Next chapter](./develop-a-plugin) will show the basics for developing a new plugin following the interLink openAPI spec.
+[Next chapter](./develop-a-plugin) will show the basics for developing a new
+plugin following the interLink openAPI spec.
 
 In alterative you can start an already supported one.
 
-
 ### Remote SLURM job submission
 
-:::warning
-Note that the SLURM plugin repository is: [github.com/interTwin-eu/interlink-slurm-plugin](https://github.com/interTwin-eu/interlink-slurm-plugin) 
+:::warning Note that the SLURM plugin repository is:
+[github.com/interlink-hq/interlink-slurm-plugin](https://github.com/interlink-hq/interlink-slurm-plugin)
 :::
 
 #### Requirements
 
-- a slurm CLI available on the remote host and configured to interact with the computing cluster
+- a slurm CLI available on the remote host and configured to interact with the
+  computing cluster
 - a sharedFS with all the worker nodes
   - an experimental feature is available for cases in which this is not possible
 
@@ -217,13 +260,14 @@ Note that the SLURM plugin repository is: [github.com/interTwin-eu/interlink-slu
   mkdir -p $HOME/.interlink/config
   ```
 
-- Create a configuration file (__remember to substitute `/home/username/` with your actual home path__): 
+- Create a configuration file (**remember to substitute `/home/username/` with
+  your actual home path**):
 
   ```bash title="./interlink/manifests/plugin-config.yaml"
   Socket: "unix:///home/myusername/plugin.sock"
   InterlinkPort: "0"
   SidecarPort: "0"
-  
+
   CommandPrefix: ""
   DataRootFolder: "/home/myusername/.interlink/jobs/"
   BashPath: /bin/bash
@@ -235,26 +279,29 @@ Note that the SLURM plugin repository is: [github.com/interTwin-eu/interlink-slu
   SingularityPrefix: ""
   ```
 
-  - More on configuration options at [official repo](https://github.com/interTwin-eu/interlink-slurm-plugin/blob/main/README.md)
+  - More on configuration options at
+    [official repo](https://github.com/interlink-hq/interlink-slurm-plugin/blob/main/README.md)
 
-You are almost there! Now it's time to add this virtual node into the Kubernetes cluster!
+You are almost there! Now it's time to add this virtual node into the Kubernetes
+cluster!
 
-:::danger
-Before going ahead, put the correct DataRootFolder in the example above! Don't forget the `/` at the end!
-:::
+:::danger Before going ahead, put the correct DataRootFolder in the example
+above! Don't forget the `/` at the end! :::
 
 #### Systemd installation
 
-:::warning
-To get the latest version of the plugin, please visit the [release](https://github.com/interTwin-eu/interlink-slurm-plugin/releases) page.
+:::warning To get the latest version of the plugin, please visit the
+[release](https://github.com/interlink-hq/interlink-slurm-plugin/releases) page.
 :::
 
-Download the [latest release](https://github.com/interTwin-eu/interlink-slurm-plugin/releases) binary in `$HOME/.interlink/bin/plugin`
+Download the
+[latest release](https://github.com/interlink-hq/interlink-slurm-plugin/releases)
+binary in `$HOME/.interlink/bin/plugin`
 
-  ```bash 
-  export PLUGIN_VERSION=$(curl -s https://api.github.com/repos/intertwin-eu/interlink-slurm-plugin/releases/latest  | jq -r .name)
-  wget -O $HOME/.interlink/bin/plugin https://github.com/interTwin-eu/interlink-slurm-plugin/releases/download/${PLUGIN_VERSION}/interlink-sidecar-slurm_Linux_x86_64 
-  ```
+```bash
+export PLUGIN_VERSION=$(curl -s https://api.github.com/repos/intertwin-eu/interlink-slurm-plugin/releases/latest  | jq -r .name)
+wget -O $HOME/.interlink/bin/plugin https://github.com/interlink-hq/interlink-slurm-plugin/releases/download/${PLUGIN_VERSION}/interlink-sidecar-slurm_Linux_x86_64
+```
 
 Now you can create a systemd service on the user space with the following:
 
@@ -293,38 +340,40 @@ Logs will be stored at `$HOME/.interlink/logs/plugin.log`.
 
 ### Create UNICORE jobs to run on HPC centers
 
-[UNICORE](https://www.unicore.eu/) (Uniform Interface to Computing Resources) offers a ready-to-run system including client and server software. UNICORE makes distributed computing and data resources available in a seamless and secure way in intranets and the internet.
+[UNICORE](https://www.unicore.eu/) (Uniform Interface to Computing Resources)
+offers a ready-to-run system including client and server software. UNICORE makes
+distributed computing and data resources available in a seamless and secure way
+in intranets and the internet.
 
-- [UNICORE plugin](https://github.com/interTwin-eu/interlink-unicore-plugin)
+- [UNICORE plugin](https://github.com/interlink-hq/interlink-unicore-plugin)
 
 ### Remote docker execution
 
-:::warning
-An mantained plugin will come soon...
-In the meantime you can take a look at the ["developing a plugin"](./develop-a-plugin) example.
-:::
+:::warning An mantained plugin will come soon... In the meantime you can take a
+look at the ["developing a plugin"](./develop-a-plugin) example. :::
 
-- [Docker plugin repository](https://github.com/interTwin-eu/interlink-docker-plugin)
+- [Docker plugin repository](https://github.com/interlink-hq/interlink-docker-plugin)
 
 ### Submit pods to HTcondor or ARC batch systems
 
-:::warning
-Coming soon
-:::
+:::warning Coming soon :::
 
-- [HTCondor plugin repository](https://github.com/interTwin-eu/interlink-htcondor-plugin)
-- [ARC plugin repository](https://github.com/interTwin-eu/interlink-arc-plugin)
+- [HTCondor plugin repository](https://github.com/interlink-hq/interlink-htcondor-plugin)
+- [ARC plugin repository](https://github.com/interlink-hq/interlink-arc-plugin)
 
 ### Remote Kubernetes Plugin
 
-InterLink plugin to extend the capabilities of existing Kubernetes clusters, enabling them to offload workloads to another remote cluster.
-The plugin supports the offloading of PODs that expose HTTP endpoints (i.e., HTTP Microservices).
+InterLink plugin to extend the capabilities of existing Kubernetes clusters,
+enabling them to offload workloads to another remote cluster. The plugin
+supports the offloading of PODs that expose HTTP endpoints (i.e., HTTP
+Microservices).
 
 - [Interlink Kubernetes Plugin](https://baltig.infn.it/mgattari/interlink-kubernetes-plugin)
 
 ## Deploy the interlink Kubernetes Agent (kubeclt host)
 
-You can now install the helm chart with the preconfigured (by the installer script) helm values in `./interlink/manifests/values.yaml` 
+You can now install the helm chart with the preconfigured (by the installer
+script) helm values in `./interlink/manifests/values.yaml`
 
 ```bash
   helm upgrade --install \
@@ -332,16 +381,21 @@ You can now install the helm chart with the preconfigured (by the installer scri
   -n interlink \
   my-node \
   oci://ghcr.io/intertwin-eu/interlink-helm-chart/interlink \
-  --values ./interlink/manifests/values.yaml 
+  --values ./interlink/manifests/values.yaml
 ```
 
-You can fix the [version of the chart](https://github.com/interTwin-eu/interlink-helm-chart/blob/main/interlink/Chart.yaml#L18) by using the `--version` option. 
+You can fix the
+[version of the chart](https://github.com/interlink-hq/interlink-helm-chart/blob/main/interlink/Chart.yaml#L18)
+by using the `--version` option.
 
-Check that the node becomes `READY`` after some time, or as soon as you see the pods in namespace `interlink` running.
+Check that the node becomes
+`READY`` after some time, or as soon as you see the pods in namespace`interlink`
+running.
 
-You are all setup, congratulations!
-To start debugging in case of problems we suggest starting from the pod containers logs!
+You are all setup, congratulations! To start debugging in case of problems we
+suggest starting from the pod containers logs!
 
 ## Test your setup
 
-Please find a demo pod to test your setup [here](./develop-a-plugin#lets-test-is-out).
+Please find a demo pod to test your setup
+[here](./develop-a-plugin#lets-test-is-out).

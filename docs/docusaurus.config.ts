@@ -39,7 +39,7 @@ const config: Config = {
           // Please change this to your repo.
           // Remove this to remove the "edit this page" links.
           editUrl:
-            'https://github.com/interTwin-eu/interLink',
+            'https://github.com/interlink-hq/interLink',
         },
         blog: false, 
         theme: {
@@ -87,7 +87,7 @@ const config: Config = {
           label: 'Docs',
         },
         {
-          href: 'https://github.com/interTwin-eu/interLink',
+          href: 'https://github.com/interlink-hq/interLink',
           label: 'GitHub',
           position: 'right',
         },
@@ -119,7 +119,7 @@ const config: Config = {
           items: [
             {
               label: 'GitHub',
-              href: 'https://github.com/interTwin-eu/interLink',
+              href: 'https://github.com/interlink-hq/interLink',
             },
           ],
         },
