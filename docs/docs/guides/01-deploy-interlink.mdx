@@ -56,7 +56,7 @@ click on `New GitHub App`. You should now be looking at a form like this:
 Provide a name for the OAuth2 application, e.g. `interlink-demo-test`, and you
 can skip the description, unless you want to provide one for future reference.
 For our purpose Homepage reference is also not used, so fill free to put there
-`https://intertwin-eu.github.io/interLink/`.
+`https://interlink-hq.github.io/interLink/`.
 
 Check now that refresh token and device flow authentication:
 
@@ -95,7 +95,7 @@ the binaries starting with `interlink-installer`. For instance, if on a `Linux`
 platform with `x86_64` processor:
 
 ```bash
-export VERSION=$(curl -s https://api.github.com/repos/intertwin-eu/interlink/releases/latest  | jq -r .name)
+export VERSION=$(curl -s https://api.github.com/repos/interlink-hq/interlink/releases/latest  | jq -r .name)
 wget -O interlink-installer https://github.com/interlink-hq/interLink/releases/download/$VERSION/interlink-installer_Linux_x86_64
 chmod +x interlink-installer
 ```
@@ -299,7 +299,7 @@ Download the
 binary in `$HOME/.interlink/bin/plugin`
 
 ```bash
-export PLUGIN_VERSION=$(curl -s https://api.github.com/repos/intertwin-eu/interlink-slurm-plugin/releases/latest  | jq -r .name)
+export PLUGIN_VERSION=$(curl -s https://api.github.com/repos/interlink-hq/interlink-slurm-plugin/releases/latest  | jq -r .name)
 wget -O $HOME/.interlink/bin/plugin https://github.com/interlink-hq/interlink-slurm-plugin/releases/download/${PLUGIN_VERSION}/interlink-sidecar-slurm_Linux_x86_64
 ```
 
@@ -380,7 +380,7 @@ script) helm values in `./interlink/manifests/values.yaml`
   --create-namespace \
   -n interlink \
   my-node \
-  oci://ghcr.io/intertwin-eu/interlink-helm-chart/interlink \
+  oci://ghcr.io/interlink-hq/interlink-helm-chart/interlink \
   --values ./interlink/manifests/values.yaml
 ```
 

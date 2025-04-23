@@ -1,8 +1,8 @@
 # interLink Installer
 
-The interLink installer is a command-line tool that simplifies the deployment of 
-interLink components across different environments. It automates the generation 
-of configuration files, deployment manifests, and installation scripts needed to 
+The interLink installer is a command-line tool that simplifies the deployment of
+interLink components across different environments. It automates the generation
+of configuration files, deployment manifests, and installation scripts needed to
 set up interLink in various deployment scenarios.
 
 ## Overview
@@ -34,8 +34,8 @@ Create a default configuration file with placeholder values:
 ./interlink-installer --init --config /path/to/config.yaml
 ```
 
-This creates a configuration file with default values 
-that you must edit to match your environment.
+This creates a configuration file with default values that you must edit to
+match your environment.
 
 > It `--config` is not given, default location is `$HOME/.interlink.yaml
 
@@ -62,7 +62,7 @@ After generating the manifests:
 
    ```bash
    helm --debug upgrade --install --create-namespace -n <namespace> <node-name> \
-     oci://ghcr.io/intertwin-eu/interlink-helm-chart/interlink \
+     oci://ghcr.io/interlink-hq/interlink-helm-chart/interlink \
      --values /path/to/output/values.yaml
    ```
 
@@ -71,7 +71,7 @@ After generating the manifests:
    ```bash
    # Copy the script to the remote server
    scp /path/to/output/interlink-remote.sh user@remote-server:~/
-   
+
    # On the remote server
    chmod +x interlink-remote.sh
    ./interlink-remote.sh install
@@ -80,11 +80,11 @@ After generating the manifests:
 
 ## Command-Line Flags
 
-| Flag | Default | Description |
-|------|---------|-------------|
-| `--config` | `$HOME/.interlink.yaml` | Path to the configuration file |
-| `--output-dir` | `$HOME/.interlink/manifests` | Directory where deployment manifests will be stored |
-| `--init` | `false` | Initialize a new configuration file with default values |
+| Flag           | Default                      | Description                                             |
+| -------------- | ---------------------------- | ------------------------------------------------------- |
+| `--config`     | `$HOME/.interlink.yaml`      | Path to the configuration file                          |
+| `--output-dir` | `$HOME/.interlink/manifests` | Directory where deployment manifests will be stored     |
+| `--init`       | `false`                      | Initialize a new configuration file with default values |
 
 ## Configuration File
 
@@ -114,8 +114,8 @@ insecure_http: true
 
 ```yaml
 oauth:
-  provider: oidc  # or github
-  grant_type: authorization_code  # or client_credentials
+  provider: oidc # or github
+  grant_type: authorization_code # or client_credentials
   client_id: OIDC_CLIENT_ID_HERE
   client_secret: OIDC_CLIENT_SECRET_HERE
   scopes:
@@ -132,15 +132,16 @@ oauth:
 
 ## Deployment Scenarios
 
-The installer supports all three deployment scenarios described in the interLink documentation:
+The installer supports all three deployment scenarios described in the interLink
+documentation:
 
 1. **Edge-node**: Deploy interLink API and plugin on a dedicated edge node
 2. **In-cluster**: Deploy all components inside the Kubernetes cluster
-3. **Tunneled**: Deploy interLink API in the cluster and plugin remotely with a secure tunnel
+3. **Tunneled**: Deploy interLink API in the cluster and plugin remotely with a
+   secure tunnel
 
-*The specific scenario is determined by how you configure the interLink IP and 
-port in the configuration file and where you run the installation script.*
-
+_The specific scenario is determined by how you configure the interLink IP and
+port in the configuration file and where you run the installation script._
 
 ## Template Files
 
@@ -151,4 +152,5 @@ The installer includes several embedded template files:
 - `interlink.service`: SystemD service file for interLink
 - `oauth2-proxy.service`: SystemD service file for OAuth2 proxy
 
-These templates are processed with the configuration data to generate the final deployment files.
+These templates are processed with the configuration data to generate the final
+deployment files.

@@ -52,7 +52,7 @@ interLink installer:
 
 ```bash
 mkdir -p $HOME/.interlink
-export VERSION=$(curl -s https://api.github.com/repos/intertwin-eu/interlink/releases/latest  | jq -r .name)
+export VERSION=$(curl -s https://api.github.com/repos/interlink-hq/interlink/releases/latest  | jq -r .name)
 wget -O $HOME/interlink-installer https://github.com/interlink-hq/interLink/releases/download/$VERSION/interlink-installer_Linux_x86_64
 chmod +x $HOME/.interlink/interlink-installer
 ```
@@ -107,7 +107,7 @@ Please fill interlink_version with the desired version.
 In alternative get the latest with:
 
 ```bash
-curl -s https://api.github.com/repos/intertwin-eu/interlink/releases/latest  | jq -r .name
+curl -s https://api.github.com/repos/interlink-hq/interlink/releases/latest  | jq -r .name
 ```
 
 :::
@@ -234,7 +234,7 @@ Select here the featured plugin you want to try:
     binary in `$HOME/.interlink/bin/plugin`
 
       ```bash
-      export PLUGIN_VERSION=$(curl -s https://api.github.com/repos/intertwin-eu/interlink-slurm-plugin/releases/latest  | jq -r .name)
+      export PLUGIN_VERSION=$(curl -s https://api.github.com/repos/interlink-hq/interlink-slurm-plugin/releases/latest  | jq -r .name)
       wget -O $HOME/.interlink/bin/plugin https://github.com/interlink-hq/interlink-slurm-plugin/releases/download/${PLUGIN_VERSION}/interlink-sidecar-slurm_Linux_x86_64
       ```
 
@@ -310,7 +310,7 @@ script) helm values in `./interlink/manifests/values.yaml`
   --create-namespace \
   -n interlink \
   my-node \
-  oci://ghcr.io/intertwin-eu/interlink-helm-chart/interlink \
+  oci://ghcr.io/interlink-hq/interlink-helm-chart/interlink \
   --version $INTERLINK_CHART_VERSION \
   --values ./.interlink/manifests/values.yaml
 ```

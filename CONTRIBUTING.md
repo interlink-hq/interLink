@@ -32,7 +32,7 @@ you submit the pull request). We have a 3 steps process for contributions.
    explain _why_ you are making this contribution, rather than just _what_ the
    contribution entails.
 2. **Run E2E tests with success**. You can follow the steps described
-   [here](https://intertwin-eu.github.io/interLink/docs/Developers)
+   [here](https://interlink-hq.github.io/interLink/docs/Developers)
 
 ### Code Review Process
 

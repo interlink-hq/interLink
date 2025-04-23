@@ -1,6 +1,6 @@
 // A module to instantiate and tests interLink components
 //
-// Visit the interLink documentation for more info: https://intertwin-eu.github.io/interLink/docs/intro/
+// Visit the interLink documentation for more info: https://interlink-hq.github.io/interLink/docs/intro/
 //
 
 package main
@@ -79,13 +79,13 @@ type Interlink struct {
 // New initializes the Dagger module at each call
 func New(name string,
 	// +optional
-	// +default="ghcr.io/intertwin-eu/interlink/virtual-kubelet-inttw:0.3.4"
+	// +default="ghcr.io/interlink-hq/interlink/virtual-kubelet-inttw:0.3.4"
 	VirtualKubeletRef string,
 	// +optional
-	// +default="ghcr.io/intertwin-eu/interlink/interlink:0.3.4"
+	// +default="ghcr.io/interlink-hq/interlink/interlink:0.3.4"
 	InterlinkRef string,
 	// +optional
-	// +default="ghcr.io/intertwin-eu/interlink-sidecar-slurm/interlink-sidecar-slurm:0.3.8"
+	// +default="ghcr.io/interlink-hq/interlink-sidecar-slurm/interlink-sidecar-slurm:0.3.8"
 	pluginRef string,
 ) *Interlink {
 	return &Interlink{
@@ -254,7 +254,7 @@ EOF`}).
 			"--create-namespace",
 			"-n", "interlink",
 			"virtual-node",
-			"oci://ghcr.io/intertwin-eu/interlink-helm-chart/interlink",
+			"oci://ghcr.io/interlink-hq/interlink-helm-chart/interlink",
 			"--version", "0.3.35-pre5",
 			"--values", "/manifests/vk_helm_chart.yaml",
 		}).Stdout(ctx)
