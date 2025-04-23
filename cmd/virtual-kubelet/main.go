@@ -185,10 +185,23 @@ func main() {
 	// TODO: create a csr auto approver https://github.com/liqotech/liqo/blob/master/cmd/liqo-controller-manager/main.go#L498
 	retriever := commonIL.NewSelfSignedCertificateRetriever(cfg.NodeName, net.ParseIP(cfg.InternalIP))
 
-	kubeletPort := os.Getenv("KUBELET_PORT")
+	var kubeletURL string
+
+	if envString, found := os.LookupEnv("KUBELET_URL"); !found {
+		kubeletURL = "0.0.0.0"
+	} else {
+		kubeletURL = envString
+	}
+
+	var kubeletPort string
+	if envString, found := os.LookupEnv("KUBELET_PORT"); !found {
+		kubeletPort = "5820"
+	} else {
+		kubeletPort = envString
+	}
 
 	server := &http.Server{
-		Addr:              fmt.Sprintf("0.0.0.0:%s", kubeletPort),
+		Addr:              fmt.Sprintf("%s:%s", kubeletURL, kubeletPort),
 		Handler:           mux,
 		ReadTimeout:       30 * time.Second,
 		ReadHeaderTimeout: 10 * time.Second, // Required to limit the effects of the Slowloris attack.
@@ -200,7 +213,7 @@ func main() {
 	}
 
 	go func() {
-		log.G(ctx).Infof("Starting the virtual kubelet HTTPs server listening on %q", server.Addr)
+		log.G(ctx).Infof("Starting the virtual kubelet HTTPs server %q", server.Addr)
 
 		// Key and certificate paths are not specified, since already configured as part of the TLSConfig.
 		if err := server.ListenAndServeTLS("", ""); err != nil {
