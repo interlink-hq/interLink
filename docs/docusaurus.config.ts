@@ -9,14 +9,14 @@ const config: Config = {
   favicon: 'img/favicon.ico',
 
   // Set the production url of your site here
-  url: 'https://intertwin-eu.github.io',
+  url: 'https://interlink-hq.github.io',
   // Set the /<baseUrl>/ pathname under which your site is served
   // For GitHub pages deployment, it is often '/<projectName>/'
   baseUrl: '/interLink/',
 
   // GitHub pages deployment config.
   // If you aren't using GitHub pages, you don't need these.
-  organizationName: 'INFN', // Usually your GitHub org/user name.
+  organizationName: 'interlink-hq', // Usually your GitHub org/user name.
   projectName: 'interLink', // Usually your repo name.
 
   onBrokenLinks: 'throw',
@@ -124,7 +124,7 @@ const config: Config = {
           ],
         },
       ],
-      copyright: `Copyright © interLink a Series of LF Projects, LLC.`,
+      copyright: `Originally created by INFN - Copyright © interLink a Series of LF Projects, LLC.`,
     },
     prism: {
       theme: prismThemes.github,
