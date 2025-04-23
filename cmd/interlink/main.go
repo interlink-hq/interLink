@@ -18,9 +18,9 @@ import (
 	"github.com/virtual-kubelet/virtual-kubelet/trace"
 	"github.com/virtual-kubelet/virtual-kubelet/trace/opentelemetry"
 
-	"github.com/intertwin-eu/interlink/pkg/interlink"
-	"github.com/intertwin-eu/interlink/pkg/interlink/api"
-	"github.com/intertwin-eu/interlink/pkg/virtualkubelet"
+	"github.com/interlink-hq/interlink/pkg/interlink"
+	"github.com/interlink-hq/interlink/pkg/interlink/api"
+	"github.com/interlink-hq/interlink/pkg/virtualkubelet"
 )
 
 // UnixSocketRoundTripper is a custom RoundTripper for Unix socket connections

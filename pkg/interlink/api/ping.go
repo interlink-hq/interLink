@@ -11,7 +11,7 @@ import (
 	"github.com/containerd/containerd/log"
 	v1 "k8s.io/api/core/v1"
 
-	types "github.com/intertwin-eu/interlink/pkg/interlink"
+	types "github.com/interlink-hq/interlink/pkg/interlink"
 
 	"go.opentelemetry.io/otel"
 	"go.opentelemetry.io/otel/attribute"

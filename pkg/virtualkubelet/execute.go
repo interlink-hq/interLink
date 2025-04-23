@@ -22,11 +22,13 @@ import (
 	v1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 
-	types "github.com/intertwin-eu/interlink/pkg/interlink"
+	types "github.com/interlink-hq/interlink/pkg/interlink"
 )
 
-const PodPhaseInitialize = "Initializing"
-const PodPhaseCompleted = "Completed"
+const (
+	PodPhaseInitialize = "Initializing"
+	PodPhaseCompleted  = "Completed"
+)
 
 func failedMount(ctx context.Context, failedAndWait *bool, name string, pod *v1.Pod, p *Provider, err error) error {
 	*failedAndWait = true
@@ -39,7 +41,6 @@ func failedMount(ctx context.Context, failedAndWait *bool, name string, pod *v1.
 		}
 	}
 	return nil
-
 }
 
 func traceExecute(ctx context.Context, pod *v1.Pod, name string, startHTTPCall int64) *trace.Span {
@@ -91,7 +92,6 @@ func PingInterLink(ctx context.Context, config Config) (bool, int, error) {
 	log.G(ctx).Info("Pinging: " + interLinkEndpoint + "/pinglink")
 	retVal := -1
 	req, err := http.NewRequest(http.MethodPost, interLinkEndpoint+"/pinglink", nil)
-
 	if err != nil {
 		log.G(ctx).Error(err)
 	}
@@ -396,7 +396,7 @@ func LogRetrieval(
 
 	clientHTTPTransport.DisableKeepAlives = true
 	clientHTTPTransport.MaxIdleConnsPerHost = -1
-	var logHTTPClient = &http.Client{Transport: clientHTTPTransport}
+	logHTTPClient := &http.Client{Transport: clientHTTPTransport}
 
 	resp, err := doRequestWithClient(req, token, logHTTPClient)
 	if err != nil {
@@ -601,7 +601,6 @@ func remoteExecutionHandleProjectedSource(
 			default:
 				log.G(ctx).Warningf("in pod %s unsupported unknown DownwardAPI in InterLink, ignoring this source...", pod.Name)
 			}
-
 		}
 	}
 	return nil
@@ -713,7 +712,6 @@ func remoteExecutionHandleVolumes(ctx context.Context, p *Provider, pod *v1.Pod,
 // Note: for the CREATE mode, the function gets stuck up to 5 minutes waiting for every missing ConfigMap/Secret.
 // If after 5m they are not still available, the function errors out
 func RemoteExecution(ctx context.Context, config Config, p *Provider, pod *v1.Pod, mode int8) error {
-
 	token := ""
 	if config.VKTokenFile != "" {
 		b, err := os.ReadFile(config.VKTokenFile) // just pass the file name
@@ -846,7 +844,6 @@ func handleInitContainersUpdate(ctx context.Context, podRemoteStatus types.PodSt
 }
 
 func handleContainersUpdate(ctx context.Context, podRemoteStatus types.PodStatus, podRefInCluster *v1.Pod, podWaitingForInitContainers bool, podInit bool, nInitContainersInPod int, counterOfTerminatedInitContainers int) (int, bool, string, bool) {
-
 	counterOfTerminatedContainers := 0
 	podErrored := false
 	failedReason := ""

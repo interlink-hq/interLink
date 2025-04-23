@@ -9,7 +9,7 @@ import (
 
 	"github.com/containerd/containerd/log"
 
-	types "github.com/intertwin-eu/interlink/pkg/interlink"
+	types "github.com/interlink-hq/interlink/pkg/interlink"
 
 	"go.opentelemetry.io/otel"
 	"go.opentelemetry.io/otel/attribute"
@@ -90,7 +90,6 @@ func (h *InterLinkHandler) CreateHandler(w http.ResponseWriter, r *http.Request)
 
 		log.G(h.Ctx).Info(req)
 		req, err = http.NewRequest(http.MethodPost, h.SidecarEndpoint+"/create", reader)
-
 		if err != nil {
 			statusCode = http.StatusInternalServerError
 			w.WriteHeader(statusCode)

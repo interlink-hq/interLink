@@ -13,7 +13,7 @@ import (
 
 	trace "go.opentelemetry.io/otel/trace"
 
-	"github.com/intertwin-eu/interlink/pkg/interlink"
+	"github.com/interlink-hq/interlink/pkg/interlink"
 )
 
 type InterLinkHandler struct {

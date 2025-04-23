@@ -55,8 +55,8 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/client-go/informers"
 
-	"github.com/intertwin-eu/interlink/pkg/interlink"
-	commonIL "github.com/intertwin-eu/interlink/pkg/virtualkubelet"
+	"github.com/interlink-hq/interlink/pkg/interlink"
+	commonIL "github.com/interlink-hq/interlink/pkg/virtualkubelet"
 )
 
 // UnixSocketRoundTripper is a custom RoundTripper for Unix socket connections

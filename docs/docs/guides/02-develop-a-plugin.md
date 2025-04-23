@@ -41,10 +41,10 @@ python SDK with:
 
 ```bash
 #export VERSION=X.X.X
-#pip install "uvicorn[standard]" "git+https://github.com/interlink-hq/interLink.git@${VERSION}#egg=interlink&subdirectory=example"
+#pip install "uvicorn[standard]" "git+https://github.com/interlink-hq/interlink-plugin-sdk@${VERSION}"
 
 # Or download the latest one with
-pip install "uvicorn[standard]" "git+https://baltig.infn.it/mgattari/interlink-plugin-sdk"
+pip install "uvicorn[standard]" "git+https://github.com/interlink-hq/interlink-plugin-sdk"
 
 ```
 

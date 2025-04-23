@@ -31,7 +31,7 @@ spec:
       containers:
       - name: plugin 
         image: "dciangot/docker-plugin:v1"
-        #image: "ghcr.io/intertwin-eu/interlink-sidecar-slurm/interlink-sidecar-slurm:0.2.3"
+        #image: "ghcr.io/interlink-hq/interlink-sidecar-slurm/interlink-sidecar-slurm:0.2.3"
         imagePullPolicy: Always
         command:
           - bash
