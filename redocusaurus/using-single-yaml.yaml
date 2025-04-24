@@ -114,12 +114,14 @@ components:
           $ref: '#/components/schemas/Metadata'
         data:
           anyOf:
-            - type: object
+            - additionalProperties: true
+              type: object
             - type: 'null'
           title: Data
         binary_data:
           anyOf:
-            - type: object
+            - additionalProperties: true
+              type: object
             - type: 'null'
           title: Binary Data
         type:
@@ -210,7 +212,8 @@ components:
           default: []
         resources:
           anyOf:
-            - type: object
+            - additionalProperties: true
+              type: object
             - type: 'null'
           title: Resources
           default: {}
@@ -543,7 +546,8 @@ components:
           title: Name
         empty_dir:
           anyOf:
-            - type: object
+            - additionalProperties: true
+              type: object
             - type: 'null'
           title: Empty Dir
         secret:
@@ -564,12 +568,14 @@ components:
           $ref: '#/components/schemas/Metadata'
         data:
           anyOf:
-            - type: object
+            - additionalProperties: true
+              type: object
             - type: 'null'
           title: Data
         string_data:
           anyOf:
-            - type: object
+            - additionalProperties: true
+              type: object
             - type: 'null'
           title: String Data
         type:
