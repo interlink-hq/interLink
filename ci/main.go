@@ -85,15 +85,15 @@ func New(name string,
 	// +default="ghcr.io/interlink-hq/interlink/interlink:0.3.4"
 	InterlinkRef string,
 	// +optional
-	// +default="ghcr.io/interlink-hq/interlink-sidecar-slurm/interlink-sidecar-slurm:0.3.8"
+	// +default="ghcr.io/interlink-hq/interlink-sidecar-slurm/interlink-sidecar-slurm:0.4.0"
 	pluginRef string,
 ) *Interlink {
 	return &Interlink{
 		Name:               name,
 		VirtualKubeletRef:  VirtualKubeletRef,
-		VKContainer:        dag.Container().From(VirtualKubeletRef),
+		VKContainer:        dag.Container(),
 		InterlinkRef:       InterlinkRef,
-		InterlinkContainer: dag.Container().From(InterlinkRef),
+		InterlinkContainer: dag.Container(),
 		PluginRef:          pluginRef,
 	}
 }
