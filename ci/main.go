@@ -79,10 +79,10 @@ type Interlink struct {
 // New initializes the Dagger module at each call
 func New(name string,
 	// +optional
-	// +default="ghcr.io/interlink-hq/interlink/virtual-kubelet-inttw:0.3.4"
+	// +default="ghcr.io/interlink-hq/interlink/virtual-kubelet-inttw:0.4.0"
 	VirtualKubeletRef string,
 	// +optional
-	// +default="ghcr.io/interlink-hq/interlink/interlink:0.3.4"
+	// +default="ghcr.io/interlink-hq/interlink/interlink:0.4.0"
 	InterlinkRef string,
 	// +optional
 	// +default="ghcr.io/interlink-hq/interlink-sidecar-slurm/interlink-sidecar-slurm:0.4.0"
@@ -255,7 +255,7 @@ EOF`}).
 			"-n", "interlink",
 			"virtual-node",
 			"oci://ghcr.io/interlink-hq/interlink-helm-chart/interlink",
-			"--version", "0.3.35-pre5",
+			"--version", "0.4.0-pre1",
 			"--values", "/manifests/vk_helm_chart.yaml",
 		}).Stdout(ctx)
 
