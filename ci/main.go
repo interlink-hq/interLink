@@ -255,7 +255,7 @@ EOF`}).
 			"-n", "interlink",
 			"virtual-node",
 			"oci://ghcr.io/interlink-hq/interlink-helm-chart/interlink",
-			"--version", "0.4.0-pre1",
+			"--version", "0.4.1",
 			"--values", "/manifests/vk_helm_chart.yaml",
 		}).Stdout(ctx)
 
