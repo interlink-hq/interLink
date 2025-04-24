@@ -21,7 +21,7 @@ services:
     #   retries: 3
     #   start_period: 5s
   docker-sidecar:
-    image: ghcr.io/intertwin-eu/interlink-sidecar-docker:0.0.2-pre1
+    image: ghcr.io/interlink-hq/interlink-sidecar-docker:0.0.2-pre1
     restart: always
     privileged: true
     cap_add:

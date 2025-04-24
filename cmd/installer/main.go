@@ -351,7 +351,7 @@ func root(cmd *cobra.Command, _ []string) error {
 	w.Flush()
 
 	// Print information about the generated values.yaml file and how to use it
-	fmt.Println("\n\n=== Deployment file written at:  " + outFolder + "/values.yaml ===\n\n To deploy the virtual kubelet run:\n   helm --debug upgrade --install --create-namespace -n " + configCLI.Namespace + " " + configCLI.VKName + " oci://ghcr.io/intertwin-eu/interlink-helm-chart/interlink  --values " + outFolder + "/values.yaml")
+	fmt.Println("\n\n=== Deployment file written at:  " + outFolder + "/values.yaml ===\n\n To deploy the virtual kubelet run:\n   helm --debug upgrade --install --create-namespace -n " + configCLI.Namespace + " " + configCLI.VKName + " oci://ghcr.io/interlink-hq/interlink-helm-chart/interlink  --values " + outFolder + "/values.yaml")
 
 	// Generate the installation script for remote interLink APIs
 	// TODO: ilctl.sh templating

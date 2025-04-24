@@ -1,19 +1,28 @@
 nodeName: {{.VKName}}
 
 interlink:
+  
   address: https://{{.InterLinkIP}}
   port: {{.InterLinkPort}}
+  disableProjectedVolumes: true
 
 virtualNode:
-  Resources:
-    CPU: {{.VKLimits.CPU}}
-    Memory: {{.VKLimits.Memory}}
-    Pods: {{.VKLimits.Pods}}
+  resources:
+    CPUs: {{.VKLimits.CPU}}
+    memGiB: {{.VKLimits.Memory}}
+    pods: {{.VKLimits.Pods}}
   HTTPProxies:
     HTTP: null
     HTTPs: null
   HTTP:
     Insecure: {{.HTTPInsecure}} 
+  # uncomment to enable custom nodeSelector and nodeTaints
+  #nodeLabels:
+  #  - "accelerator=a100"
+  #nodeTaints:
+  #  - key: "accelerator"
+  #    value: "a100"
+  #    effect: "NoSchedule"
 
 OAUTH:
   enabled: true

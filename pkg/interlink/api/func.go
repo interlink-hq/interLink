@@ -11,7 +11,7 @@ import (
 	trace "go.opentelemetry.io/otel/trace"
 	v1 "k8s.io/api/core/v1"
 
-	types "github.com/intertwin-eu/interlink/pkg/interlink"
+	types "github.com/interlink-hq/interlink/pkg/interlink"
 )
 
 type MutexStatuses struct {
@@ -144,7 +144,6 @@ func retrieveData(ctx context.Context, _ types.Config, pod types.PodCreateReques
 				default:
 					log.G(ctx).Warning("ignoring unsupported volume type for ", mountVar.Name)
 				}
-
 			}
 		}
 	}

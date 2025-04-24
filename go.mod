@@ -1,4 +1,4 @@
-module github.com/intertwin-eu/interlink
+module github.com/interlink-hq/interlink
 
 go 1.22
 

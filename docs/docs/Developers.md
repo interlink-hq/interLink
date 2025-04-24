@@ -2,9 +2,10 @@
 sidebar_position: 5
 ---
 
-# E2E integration tests 
+# E2E integration tests
 
-Here you can find how to test a virtual kubelet implementation against the main pod use cases we mean to support. 
+Here you can find how to test a virtual kubelet implementation against the main
+pod use cases we mean to support.
 
 ## Requirements
 
@@ -13,37 +14,56 @@ Here you can find how to test a virtual kubelet implementation against the main 
 
 ## What's in the Dagger module
 
-- E2e integration tests: a reproducible test environment (selfcontained in Dagger runtime). Run the very same tests executed by github actions to validate any PR
-- A development setup tool: optionally you can use your k8s cluster of choice to run and install different interlink components via this module.
+- E2e integration tests: a reproducible test environment (selfcontained in
+  Dagger runtime). Run the very same tests executed by github actions to
+  validate any PR
+- A development setup tool: optionally you can use your k8s cluster of choice to
+  run and install different interlink components via this module.
 
-:warning: by default the docker plugin is the one tested and to be referred to for any change as first thing.
+:warning: by default the docker plugin is the one tested and to be referred to
+for any change as first thing.
 
 ## Usage
 
-The whole test suite is based on the application of k8s manifests inside a folder that must be passed at runtime. In `./ci/manifests` of this repo you can find the one executed by default by the github actions.
+The whole test suite is based on the application of k8s manifests inside a
+folder that must be passed at runtime. In `./ci/manifests` of this repo you can
+find the one executed by default by the github actions.
 
-That means you can test your code **before** any commit, discovering in advance if anything is breaking.
+That means you can test your code **before** any commit, discovering in advance
+if anything is breaking.
 
 ### Run e2e tests
 
-The easiest way is to simply run `make test` from the root folder of interlink. But if you need to debug or understand further the test utility or a plugin, you should follow these instructions.
+The easiest way is to simply run `make test` from the root folder of interlink.
+But if you need to debug or understand further the test utility or a plugin, you
+should follow these instructions.
 
 #### Edit manifests with your images
 
-- `service-account.yaml` is the default set of permission needed by the virtualkubelet. Do not touch unless you know what you are doing.
-- `virtual-kubelet-config.yaml` is the configuration mounted into the __virtual kubelet__ component to determine its behaviour.
-- `virtual-kubelet.yaml` is the one that you should touch if you are pointing to different interlink endpoints or if you want to change the __virtual kubelet__ image to be tested.
-- `interlink-config.yaml` is the configuration mounted into the __interlink API__ component to determine its behaviour.
-- `interlink.yaml` is the one that you should touch if you are pointing to different plugin endpoints or if you want to change the __interlink API__ image to be tested.
-- `plugin-config.yaml` is the configuration for the __interLink plugin__ component that you MUST TO START MANUALLY on your host.
-    - we do have solution to make it start inside dagger environment, but is not documented yet.
+- `service-account.yaml` is the default set of permission needed by the
+  virtualkubelet. Do not touch unless you know what you are doing.
+- `virtual-kubelet-config.yaml` is the configuration mounted into the **virtual
+  kubelet** component to determine its behaviour.
+- `virtual-kubelet.yaml` is the one that you should touch if you are pointing to
+  different interlink endpoints or if you want to change the **virtual kubelet**
+  image to be tested.
+- `interlink-config.yaml` is the configuration mounted into the **interlink
+  API** component to determine its behaviour.
+- `interlink.yaml` is the one that you should touch if you are pointing to
+  different plugin endpoints or if you want to change the **interlink API**
+  image to be tested.
+- `plugin-config.yaml` is the configuration for the **interLink plugin**
+  component that you MUST TO START MANUALLY on your host.
+  - we do have solution to make it start inside dagger environment, but is not
+    documented yet.
 
 #### Start the local docker plugin service
 
-For a simple demonstration, you can use the plugin that we actually use in are Github Actions:
+For a simple demonstration, you can use the plugin that we actually use in are
+Github Actions:
 
 ```bash
-wget https://github.com/interTwin-eu/interlink-docker-plugin/releases/download/0.0.24-no-gpu/docker-plugin_Linux_x86_64 -O docker-plugin \
+wget https://github.com/interlink-hq/interlink-docker-plugin/releases/download/0.0.24-no-gpu/docker-plugin_Linux_x86_64 -O docker-plugin \
   && chmod +x docker-plugin \
   && docker ps \
   && export INTERLINKCONFIGPATH=$PWD/ci/manifests/plugin-config.yaml \
@@ -52,14 +72,25 @@ wget https://github.com/interTwin-eu/interlink-docker-plugin/releases/download/0
 
 #### Run the tests
 
-Then, in another terminal sessions you are ready to execute the e2e tests with Dagger.
+Then, in another terminal sessions you are ready to execute the e2e tests with
+Dagger.
 
-First of all, in `ci/manifests/vktest_config.yaml` you will find the pytest configuration file. Please see the [test documentation](https://github.com/interTwin-eu/vk-test-set/tree/main) for understanding how to tweak it. 
+First of all, in `ci/manifests/vktest_config.yaml` you will find the pytest
+configuration file. Please see the
+[test documentation](https://github.com/interlink-hq/vk-test-set/tree/main) for
+understanding how to tweak it.
 
-The following instructions are thought for building docker images of the virtual-kubelet and interlink api server components at runtime and published on `virtual-kubelet-ref` and `interlink-ref` repositories (in this example it will be dockerHUB repository of the dciangot user).
-It basically consists on a chain of Dagger tasks for building core images (`build-images`), creating the kubernetes environment configured with core components (`new-interlink`), installing the plugin of choice indicated in the `manifest` folder (`load-plugin`), and eventually the execution of the tests (`test`)
+The following instructions are thought for building docker images of the
+virtual-kubelet and interlink api server components at runtime and published on
+`virtual-kubelet-ref` and `interlink-ref` repositories (in this example it will
+be dockerHUB repository of the dciangot user). It basically consists on a chain
+of Dagger tasks for building core images (`build-images`), creating the
+kubernetes environment configured with core components (`new-interlink`),
+installing the plugin of choice indicated in the `manifest` folder
+(`load-plugin`), and eventually the execution of the tests (`test`)
 
-To run the default tests you can move to `ci` folder and execute the Dagger pipeline with:
+To run the default tests you can move to `ci` folder and execute the Dagger
+pipeline with:
 
 ```bash
 dagger call \
@@ -70,7 +101,8 @@ dagger call \
   test stdout
 ```
 
-:warning: by default the docker plugin is the one tested and to be referred to for any change as first thing.
+:warning: by default the docker plugin is the one tested and to be referred to
+for any change as first thing.
 
 In case of success the output should print something like the following:
 
@@ -97,7 +129,8 @@ vktestset/basic_test.py::test_manifest[virtual-kubelet-060-init-container.yaml] 
 
 #### Debug with interactive session
 
-In case something went wrong, you have the possibility to spawn a session inside the final step of the pipeline to debug things:
+In case something went wrong, you have the possibility to spawn a session inside
+the final step of the pipeline to debug things:
 
 ```bash
 dagger call \
@@ -109,7 +142,8 @@ dagger call \
 
 ```
 
-with this command (after some minutes) then you should be able to access a bash session doing the following commands:
+with this command (after some minutes) then you should be able to access a bash
+session doing the following commands:
 
 ```bash
 bash
@@ -133,7 +167,7 @@ dagger call \
   build-images \
   new-interlink \
     --plugin-endpoint tcp://localhost:4000 \
-  kube up 
+  kube up
 ```
 
 and then from another session, you can get the kubeconfig with:
@@ -143,7 +177,6 @@ dagger call \
     --name my-tests \
   config export --path ./kubeconfig.yaml
 ```
-
 
 ### Deploy on existing K8s cluster
 
@@ -170,8 +203,6 @@ TBD
 
 :warning: Coming soon
 
-
-### Develop your plugin 
+### Develop your plugin
 
 :warning: Coming soon
-

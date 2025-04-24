@@ -26,7 +26,7 @@ import (
 	"k8s.io/client-go/kubernetes"
 	"k8s.io/client-go/tools/clientcmd"
 
-	types "github.com/intertwin-eu/interlink/pkg/interlink"
+	types "github.com/interlink-hq/interlink/pkg/interlink"
 )
 
 const (
