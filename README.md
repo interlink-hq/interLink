@@ -104,12 +104,9 @@ capabilities, including but not limited to:
 
 ## Resources
 
-<a>
-<iframe width="560" height="315" src="https://www.youtube.com/embed/vTg58Nd7_58?si=b7NPsU8ZoJl10WWg" title="Kubecon AI days 2025" frameborder="0" allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture; web-share" referrerpolicy="strict-origin-when-cross-origin" allowfullscreen></iframe>
-<iframe width="560" height="315" src="https://www.youtube.com/embed/M3uLQiekqo8?si=pzM-0MzzK7QGaCzZ" title="Kubecon AI days 2024" frameborder="0" allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture; web-share" referrerpolicy="strict-origin-when-cross-origin" allowfullscreen></iframe>
-
-<iframe width="560" height="315" src="https://www.youtube.com/embed/bIxw1uK0QRQ?si=T_TnWu5c81nvkWzy&amp;start=180" title="Kubecon 2024" frameborder="0" allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture; web-share" referrerpolicy="strict-origin-when-cross-origin" allowfullscreen></iframe>
-</a>
+[![Kubecon 2025](https://img.youtube.com/vi/bIxw1uK0QRQ/0.jpg)](https://www.youtube.com/watch?v=bIxw1uK0QRQ)
+[![Kubecon AI days 2025](https://img.youtube.com/vi/vTg58Nd7_58/0.jpg)](https://www.youtube.com/watch?v=vTg58Nd7_58)
+[![Kubecon AI days 2024](https://img.youtube.com/vi/M3uLQiekqo8/0.jpg)](https://www.youtube.com/watch?v=M3uLQiekqo8)
 
 ## License
 
