@@ -5,7 +5,7 @@ import type * as Redocusaurus from 'redocusaurus';
 
 const config: Config = {
   title: 'interLink',
-  tagline: 'Extend your cloud... everywhere!',
+  tagline: 'Your Virtual Kubelet ecosystem!',
   favicon: 'img/favicon.ico',
 
   // Set the production url of your site here
@@ -77,6 +77,15 @@ const config: Config = {
   ],
 
   themeConfig: {
+      announcementBar: {
+      id: 'support_us',
+      content:
+        'We are onboarding for our contribution to CNCF Sandbox! Please let us know for any broken or missing information as we move to the new home.',
+      backgroundColor: '#fafbfc',
+      textColor: '#091E42',
+      isCloseable: false,
+    },
+
     // Replace with your project's social card
     image: 'img/img/interlink_logo.png',
     navbar: {
