@@ -36,6 +36,10 @@ interLink is hosted by the
 For usage and development guides please refer to
 [our site](https://interlink-hq.github.io/interLink/)
 
+## Adopters
+
+Please find all our current adopters [here](./ADOPTERS.md)
+
 ## Contributing
 
 Our project welcomes contributions from any member of our community. To get
