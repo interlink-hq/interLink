@@ -38,8 +38,6 @@ For usage and development guides please refer to
 
 ## Contributing
 
-<!-- Template: https://github.com/cncf/project-template/blob/main/CONTRIBUTING.md -->
-
 Our project welcomes contributions from any member of our community. To get
 started contributing, please see our [Contributor Guide](./CONTRIBUTING.md).
 
@@ -102,16 +100,14 @@ capabilities, including but not limited to:
 
 ## Communications
 
-- User Mailing List:
-- Developer Mailing List:
-- Slack Channel:
-- Public Meeting Schedule and Links:
-- Social Media:
-- Other Channel(s), If Any:
+- [![Slack server](https://img.shields.io/badge/slack_server-8A2BE2?link=https%3A%2F%2Fjoin.slack.com%2Ft%2Fintertwin%2Fshared_invite%2Fzt-2cs67h9wz-2DFQ6EiSQGS1vlbbbJHctA)](https://join.slack.com/t/intertwin/shared_invite/zt-2cs67h9wz-2DFQ6EiSQGS1vlbbbJHctA)
 
 ## Resources
 
-[TODO: Add links to other helpful information (roadmap, docs, website, etc.)]
+<iframe width="560" height="315" src="https://www.youtube.com/embed/vTg58Nd7_58?si=b7NPsU8ZoJl10WWg" title="Kubecon AI days 2025" frameborder="0" allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture; web-share" referrerpolicy="strict-origin-when-cross-origin" allowfullscreen></iframe>
+<iframe width="560" height="315" src="https://www.youtube.com/embed/M3uLQiekqo8?si=pzM-0MzzK7QGaCzZ" title="Kubecon AI days 2024" frameborder="0" allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture; web-share" referrerpolicy="strict-origin-when-cross-origin" allowfullscreen></iframe>
+
+<iframe width="560" height="315" src="https://www.youtube.com/embed/bIxw1uK0QRQ?si=T_TnWu5c81nvkWzy&amp;start=180" title="Kubecon 2024" frameborder="0" allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture; web-share" referrerpolicy="strict-origin-when-cross-origin" allowfullscreen></iframe>
 
 ## License
 
