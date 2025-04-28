@@ -1,3 +1,5 @@
+# Welcome to the interLink Project
+
 [![GitHub License](https://img.shields.io/github/license/interlink-hq/interlink)](https://img.shields.io/github/license/interlink-hq/interlink)
 ![GitHub Repo stars](https://img.shields.io/github/stars/interlink-hq/interlink)
 
@@ -9,30 +11,112 @@
 
 ![Interlink logo](./docs/static/img/interlink_logo.png)
 
-## :information_source: Overview
+interLink is a abstraction layer for the execution of any Kubernetes pod on any
+remote resource capable of managing a Container execution lifecycle.
 
-### Introduction
-
-InterLink aims to provide an abstraction for the execution of a Kubernetes pod
-on any remote resource capable of managing a Container execution lifecycle. We
-target to facilitate the development of provider specific plugins, so the
+It facilitates the development of provider specific plugins for the
+[Kubernetes Virtual Kubelet interface](https://virtual-kubelet.io/), so the
 resource providers can leverage the power of virtual kubelet without a black
 belt in kubernetes internals.
 
 The project consists of two main components:
 
-- **A Kubernetes Virtual Node:** based on the
-  [VirtualKubelet](https://virtual-kubelet.io/) technology. Translating request
-  for a kubernetes pod execution into a remote call to the interLink API server.
+- **A Kubernetes Virtual Node:** based on the translating requests for a
+  kubernetes pod execution into a remote call to the interLink API server.
 - **The interLink API server:** a modular and pluggable REST server where you
   can create your own Container manager plugin (called sidecars), or use the
   existing ones: remote docker execution on a remote host, singularity Container
   on a remote SLURM batch system.
 
-The project got inspired by the [KNoC](https://github.com/CARV-ICS-FORTH/knoc)
-and [Liqo](https://github.com/liqotech/liqo/tree/master) projects, enhancing
-that with the implemention a generic API layer b/w the virtual kubelet component
-and the provider logic for the container lifecycle management.
+interLink is hosted by the
+[Cloud Native Computing Foundation (CNCF)](https://cncf.io).
+
+## Getting Started
 
 For usage and development guides please refer to
 [our site](https://interlink-hq.github.io/interLink/)
+
+## Contributing
+
+<!-- Template: https://github.com/cncf/project-template/blob/main/CONTRIBUTING.md -->
+
+Our project welcomes contributions from any member of our community. To get
+started contributing, please see our [Contributor Guide](./CONTRIBUTING.md).
+
+## Providers
+
+interLink is designed to ease the work required to include new remote providers.
+It already targets a wide range of providers with container execution
+capabilities, including but not limited to:
+
+- **SLURM or HTCondor batch systems with Apptainer, Enroot, or Singularity**:
+  These batch systems are widely used in high-performance computing environments
+  to manage and schedule jobs. By integrating with container runtimes like
+  Apptainer, Enroot, or Singularity, our solution can efficiently execute
+  containerized tasks on these systems.
+- **On-demand virtual machines with any container runtime**: This includes
+  virtual machines that can be provisioned on-demand and support container
+  runtimes such as Docker, Podman, or others. This flexibility allows for
+  scalable and dynamic resource allocation based on workload requirements.
+- **Remote Kubernetes clusters**: Our solution can extend the capabilities of
+  existing Kubernetes clusters, enabling them to offload workloads to another
+  remote cluster. This is particularly useful for distributing workloads across
+  multiple clusters for better resource utilization and fault tolerance.
+- **Lambda-like services**: These are serverless computing services that execute
+  code in response to events and automatically manage the underlying compute
+  resources. By targeting these services, our solution can leverage the
+  scalability and efficiency of serverless architectures for containerized
+  workloads. All of this, while exposing a bare Kubernetes API kind of
+  orchestration.
+
+## In Scope
+
+- **K8s applications with tasks to be executed on HPC systems**: This target
+  focuses on Kubernetes applications that require high-performance computing
+  (HPC) resources for executing tasks (AI training and inference, ML algorithm
+  optimizations etc). These tasks might involve complex computations,
+  simulations, or data processing that benefit from the specialized hardware and
+  optimized performance of HPC systems.
+
+- **Remote "runner"-like application for heavy payload execution requiring
+  GPUs**: This target is designed for applications that need to execute heavy
+  computational payloads, particularly those requiring GPU resources. These
+  applications can be run remotely, leveraging powerful GPU hardware to handle
+  tasks such as machine learning model training, data analysis, or rendering.
+
+- **Lambda-like functions calling on external resources**: This target involves
+  running containers on demand with specific computing needs. Now these
+  resources might also be outside of the Kubernetes cluster thanks to interLink
+  functionality.
+
+## Out of Scope
+
+- **Long-running services**: Our solution is not designed for services that need
+  to run continuously for extended periods. It is optimized for tasks that have
+  a defined start and end, rather than persistent services exposing
+  intra-cluster communication endpoints.
+- **Kubernetes Federation**: We do not aim to support Kubernetes Federation,
+  which involves managing multiple Kubernetes clusters as a single entity. Our
+  focus is on enabling Kubernetes pods to execute on remote resources, not on
+  federating all kind of resources on multiple clusters.
+
+## Communications
+
+- User Mailing List:
+- Developer Mailing List:
+- Slack Channel:
+- Public Meeting Schedule and Links:
+- Social Media:
+- Other Channel(s), If Any:
+
+## Resources
+
+[TODO: Add links to other helpful information (roadmap, docs, website, etc.)]
+
+## License
+
+This project is licensed under [Apache2](./LICENSE)
+
+## Conduct
+
+We follow the [CNCF Code of Conduct](./CODE_OF_CONDUCT.md)
