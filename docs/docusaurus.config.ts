@@ -55,9 +55,15 @@ const config: Config = {
           // Pass it a path to a local OpenAPI YAML file
           {
             // Redocusaurus will automatically bundle your spec into a single file during the build
-            id: 'using-single-yaml',
-            spec: 'openapi/openapi.json',
-            route: '/openapi/',
+            id: 'plugin-api',
+            spec: 'openapi/plugin-openapi.json',
+            route: '/plugin-openapi/',
+          },
+          {
+            // Redocusaurus will automatically bundle your spec into a single file during the build
+            id: 'interlink-api',
+            spec: 'openapi/interlink-openapi.json',
+            route: '/interlink-openapi/',
           },
         ],
         // Theme Options for modifying how redoc renders them
