@@ -10,15 +10,29 @@ Dealing with issues:
   and issues.
 -->
 
-# Short Description of the issue
+# Title
+
+### Summary
 
 <!--
-Please provide a plain-language description of what you would like to report.
-By using simple, concise language, you can help the maintainers understand the
-issue and context, and thereby help them prioritise it.
+Please provide a brief, high level summary of the issue you are having
 -->
 
-## Environment
+### Actual Behavior
+
+<!--
+Please describe, in detail, step-by-step what behavior is occurring.  Please
+include any screenshots or other relevant files to assist in duplicating the
+issue.
+-->
+
+### Expected Behavior
+
+<!--
+Please describe, in detail, step-by-step what you expect to occur.
+-->
+
+### Environment
 
 <!--
 Provide details of the environment you used when this error occurred
@@ -27,26 +41,17 @@ Provide details of the environment you used when this error occurred
 - Operating System:
 - Other related components versions:
 
-## Steps to reproduce
+### Steps to reproduce
 
 <!--
 If this is a runtime or other error, please describe what you did to generate the
 error
 -->
 
-## Logs, stacktrace, or other symptoms
+### Logs, stacktrace, or other symptoms
 
 <!--
 If you have logs or other supporting information like the stack trace from python,
 etc, paste it here.
 Use markdown formatting to put output in code blocks
 -->
-
-```shell
-output
-```
-
-<!-- the section below is optional - remove it if you don't know what to propose,
-but merely want to report an issue.  -->
-
-# Summary of proposed changes

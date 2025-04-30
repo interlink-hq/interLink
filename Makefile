@@ -12,6 +12,9 @@ installer:
 ssh-tunnel:
 	CGO_ENABLED=0 OOS=linux go build -o bin/ssh-tunnel cmd/ssh-tunnel/main.go
 
+openapi:
+	go run cmd/openapi-gen/main.go
+
 clean:
 	rm -rf ./bin
 

@@ -1,0 +1,20 @@
+[Unit]
+Description=This Unit is needed to automatically start the interLink API at system startup
+After=network.target
+
+[Service]
+Type=simple
+Restart=always
+RestartSec=3
+
+ExecStart=/home/USERNAME/.interlink/bin/interlink
+Environment="INTERLINKCONFIGPATH=/home/USERNAME/.interlink/config/InterLinkConfig.yaml"
+Environment="SHARED_FS=true"
+
+Environment="ENABLE_TRACING=0"
+
+StandardOutput=append:/home/USERNAME/.interlink/logs/interlink.log
+StandardError=append:/home/USERNAME/.interlink/logs/interlink.log
+
+[Install]
+WantedBy=multi-user.target
