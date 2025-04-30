@@ -2,6 +2,9 @@
 sidebar_position: 4
 ---
 
+import ThemedImage from "@theme/ThemedImage";
+import useBaseUrl from "@docusaurus/useBaseUrl";
+
 # Configure OpenID connect identity providers
 
 We support any OpenID compliant identity provider and also GitHub authN
