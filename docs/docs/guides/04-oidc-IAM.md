@@ -101,7 +101,11 @@ oauth:
   client_secret: ""
 ```
 
-:::danger Remember to put your email in the group field! :::
+:::danger
+
+Remember to put your email in the group field! 
+
+:::
 
 ## Indigo IAM
 
