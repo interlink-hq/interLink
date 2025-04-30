@@ -17,7 +17,7 @@ jobs:
         uses: actions/checkout@v4
 
       - name: Remove existing openapi.json
-        run: rm ./docs/openapi/openapi.json
+        run: rm ./docs/openapi/plugin-openapi.json
 
       - name: Download openapi.json
         uses: robinraju/release-downloader@v1
@@ -28,7 +28,7 @@ jobs:
           out-file-path: 'docs/openapi'
       
       - name: Rename openAPISpec to openapi.json
-        run: mv ./docs/openapi/openAPISpec ./docs/openapi/openapi.json
+        run: mv ./docs/openapi/openAPISpec ./docs/openapi/plugin-openapi.json
 
       - name: Set up Node.js
         uses: actions/setup-node@v4
