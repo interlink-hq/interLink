@@ -39,12 +39,11 @@ function HomepageHeader() {
           </Link>
 
         </div>
-      <img alt="Stars" src="https://img.shields.io/github/stars/intertwin-eu/interlink" style={{ marginTop: '1rem' }} onClick={() => window.location.href='https://github.com/interTwin-eu/interLink'}/>
+      <img alt="Stars" src="https://img.shields.io/github/stars/interlink-hq/interlink" style={{ marginTop: '1rem' }} onClick={() => window.location.href='https://github.com/interlink-hq/interLink'}/>
       <br/>
-      <img alt="GoReport" src="https://goreportcard.com/badge/github.com/intertwin-eu/interlink" style={{ marginTop: '1rem' }} onClick={() => window.location.href='https://goreportcard.com/report/github.com/intertwin-eu/interlink'}/>
+      <img alt="GoReport" src="https://goreportcard.com/badge/github.com/interlink-hq/interlink" style={{ marginTop: '1rem' }} onClick={() => window.location.href='https://goreportcard.com/report/github.com/interlink-hq/interlink'}/>
       <br/>
       <img alt="Slack" src="https://img.shields.io/badge/Join_Slack_Server!-8A2BE2" style={{ marginTop: '1rem' }} onClick={() => window.location.href='https://join.slack.com/t/intertwin/shared_invite/zt-2cs67h9wz-2DFQ6EiSQGS1vlbbbJHctA'}/>
-      <HomepageFeatures />
       </div>
     </header>
   );
@@ -58,8 +57,18 @@ export default function Home(): JSX.Element {
       description="Virtual Kubelets for everyone">
       <HomepageHeader />
       <main>
+      <HomepageFeatures />
+    <header className={clsx('hero hero--primary', styles.heroBanner)}>
+        <AdoptersFeatures/>
+        </header>
         <HomepageVideo />
-
+        <div class="container">
+        <Heading as="h2" className="hero__title">
+          CNCF contribution 
+        </Heading>
+        <p class="h3 p-3 mb-2 text-muted text-center">interLink is a <a href="https://cncf.io">Cloud Native Computing Foundation</a> Sandbox project</p>
+        <img class="mx-auto d-block img-fluid is-cncf-logo" src="/img/cncf-color.svg" alt="Cloud Native Computing Foundation logo"></img>
+        <p class="text-muted text-center">The Linux Foundation® (TLF) has registered trademarks and uses trademarks. For a list of TLF trademarks, see <a href="https://www.linuxfoundation.org/trademark-usage/">Trademark Usage</a>.</p></div>
       </main>
     </Layout>
   )

@@ -18,10 +18,9 @@ import (
 	"github.com/virtual-kubelet/virtual-kubelet/trace"
 	"github.com/virtual-kubelet/virtual-kubelet/trace/opentelemetry"
 
-	"github.com/intertwin-eu/interlink/pkg/interlink"
-	types "github.com/intertwin-eu/interlink/pkg/interlink"
-	"github.com/intertwin-eu/interlink/pkg/interlink/api"
-	"github.com/intertwin-eu/interlink/pkg/virtualkubelet"
+	"github.com/interlink-hq/interlink/pkg/interlink"
+	"github.com/interlink-hq/interlink/pkg/interlink/api"
+	"github.com/interlink-hq/interlink/pkg/virtualkubelet"
 )
 
 // UnixSocketRoundTripper is a custom RoundTripper for Unix socket connections
@@ -47,9 +46,9 @@ func main() {
 		return
 	}
 	var cancel context.CancelFunc
-	api.PodStatuses.Statuses = make(map[string]types.PodStatus)
+	api.PodStatuses.Statuses = make(map[string]interlink.PodStatus)
 
-	interLinkConfig, err := types.NewInterLinkConfig()
+	interLinkConfig, err := interlink.NewInterLinkConfig()
 	if err != nil {
 		panic(err)
 	}
@@ -67,7 +66,7 @@ func main() {
 	defer cancel()
 
 	if os.Getenv("ENABLE_TRACING") == "1" {
-		shutdown, err := interlink.InitTracer(ctx)
+		shutdown, err := interlink.InitTracer(ctx, "InterLink-Plugin-")
 		if err != nil {
 			log.G(ctx).Fatal(err)
 		}
@@ -176,7 +175,6 @@ func main() {
 		}
 
 		err = server.ListenAndServe()
-
 		if err != nil {
 			log.G(ctx).Fatal(err)
 		}

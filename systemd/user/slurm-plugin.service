@@ -1,0 +1,19 @@
+[Unit]
+Description=This Unit is needed to automatically start the SLURM plugin at system startup
+After=network.target
+
+[Service]
+Type=simple
+Restart=always
+RestartSec=3
+
+ExecStart=/home/USERNAME/.interlink/bin/plugin
+Environment="SLURMCONFIGPATH=/home/USERNAME/.interlink/config/plugin-config.yaml"
+Environment="SHARED_FS=true"
+
+Environment="ENABLE_TRACING=0"
+StandardOutput=append:/home/USERNAME/.interlink/logs/plugin.log
+StandardError=append:/home/USERNAME/.interlink/logs/plugin.log
+
+[Install]
+WantedBy=multi-user.target

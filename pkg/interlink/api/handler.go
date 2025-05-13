@@ -13,8 +13,7 @@ import (
 
 	trace "go.opentelemetry.io/otel/trace"
 
-	"github.com/intertwin-eu/interlink/pkg/interlink"
-	types "github.com/intertwin-eu/interlink/pkg/interlink"
+	"github.com/interlink-hq/interlink/pkg/interlink"
 )
 
 type InterLinkHandler struct {
@@ -55,7 +54,6 @@ func ReqWithError(
 	sessionContext string,
 	clientHTTP *http.Client,
 ) ([]byte, error) {
-
 	req.Header.Set("Content-Type", "application/json")
 
 	sessionContextMessage := GetSessionContextMessage(sessionContext)
@@ -99,7 +97,7 @@ func ReqWithError(
 		return nil, errHTTP
 	}
 
-	types.SetDurationSpan(start, span, types.WithHTTPReturnCode(resp.StatusCode))
+	interlink.SetDurationSpan(start, span, interlink.WithHTTPReturnCode(resp.StatusCode))
 
 	if respondWithReturn {
 

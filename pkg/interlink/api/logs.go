@@ -10,7 +10,7 @@ import (
 
 	"github.com/containerd/containerd/log"
 
-	types "github.com/intertwin-eu/interlink/pkg/interlink"
+	types "github.com/interlink-hq/interlink/pkg/interlink"
 
 	"go.opentelemetry.io/otel"
 	"go.opentelemetry.io/otel/attribute"
@@ -25,6 +25,7 @@ func (h *InterLinkHandler) GetLogsHandler(w http.ResponseWriter, r *http.Request
 	))
 	defer span.End()
 	defer types.SetDurationSpan(start, span)
+	defer types.SetInfoFromHeaders(span, &r.Header)
 
 	sessionContext := GetSessionContext(r)
 	sessionContextMessage := GetSessionContextMessage(sessionContext)
@@ -107,5 +108,4 @@ func (h *InterLinkHandler) GetLogsHandler(w http.ResponseWriter, r *http.Request
 		log.L.Error(sessionContextMessage, err)
 		return
 	}
-
 }

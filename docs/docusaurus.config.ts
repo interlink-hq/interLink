@@ -5,18 +5,18 @@ import type * as Redocusaurus from 'redocusaurus';
 
 const config: Config = {
   title: 'interLink',
-  tagline: 'Extend your cloud... everywhere!',
+  tagline: 'Your Virtual Kubelet ecosystem!',
   favicon: 'img/favicon.ico',
 
   // Set the production url of your site here
-  url: 'https://intertwin-eu.github.io',
+  url: 'https://interlink-hq.github.io',
   // Set the /<baseUrl>/ pathname under which your site is served
   // For GitHub pages deployment, it is often '/<projectName>/'
   baseUrl: '/interLink/',
 
   // GitHub pages deployment config.
   // If you aren't using GitHub pages, you don't need these.
-  organizationName: 'INFN', // Usually your GitHub org/user name.
+  organizationName: 'interlink-hq', // Usually your GitHub org/user name.
   projectName: 'interLink', // Usually your repo name.
 
   onBrokenLinks: 'throw',
@@ -39,7 +39,7 @@ const config: Config = {
           // Please change this to your repo.
           // Remove this to remove the "edit this page" links.
           editUrl:
-            'https://github.com/interTwin-eu/interLink',
+            'https://github.com/interlink-hq/interLink',
         },
         blog: false, 
         theme: {
@@ -55,9 +55,15 @@ const config: Config = {
           // Pass it a path to a local OpenAPI YAML file
           {
             // Redocusaurus will automatically bundle your spec into a single file during the build
-            id: 'using-single-yaml',
-            spec: 'openapi/openapi.json',
-            route: '/openapi/',
+            id: 'plugin-api',
+            spec: 'openapi/plugin-openapi.json',
+            route: '/plugin-openapi/',
+          },
+          {
+            // Redocusaurus will automatically bundle your spec into a single file during the build
+            id: 'interlink-api',
+            spec: 'openapi/interlink-openapi.json',
+            route: '/interlink-openapi/',
           },
         ],
         // Theme Options for modifying how redoc renders them
@@ -71,6 +77,15 @@ const config: Config = {
   ],
 
   themeConfig: {
+      announcementBar: {
+      id: 'support_us',
+      content:
+        'We are onboarding for our contribution to CNCF Sandbox! Please let us know for any broken or missing information as we move to the new home.',
+      backgroundColor: '#fafbfc',
+      textColor: '#091E42',
+      isCloseable: false,
+    },
+
     // Replace with your project's social card
     image: 'img/img/interlink_logo.png',
     navbar: {
@@ -87,7 +102,7 @@ const config: Config = {
           label: 'Docs',
         },
         {
-          href: 'https://github.com/interTwin-eu/interLink',
+          href: 'https://github.com/interlink-hq/interLink',
           label: 'GitHub',
           position: 'right',
         },
@@ -119,12 +134,12 @@ const config: Config = {
           items: [
             {
               label: 'GitHub',
-              href: 'https://github.com/interTwin-eu/interLink',
+              href: 'https://github.com/interlink-hq/interLink',
             },
           ],
         },
       ],
-      copyright: `Copyright © ${new Date().getFullYear()} Istituto Nazionale di Fisica Nucleare (INFN) - Built with Docusaurus.`,
+      copyright: `Originally created by INFN - Copyright © interLink a Series of LF Projects, LLC.`,
     },
     prism: {
       theme: prismThemes.github,

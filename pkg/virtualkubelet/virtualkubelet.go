@@ -8,6 +8,7 @@ import (
 	"net/http"
 	"os"
 	"strconv"
+	"strings"
 	"time"
 
 	"gopkg.in/yaml.v2"
@@ -25,7 +26,7 @@ import (
 	"k8s.io/client-go/kubernetes"
 	"k8s.io/client-go/tools/clientcmd"
 
-	types "github.com/intertwin-eu/interlink/pkg/interlink"
+	types "github.com/interlink-hq/interlink/pkg/interlink"
 )
 
 const (
@@ -33,11 +34,17 @@ const (
 	DefaultMemoryCapacity = "3000G"
 	DefaultPodCapacity    = "10000"
 	DefaultGPUCapacity    = "0"
+	DefaultFPGACapacity   = "0"
 	DefaultListenPort     = 10250
 	NamespaceKey          = "namespace"
 	NameKey               = "name"
 	CREATE                = 0
 	DELETE                = 1
+	nvidiaGPU             = "nvidia.com/gpu"
+	amdGPU                = "amd.com/gpu"
+	intelGPU              = "intel.com/gpu"
+	xilinxFPGA            = "xilinx.com/fpga"
+	intelFPGA             = "intel.com/fpga"
 )
 
 func TracerUpdate(ctx *context.Context, name string, pod *v1.Pod) {
@@ -59,7 +66,6 @@ func TracerUpdate(ctx *context.Context, name string, pod *v1.Pod) {
 	}
 	defer span.End()
 	defer types.SetDurationSpan(start, span)
-
 }
 
 func PodPhase(p Provider, phase string) (v1.PodStatus, error) {
@@ -87,7 +93,7 @@ func PodPhase(p Provider, phase string) (v1.PodStatus, error) {
 		ready = v1.ConditionFalse
 		scheduled = v1.ConditionFalse
 	default:
-		return v1.PodStatus{}, fmt.Errorf("Invalid pod phase specified: %s", phase)
+		return v1.PodStatus{}, fmt.Errorf("invalid pod phase specified: %s", phase)
 	}
 
 	return v1.PodStatus{
@@ -110,11 +116,9 @@ func PodPhase(p Provider, phase string) (v1.PodStatus, error) {
 			},
 		},
 	}, nil
-
 }
 
 func NodeCondition(ready bool) []v1.NodeCondition {
-
 	var readyType v1.ConditionStatus
 	var netType v1.ConditionStatus
 	if ready {
@@ -170,30 +174,75 @@ func NodeCondition(ready bool) []v1.NodeCondition {
 }
 
 func GetResources(config Config) v1.ResourceList {
+	gpuCount := map[string]int{}
+	fpgaCount := map[string]int{}
 
-	return v1.ResourceList{
-		"cpu":            resource.MustParse(config.CPU),
-		"memory":         resource.MustParse(config.Memory),
-		"pods":           resource.MustParse(config.Pods),
-		"nvidia.com/gpu": resource.MustParse(config.GPU),
+	for _, accelerator := range config.Resources.Accelerators {
+		switch accelerator.ResourceType {
+		case nvidiaGPU, amdGPU, intelGPU:
+			gpuCount[accelerator.ResourceType] += accelerator.Available
+		case xilinxFPGA, intelFPGA:
+			fpgaCount[accelerator.ResourceType] += accelerator.Available
+		}
 	}
 
+	resourceList := v1.ResourceList{
+		"cpu":    resource.MustParse(config.Resources.CPU),
+		"memory": resource.MustParse(config.Resources.Memory),
+		"pods":   resource.MustParse(config.Resources.Pods),
+	}
+
+	for resourceType, count := range gpuCount {
+		if count > 0 {
+			resourceList[v1.ResourceName(resourceType)] = *resource.NewQuantity(int64(count), resource.DecimalSI)
+		}
+	}
+
+	for resourceType, count := range fpgaCount {
+		if count > 0 {
+			resourceList[v1.ResourceName(resourceType)] = *resource.NewQuantity(int64(count), resource.DecimalSI)
+		}
+	}
+
+	// log the resource list
+	for key, value := range resourceList {
+		log.G(context.Background()).Infof("Resource %s: %s", key, value.String())
+	}
+
+	return resourceList
 }
 
 func SetDefaultResource(config *Config) {
-	if config.CPU == "" {
-		config.CPU = DefaultCPUCapacity
+	if config.Resources.CPU == "" {
+		config.Resources.CPU = DefaultCPUCapacity
 	}
-	if config.Memory == "" {
-		config.Memory = DefaultMemoryCapacity
+	if config.Resources.Memory == "" {
+		config.Resources.Memory = DefaultMemoryCapacity
 	}
-	if config.Pods == "" {
-		config.Pods = DefaultPodCapacity
-	}
-	if config.GPU == "" {
-		config.GPU = DefaultGPUCapacity
+	if config.Resources.Pods == "" {
+		config.Resources.Pods = DefaultPodCapacity
 	}
 
+	for i, accelerator := range config.Resources.Accelerators {
+		if accelerator.Available == 0 {
+			switch accelerator.ResourceType {
+			case nvidiaGPU, amdGPU, intelGPU:
+				defaultGPUCapacity, err := strconv.Atoi(DefaultGPUCapacity)
+				if err != nil {
+					log.G(context.Background()).Errorf("Invalid default GPU capacity: %v", err)
+					defaultGPUCapacity = 0
+				}
+				config.Resources.Accelerators[i].Available = defaultGPUCapacity
+			case xilinxFPGA, intelFPGA:
+				defaultFPGACapacity, err := strconv.Atoi(DefaultFPGACapacity)
+				if err != nil {
+					log.G(context.Background()).Errorf("Invalid default FPGA capacity: %v", err)
+					defaultFPGACapacity = 0
+				}
+				config.Resources.Accelerators[i].Available = defaultFPGACapacity
+			}
+		}
+	}
 }
 
 func buildKeyFromNames(namespace string, name string) (string, error) {
@@ -238,30 +287,81 @@ func NewProviderConfig(
 	daemonEndpointPort int32,
 	clientHTTPTransport *http.Transport,
 ) (*Provider, error) {
-
 	SetDefaultResource(&config)
 
 	lbls := map[string]string{
 		"alpha.service-controller.kubernetes.io/exclude-balancer": "true",
-		"beta.kubernetes.io/os":                                   "linux",
-		"kubernetes.io/hostname":                                  nodeName,
-		"kubernetes.io/role":                                      "agent",
+		"kubernetes.io/os":       "virtual-kubelet",
+		"kubernetes.io/hostname": nodeName,
+		"kubernetes.io/role":     "agent",
 		"node.kubernetes.io/exclude-from-external-load-balancers": "true",
-		"type": "virtual-kubelet",
+		"virtual-node.interlink/type":                             "virtual-kubelet",
+	}
+
+	taints := []v1.Taint{
+		{
+			Key:    "virtual-node.interlink/no-schedule",
+			Value:  strconv.FormatBool(true),
+			Effect: v1.TaintEffectNoSchedule,
+		},
+	}
+
+	// Add custom labels from config
+	for _, label := range config.NodeLabels {
+
+		parts := strings.SplitN(label, "=", 2)
+		if len(parts) == 2 {
+			lbls[parts[0]] = parts[1]
+		} else {
+			log.G(context.Background()).Warnf("Node label %q is not in the correct format. Should be key=value", label)
+		}
+	}
+
+	for _, accelerator := range config.Resources.Accelerators {
+		switch strings.ToLower(accelerator.ResourceType) {
+		case "nvidia.com/gpu":
+			lbls["nvidia-gpu-type"] = accelerator.Model
+		case "xilinx.com/fpga":
+			lbls["xilinx-fpga-type"] = accelerator.Model
+		case "intel.com/fpga":
+			lbls["intel-fpga-type"] = accelerator.Model
+		default:
+			log.G(context.Background()).Warnf("Unhandled accelerator resource type: %q", accelerator.ResourceType)
+		}
+	}
+
+	for _, taint := range config.NodeTaints {
+		log.G(context.Background()).Infof("Adding taint key=%q value=%q effect=%q", taint.Key, taint.Value, taint.Effect)
+
+		var effect v1.TaintEffect
+
+		switch taint.Effect {
+		case "NoSchedule":
+			effect = v1.TaintEffectNoSchedule
+		case "PreferNoSchedule":
+			effect = v1.TaintEffectPreferNoSchedule
+		case "NoExecute":
+			effect = v1.TaintEffectNoExecute
+		default:
+			effect = v1.TaintEffectNoSchedule
+			log.G(context.Background()).Warnf("Unknown taint effect %q, defaulting to NoSchedule", taint.Effect)
+		}
+
+		taints = append(taints, v1.Taint{
+			Key:    taint.Key,
+			Value:  taint.Value,
+			Effect: effect,
+		})
 	}
 
 	node := v1.Node{
 		ObjectMeta: metav1.ObjectMeta{
 			Name:   nodeName,
 			Labels: lbls,
-			//Annotations: cfg.ExtraAnnotations,
 		},
 		Spec: v1.NodeSpec{
-			Taints: []v1.Taint{{
-				Key:    "virtual-node.interlink/no-schedule",
-				Value:  strconv.FormatBool(true),
-				Effect: v1.TaintEffectNoSchedule,
-			}},
+			ProviderID: "external:///" + nodeName,
+			Taints:     taints,
 		},
 		Status: v1.NodeStatus{
 			NodeInfo: v1.NodeSystemInfo{
@@ -321,7 +421,6 @@ func NewProvider(
 
 // LoadConfig loads the given json configuration files and return a VirtualKubeletConfig struct
 func LoadConfig(ctx context.Context, providerConfig string) (config Config, err error) {
-
 	log.G(ctx).Info("Loading Virtual Kubelet config from " + providerConfig)
 	data, err := os.ReadFile(providerConfig)
 	if err != nil {
@@ -330,7 +429,6 @@ func LoadConfig(ctx context.Context, providerConfig string) (config Config, err 
 
 	config = Config{}
 	err = yaml.Unmarshal(data, &config)
-
 	if err != nil {
 		log.G(ctx).Fatal(err)
 		return config, err
@@ -339,18 +437,31 @@ func LoadConfig(ctx context.Context, providerConfig string) (config Config, err 
 	// config = configMap
 	SetDefaultResource(&config)
 
-	if _, err = resource.ParseQuantity(config.CPU); err != nil {
-		return config, fmt.Errorf("invalid CPU value %v", config.CPU)
+	if _, err = resource.ParseQuantity(config.Resources.CPU); err != nil {
+		return config, fmt.Errorf("invalid CPU value %v", config.Resources.CPU)
 	}
-	if _, err = resource.ParseQuantity(config.Memory); err != nil {
-		return config, fmt.Errorf("invalid memory value %v", config.Memory)
+	if _, err = resource.ParseQuantity(config.Resources.Memory); err != nil {
+		return config, fmt.Errorf("invalid memory value %v", config.Resources.Memory)
 	}
-	if _, err = resource.ParseQuantity(config.Pods); err != nil {
-		return config, fmt.Errorf("invalid pods value %v", config.Pods)
+	if _, err = resource.ParseQuantity(config.Resources.Pods); err != nil {
+		return config, fmt.Errorf("invalid pods value %v", config.Resources.Pods)
 	}
-	if _, err = resource.ParseQuantity(config.GPU); err != nil {
-		return config, fmt.Errorf("invalid GPU value %v", config.GPU)
+	if _, err = resource.ParseQuantity(config.Resources.CPU); err != nil {
+		return config, fmt.Errorf("invalid CPU value %v", config.Resources.CPU)
 	}
+	if _, err = resource.ParseQuantity(config.Resources.Memory); err != nil {
+		return config, fmt.Errorf("invalid memory value %v", config.Resources.Memory)
+	}
+	if _, err = resource.ParseQuantity(config.Resources.Pods); err != nil {
+		return config, fmt.Errorf("invalid pods value %v", config.Resources.Pods)
+	}
+	for _, accelerator := range config.Resources.Accelerators {
+		quantity := resource.NewQuantity(int64(accelerator.Available), resource.DecimalSI)
+		if _, err = resource.ParseQuantity(quantity.String()); err != nil {
+			return config, fmt.Errorf("invalid value for accelerator %v (model: %v): %v", accelerator.ResourceType, accelerator.Model, err)
+		}
+	}
+
 	return config, nil
 }
 
@@ -368,7 +479,6 @@ func (p *Provider) NotifyNodeStatus(ctx context.Context, f func(*v1.Node)) {
 
 // nodeUpdate continously checks for node status and availability
 func (p *Provider) nodeUpdate(ctx context.Context) {
-
 	t := time.NewTimer(5 * time.Second)
 	if !t.Stop() {
 		<-t.C
@@ -404,7 +514,6 @@ func (p *Provider) nodeUpdate(ctx context.Context) {
 		}
 		log.G(ctx).Info("endNodeLoop")
 	}
-
 }
 
 // Ping the kubelet from the cluster, this will always be ok by design probably
@@ -416,7 +525,7 @@ func (p *Provider) Ping(_ context.Context) error {
 func (p *Provider) CreatePod(ctx context.Context, pod *v1.Pod) error {
 	TracerUpdate(&ctx, "CreatePodVK", pod)
 
-	var hasInitContainers = false
+	hasInitContainers := false
 	var state v1.ContainerState
 
 	key, err := buildKey(pod)
@@ -486,7 +595,6 @@ func (p *Provider) CreatePod(ctx context.Context, pod *v1.Pod) error {
 
 	// set pod containers status to notReady and waiting if there is an initContainer to be executed first
 	for _, container := range pod.Spec.Containers {
-
 		pod.Status.ContainerStatuses = append(pod.Status.ContainerStatuses, v1.ContainerStatus{
 			Name:         container.Name,
 			Image:        container.Image,
@@ -494,7 +602,6 @@ func (p *Provider) CreatePod(ctx context.Context, pod *v1.Pod) error {
 			RestartCount: 0,
 			State:        state,
 		})
-
 	}
 
 	p.pods[key] = pod
@@ -870,7 +977,6 @@ func CheckIfAnnotationExists(pod *v1.Pod, key string) bool {
 	_, ok := pod.Annotations[key]
 
 	return ok
-
 }
 
 func (p *Provider) initClientSet(ctx context.Context) error {

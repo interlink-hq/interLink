@@ -18,18 +18,21 @@ import (
 	"go.opentelemetry.io/otel"
 	"go.opentelemetry.io/otel/attribute"
 	trace "go.opentelemetry.io/otel/trace"
+	authenticationv1 "k8s.io/api/authentication/v1"
 	v1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 
-	types "github.com/intertwin-eu/interlink/pkg/interlink"
+	types "github.com/interlink-hq/interlink/pkg/interlink"
 )
 
-const PodPhaseInitialize = "Initializing"
-const PodPhaseCompleted = "Completed"
+const (
+	PodPhaseInitialize = "Initializing"
+	PodPhaseCompleted  = "Completed"
+)
 
-func failedMount(ctx context.Context, failed *bool, name string, pod *v1.Pod, p *Provider) error {
-	*failed = true
-	log.G(ctx).Warning("Unable to find ConfigMap " + name + " for pod " + pod.Name + ". Waiting for it to be initialized")
+func failedMount(ctx context.Context, failedAndWait *bool, name string, pod *v1.Pod, p *Provider, err error) error {
+	*failedAndWait = true
+	log.G(ctx).Warningf("Unable to find ConfigMap %s for pod %s. Waiting for it to be initialized. Error was: %v. Current phase: %s", name, pod.Name, err, pod.Status.Phase)
 	if pod.Status.Phase != PodPhaseInitialize {
 		pod.Status.Phase = PodPhaseInitialize
 		err := p.UpdatePod(ctx, pod)
@@ -38,7 +41,6 @@ func failedMount(ctx context.Context, failed *bool, name string, pod *v1.Pod, p 
 		}
 	}
 	return nil
-
 }
 
 func traceExecute(ctx context.Context, pod *v1.Pod, name string, startHTTPCall int64) *trace.Span {
@@ -86,11 +88,10 @@ func getSidecarEndpoint(ctx context.Context, interLinkURL string, interLinkPort 
 // PingInterLink pings the InterLink API and returns true if there's an answer. The second return value is given by the answer provided by the API.
 func PingInterLink(ctx context.Context, config Config) (bool, int, error) {
 	tracer := otel.Tracer("interlink-service")
-	interLinkEndpoint := getSidecarEndpoint(ctx, config.InterlinkURL, config.Interlinkport)
+	interLinkEndpoint := getSidecarEndpoint(ctx, config.InterlinkURL, config.InterlinkPort)
 	log.G(ctx).Info("Pinging: " + interLinkEndpoint + "/pinglink")
 	retVal := -1
 	req, err := http.NewRequest(http.MethodPost, interLinkEndpoint+"/pinglink", nil)
-
 	if err != nil {
 		log.G(ctx).Error(err)
 	}
@@ -144,7 +145,7 @@ func updateCacheRequest(ctx context.Context, config Config, pod v1.Pod, token st
 		return err
 	}
 
-	interLinkEndpoint := getSidecarEndpoint(ctx, config.InterlinkURL, config.Interlinkport)
+	interLinkEndpoint := getSidecarEndpoint(ctx, config.InterlinkURL, config.InterlinkPort)
 	reader := bytes.NewReader(bodyBytes)
 	req, err := http.NewRequest(http.MethodPost, interLinkEndpoint+"/updateCache", reader)
 	if err != nil {
@@ -182,7 +183,7 @@ func updateCacheRequest(ctx context.Context, config Config, pod v1.Pod, token st
 // Returns the call response expressed in bytes and/or the first encountered error
 func createRequest(ctx context.Context, config Config, pod types.PodCreateRequests, token string) ([]byte, error) {
 	tracer := otel.Tracer("interlink-service")
-	interLinkEndpoint := getSidecarEndpoint(ctx, config.InterlinkURL, config.Interlinkport)
+	interLinkEndpoint := getSidecarEndpoint(ctx, config.InterlinkURL, config.InterlinkPort)
 
 	bodyBytes, err := json.Marshal(pod)
 	if err != nil {
@@ -231,7 +232,7 @@ func createRequest(ctx context.Context, config Config, pod types.PodCreateReques
 // deleteRequest performs a REST call to the InterLink API when a Pod is deleted from the VK. It Marshals the standard v1.Pod struct and sends it to InterLink.
 // Returns the call response expressed in bytes and/or the first encountered error
 func deleteRequest(ctx context.Context, config Config, pod *v1.Pod, token string) ([]byte, error) {
-	interLinkEndpoint := getSidecarEndpoint(ctx, config.InterlinkURL, config.Interlinkport)
+	interLinkEndpoint := getSidecarEndpoint(ctx, config.InterlinkURL, config.InterlinkPort)
 	var returnValue []byte
 	bodyBytes, err := json.Marshal(pod)
 	if err != nil {
@@ -287,7 +288,7 @@ func deleteRequest(ctx context.Context, config Config, pod *v1.Pod, token string
 func statusRequest(ctx context.Context, config Config, podsList []*v1.Pod, token string) ([]byte, error) {
 	tracer := otel.Tracer("interlink-service")
 
-	interLinkEndpoint := getSidecarEndpoint(ctx, config.InterlinkURL, config.Interlinkport)
+	interLinkEndpoint := getSidecarEndpoint(ctx, config.InterlinkURL, config.InterlinkPort)
 
 	bodyBytes, err := json.Marshal(podsList)
 	if err != nil {
@@ -348,7 +349,7 @@ func LogRetrieval(
 	sessionContext string,
 ) (io.ReadCloser, error) {
 	tracer := otel.Tracer("interlink-service")
-	interLinkEndpoint := getSidecarEndpoint(ctx, config.InterlinkURL, config.Interlinkport)
+	interLinkEndpoint := getSidecarEndpoint(ctx, config.InterlinkURL, config.InterlinkPort)
 
 	token := ""
 
@@ -395,7 +396,7 @@ func LogRetrieval(
 
 	clientHTTPTransport.DisableKeepAlives = true
 	clientHTTPTransport.MaxIdleConnsPerHost = -1
-	var logHTTPClient = &http.Client{Transport: clientHTTPTransport}
+	logHTTPClient := &http.Client{Transport: clientHTTPTransport}
 
 	resp, err := doRequestWithClient(req, token, logHTTPClient)
 	if err != nil {
@@ -416,12 +417,301 @@ func LogRetrieval(
 	return resp.Body, err
 }
 
+// Adds to pod environment variables related to services. For now, it only concerns Kubernetes API variables, example below:
+/*
+KUBERNETES_PORT=tcp://10.96.0.1:443
+KUBERNETES_SERVICE_PORT=443
+KUBERNETES_PORT_443_TCP_ADDR=10.96.0.1
+KUBERNETES_PORT_443_TCP_PORT=443
+KUBERNETES_PORT_443_TCP_PROTO=tcp
+KUBERNETES_PORT_443_TCP=tcp://10.96.0.1:443
+KUBERNETES_SERVICE_PORT_HTTPS=443
+KUBERNETES_SERVICE_HOST=10.96.0.1
+*/
+func addKubernetesServicesEnvVars(ctx context.Context, config Config, pod *v1.Pod) {
+	if config.KubernetesAPIAddr == "" || config.KubernetesAPIPort == "" {
+		log.G(ctx).Info("InterLink configuration does not contains both KubernetesApiAddr and KubernetesApiPort, so no env var like KUBERNETES_SERVICE_HOST is added.")
+		return
+	}
+
+	appendEnvVar := func(envs *[]v1.EnvVar, name string, value string) {
+		envVar := v1.EnvVar{
+			Name:  name,
+			Value: value,
+		}
+		*envs = append(*envs, envVar)
+	}
+	appendEnvVars := func(containersPtr *[]v1.Container, index int) {
+		containers := *containersPtr
+		// container := containers[index]
+		envsPtr := &containers[index].Env
+
+		appendEnvVar(envsPtr, "KUBERNETES_PORT", "tcp://"+config.KubernetesAPIAddr+":"+config.KubernetesAPIPort)
+		appendEnvVar(envsPtr, "KUBERNETES_SERVICE_PORT", config.KubernetesAPIPort)
+		appendEnvVar(envsPtr, "KUBERNETES_PORT_443_TCP_ADDR", config.KubernetesAPIAddr)
+		appendEnvVar(envsPtr, "KUBERNETES_PORT_443_TCP_PORT", config.KubernetesAPIPort)
+		appendEnvVar(envsPtr, "KUBERNETES_PORT_443_TCP_PROTO", "tcp")
+		appendEnvVar(envsPtr, "KUBERNETES_PORT_443_TCP", "tcp://"+config.KubernetesAPIAddr+":"+config.KubernetesAPIPort)
+		appendEnvVar(envsPtr, "KUBERNETES_SERVICE_PORT_HTTPS", config.KubernetesAPIPort)
+		appendEnvVar(envsPtr, "KUBERNETES_SERVICE_HOST", config.KubernetesAPIAddr)
+	}
+	// Warning: loop range copy value, so to modify original containers, we must use index instead.
+	for i := range pod.Spec.InitContainers {
+		appendEnvVars(&pod.Spec.InitContainers, i)
+	}
+	for i := range pod.Spec.Containers {
+		appendEnvVars(&pod.Spec.Containers, i)
+	}
+
+	if log.G(ctx).Logger.IsLevelEnabled(log.DebugLevel) {
+		// For debugging purpose only.
+		for _, container := range pod.Spec.InitContainers {
+			for _, envVar := range container.Env {
+				log.G(ctx).Debug("in addKubernetesServicesEnvVars InterLink VK environment variable to pod ", pod.Name, " container: ", container.Name, " env: ", envVar.Name, " value: ", envVar.Value)
+			}
+		}
+		for _, container := range pod.Spec.Containers {
+			for _, envVar := range container.Env {
+				log.G(ctx).Debug("in addKubernetesServicesEnvVars InterLink VK environment variable to pod ", pod.Name, " container: ", container.Name, " env: ", envVar.Name, " value: ", envVar.Value)
+			}
+		}
+	}
+	log.G(ctx).Info("InterLink VK added a set of environment variables (e.g.: KUBERNETES_SERVICE_HOST) to all containers of pod ",
+		pod.Name, " k8s addr ", config.KubernetesAPIAddr, " k8s port ", config.KubernetesAPIPort)
+}
+
+// Handle projected sources and fills the projectedVolume object.
+func remoteExecutionHandleProjectedSource(
+	ctx context.Context, p *Provider, pod *v1.Pod, source v1.VolumeProjection, projectedVolume *v1.ConfigMap,
+) error {
+	switch {
+	case source.ServiceAccountToken != nil:
+		/* Case
+		   - serviceAccountToken:
+		       expirationSeconds: 3600
+		       path: token
+		*/
+		log.G(ctx).Debug("Volume is a projected volume typed serviceAccountToken")
+
+		// Now using TokenRequest API (https://kubernetes.io/docs/reference/kubernetes-api/authentication-resources/token-request-v1/)
+		var expirationSeconds int64
+		/*
+			TODO: honor the expirationSeconds field and implement a rotation.
+			if source.ServiceAccountToken.ExpirationSeconds != nil {
+				expirationSeconds = *source.ServiceAccountToken.ExpirationSeconds
+			} else {
+				// If not expiration is set, set to 1h.
+				expirationSeconds = 3600
+			}
+		*/
+		// Infinite = 100 years
+		expirationSeconds = 100 * 365 * 24 * 3600
+
+		// Bount it to POD, so that token is deleted if pod is deleted. This is important given the illimited expiration.
+		bountObjectRef := &authenticationv1.BoundObjectReference{
+			Kind: "Pod",
+			// Only one of UID or Name is sufficient, k8s will retrieve the other value.
+			UID:  pod.UID,
+			Name: pod.Name,
+		}
+		tokenRequest := &authenticationv1.TokenRequest{
+			Spec: authenticationv1.TokenRequestSpec{
+				// No need to set audience field. If set with wrong value, it might break token validity!
+				ExpirationSeconds: &expirationSeconds,
+				BoundObjectRef:    bountObjectRef,
+			},
+		}
+
+		tokenRequestResult, err := p.clientSet.CoreV1().ServiceAccounts(pod.Namespace).CreateToken(
+			ctx, pod.Spec.ServiceAccountName, tokenRequest, metav1.CreateOptions{})
+		if err != nil {
+			log.G(ctx).Error("error during token request in RemoteExecution() ", err)
+		}
+		log.G(ctx).Debug("could get token ", tokenRequestResult.Status.Token)
+
+		// Add found token to result.
+		projectedVolume.Data[source.ServiceAccountToken.Path] = tokenRequestResult.Status.Token
+
+	case source.ConfigMap != nil:
+		/* Case
+		   - configMap:
+		       items:
+		         - key: ca.crt
+		           path: ca.crt
+		       name: kube-root-ca.crt
+		*/
+		for _, item := range source.ConfigMap.Items {
+			const kubeCaCrt = "kube-root-ca.crt"
+			overrideCaCrt := p.config.KubernetesAPICaCrt
+			if source.ConfigMap.Name == kubeCaCrt && overrideCaCrt != "" {
+				log.G(ctx).Debug("handling special case of Kubernetes API kube-root-ca.crt, override found, using provided ca.crt:, ", overrideCaCrt)
+				projectedVolume.Data[item.Path] = overrideCaCrt
+			} else {
+				// This gets the usual certificate for K8s API, but it is restricted to whatever usual IP/FQDN of K8S API URL.
+				// With InterLink, the Kubernetes internal network is not accessible so this default ca.crt is probably useless.
+				log.G(ctx).Warning("using default Kubernetes API kube-root-ca.crt (no override found), but the default one might not be compatible with the subject: ", p.config.KubernetesAPIAddr)
+				cfgmap, err := p.clientSet.CoreV1().ConfigMaps(pod.Namespace).Get(ctx, source.ConfigMap.Name, metav1.GetOptions{})
+				if err != nil {
+					return fmt.Errorf("error during retrieval of ConfigMap %s error: %w", source.ConfigMap.Name, err)
+				}
+				if value, ok := cfgmap.Data[item.Key]; ok {
+					projectedVolume.Data[item.Path] = value
+				} else {
+					return fmt.Errorf("error during retrieval of key %s of (existing) ConfigMap %s error: %w", item.Key, source.ConfigMap.Name, err)
+				}
+			}
+		}
+
+	case source.DownwardAPI != nil:
+		/* Case
+		- downwardAPI:
+			items:
+			- fieldRef:
+				apiVersion: v1
+				fieldPath: metadata.namespace
+				path: namespace
+		*/
+		// https://kubernetes.io/docs/concepts/workloads/pods/downward-api/
+		// See URL doc above, that describe what type of DownwardAPI to expect from volume. For now, only FieldRef is supported.
+		// The rest are ignored.
+		for _, item := range source.DownwardAPI.Items {
+			switch {
+
+			case item.FieldRef != nil:
+				switch item.FieldRef.FieldPath {
+				case "metadata.name":
+					projectedVolume.Data[item.Path] = pod.Name
+
+				case "metadata.namespace":
+					projectedVolume.Data[item.Path] = pod.Namespace
+
+				case "metadata.uid":
+					projectedVolume.Data[item.Path] = string(pod.UID)
+
+				// TODO implement DownwardAPI annotation and label if needed.
+
+				default:
+					log.G(ctx).Warningf("in pod %s unsupported DownwardAPI FieldPath %s in InterLink, ignoring this source...", pod.Name, item.FieldRef.FieldPath)
+				}
+
+			case item.ResourceFieldRef != nil:
+				// TODO implement DownwardAPI resourceFieldRef if needed.
+				log.G(ctx).Warningf("in pod %s unsupported DownwardAPI resourceFieldRef in InterLink, ignoring this source...", pod.Name)
+
+			default:
+				log.G(ctx).Warningf("in pod %s unsupported unknown DownwardAPI in InterLink, ignoring this source...", pod.Name)
+			}
+		}
+	}
+	return nil
+}
+
+func remoteExecutionHandleVolumes(ctx context.Context, p *Provider, pod *v1.Pod, req *types.PodCreateRequests) error {
+	startTime := time.Now()
+	endTime := startTime.Add(5 * time.Minute)
+
+	_, err := p.clientSet.CoreV1().Pods(pod.Namespace).Get(ctx, pod.Name, metav1.GetOptions{})
+	if err != nil {
+		log.G(ctx).Warning("Deleted Pod before actual creation")
+		return nil
+	}
+	// Sometime the get secret or configmap can fail because it didn't have time to initialize, thus this
+	// is not a true failure. We use this flag to wait.
+	var failedAndWait bool
+
+	log.G(ctx).Debug("Looking at volumes")
+	for _, volume := range pod.Spec.Volumes {
+		log.G(ctx).Debug("Looking at volume ", volume)
+		for {
+			failedAndWait = false
+			if time.Now().Before(endTime) {
+				switch {
+				case volume.ConfigMap != nil:
+					cfgmap, err := p.clientSet.CoreV1().ConfigMaps(pod.Namespace).Get(ctx, volume.ConfigMap.Name, metav1.GetOptions{})
+					if err != nil {
+						err = failedMount(ctx, &failedAndWait, volume.ConfigMap.Name, pod, p, err)
+						if err != nil {
+							return err
+						}
+					} else {
+						req.ConfigMaps = append(req.ConfigMaps, *cfgmap)
+					}
+
+				case volume.Projected != nil:
+					// The service account token uses the projected volume in K8S >= 1.24.
+
+					if p.config.DisableProjectedVolumes {
+						// This flag disable doing anything about Projected Volumes.
+						log.G(ctx).Warning("Flag DisableProjectedVolumes set to true, so not handing Projected Volume: ", volume)
+						break
+					}
+
+					var projectedVolume v1.ConfigMap
+					projectedVolume.Name = volume.Name
+					projectedVolume.Data = make(map[string]string)
+					log.G(ctx).Debug("Adding to PodCreateRequests the projected volume ", volume.Name)
+					req.ProjectedVolumeMaps = append(req.ProjectedVolumeMaps, projectedVolume)
+
+					for _, source := range volume.Projected.Sources {
+						err := remoteExecutionHandleProjectedSource(ctx, p, pod, source, &projectedVolume)
+						if err != nil {
+							return err
+						}
+						failedAndWait = false
+						log.G(ctx).Debug("ProjectedVolumeMaps len: ", len(req.ProjectedVolumeMaps))
+					}
+
+				case volume.Secret != nil:
+					scrt, err := p.clientSet.CoreV1().Secrets(pod.Namespace).Get(ctx, volume.Secret.SecretName, metav1.GetOptions{})
+					if err != nil {
+						err = failedMount(ctx, &failedAndWait, volume.Secret.SecretName, pod, p, err)
+						if err != nil {
+							return err
+						}
+					} else {
+						req.Secrets = append(req.Secrets, *scrt)
+					}
+
+				case volume.EmptyDir != nil:
+					log.G(ctx).Debugf("empty dir found, nothing to do for volume %s for Pod %s", volume.Name, pod.Name)
+
+				default:
+					log.G(ctx).Warningf("ignoring unsupported volume %s for Pod %s", volume.Name, pod.Name)
+				}
+
+				if failedAndWait {
+					log.G(ctx).Warningf("volume %s not ready, sleeping 2s, attempt %f / 5 minutes max", volume.Name, time.Since(startTime).Minutes())
+					time.Sleep(2 * time.Second)
+					continue
+				}
+				pod.Status.Phase = v1.PodPending
+				err = p.UpdatePod(ctx, pod)
+				if err != nil {
+					return err
+				}
+				break
+			}
+
+			pod.Status.Phase = v1.PodFailed
+			pod.Status.Reason = "CFGMaps/Secrets not found"
+			for i := range pod.Status.ContainerStatuses {
+				pod.Status.ContainerStatuses[i].Ready = false
+			}
+			err = p.UpdatePod(ctx, pod)
+			if err != nil {
+				return err
+			}
+			return errors.New("unable to retrieve ConfigMaps or Secrets after 5m. Check logs")
+		}
+	}
+	return nil
+}
+
 // RemoteExecution is called by the VK everytime a Pod is being registered or deleted to/from the VK.
 // Depending on the mode (CREATE/DELETE), it performs different actions, making different REST calls.
 // Note: for the CREATE mode, the function gets stuck up to 5 minutes waiting for every missing ConfigMap/Secret.
 // If after 5m they are not still available, the function errors out
 func RemoteExecution(ctx context.Context, config Config, p *Provider, pod *v1.Pod, mode int8) error {
-
 	token := ""
 	if config.VKTokenFile != "" {
 		b, err := os.ReadFile(config.VKTokenFile) // just pass the file name
@@ -437,75 +727,32 @@ func RemoteExecution(ctx context.Context, config Config, p *Provider, pod *v1.Po
 		var resp types.CreateStruct
 
 		req.Pod = *pod
-		startTime := time.Now()
 
-		timeNow := time.Now()
-		_, err := p.clientSet.CoreV1().Pods(pod.Namespace).Get(ctx, pod.Name, metav1.GetOptions{})
+		err := remoteExecutionHandleVolumes(ctx, p, pod, &req)
 		if err != nil {
-			log.G(ctx).Warning("Deleted Pod before actual creation")
-			return nil
+			return err
 		}
 
-		var failed bool
+		// Adds special Kubernetes env var. Note: the pod provided by VK is "immutable", well it is a copy. In InterLink, we can modify it.
+		addKubernetesServicesEnvVars(ctx, config, pod)
 
-		for _, volume := range pod.Spec.Volumes {
-			for {
-				if timeNow.Sub(startTime).Seconds() < time.Hour.Minutes()*5 {
-					if volume.ConfigMap != nil {
-						cfgmap, err := p.clientSet.CoreV1().ConfigMaps(pod.Namespace).Get(ctx, volume.ConfigMap.Name, metav1.GetOptions{})
-						if err != nil {
-							err = failedMount(ctx, &failed, volume.ConfigMap.Name, pod, p)
-							if err != nil {
-								return err
-							}
-						} else {
-							failed = false
-							req.ConfigMaps = append(req.ConfigMaps, *cfgmap)
-						}
-					} else if volume.Secret != nil {
-						scrt, err := p.clientSet.CoreV1().Secrets(pod.Namespace).Get(ctx, volume.Secret.SecretName, metav1.GetOptions{})
-						if err != nil {
-							err = failedMount(ctx, &failed, volume.Secret.SecretName, pod, p)
-							if err != nil {
-								return err
-							}
-						} else {
-							failed = false
-							req.Secrets = append(req.Secrets, *scrt)
-						}
-					}
-
-					if failed {
-						time.Sleep(time.Second)
-						continue
-					}
-					pod.Status.Phase = v1.PodPending
-					err = p.UpdatePod(ctx, pod)
-					if err != nil {
-						return err
-					}
-					break
-				}
-
-				pod.Status.Phase = v1.PodFailed
-				pod.Status.Reason = "CFGMaps/Secrets not found"
-				for i := range pod.Status.ContainerStatuses {
-					pod.Status.ContainerStatuses[i].Ready = false
-				}
-				err = p.UpdatePod(ctx, pod)
-				if err != nil {
-					return err
-				}
-				return errors.New("unable to retrieve ConfigMaps or Secrets. Check logs")
+		// For debugging purpose only.
+		for _, container := range pod.Spec.InitContainers {
+			for _, envVar := range container.Env {
+				log.G(ctx).Debug("InterLink VK environment variable to pod ", pod.Name, " container: ", container.Name, " env: ", envVar.Name, " value: ", envVar.Value)
 			}
 		}
-
+		for _, container := range pod.Spec.Containers {
+			for _, envVar := range container.Env {
+				log.G(ctx).Debug("InterLink VK environment variable to pod ", pod.Name, " container: ", container.Name, " env: ", envVar.Name, " value: ", envVar.Value)
+			}
+		}
 		returnVal, err := createRequest(ctx, config, req, token)
 		if err != nil {
 			return fmt.Errorf("error doing createRequest() in RemoteExecution() return value %s error detail %s error: %w", returnVal, fmt.Sprintf("%#v", err), err)
 		}
 
-		log.G(ctx).Debug("Pod " + pod.Name + " with Job ID " + resp.PodJID + " before json.Unmarshal()")
+		log.G(ctx).Debug("Pod ", pod.Name, " with Job ID ", resp.PodJID, " before json.Unmarshal()")
 		// get remote job ID and annotate it into the pod
 		err = json.Unmarshal(returnVal, &resp)
 		if err != nil {
@@ -597,7 +844,6 @@ func handleInitContainersUpdate(ctx context.Context, podRemoteStatus types.PodSt
 }
 
 func handleContainersUpdate(ctx context.Context, podRemoteStatus types.PodStatus, podRefInCluster *v1.Pod, podWaitingForInitContainers bool, podInit bool, nInitContainersInPod int, counterOfTerminatedInitContainers int) (int, bool, string, bool) {
-
 	counterOfTerminatedContainers := 0
 	podErrored := false
 	failedReason := ""

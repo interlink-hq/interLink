@@ -9,7 +9,7 @@
 InterlinkAddress: "http://0.0.0.0"
 InterlinkPort: "3000"
 SidecarURL: "http://plugin"
-#SidecarURL: "http://0.0.0.0"
+#sidecarURL: "http://0.0.0.0"
 SidecarPort: "4000"
 VerboseLogging: true
 ErrorsOnlyLogging: false

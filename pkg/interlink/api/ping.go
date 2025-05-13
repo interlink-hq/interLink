@@ -11,7 +11,7 @@ import (
 	"github.com/containerd/containerd/log"
 	v1 "k8s.io/api/core/v1"
 
-	types "github.com/intertwin-eu/interlink/pkg/interlink"
+	types "github.com/interlink-hq/interlink/pkg/interlink"
 
 	"go.opentelemetry.io/otel"
 	"go.opentelemetry.io/otel/attribute"
@@ -19,7 +19,7 @@ import (
 )
 
 // Ping is just a very basic Ping function
-func (h *InterLinkHandler) Ping(w http.ResponseWriter, _ *http.Request) {
+func (h *InterLinkHandler) Ping(w http.ResponseWriter, r *http.Request) {
 	start := time.Now().UnixMicro()
 	tracer := otel.Tracer("interlink-API")
 	_, span := tracer.Start(h.Ctx, "PingAPI", trace.WithAttributes(
@@ -27,6 +27,7 @@ func (h *InterLinkHandler) Ping(w http.ResponseWriter, _ *http.Request) {
 	))
 	defer span.End()
 	defer types.SetDurationSpan(start, span)
+	defer types.SetInfoFromHeaders(span, &r.Header)
 
 	log.G(h.Ctx).Info("InterLink: received Ping call")
 
@@ -57,7 +58,7 @@ func (h *InterLinkHandler) Ping(w http.ResponseWriter, _ *http.Request) {
 		w.WriteHeader(http.StatusServiceUnavailable)
 		_, err = w.Write([]byte(strconv.Itoa(http.StatusServiceUnavailable)))
 		if err != nil {
-			log.G(h.Ctx).Error(errors.New("Failed to write to http buffer"))
+			log.G(h.Ctx).Error(errors.New("failed to write to http buffer"))
 		}
 		return
 	}

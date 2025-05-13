@@ -12,7 +12,7 @@ import (
 	"github.com/containerd/containerd/log"
 	v1 "k8s.io/api/core/v1"
 
-	types "github.com/intertwin-eu/interlink/pkg/interlink"
+	types "github.com/interlink-hq/interlink/pkg/interlink"
 
 	"go.opentelemetry.io/otel"
 	"go.opentelemetry.io/otel/attribute"
@@ -27,6 +27,7 @@ func (h *InterLinkHandler) StatusHandler(w http.ResponseWriter, r *http.Request)
 	))
 	defer span.End()
 	defer types.SetDurationSpan(start, span)
+	defer types.SetInfoFromHeaders(span, &r.Header)
 	statusCode := http.StatusOK
 	var pods []*v1.Pod
 	log.G(h.Ctx).Info("InterLink: received GetStatus call")
@@ -130,7 +131,6 @@ func (h *InterLinkHandler) StatusHandler(w http.ResponseWriter, r *http.Request)
 	w.WriteHeader(statusCode)
 	_, err = w.Write(returnValue)
 	if err != nil {
-		log.G(h.Ctx).Error(errors.New("Failed to write to http buffer"))
+		log.G(h.Ctx).Error(errors.New("failed to write to http buffer"))
 	}
-
 }
