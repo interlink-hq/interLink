@@ -19,7 +19,199 @@ Deploy interLink on an edge node, outside the local K8S cluster.
   }}
 />
 
-## Install interLink
+## Installation overview
+
+In this scenario, we need to setup 5 components:
+- interLink OIDC/OAuth proxy
+- interLink Edge components
+  - API server
+  - Plugin service
+- interLink Kubernetes components
+  - Virtual node
+  - Pod job
+
+To simplify the installation, interLink provides an _installer_ script that
+will generate all the necessary configuration files to
+- deploy the interLink API server (remote/edge component)
+- deploy the interLink virtual node (local/kubernetes component)
+
+The installer script will need some information to generate the configuration files:
+- the public IP of the edge node
+- the port where the interLink API server will be listening
+- the OIDC/OAuth provider information (client id, client secret, token url, etc.)
+
+
+## 1. Setup OIDC/OAuth server 
+
+Different Identity Providers (IdP) are supported. 
+The most common ones are documented in the [Guides](../guides) section
+([GitHub](../guides/deploy-interlink#create-an-oauth-github-app),
+[EGI checkin](../guides/04-oidc-IAM.md#egi-check-in),
+[INFN IAM](../guides/oidc-IAM#indigo-iam)).
+
+From the IdP provider, we'll need the following information:
+- **Client ID**: the client id of the OIDC/OAuth application
+- **Client Secret**: the client secret of the OIDC/OAuth application
+- **Token URL**: the token url of the OIDC/OAuth application
+- **Device Code URL**: the device code url of the OIDC/OAuth application
+- **Scopes**: the scopes of the OIDC/OAuth application
+
+Write them down (in particular, the Client Secret), we'll need them in the next
+step.
+
+Example of the information needed for the GitHub OIDC/OAuth application:
+
+```
+Client ID: "1234567890abcdef1234"
+Client Secret: "1234567890abcdef1234"
+Token URL: "https://github.com/login/oauth/access_token"
+Device Code URL: "https://github.com/login/device/code"
+Scopes: "read:user"
+``` 
+
+## 2. Run interLink-installer
+
+The interLink installer is a script that will generate two configuration files:
+- `interlink-remote.sh`: the script that will install and start the interLink API server
+- `values.yaml`: the configuration file for deploying the interLink virtual node
+
+As input for the installer, we will fill-in a configuration file with the
+information we collected in the previous step. 
+
+:::note
+You can run the _installer_ script on any machine, because
+the script will not really _install_ any component, it will just
+generate the configuration files needed to install the components. We will Then
+copy those files to their corresponding locations (edge and k8s hosts).
+:::
+
+### Download interLink-installer
+
+Choose the 
+[latest release](https://github.com/interlink-hq/interLink/releases) 
+of the installer according to the OS/architecture of the machine you are
+running the installer on:
+
+Let's create a directory where we are going to download and run the installer:
+```bash 
+export INTERLINK_WD=$HOME/tmp/interlink
+mkdir -p $INTERLINK_WD
+```
+
+```bash
+cd $INTERLINK_WD
+export OSARCH=$(uname -s)_$(uname -m)
+export VERSION=$(curl -s https://api.github.com/repos/interlink-hq/interlink/releases/latest  | jq -r .name)
+wget -O interlink-installer https://github.com/interlink-hq/interLink/releases/download/$VERSION/interlink-installer_$OSARCH
+chmod +x interlink-installer
+```
+
+### Create configuration file
+
+Create a template configuration with the init option:
+
+```bash
+./interlink-installer --init --config installer.yaml
+```
+
+This will generate a configuration file called `installer.yaml` in the current
+directory. The file will look like this (comments added for clarity):
+
+```yaml title="installer.yaml"
+interlink_ip: PUBLIC_IP_HERE    # IP of the edge node
+interlink_port: API_PORT_HERE   # Port of the interLink API server
+interlink_version: 0.4.1        # Version of the interLink API server
+kubelet_node_name: my-vk-node   # Name of the virtual node in the k8s cluster
+kubernetes_namespace: interlink # Namespace where the virtual node will be deployed
+node_limits:                    # Limits for the virtual node
+    cpu: "10"                   # CPU limit (in cores)
+    memory: "256"               # Memory limit (in MB)
+    pods: "10"                  # Number of pods limit
+oauth:                          # OIDC/OAuth provider information
+    provider: oidc
+    grant_type: ""
+    issuer: https://my_oidc_idp.com/
+    group_claim: ""
+    scopes:
+        - openid
+        - email
+        - offline_access
+        - profile
+    github_user: ""
+    token_url: https://my_oidc_idp.com/token
+    device_code_url: https://my_oidc_idp/auth/device
+    client_id: OIDC_CLIENT_ID_HERE
+    client_secret: OIDC_CLIENT_SECRET_HERE
+insecure_http: true
+```
+
+### Fill the configuration file
+
+Fill and adjust the configuration file with the information we collected in the
+previous step, about the OIDC/OAuth provider and the IP/Port of the edge node.
+As well, adjust the node limits according to your needs.
+
+:::note
+
+The `interlink_version` is the version of the interLink API server that you
+want to install. You can find the latest version in the
+[releases page](https://github.com/interlink-hq/interLink/releases), or 
+directly querying the GitHub API:
+
+```bash
+curl -s https://api.github.com/repos/interlink-hq/interlink/releases/latest  | jq -r .name
+```
+
+:::
+
+### Generate installer outputs
+
+Run `interlink-installer` (without `--init` option) to generate the (final) files.
+
+The installer will interrogate the OIDC/OAuth provider to get the necessary
+information (regarding auth/tokens).
+
+```bash
+./interlink-installer --config installer.yaml --output-dir ./installer-output/
+```
+
+:::note
+This is an interactive process if you are using an "authorization_code" flow. 
+Follow the instructions on the screen. On Github, this means entering a 
+code in the browser (at `device_code_url`); you should get a successfully
+"Congratulations, you're all set!" message on your browser.
+:::
+
+After a couple of seconds, the installer script should answer with a message like:
+
+```
+=== Deployment file written at:  ./installer-output//values.yaml ===
+
+ To deploy the virtual kubelet run:
+   helm --debug upgrade --install --create-namespace -n interlink my-vk-node oci://ghcr.io/interlink-hq/interlink-helm-chart/interlink  --values ./installer-output//values.yaml
+
+
+=== Installation script for remote interLink APIs stored at: ./installer-output//interlink-remote.sh ===
+
+  Please execute the script on the remote server: <the PUBLIC_IP_HERE of edge node>
+
+  "./interlink-remote.sh install" followed by "interlink-remote.sh start"
+```
+
+Take note of those instructions, as they will be useful in the next steps.
+Not now, but later.
+
+
+### Move files to the right place
+
+At this point, we have two files (inside our `installer-output/` folder):
+- `interlink-remote.sh`: the script that will install and start the interLink API server
+- `values.yaml`: the configuration file for deploying the interLink virtual node
+
+We need to copy the `interlink-remote.sh` script to the edge node (the one
+where we want to run the interLink API server) and the `values.yaml` file to
+the Kubernetes cluster (where we want to run the interLink virtual node).
+
 
 ### Deploy Remote components
 
