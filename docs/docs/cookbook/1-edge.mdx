@@ -22,7 +22,7 @@ Deploy interLink on an edge node, outside the local K8S cluster.
 ## Installation overview
 
 In this scenario, we need to setup 5 components:
-- interLink OIDC/OAuth proxy
+- OIDC/OAuth proxy
 - interLink Edge components
   - API server
   - Plugin service
@@ -41,9 +41,9 @@ The installer script will need some information to generate the configuration fi
 - the OIDC/OAuth provider information (client id, client secret, token url, etc.)
 
 
-## 1. Setup OIDC/OAuth server 
+## 1. Setup OIDC/OAuth server
 
-Different Identity Providers (IdP) are supported. 
+Different Identity Providers (IdP) are supported.
 The most common ones are documented in the [Guides](../guides) section
 ([GitHub](../guides/deploy-interlink#create-an-oauth-github-app),
 [EGI checkin](../guides/04-oidc-IAM.md#egi-check-in),
@@ -67,16 +67,16 @@ Client Secret: "1234567890abcdef1234"
 Token URL: "https://github.com/login/oauth/access_token"
 Device Code URL: "https://github.com/login/device/code"
 Scopes: "read:user"
-``` 
+```
 
 ## 2. Run interLink-installer
 
 The interLink installer is a script that will generate two configuration files:
-- `interlink-remote.sh`: the script that will install and start the interLink API server
-- `values.yaml`: the configuration file for deploying the interLink virtual node
+- `interlink-remote.sh`: the script to install and start the interLink API server;
+- `values.yaml`: helm _Values_ file for deploying the interLink virtual node.
 
 As input for the installer, we will fill-in a configuration file with the
-information we collected in the previous step. 
+information we collected in the previous step.
 
 :::note
 You can run the _installer_ script on any machine, because
@@ -87,13 +87,13 @@ copy those files to their corresponding locations (edge and k8s hosts).
 
 ### Download interLink-installer
 
-Choose the 
-[latest release](https://github.com/interlink-hq/interLink/releases) 
+Choose the
+[latest release](https://github.com/interlink-hq/interLink/releases)
 of the installer according to the OS/architecture of the machine you are
 running the installer on:
 
 Let's create a directory where we are going to download and run the installer:
-```bash 
+```bash
 export INTERLINK_WD=$HOME/tmp/interlink
 mkdir -p $INTERLINK_WD
 ```
@@ -155,7 +155,7 @@ As well, adjust the node limits according to your needs.
 
 The `interlink_version` is the version of the interLink API server that you
 want to install. You can find the latest version in the
-[releases page](https://github.com/interlink-hq/interLink/releases), or 
+[releases page](https://github.com/interlink-hq/interLink/releases), or
 directly querying the GitHub API:
 
 ```bash
@@ -169,20 +169,16 @@ curl -s https://api.github.com/repos/interlink-hq/interlink/releases/latest  | j
 Run `interlink-installer` (without `--init` option) to generate the (final) files.
 
 The installer will interrogate the OIDC/OAuth provider to get the necessary
-information (regarding auth/tokens).
+information (regarding auth/tokens). This will be an interactive process,
+follow the instructions on the screen.
 
 ```bash
 ./interlink-installer --config installer.yaml --output-dir ./installer-output/
 ```
 
-:::note
-This is an interactive process if you are using an "authorization_code" flow. 
-Follow the instructions on the screen. On Github, this means entering a 
-code in the browser (at `device_code_url`); you should get a successfully
-"Congratulations, you're all set!" message on your browser.
-:::
-
-After a couple of seconds, the installer script should answer with a message like:
+If everything goes well, you'll see a successful (client authentication)
+message in your browser, and (after a couple of seconds) a message like this
+on your terminal:
 
 ```
 === Deployment file written at:  ./installer-output//values.yaml ===
@@ -198,151 +194,169 @@ After a couple of seconds, the installer script should answer with a message lik
   "./interlink-remote.sh install" followed by "interlink-remote.sh start"
 ```
 
-Take note of those instructions, as they will be useful in the next steps.
+> Take note of those instructions, as they will be useful in the next steps.
 Not now, but later.
 
+#### Checkpoint
+
+At this point, we have the following files in our working directory:
+```bash
+% tree
+.
+├── installer-output
+│   ├── interlink-remote.sh
+│   └── values.yaml
+├── installer.yaml
+└── interlink-installer
+
+2 directories, 4 files
+```
 
 ### Move files to the right place
 
-At this point, we have two files (inside our `installer-output/` folder):
+We have two files (inside our `installer-output/` folder):
 - `interlink-remote.sh`: the script that will install and start the interLink API server
 - `values.yaml`: the configuration file for deploying the interLink virtual node
 
-We need to copy the `interlink-remote.sh` script to the edge node (the one
-where we want to run the interLink API server) and the `values.yaml` file to
-the Kubernetes cluster (where we want to run the interLink virtual node).
+We need to copy/move those files:
+- Copy the `interlink-remote.sh` script to the edge node;
+  * E.g., move it to `~/any/path/interlink-remote.sh`
+  in the `edge-node` machine.
+- Copy the `values.yaml` file to the Kubernetes cluster
+  * E.g., move it to `~/some/path/values.yaml` in the
+  `k8s-cluster` machine.
 
 
-### Deploy Remote components
+## 3. Setup Edge Components
 
-In general, starting from the deployment of the remote components is adviced.
-Since the kubernetes virtual node won't reach the `Ready` status until all the
+In general, starting from the deployment of the remote components is advised,
+since the kubernetes virtual node won't reach the _ready_ status until all the
 stack is successfully deployed.
 
-#### Interlink API server
+### Interlink API server
 
-**For this deployment mode the remote host has to allow the kubernetes cluster
-to connect to the Oauth2 proxy service port (30443 if you use the automatic
-script for installation)**
+> Here is the point where connection to OAuth proxy service takes place
+> through port `interlink_port` (in `installer.yaml`) we set before.
+> Make sure this port (`30443` by default) is open on the edge node.
 
-You first need to initialize an OIDC client with you Identity Provider (IdP).
+The script `installer-script.sh` created be the previous step should be
+in your edge-node by now.
+That script contains all information necessary to install and configure interLink
+API server and the OAuth client.
 
-Since any OIDC provider working with
-[OAuth2 Proxy](https://oauth2-proxy.github.io/oauth2-proxy/) tool will do the
-work, we are going to put the configuration for a generic OIDC identity provider
-in this cookbook. Nevertheless you can find more detailed on dedicated pages
-with instructions ready for
-[GitHub](../guides/deploy-interlink#create-an-oauth-github-app),
-[EGI checkin](../guides/04-oidc-IAM.md#egi-check-in),
-[INFN IAM](../guides/oidc-IAM#indigo-iam).
+> Make sure the script is executable, `chmod +x interlink-installer.sh`.
 
-Then download the
-[latest release](https://github.com/interlink-hq/interLink/releases) of the
-interLink installer:
-
-```bash
-mkdir -p $HOME/.interlink
-export VERSION=$(curl -s https://api.github.com/repos/interlink-hq/interlink/releases/latest  | jq -r .name)
-wget -O $HOME/interlink-installer https://github.com/interlink-hq/interLink/releases/download/$VERSION/interlink-installer_Linux_x86_64
-chmod +x $HOME/.interlink/interlink-installer
+```sh
+./interlink-installer.sh install
 ```
 
-Create a template configuration with the init option:
+This will download and place the necessary software under `~/.interlink`:
 
-```bash
-mkdir -p $HOME/.interlink/logs
-mkdir -p $HOME/.interlink/bin
-mkdir -p $HOME/.interlink/config
-$HOME/.interlink/interlink-installer --init --config $HOME/.interlink/installer.yaml
+```text title='$ tree ~/.interlink'
+.interlink/
+├── bin
+│   ├── interlink
+│   └── oauth2-proxy
+├── config
+│   ├── InterLinkConfig.yaml
+│   ├── tls.crt
+│   └── tls.key
+└── logs
+
+4 directories, 5 files
 ```
 
-The configuration file should be filled as followed. This is the case where the
-`my-node` will contact an edge service that will be listening on `PUBLIC_IP` and
-`API_PORT` authenticating requests from an OIDC provider
-`https://my_oidc_idp.com`:
+You will not touch those files, everything is managed by the "installer" script.
 
-```bash title="$HOME/.interlink/installer.yaml"
-interlink_ip: PUBLIC_IP
-interlink_port: API_PORT
-interlink_version: X.X.X
-kubelet_node_name: my-node
-kubernetes_namespace: interlink
-node_limits:
-    cpu: "1000"
-    # MEMORY in GB
-    memory: 25600
-    pods: "100"
-oauth:
-  provider: oidc
-  issuer: https://my_oidc_idp.com/
-  scopes:
-    - "openid"
-    - "email"
-    - "offline_access"
-    - "profile"
-  audience: interlink
-  grant_type: authorization_code
-  group_claim: groups
-  group: "my_vk_allowed_group"
-  token_url: "https://my_oidc_idp.com/token"
-  device_code_url: "https://my_oidc_idp/auth/device"
-  client_id: "oidc-client-xx"
-  client_secret: "xxxxxx"
-insecure_http: true
+For instance, now you can run (ie, _start_) the API and OAuth services:
+
+```sh
+./interlink-installer start
 ```
 
-:::note
+It runs silently. Notice, though, that `~/.interlink` has new files:
 
-Please fill interlink_version with the desired version.  
-In alternative get the latest with:
+```sh title='$ tree -a .interlink/'
+.interlink/
+//highlight-next-line
+├── .interlink.sock
+├── bin
+│   ├── interlink
+│   └── oauth2-proxy
+├── config
+│   ├── InterLinkConfig.yaml
+│   ├── tls.crt
+│   └── tls.key
+//highlight-next-line
+├── interlink.pid
+├── logs
+//highlight-start
+│   ├── interlink.log
+│   └── oauth2-proxy.log
+└── oauth2-proxy.pid
+//highlight-end
 
-```bash
-curl -s https://api.github.com/repos/interlink-hq/interlink/releases/latest  | jq -r .name
+4 directories, 10 files
 ```
 
-:::
+You can check a few things, although not much is happening yet.
+For starter, you cacn check the running processes, `interlink` and `oauth2-proxy`
+should be there:
 
-Now you are ready to start the OIDC authentication flow to generate all your
-manifests and configuration files for the interLink components. To do so, just
-execute the installer:
-
-```bash
-$HOME/.interlink/interlink-installer --config $HOME/.interlink/installer.yaml --output-dir $HOME/.interlink/manifests/
+```sh title='$ ps x'
+(...)
+505865 pts/0    Sl     0:00 ~/.interlink/bin/oauth2-proxy --client-id ...
+505866 pts/0    Sl     0:00 ~/.interlink/bin/interlink
+(...)
 ```
 
-Install Oauth2-Proxy and interLink API server services and configurations with:
+You can also check the logs:
 
-```bash
-chmod +x $HOME/.interlink/manifests/interlink-remote.sh
-$HOME/.interlink/manifests/interlink-remote.sh install
+```sh title='cat ~/.interlink/logs/interlink.log'
+time="2025-05-15T12:23:00Z" level=info msg="Loading InterLink config from /home/slurm/.interlink/config/InterLinkConfig.yaml"
+time="2025-05-15T12:23:00Z" level=info msg="{unix:///home/slurm/.interlink/.interlink.sock 0 unix:///home/slurm/.interlink/.plugin.sock 0 false false ~/.interlink}"
+time="2025-05-15T12:23:00Z" level=info msg="interLink version: 0.4.1"
+time="2025-05-15T12:23:00Z" level=info msg="&{0xc0001ccd80 /home/slurm/.interlink/.interlink.sock true {{} {{} 0} {{} {0 0}}}}"
 ```
 
-Then start the services with:
+And if you ping the API server:
 
-```bash
-$HOME/.interlink/manifests/interlink-remote.sh start
+```sh title='$ curl -v --unix-socket ${HOME}/.interlink/.interlink.sock  http://unix/pinglink'
+*   Trying /home/slurm/.interlink/.interlink.sock:0...
+* Connected to unix (/home/slurm/.interlink/.interlink.sock) port 80
+> GET /pinglink HTTP/1.1
+> Host: unix
+> User-Agent: curl/8.5.0
+> Accept: */*
+>
+< HTTP/1.1 500 Internal Server Error
+< Date: Thu, 15 May 2025 13:11:19 GMT
+< Content-Length: 3
+< Content-Type: text/plain; charset=utf-8
+<
+* Connection #0 to host unix left intact
+503
 ```
 
-With `stop` command you can stop the service. By default logs are store in
-`~/.interlink/logs`, checkout there for any error before moving to the next
-step.
+You will get an error. And that's fine, because there is no _plugin_ yet installed.
+We can go back and check the `interlink.log` to see the internal reactions
+of this ping, you should see something like the following lines appended to log:
 
-:::note
+```text
+time="2025-05-15T12:37:30Z" level=info msg="InterLink: received Ping call"
+time="2025-05-15T12:37:30Z" level=info msg="InterLink: forwarding GetStatus call to sidecar"
+time="2025-05-15T12:37:30Z" level=error msg="HTTP InterLink session
+    Request-69f0d582-c310-49b3-bdd1-45208de3406a: error doing DoReq() of
+    ReqWithErrorWithSessionNumber error Get \"http://unix/status\": dial unix
+    //highlight-next-line
+    /home/slurm/.interlink/.plugin.sock: connect: no such file or directory"
+2025/05/15 12:37:30 http: superfluous response.WriteHeader call from
+    github.com/interlink-hq/interlink/pkg/interlink/api.(*InterLinkHandler).Ping (ping.go:58)
+```
 
-**N.B.** you can look the oauth2_proxy configuration parameters looking directly
-into the `interlink-remote.sh` script.
+Then, let's bring a plugin in.
 
-:::
-
-:::warning
-
-**N.B.** logs (expecially if in verbose mode) can become pretty huge, consider
-to implement your favorite rotation routine for all the logs in
-`~/.interlink/logs/`.
-
-:::
-
-#### Plugin service
+### Interlink Plugin
 
 Select here the featured plugin you want to try:
 
@@ -401,7 +415,7 @@ Select here the featured plugin you want to try:
     - Please be sure that you have a shared filesystem area with the SLURM nodes available from the edge node. In this case our `DataRootFolder` is `$HOME/.interlink/jobs`
     - Create a configuration file (__remember to substitute `/home/username/` with your actual home path__):
 
-      ```bash title="./interlink/manifests/plugin-config.yaml"
+      ```bash title="~/.interlink/manifests/plugin-config-slurm.yaml"
       Socket: "unix:///home/myusername/.interlink/.plugin.sock"
       InterlinkPort: "0"
       SidecarPort: "0"
@@ -436,7 +450,12 @@ Select here the featured plugin you want to try:
       echo $! > $HOME/.interlink/plugin.pid
       ```
 
-    - Check the logs in `$HOME/.interlink/logs/plugin.log`.
+    - Check the logs in `$HOME/.interlink/logs/plugin.log`:
+      ```text
+      time="2025-05-16T07:36:48Z" level=info msg="Loading SLURM config from /home/slurm/.interlink/manifests/plugin-config-slurm.yaml"
+      time="2025-05-16T07:36:48Z" level=info msg="&{0xc0003bbe00 /home/slurm/.interlink/.plugin.sock true {{} {{} 0} {{} {0 0}}}}"
+      ```
+
     - To kill and restart the process is enough:
 
       ```bash
@@ -461,6 +480,41 @@ Select here the featured plugin you want to try:
 
 </Tabs>
 
+##### 3rd-party plugins
+
+There are more 3rd-party plugins developed that you can get inspired by or even
+use out of the box. You can find some ref in the
+[quick start section](../guides/deploy-interlink#attach-your-favorite-plugin-or-develop-one)
+
+
+### Test interLink stack health
+
+Let's check again, now with the plugin, how (interlink) API server reacts:
+
+```
+curl -v --unix-socket ${HOME}/.interlink/.interlink.sock  http://unix/pinglink
+```
+
+Now that we have a plugin, this call should return a successful request,
+with an empty body:
+
+```
+*   Trying /home/slurm/.interlink/.interlink.sock:0...
+* Connected to unix (/home/slurm/.interlink/.interlink.sock) port 80
+> GET /pinglink HTTP/1.1
+> Host: unix
+> User-Agent: curl/8.5.0
+> Accept: */*
+>
+< HTTP/1.1 200 OK
+< Date: Fri, 16 May 2025 07:38:44 GMT
+< Transfer-Encoding: chunked
+<
+* Connection #0 to host unix left intact
+null
+```
+
+
 :::tip
 
 Yes, if you will, you can also manage all interLink processes through `systemd`.
@@ -469,52 +523,50 @@ example in the interlink repo `./systemd` folder.
 
 :::
 
-##### 3rd-party plugins
 
-There are more 3rd-party plugins developed that you can get inspired by or even
-use out of the box. You can find some ref in the
-[quick start section](../guides/deploy-interlink#attach-your-favorite-plugin-or-develop-one)
+## 4. Setup Kubernetes components
 
-#### Test interLink stack health
-
-interLink comes with a call that can be used to monitor the overall status of
-both interlink server and plugins, at once.
-
-```
-curl -v --unix-socket ${HOME}/.interlink/.interlink.sock  http://unix/pinglink
-```
-
-This call will return the status of the system and its readiness to submit jobs.
-
-### Deploy Kubernetes components
+### Deploy Virtual-Node
 
 The deployment of the Kubernetes components are managed by the official
 [HELM chart](https://github.com/interlink-hq/interlink-helm-chart). Depending on
 the scenario you selected, there might be additional operations to be done.
 
 You can now install the helm chart with the preconfigured (by the installer
-script) helm values in `./interlink/manifests/values.yaml`
+script) helm values (e.g., at `/some/path/manifests/values.yaml`):
 
-```bash
-  export INTERLINK_CHART_VERSION="X.X.X"
-  helm upgrade --install \
-  --create-namespace \
-  -n interlink \
-  my-node \
-  oci://ghcr.io/interlink-hq/interlink-helm-chart/interlink \
-  --version $INTERLINK_CHART_VERSION \
-  --values ./.interlink/manifests/values.yaml
+```sh
+helm --debug upgrade --install \
+    --create-namespace -n interlink \
+    my-vk-node \
+    oci://ghcr.io/interlink-hq/interlink-helm-chart/interlink \
+    --values values.yaml
 ```
+
+This will install the latest interlink's helm chart (deploying the virtual node).
 
 :::warning
 
-Remember to pick the
-[version of the chart](https://github.com/interlink-hq/interlink-helm-chart/blob/main/interlink/Chart.yaml#L18)
-and put it into the `INTERLINK_CHART_VERSION` env var above.
+If you want to specify an specific [version of the chart](https://github.com/interlink-hq/interlink-helm-chart/blob/main/interlink/Chart.yaml#L18)
+declare it in the `INTERLINK_CHART_VERSION` as follows:
+
+```sh
+//highlight-next-line
+export INTERLINK_CHART_VERSION="X.X.X"
+helm upgrade --install \
+    --create-namespace -n interlink \
+    my-vk-node \
+    oci://ghcr.io/interlink-hq/interlink-helm-chart/interlink \
+    --values values.yaml \
+    //highlight-next-line
+    --version $INTERLINK_CHART_VERSION
+```
 
 :::
 
 Whenever you see the node ready, you are good to go!
+
+### Deploy a Job-Pod
 
 :::note
 
