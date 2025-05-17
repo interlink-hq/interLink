@@ -162,7 +162,21 @@ func main() {
 		trace.T = opentelemetry.Adapter{}
 	}
 
-	dport, err := strconv.ParseInt(os.Getenv("KUBELET_PORT"), 10, 32)
+	var kubeletURL string
+
+	if envString, found := os.LookupEnv("KUBELET_URL"); !found {
+		kubeletURL = "0.0.0.0"
+	} else {
+		kubeletURL = envString
+	}
+
+	var kubeletPort string
+	if envString, found := os.LookupEnv("KUBELET_PORT"); !found {
+		kubeletPort = "5820"
+	} else {
+		kubeletPort = envString
+	}
+	dport, err := strconv.ParseInt(kubeletPort, 10, 32)
 	if err != nil {
 		log.G(ctx).Fatal(err)
 	}
@@ -184,21 +198,6 @@ func main() {
 	// }
 	// TODO: create a csr auto approver https://github.com/liqotech/liqo/blob/master/cmd/liqo-controller-manager/main.go#L498
 	retriever := commonIL.NewSelfSignedCertificateRetriever(cfg.NodeName, net.ParseIP(cfg.InternalIP))
-
-	var kubeletURL string
-
-	if envString, found := os.LookupEnv("KUBELET_URL"); !found {
-		kubeletURL = "0.0.0.0"
-	} else {
-		kubeletURL = envString
-	}
-
-	var kubeletPort string
-	if envString, found := os.LookupEnv("KUBELET_PORT"); !found {
-		kubeletPort = "5820"
-	} else {
-		kubeletPort = envString
-	}
 
 	server := &http.Server{
 		Addr:              fmt.Sprintf("%s:%s", kubeletURL, kubeletPort),
@@ -335,8 +334,8 @@ func main() {
 
 	podControllerConfig := node.PodControllerConfig{
 		PodClient:         localClient.CoreV1(),
-		Provider:          nodeProvider,
 		EventRecorder:     EventRecorder,
+		Provider:          nodeProvider,
 		PodInformer:       podInformerFactory.Core().V1().Pods(),
 		SecretInformer:    scmInformerFactory.Core().V1().Secrets(),
 		ConfigMapInformer: scmInformerFactory.Core().V1().ConfigMaps(),

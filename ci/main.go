@@ -130,6 +130,7 @@ func (m *Interlink) NewInterlink(
 			WithExposedPort(5000).AsService()
 	}
 
+	// docker run -p 4000:4000 -v ./manifests/plugin-config.yaml:/etc/interlink/InterLinkConfig.yaml -e SHARED_FS=true -e SLURMCONFIGPATH=/etc/interlink/InterLinkConfig.yaml ghcr.io/interlink-hq/interlink-sidecar-slurm/interlink-sidecar-slurm:0.4.0
 	var err error
 	if pluginEndpoint == nil {
 		m.PluginContainer = dag.Container().From(m.PluginRef).
@@ -145,6 +146,7 @@ func (m *Interlink) NewInterlink(
 		}
 	}
 
+	// docker run -p 3000:3000 -v ./manifests/interlink-config-local.yaml:/etc/interlink/InterLinkConfig.yaml -e INTERLINKCONFIGPATH=/etc/interlink/InterLinkConfig.yaml ghcr.io/interlink-hq/interlink/interlink:0.4.0
 	if interlinkEndpoint == nil {
 		interlink := m.InterlinkContainer.
 			WithFile("/etc/interlink/InterLinkConfig.yaml", interlinkConfig).
@@ -299,7 +301,7 @@ func (m *Interlink) BuildImages(
 	}
 
 	builder := dag.Container().
-		From("golang:1.22").
+		From("golang:1.23").
 		WithDirectory("/src", sourceFolder).
 		WithWorkdir("/src").
 		WithMountedCache("/go/pkg/mod", dag.CacheVolume("go-mod-122")).
@@ -327,7 +329,7 @@ func (m *Interlink) BuildImages(
 	}
 
 	builderVK := dag.Container().
-		From("golang:1.22").
+		From("golang:1.23").
 		WithDirectory("/src", sourceFolder).
 		WithWorkdir("/src").
 		WithMountedCache("/go/pkg/mod", dag.CacheVolume("go-mod-122")).
