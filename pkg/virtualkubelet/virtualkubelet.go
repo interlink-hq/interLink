@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"io"
 	"math/rand"
+	"net"
 	"net/http"
 	"os"
 	"strconv"
@@ -16,7 +17,6 @@ import (
 	"github.com/containerd/containerd/log"
 	"github.com/virtual-kubelet/virtual-kubelet/errdefs"
 	"github.com/virtual-kubelet/virtual-kubelet/node/api"
-	stats "github.com/virtual-kubelet/virtual-kubelet/node/api/statsv1alpha1"
 	"go.opentelemetry.io/otel"
 	"go.opentelemetry.io/otel/attribute"
 	trace "go.opentelemetry.io/otel/trace"
@@ -25,8 +25,10 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/client-go/kubernetes"
 	"k8s.io/client-go/tools/clientcmd"
+	stats "k8s.io/kubelet/pkg/apis/stats/v1alpha1"
 
 	types "github.com/interlink-hq/interlink/pkg/interlink"
+	k8stypes "k8s.io/apimachinery/pkg/types"
 )
 
 const (
@@ -46,6 +48,50 @@ const (
 	xilinxFPGA            = "xilinx.com/fpga"
 	intelFPGA             = "intel.com/fpga"
 )
+
+// Increment the given IP address
+func incrementIP(ip net.IP) {
+	for j := len(ip) - 1; j >= 0; j-- {
+		ip[j]++
+		if ip[j] > 0 {
+			break
+		}
+	}
+}
+
+func findFirstFreeIP(ipList, usedIPs []string, minIP, maxIP int) string {
+	usedIPSet := make(map[string]bool)
+	for _, ip := range usedIPs {
+		usedIPSet[ip] = true
+	}
+
+	for _, ip := range ipList {
+		if usedIPSet[ip] {
+			continue
+		}
+
+		var numStr string
+		if strings.Contains(ip, ".") {
+			parts := strings.Split(ip, ".")
+			numStr = parts[len(parts)-1]
+		} else {
+			numStr = ip
+		}
+
+		ipNum, err := strconv.Atoi(numStr)
+		if err != nil {
+			continue
+		}
+
+		if ipNum < minIP || ipNum > maxIP {
+			continue
+		}
+
+		return ip
+	}
+
+	return ""
+}
 
 func TracerUpdate(ctx *context.Context, name string, pod *v1.Pod) {
 	start := time.Now().Unix()
@@ -68,7 +114,7 @@ func TracerUpdate(ctx *context.Context, name string, pod *v1.Pod) {
 	defer types.SetDurationSpan(start, span)
 }
 
-func PodPhase(p Provider, phase string) (v1.PodStatus, error) {
+func PodPhase(_ Provider, phase string, podIP string) (v1.PodStatus, error) {
 	now := metav1.NewTime(time.Now())
 
 	var podPhase v1.PodPhase
@@ -98,8 +144,8 @@ func PodPhase(p Provider, phase string) (v1.PodStatus, error) {
 
 	return v1.PodStatus{
 		Phase:     podPhase,
-		HostIP:    p.internalIP,
-		PodIP:     p.internalIP,
+		HostIP:    podIP,
+		PodIP:     podIP,
 		StartTime: &now,
 		Conditions: []v1.PodCondition{
 			{
@@ -245,22 +291,6 @@ func SetDefaultResource(config *Config) {
 	}
 }
 
-func buildKeyFromNames(namespace string, name string) (string, error) {
-	return fmt.Sprintf("%s-%s", namespace, name), nil
-}
-
-func buildKey(pod *v1.Pod) (string, error) {
-	if pod.Namespace == "" {
-		return "", fmt.Errorf("pod namespace not found")
-	}
-
-	if pod.Name == "" {
-		return "", fmt.Errorf("pod name not found")
-	}
-
-	return buildKeyFromNames(pod.Namespace, pod.Name)
-}
-
 // Provider defines the properties of the virtual kubelet provider
 type Provider struct {
 	nodeName             string
@@ -275,6 +305,7 @@ type Provider struct {
 	onNodeChangeCallback func(*v1.Node)
 	clientSet            *kubernetes.Clientset
 	clientHTTPTransport  *http.Transport
+	podIPs               []string
 }
 
 // NewProviderConfig takes user-defined configuration and fills the Virtual Kubelet provider struct
@@ -362,6 +393,7 @@ func NewProviderConfig(
 		Spec: v1.NodeSpec{
 			ProviderID: "external:///" + nodeName,
 			Taints:     taints,
+			PodCIDR:    config.PodCIDR.Subnet,
 		},
 		Status: v1.NodeStatus{
 			NodeInfo: v1.NodeSystemInfo{
@@ -528,10 +560,8 @@ func (p *Provider) CreatePod(ctx context.Context, pod *v1.Pod) error {
 	hasInitContainers := false
 	var state v1.ContainerState
 
-	key, err := buildKey(pod)
-	if err != nil {
-		return err
-	}
+	key := pod.UID
+
 	now := metav1.NewTime(time.Now())
 	runningState := v1.ContainerState{
 		Running: &v1.ContainerStateRunning{
@@ -545,26 +575,99 @@ func (p *Provider) CreatePod(ctx context.Context, pod *v1.Pod) error {
 	}
 	state = runningState
 
+	podIP := "127.0.0.1"
+
+	if _, ok := pod.Annotations["interlink.eu/pod-vpn"]; ok {
+		podsVPN, err := p.clientSet.CoreV1().Pods("").List(ctx, metav1.ListOptions{})
+		if err != nil {
+			log.G(ctx).Warning("Get all pods attached to the VPN")
+			return nil
+		}
+
+		log.G(ctx).Debug("Pod lists with pod-vpn enabled has len ", len(podsVPN.Items))
+
+		for _, podVPN := range podsVPN.Items {
+			if ip, ok := podVPN.Annotations["interlink.eu/pod-ip"]; ok {
+				p.podIPs = append(p.podIPs, ip)
+			}
+		}
+
+		// Get the CIDR of the virtual node
+		podCIDR := p.node.Spec.PodCIDR
+		if podCIDR == "" {
+			return fmt.Errorf("node podCIDR not found")
+		}
+
+		_, subnet, err := net.ParseCIDR(podCIDR)
+		if err != nil {
+			return err
+		}
+
+		var ipList []string
+		for ip := subnet.IP.Mask(subnet.Mask); subnet.Contains(ip); incrementIP(ip) {
+			ipList = append(ipList, ip.String())
+		}
+		// Remove network address and broadcast address
+		ipList = ipList[2 : len(ipList)-1]
+
+		// get the minIP and maxIP from the config
+		minIP := p.config.PodCIDR.MinIP
+		maxIP := p.config.PodCIDR.MaxIP
+
+		if minIP < 2 {
+			log.G(ctx).Warn("MinIP is less than 2, setting it to 2")
+			minIP = 2
+		}
+
+		if maxIP > 250 {
+			log.G(ctx).Warn("MaxIP is greater than 250, setting it to 250")
+			maxIP = 250
+		}
+
+		freeIP := findFirstFreeIP(ipList, p.podIPs, minIP, maxIP)
+		if freeIP != "" {
+			log.G(ctx).Info("First free IP: ", freeIP)
+		} else {
+			return fmt.Errorf("no free IP found")
+		}
+
+		p.podIPs = append(p.podIPs, freeIP)
+		pod.Annotations["interlink.eu/pod-ip"] = freeIP
+		podIP = freeIP
+	} else if ip, ok := pod.Annotations["interlink.eu/pod-ip"]; ok {
+		podIP = ip
+	}
+
 	// in case we have initContainers we need to stop main containers from executing for now ...
 	if len(pod.Spec.InitContainers) > 0 {
 		state = waitingState
 		hasInitContainers = true
 
 		// we put the phase in running but initialization phase to false
-		pod.Status, err = PodPhase(*p, "Running")
+		status, err := PodPhase(*p, "Running", podIP)
 		if err != nil {
 			log.G(ctx).Error(err)
 			return err
+		}
+		pod.Status = status
+		err = p.UpdatePod(ctx, pod)
+		if err != nil {
+			log.G(ctx).Error(err)
 		}
 	} else {
 
 		// if no init containers are there, go head and set phase to initialized
-		pod.Status, err = PodPhase(*p, "Pending")
+		status, err := PodPhase(*p, "Pending", podIP)
 		if err != nil {
 			log.G(ctx).Error(err)
 			return err
 		}
 
+		pod.Status = status
+		err = p.UpdatePod(ctx, pod)
+		if err != nil {
+			log.G(ctx).Error(err)
+		}
 	}
 
 	// Create pod asynchronously on the remote plugin
@@ -577,7 +680,7 @@ func (p *Provider) CreatePod(ctx context.Context, pod *v1.Pod) error {
 			} else {
 				// TODO if node in NotReady put it to Unknown/pending?
 				log.G(ctx).Error(err)
-				pod.Status, err = PodPhase(*p, "Failed")
+				pod.Status, err = PodPhase(*p, "Pending", podIP)
 				if err != nil {
 					log.G(ctx).Error(err)
 					return
@@ -604,7 +707,7 @@ func (p *Provider) CreatePod(ctx context.Context, pod *v1.Pod) error {
 		})
 	}
 
-	p.pods[key] = pod
+	p.pods[string(key)] = pod
 
 	return nil
 }
@@ -624,12 +727,9 @@ func (p *Provider) DeletePod(ctx context.Context, pod *v1.Pod) (err error) {
 
 	log.G(ctx).Infof("receive DeletePod %q", pod.Name)
 
-	key, err := buildKey(pod)
-	if err != nil {
-		return err
-	}
+	key := pod.UID
 
-	if _, exists := p.pods[key]; !exists {
+	if _, exists := p.pods[string(key)]; !exists {
 		return errdefs.NotFound("pod not found")
 	}
 
@@ -672,13 +772,21 @@ func (p *Provider) DeletePod(ctx context.Context, pod *v1.Pod) (err error) {
 	}
 
 	// delete from p.pods
-	delete(p.pods, key)
+	delete(p.pods, string(key))
 
 	return nil
 }
 
-// GetPod returns a pod by name that is stored in memory.
-func (p *Provider) GetPod(ctx context.Context, namespace, name string) (pod *v1.Pod, err error) {
+func (p *Provider) GetPod(_ context.Context, _ string, _ string) (*v1.Pod, error) {
+	return &v1.Pod{}, fmt.Errorf("NOT IMPLEMENTED")
+}
+
+func (p *Provider) GetPodStatus(_ context.Context, _ string, _ string) (*v1.PodStatus, error) {
+	return &v1.PodStatus{}, fmt.Errorf("NOT IMPLEMENTED")
+}
+
+// GetPodByUID returns a pod by name that is stored in memory.
+func (p *Provider) GetPodByUID(ctx context.Context, namespace, name string, uid k8stypes.UID) (pod *v1.Pod, err error) {
 	start := time.Now().Unix()
 	tracer := otel.Tracer("interlink-service")
 	ctx, span := tracer.Start(ctx, "GetPodVK", trace.WithAttributes(
@@ -691,21 +799,16 @@ func (p *Provider) GetPod(ctx context.Context, namespace, name string) (pod *v1.
 
 	log.G(ctx).Infof("receive GetPod %q", name)
 
-	key, err := buildKeyFromNames(namespace, name)
-	if err != nil {
-		return nil, err
-	}
-
-	if pod, ok := p.pods[key]; ok {
+	if pod, ok := p.pods[string(uid)]; ok {
 		return pod, nil
 	}
 
 	return nil, errdefs.NotFoundf("pod \"%s/%s\" is not known to the provider", namespace, name)
 }
 
-// GetPodStatus returns the status of a pod by name that is "running".
+// GetPodStatusByUID returns the status of a pod by name that is "running".
 // returns nil if a pod by that name is not found.
-func (p *Provider) GetPodStatus(ctx context.Context, namespace, name string) (*v1.PodStatus, error) {
+func (p *Provider) GetPodStatusByUID(ctx context.Context, namespace, name string, uid k8stypes.UID) (*v1.PodStatus, error) {
 	podTmp := v1.Pod{
 		TypeMeta: metav1.TypeMeta{},
 		ObjectMeta: metav1.ObjectMeta{
@@ -715,7 +818,7 @@ func (p *Provider) GetPodStatus(ctx context.Context, namespace, name string) (*v
 	}
 	TracerUpdate(&ctx, "GetPodStatusVK", &podTmp)
 
-	pod, err := p.GetPod(ctx, namespace, name)
+	pod, err := p.GetPodByUID(ctx, namespace, name, uid)
 	if err != nil {
 		return nil, err
 	}
@@ -743,13 +846,13 @@ func (p *Provider) GetPods(ctx context.Context) ([]*v1.Pod, error) {
 		pods = append(pods, pod)
 	}
 
+	go p.statusLoop(ctx)
 	return pods, nil
 }
 
 // NotifyPods is called to set a pod notifier callback function. Also starts the go routine to monitor all vk pods
-func (p *Provider) NotifyPods(ctx context.Context, f func(*v1.Pod)) {
+func (p *Provider) NotifyPods(_ context.Context, f func(*v1.Pod)) {
 	p.notifier = f
-	go p.statusLoop(ctx)
 }
 
 // statusLoop preiodically monitoring the status of all the pods in p.pods
@@ -768,6 +871,21 @@ func (p *Provider) statusLoop(ctx context.Context) {
 		case <-t.C:
 		}
 
+		p.podIPs = []string{}
+
+		podsVPN, err := p.clientSet.CoreV1().Pods("").List(ctx, metav1.ListOptions{})
+		if err != nil {
+			log.G(ctx).Error(err)
+		}
+
+		log.G(ctx).Debug("Pod lists with pod-vpn enabled has len ", len(podsVPN.Items))
+
+		for _, podVPN := range podsVPN.Items {
+			if ip, ok := podVPN.Annotations["interlink.eu/pod-ip"]; ok {
+				p.podIPs = append(p.podIPs, ip)
+			}
+		}
+
 		token := ""
 		if p.config.VKTokenFile != "" {
 			b, err := os.ReadFile(p.config.VKTokenFile) // just pass the file name
@@ -777,34 +895,34 @@ func (p *Provider) statusLoop(ctx context.Context) {
 			token = string(b)
 		}
 
-		var podsList []*v1.Pod
 		for _, pod := range p.pods {
 			if pod.Status.Phase != "Initializing" {
-				podsList = append(podsList, pod)
-				err := p.UpdatePod(ctx, pod)
-				if err != nil {
-					log.G(ctx).Error(err)
+				if pod.Status.Phase == v1.PodFailed || pod.Status.Phase == v1.PodSucceeded {
+					if p.pods[string(pod.UID)].Status.Phase != pod.Status.Phase {
+						_, err := checkPodsStatus(ctx, p, pod, token, p.config)
+						if err != nil {
+							log.G(ctx).Error(err)
+						}
+						p.asyncUpdate(ctx, pod)
+					}
+				} else {
+					_, err := checkPodsStatus(ctx, p, pod, token, p.config)
+					if err != nil {
+						log.G(ctx).Error(err)
+					}
+					p.asyncUpdate(ctx, pod)
 				}
 			}
-		}
-
-		if len(podsList) > 0 {
-			_, err := checkPodsStatus(ctx, p, podsList, token, p.config)
-			if err != nil {
-				log.G(ctx).Error(err)
-			}
-			for _, pod := range p.pods {
-				key, err := buildKey(pod)
-				if err != nil {
-					log.G(ctx).Error(err)
-				}
-				p.pods[key] = pod
-			}
-		} else {
-			log.G(ctx).Info("No pods to monitor, waiting for the next loop to start")
 		}
 
 		log.G(ctx).Info("statusLoop=end")
+	}
+}
+
+func (p *Provider) asyncUpdate(ctx context.Context, pod *v1.Pod) {
+	err := p.UpdatePod(ctx, pod)
+	if err != nil {
+		log.G(ctx).Error(err)
 	}
 }
 
@@ -833,14 +951,14 @@ func (p *Provider) GetLogs(ctx context.Context, namespace, podName, containerNam
 
 	log.G(ctx).Infof(sessionContextMessage+"receive GetPodLogs %q", podName)
 
-	key, err := buildKeyFromNames(namespace, podName)
+	pod, err := p.clientSet.CoreV1().Pods(namespace).Get(ctx, podName, metav1.GetOptions{})
 	if err != nil {
-		log.G(ctx).Error(err)
+		return nil, err
 	}
 
 	logsRequest := types.LogStruct{
 		Namespace:     namespace,
-		PodUID:        string(p.pods[key].UID),
+		PodUID:        string(pod.UID),
 		PodName:       podName,
 		ContainerName: containerName,
 		Opts:          types.ContainerLogOpts(opts),
@@ -957,12 +1075,7 @@ func (p *Provider) RetrievePodsFromCluster(ctx context.Context) error {
 		}
 		for _, pod := range podsList.Items {
 			if CheckIfAnnotationExists(&pod, "JobID") && p.nodeName == pod.Spec.NodeName {
-				key, err := buildKeyFromNames(pod.Namespace, pod.Name)
-				if err != nil {
-					log.G(ctx).Error(err)
-					return err
-				}
-				p.pods[key] = &pod
+				p.pods[string(pod.UID)] = &pod
 				p.notifier(&pod)
 			}
 		}

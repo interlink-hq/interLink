@@ -21,6 +21,7 @@ import (
 	"github.com/interlink-hq/interlink/pkg/interlink"
 	"github.com/interlink-hq/interlink/pkg/interlink/api"
 	"github.com/interlink-hq/interlink/pkg/virtualkubelet"
+	"k8s.io/cri-client/pkg/util"
 )
 
 // UnixSocketRoundTripper is a custom RoundTripper for Unix socket connections
@@ -181,4 +182,20 @@ func main() {
 	default:
 		log.G(ctx).Fatal("Interlink URL should either start per unix:// or http://. Getting: ", interLinkConfig.InterlinkAddress)
 	}
+
+	interlinkRuntime := NewFakeRemoteRuntime()
+	err = interlinkRuntime.Start("unix:///tmp/kubelet_remote_1000.sock")
+	if err != nil {
+		interlinkRuntime.Stop()
+		log.G(ctx).Fatal(err)
+	}
+	defer func() {
+		interlinkRuntime.Stop()
+		// clear endpoint file
+		if addr, _, err := util.GetAddressAndDialer("unix:///tmp/kubelet_remote_1000.sock"); err == nil {
+			if _, err := os.Stat(addr); err == nil {
+				os.Remove(addr)
+			}
+		}
+	}()
 }

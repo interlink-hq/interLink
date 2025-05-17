@@ -132,6 +132,12 @@ type dataStruct struct {
 
 	// HTTPInsecure determines whether to allow insecure HTTP connections
 	HTTPInsecure bool `default:"true" yaml:"insecure_http"`
+
+	// CaCert is the CA certificate for secure connections
+	CACert string `yaml:"ca_cert,omitempty"`
+
+	// DisableTLSVerify disables TLS verification for secure connections
+	DisableProjectedVolumes bool `default:"true" yaml:"disable_projected_volumes"`
 }
 
 // evalManifest evaluates a template file using the provided configuration data.
