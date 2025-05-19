@@ -5,7 +5,7 @@ metadata:
   namespace: default
 spec:
   nodeSelector:
-    kubernetes.io/hostname: my-civo-node
+    kubernetes.io/hostname: virtual-kubelet
   automountServiceAccountToken: false
   containers:
   - args:

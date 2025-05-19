@@ -23,6 +23,7 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 
 	types "github.com/interlink-hq/interlink/pkg/interlink"
+	k8sTypes "k8s.io/apimachinery/pkg/types"
 )
 
 const (
@@ -941,7 +942,7 @@ func checkPodsStatus(ctx context.Context, p *Provider, podsList []*v1.Pod, token
 				}
 
 				// get pod reference from cluster etcd
-				podRefInCluster, err := p.GetPod(ctx, podRemoteStatus.PodNamespace, podRemoteStatus.PodName)
+				podRefInCluster, err := p.GetPodByUID(ctx, podRemoteStatus.PodNamespace, podRemoteStatus.PodName, k8sTypes.UID(podRemoteStatus.PodUID))
 				if err != nil {
 					log.G(ctx).Warning(err)
 					continue
