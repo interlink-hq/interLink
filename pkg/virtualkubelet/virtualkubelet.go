@@ -728,13 +728,13 @@ func (p *Provider) GetPods(ctx context.Context) ([]*v1.Pod, error) {
 		pods = append(pods, pod)
 	}
 
+	go p.statusLoop(ctx)
 	return pods, nil
 }
 
 // NotifyPods is called to set a pod notifier callback function. Also starts the go routine to monitor all vk pods
-func (p *Provider) NotifyPods(ctx context.Context, f func(*v1.Pod)) {
+func (p *Provider) NotifyPods(_ context.Context, f func(*v1.Pod)) {
 	p.notifier = f
-	go p.statusLoop(ctx)
 }
 
 // statusLoop preiodically monitoring the status of all the pods in p.pods
@@ -766,10 +766,10 @@ func (p *Provider) statusLoop(ctx context.Context) {
 		for _, pod := range p.pods {
 			if pod.Status.Phase != "Initializing" {
 				podsList = append(podsList, pod)
-				err := p.UpdatePod(ctx, pod)
-				if err != nil {
-					log.G(ctx).Error(err)
-				}
+				// err := p.UpdatePod(ctx, pod)
+				// if err != nil {
+				// 	log.G(ctx).Error(err)
+				// }
 			}
 		}
 
@@ -779,13 +779,23 @@ func (p *Provider) statusLoop(ctx context.Context) {
 				log.G(ctx).Error(err)
 			}
 			for _, pod := range p.pods {
-				p.pods[string(pod.UID)] = pod
+				if p.pods[string(pod.UID)].Status.Phase != pod.Status.Phase {
+					p.pods[string(pod.UID)] = pod
+					go p.asyncUpdate(ctx, pod)
+				}
 			}
 		} else {
 			log.G(ctx).Info("No pods to monitor, waiting for the next loop to start")
 		}
 
 		log.G(ctx).Info("statusLoop=end")
+	}
+}
+
+func (p *Provider) asyncUpdate(ctx context.Context, pod *v1.Pod) {
+	err := p.UpdatePod(ctx, pod)
+	if err != nil {
+		log.G(ctx).Error(err)
 	}
 }
 

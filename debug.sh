@@ -1,3 +1,7 @@
+docker run -d -p 4000:4000 -v ./manifests/plugin-config.yaml:/etc/interlink/InterLinkConfig.yaml -e SHARED_FS=true -e SLURMCONFIGPATH=/etc/interlink/InterLinkConfig.yaml ghcr.io/interlink-hq/interlink-sidecar-slurm/interlink-sidecar-slurm:0.4.0
+
+docker run -d -p 3000:3000 -v ./manifests/interlink-config-local.yaml:/etc/interlink/InterLinkConfig.yaml -e INTERLINKCONFIGPATH=/etc/interlink/InterLinkConfig.yaml ghcr.io/interlink-hq/interlink/interlink:0.4.0
+
 export NODENAME=virtual-kubelet
 export KUBELET_PORT=10251
 export KUBELET_URL=0.0.0.0
