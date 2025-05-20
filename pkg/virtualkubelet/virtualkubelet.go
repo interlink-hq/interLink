@@ -540,6 +540,10 @@ func (p *Provider) CreatePod(ctx context.Context, pod *v1.Pod) error {
 			return err
 		}
 		pod.Status = status
+		err = p.UpdatePod(ctx, pod)
+		if err != nil {
+			log.G(ctx).Error(err)
+		}
 	} else {
 
 		// if no init containers are there, go head and set phase to initialized
@@ -550,6 +554,10 @@ func (p *Provider) CreatePod(ctx context.Context, pod *v1.Pod) error {
 		}
 
 		pod.Status = status
+		err = p.UpdatePod(ctx, pod)
+		if err != nil {
+			log.G(ctx).Error(err)
+		}
 	}
 
 	// Create pod asynchronously on the remote plugin
@@ -562,7 +570,7 @@ func (p *Provider) CreatePod(ctx context.Context, pod *v1.Pod) error {
 			} else {
 				// TODO if node in NotReady put it to Unknown/pending?
 				log.G(ctx).Error(err)
-				pod.Status, err = PodPhase(*p, "Failed")
+				pod.Status, err = PodPhase(*p, "Pending")
 				if err != nil {
 					log.G(ctx).Error(err)
 					return

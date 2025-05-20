@@ -1,0 +1,16 @@
+# apiVersion: v1
+# kind: ConfigMap
+# metadata:
+#   name: "interlink-config"
+#   namespace: interlink 
+# data:
+#   InterLinkConfig.yaml: |
+    #InterlinkAddress: "unix:///var/run/interlink.socket"
+InterlinkAddress: "http://0.0.0.0"
+InterlinkPort: "3000"
+#sidecarURL: "http://plugin"
+SidecarURL: "http://0.0.0.0"
+SidecarPort: "4000"
+VerboseLogging: true
+ErrorsOnlyLogging: false
+DataRootFolder: "~/.interlink"
