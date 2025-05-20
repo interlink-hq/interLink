@@ -44,8 +44,13 @@ func (f *RemoteRuntime) Start(endpoint string) error {
 		return fmt.Errorf("failed to listen on %q: %v", endpoint, err)
 	}
 
-	go f.server.Serve(l)
-
+	go func() {
+		err = f.server.Serve(l)
+		if err != nil {
+			fmt.Printf("failed to serve: %v", err)
+			panic(err)
+		}
+	}()
 	// Set runtime and network conditions ready.
 	f.RuntimeService.FakeStatus = &kubeapi.RuntimeStatus{
 		Conditions: []*kubeapi.RuntimeCondition{
@@ -278,7 +283,7 @@ func (f *RemoteRuntime) UpdateRuntimeConfig(ctx context.Context, req *kubeapi.Up
 }
 
 // Status returns the status of the runtime.
-func (f *RemoteRuntime) Status(ctx context.Context, req *kubeapi.StatusRequest) (*kubeapi.StatusResponse, error) {
+func (f *RemoteRuntime) Status(ctx context.Context, _ *kubeapi.StatusRequest) (*kubeapi.StatusResponse, error) {
 	resp, err := f.RuntimeService.Status(ctx, false)
 	if err != nil {
 		return nil, err
@@ -308,7 +313,7 @@ func (f *RemoteRuntime) ReopenContainerLog(ctx context.Context, req *kubeapi.Reo
 }
 
 // CheckpointContainer checkpoints the given container.
-func (f *RemoteRuntime) CheckpointContainer(ctx context.Context, req *kubeapi.CheckpointContainerRequest) (*kubeapi.CheckpointContainerResponse, error) {
+func (f *RemoteRuntime) CheckpointContainer(ctx context.Context, _ *kubeapi.CheckpointContainerRequest) (*kubeapi.CheckpointContainerResponse, error) {
 	err := f.RuntimeService.CheckpointContainer(ctx, &kubeapi.CheckpointContainerRequest{})
 	if err != nil {
 		return nil, err
@@ -317,12 +322,12 @@ func (f *RemoteRuntime) CheckpointContainer(ctx context.Context, req *kubeapi.Ch
 	return &kubeapi.CheckpointContainerResponse{}, nil
 }
 
-func (f *RemoteRuntime) GetContainerEvents(req *kubeapi.GetEventsRequest, ces kubeapi.RuntimeService_GetContainerEventsServer) error {
+func (f *RemoteRuntime) GetContainerEvents(_ *kubeapi.GetEventsRequest, _ kubeapi.RuntimeService_GetContainerEventsServer) error {
 	return nil
 }
 
 // ListMetricDescriptors gets the descriptors for the metrics that will be returned in ListPodSandboxMetrics.
-func (f *RemoteRuntime) ListMetricDescriptors(ctx context.Context, req *kubeapi.ListMetricDescriptorsRequest) (*kubeapi.ListMetricDescriptorsResponse, error) {
+func (f *RemoteRuntime) ListMetricDescriptors(ctx context.Context, _ *kubeapi.ListMetricDescriptorsRequest) (*kubeapi.ListMetricDescriptorsResponse, error) {
 	descs, err := f.RuntimeService.ListMetricDescriptors(ctx)
 	if err != nil {
 		return nil, err
@@ -332,7 +337,7 @@ func (f *RemoteRuntime) ListMetricDescriptors(ctx context.Context, req *kubeapi.
 }
 
 // ListPodSandboxMetrics retrieves the metrics for all pod sandboxes.
-func (f *RemoteRuntime) ListPodSandboxMetrics(ctx context.Context, req *kubeapi.ListPodSandboxMetricsRequest) (*kubeapi.ListPodSandboxMetricsResponse, error) {
+func (f *RemoteRuntime) ListPodSandboxMetrics(ctx context.Context, _ *kubeapi.ListPodSandboxMetricsRequest) (*kubeapi.ListPodSandboxMetricsResponse, error) {
 	podMetrics, err := f.RuntimeService.ListPodSandboxMetrics(ctx)
 	if err != nil {
 		return nil, err
@@ -342,7 +347,7 @@ func (f *RemoteRuntime) ListPodSandboxMetrics(ctx context.Context, req *kubeapi.
 }
 
 // RuntimeConfig returns the configuration information of the runtime.
-func (f *RemoteRuntime) RuntimeConfig(ctx context.Context, req *kubeapi.RuntimeConfigRequest) (*kubeapi.RuntimeConfigResponse, error) {
+func (f *RemoteRuntime) RuntimeConfig(ctx context.Context, _ *kubeapi.RuntimeConfigRequest) (*kubeapi.RuntimeConfigResponse, error) {
 	resp, err := f.RuntimeService.RuntimeConfig(ctx)
 	if err != nil {
 		return nil, err

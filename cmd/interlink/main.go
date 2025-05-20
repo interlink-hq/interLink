@@ -184,7 +184,11 @@ func main() {
 	}
 
 	interlinkRuntime := NewFakeRemoteRuntime()
-	interlinkRuntime.Start("unix:///tmp/kubelet_remote_1000.sock")
+	err = interlinkRuntime.Start("unix:///tmp/kubelet_remote_1000.sock")
+	if err != nil {
+		interlinkRuntime.Stop()
+		log.G(ctx).Fatal(err)
+	}
 	defer func() {
 		interlinkRuntime.Stop()
 		// clear endpoint file
