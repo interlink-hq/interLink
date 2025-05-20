@@ -787,7 +787,12 @@ func (p *Provider) statusLoop(ctx context.Context) {
 				log.G(ctx).Error(err)
 			}
 			for _, pod := range p.pods {
-				if p.pods[string(pod.UID)].Status.Phase != pod.Status.Phase {
+				if pod.Status.Phase == v1.PodFailed || pod.Status.Phase == v1.PodSucceeded {
+					if p.pods[string(pod.UID)].Status.Phase != pod.Status.Phase {
+						p.pods[string(pod.UID)] = pod
+						go p.asyncUpdate(ctx, pod)
+					}
+				} else {
 					p.pods[string(pod.UID)] = pod
 					go p.asyncUpdate(ctx, pod)
 				}
