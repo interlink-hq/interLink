@@ -301,7 +301,7 @@ func (m *Interlink) BuildImages(
 	}
 
 	builder := dag.Container().
-		From("golang:1.23").
+		From("golang:1.24").
 		WithDirectory("/src", sourceFolder).
 		WithWorkdir("/src").
 		WithMountedCache("/go/pkg/mod", dag.CacheVolume("go-mod-122")).
@@ -311,7 +311,7 @@ func (m *Interlink) BuildImages(
 		WithEnvVariable("GOCACHE", "/go/build-cache").
 		WithEnvVariable("CGO_ENABLED", "0").
 		WithExec([]string{"bash", "-c", "KUBELET_VERSION=${VERSION} ./cmd/virtual-kubelet/set-version.sh"}).
-		WithExec([]string{"go", "build", "-o", "bin/interlink", "cmd/interlink/main.go"})
+		WithExec([]string{"go", "build", "-o", "bin/interlink", "cmd/interlink/main.go", "cmd/interlink/cri.go"})
 
 	m.InterlinkContainer = dag.Container().
 		From("alpine").
@@ -329,7 +329,7 @@ func (m *Interlink) BuildImages(
 	}
 
 	builderVK := dag.Container().
-		From("golang:1.23").
+		From("golang:1.24").
 		WithDirectory("/src", sourceFolder).
 		WithWorkdir("/src").
 		WithMountedCache("/go/pkg/mod", dag.CacheVolume("go-mod-122")).

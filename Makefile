@@ -1,7 +1,7 @@
 all: interlink vk installer ssh-tunnel
 
 interlink:
-	CGO_ENABLED=0 OOS=linux go build -o bin/interlink cmd/interlink/main.go
+	CGO_ENABLED=0 OOS=linux go build -o bin/interlink cmd/interlink/main.go cmd/interlink/cri.go
 
 vk:
 	CGO_ENABLED=0 OOS=linux go build -o bin/vk cmd/virtual-kubelet/main.go
