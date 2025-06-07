@@ -229,6 +229,7 @@ func root(cmd *cobra.Command, _ []string) error {
 				DeviceCodeURL: "https://my_oidc_idp/auth/device",
 				Provider:      "oidc",
 				Issuer:        "https://my_oidc_idp.com/",
+				Audience:      "OIDC_AUDIENCE_HERE",
 			},
 			HTTPInsecure: true,
 		}

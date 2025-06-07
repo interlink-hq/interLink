@@ -126,6 +126,7 @@ oauth:
   token_url: https://my_oidc_idp.com/token
   device_code_url: https://my_oidc_idp/auth/device
   issuer: https://my_oidc_idp.com/
+  audience: OIDC_AUDIENCE_HERE # Required for OIDC providers
   # For GitHub provider
   # github_user: username
 ```

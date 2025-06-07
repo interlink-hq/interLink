@@ -10,6 +10,14 @@ import useBaseUrl from "@docusaurus/useBaseUrl";
 We support any OpenID compliant identity provider and also GitHub authN
 workflow.
 
+## OAuth Audience Configuration
+
+When configuring OIDC providers, the `audience` field is required and specifies the intended audience for the JWT tokens. This field should match the audience configured in your OIDC provider and helps ensure tokens are intended for interLink. Different providers may use different audience values:
+
+- **EGI Check-in**: Uses `interlink` as the audience
+- **Indigo IAM**: Typically uses `users` or a custom client-specific audience
+- **Generic OIDC**: Contact your provider administrator for the correct audience value
+
 ## GitHub authN
 
 ### Requirements
