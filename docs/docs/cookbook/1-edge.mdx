@@ -33,6 +33,12 @@ stack is successfully deployed.
 to connect to the Oauth2 proxy service port (30443 if you use the automatic
 script for installation)**
 
+## Authentication Methods
+
+interLink supports two primary authentication methods for secure communication between the Kubernetes cluster and the edge node:
+
+### Option 1: OIDC Authentication (OAuth2 Proxy)
+
 You first need to initialize an OIDC client with you Identity Provider (IdP).
 
 Since any OIDC provider working with
@@ -43,6 +49,55 @@ with instructions ready for
 [GitHub](../guides/deploy-interlink#create-an-oauth-github-app),
 [EGI checkin](../guides/04-oidc-IAM.md#egi-check-in),
 [INFN IAM](../guides/oidc-IAM#indigo-iam).
+
+### Option 2: mTLS Authentication (Mutual TLS)
+
+As an alternative to OIDC, you can use mutual TLS (mTLS) for authentication, which provides strong cryptographic authentication without requiring an external identity provider.
+
+#### Prerequisites for mTLS
+
+1. A Certificate Authority (CA) certificate
+2. Server certificate and private key for the interLink API server
+3. Client certificate and private key for the Virtual Kubelet
+
+#### Generate Certificates for mTLS
+
+```bash
+# Generate CA private key
+openssl genrsa -out ca-key.pem 4096
+
+# Generate CA certificate
+openssl req -new -x509 -days 365 -key ca-key.pem -sha256 -out ca.pem -subj "/C=US/ST=CA/L=San Francisco/O=InterLink/CN=InterLink CA"
+
+# Generate server private key
+openssl genrsa -out server-key.pem 4096
+
+# Generate server certificate signing request
+openssl req -subj "/C=US/ST=CA/L=San Francisco/O=InterLink/CN=interlink-server" -sha256 -new -key server-key.pem -out server.csr
+
+# Generate server certificate signed by CA
+openssl x509 -req -days 365 -sha256 -in server.csr -CA ca.pem -CAkey ca-key.pem -out server-cert.pem -extensions v3_req
+
+# Generate client private key
+openssl genrsa -out client-key.pem 4096
+
+# Generate client certificate signing request
+openssl req -subj "/C=US/ST=CA/L=San Francisco/O=InterLink/CN=interlink-client" -sha256 -new -key client-key.pem -out client.csr
+
+# Generate client certificate signed by CA
+openssl x509 -req -days 365 -sha256 -in client.csr -CA ca.pem -CAkey ca-key.pem -out client-cert.pem -extensions v3_req
+
+# Clean up CSR files
+rm server.csr client.csr
+```
+
+---
+
+## Installation Instructions
+
+Choose one of the authentication methods above and follow the corresponding installation steps below.
+
+### OIDC Authentication Installation
 
 Then download the
 [latest release](https://github.com/interlink-hq/interLink/releases) of the
@@ -98,6 +153,156 @@ oauth:
   client_secret: "xxxxxx"
 insecure_http: true
 ```
+
+### mTLS Authentication Installation
+
+For mTLS authentication, you don't need OAuth2 Proxy. Instead, configure interLink directly with TLS certificates.
+
+#### Prepare Certificate Files
+
+First, copy your generated certificates to the appropriate locations:
+
+```bash
+mkdir -p $HOME/.interlink/certs
+mkdir -p $HOME/.interlink/config
+mkdir -p $HOME/.interlink/logs
+mkdir -p $HOME/.interlink/bin
+
+# Copy certificates (assuming you generated them as shown above)
+cp ca.pem server-cert.pem server-key.pem $HOME/.interlink/certs/
+cp ca.pem client-cert.pem client-key.pem $HOME/.interlink/certs/
+```
+
+#### Create mTLS Configuration
+
+Create the interLink configuration file with mTLS settings:
+
+```yaml title="$HOME/.interlink/config/InterLinkConfig.yaml"
+InterlinkAddress: https://0.0.0.0
+InterlinkPort: "3000"
+SidecarURL: http://plugin
+SidecarPort: "4000"
+VerboseLogging: true
+ErrorsOnlyLogging: false
+DataRootFolder: "/tmp/interlink"
+
+# mTLS Configuration
+TLS:
+  Enabled: true
+  CertFile: "/home/myusername/.interlink/certs/server-cert.pem"
+  KeyFile: "/home/myusername/.interlink/certs/server-key.pem"
+  CACertFile: "/home/myusername/.interlink/certs/ca.pem"
+```
+
+#### Download and Configure interLink Binary
+
+```bash
+export VERSION=$(curl -s https://api.github.com/repos/interlink-hq/interlink/releases/latest | jq -r .name)
+wget -O $HOME/.interlink/bin/interlink https://github.com/interlink-hq/interLink/releases/download/$VERSION/interlink_Linux_x86_64
+chmod +x $HOME/.interlink/bin/interlink
+```
+
+#### Start interLink API Server
+
+```bash
+# Start interLink API server with mTLS
+export INTERLINKCONFIGPATH=$HOME/.interlink/config/InterLinkConfig.yaml
+$HOME/.interlink/bin/interlink &> $HOME/.interlink/logs/interlink.log &
+echo $! > $HOME/.interlink/interlink.pid
+```
+
+#### Configure Virtual Kubelet for mTLS
+
+For the Kubernetes side (Virtual Kubelet), you'll need to configure it to use client certificates. This configuration will be used when setting up the Helm chart:
+
+```yaml title="mTLS values for Helm chart"
+virtualkubelet:
+  config:
+    InterlinkURL: https://PUBLIC_IP  # Your edge node IP
+    InterlinkPort: "3000"
+    TLS:
+      Enabled: true
+      CertFile: "/etc/vk/certs/client-cert.pem"
+      KeyFile: "/etc/vk/certs/client-key.pem" 
+      CACertFile: "/etc/vk/certs/ca.pem"
+  
+  # Certificate secret mounts
+  extraVolumes:
+    - name: vk-tls-certs
+      secret:
+        secretName: vk-tls-certs
+  
+  extraVolumeMounts:
+    - name: vk-tls-certs
+      mountPath: /etc/vk/certs
+      readOnly: true
+```
+
+#### Create Kubernetes Secrets for Certificates
+
+Before deploying the Helm chart, create the necessary secrets:
+
+```bash
+# Create namespace
+kubectl create namespace interlink
+
+# Create secret with client certificates for Virtual Kubelet
+kubectl create secret generic vk-tls-certs \
+  --from-file=ca.pem=$HOME/.interlink/certs/ca.pem \
+  --from-file=client-cert.pem=$HOME/.interlink/certs/client-cert.pem \
+  --from-file=client-key.pem=$HOME/.interlink/certs/client-key.pem \
+  -n interlink
+```
+
+#### mTLS Security Considerations
+
+**Certificate Management:**
+- Implement regular certificate rotation for production deployments
+- Store private keys securely with restricted file permissions (600)
+- Keep CA private key highly secure and consider using a proper PKI solution
+- Monitor certificate expiration dates
+
+**Network Security:**
+```bash
+# Example firewall configuration
+sudo ufw allow from <kubernetes-cluster-cidr> to any port 3000 comment "interLink mTLS API"
+sudo ufw deny 3000 comment "Block public access to interLink API"
+```
+
+**Certificate Validation:**
+```bash
+# Verify certificate details and chain
+openssl x509 -in server-cert.pem -text -noout
+openssl verify -CAfile ca.pem server-cert.pem
+
+# Test mTLS connection
+openssl s_client -connect YOUR_EDGE_NODE_IP:3000 -CAfile ca.pem -cert client-cert.pem -key client-key.pem
+```
+
+#### mTLS Troubleshooting
+
+**Common Issues:**
+1. **Certificate verification errors** - Check certificate chain and CA
+2. **Permission denied** - Verify file permissions and paths
+3. **Handshake failures** - Ensure client certificate is signed by the same CA
+
+**Debug Commands:**
+```bash
+# Check certificate chain
+openssl verify -CAfile ca.pem client-cert.pem
+
+# Test server connectivity
+curl -v --cacert ca.pem --cert client-cert.pem --key client-key.pem https://YOUR_EDGE_NODE_IP:3000/pinglink
+
+# Check interLink logs for TLS errors
+tail -f $HOME/.interlink/logs/interlink.log | grep -i tls
+```
+
+**Log Messages to Monitor:**
+- "Loaded CA certificate for TLS client"
+- "mTLS enabled - requiring client certificates"
+- "Failed to create TLS HTTP client"
+- "certificate verification failed"
 
 :::note
 
@@ -644,21 +849,72 @@ This call will return the status of the system and its readiness to submit jobs.
 ### Deploy Kubernetes components
 
 The deployment of the Kubernetes components are managed by the official
-[HELM chart](https://github.com/interlink-hq/interlink-helm-chart). Depending on
-the scenario you selected, there might be additional operations to be done.
+[HELM chart](https://github.com/interlink-hq/interlink-helm-chart). The deployment steps differ based on your chosen authentication method.
 
-You can now install the helm chart with the preconfigured (by the installer
-script) helm values in `./interlink/manifests/values.yaml`
+#### For OIDC Authentication
+
+You can install the helm chart with the preconfigured (by the installer script) helm values in `./interlink/manifests/values.yaml`
 
 ```bash
-  export INTERLINK_CHART_VERSION="X.X.X"
-  helm upgrade --install \
+export INTERLINK_CHART_VERSION="X.X.X"
+helm upgrade --install \
   --create-namespace \
   -n interlink \
   my-node \
   oci://ghcr.io/interlink-hq/interlink-helm-chart/interlink \
   --version $INTERLINK_CHART_VERSION \
   --values ./.interlink/manifests/values.yaml
+```
+
+#### For mTLS Authentication
+
+For mTLS, create a custom values file and deploy:
+
+```bash
+# Create values file for mTLS
+cat > $HOME/.interlink/mtls-values.yaml << EOF
+virtualkubelet:
+  config:
+    InterlinkURL: https://YOUR_EDGE_NODE_IP
+    InterlinkPort: "3000"
+    TLS:
+      Enabled: true
+      CertFile: "/etc/vk/certs/client-cert.pem"
+      KeyFile: "/etc/vk/certs/client-key.pem" 
+      CACertFile: "/etc/vk/certs/ca.pem"
+  
+  extraVolumes:
+    - name: vk-tls-certs
+      secret:
+        secretName: vk-tls-certs
+  
+  extraVolumeMounts:
+    - name: vk-tls-certs
+      mountPath: /etc/vk/certs
+      readOnly: true
+
+  nodeSelector:
+    kubernetes.io/arch: amd64
+    kubernetes.io/os: linux
+
+  nodeName: "my-node"
+  
+  resources:
+    limits:
+      cpu: "1000m"
+      memory: "25600Mi"
+    pods: "100"
+EOF
+
+# Deploy with mTLS configuration
+export INTERLINK_CHART_VERSION="X.X.X"
+helm upgrade --install \
+  --create-namespace \
+  -n interlink \
+  my-node \
+  oci://ghcr.io/interlink-hq/interlink-helm-chart/interlink \
+  --version $INTERLINK_CHART_VERSION \
+  --values $HOME/.interlink/mtls-values.yaml
 ```
 
 :::warning
