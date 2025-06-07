@@ -3,6 +3,8 @@ package virtualkubelet
 import (
 	"bytes"
 	"context"
+	"crypto/tls"
+	"crypto/x509"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -62,6 +64,46 @@ func doRequest(req *http.Request, token string) (*http.Response, error) {
 	return doRequestWithClient(req, token, http.DefaultClient)
 }
 
+// createTLSHTTPClient creates an HTTP client with TLS/mTLS configuration
+func createTLSHTTPClient(ctx context.Context, tlsConfig TLSConfig) (*http.Client, error) {
+	if !tlsConfig.Enabled {
+		return http.DefaultClient, nil
+	}
+
+	transport := &http.Transport{
+		TLSClientConfig: &tls.Config{
+			MinVersion: tls.VersionTLS12,
+		},
+	}
+
+	// Load CA certificate if provided
+	if tlsConfig.CACertFile != "" {
+		caCert, err := os.ReadFile(tlsConfig.CACertFile)
+		if err != nil {
+			return nil, fmt.Errorf("failed to read CA certificate file %s: %w", tlsConfig.CACertFile, err)
+		}
+
+		caCertPool := x509.NewCertPool()
+		if !caCertPool.AppendCertsFromPEM(caCert) {
+			return nil, fmt.Errorf("failed to parse CA certificate from %s", tlsConfig.CACertFile)
+		}
+		transport.TLSClientConfig.RootCAs = caCertPool
+		log.G(ctx).Info("Loaded CA certificate for TLS client from: ", tlsConfig.CACertFile)
+	}
+
+	// Load client certificate and key for mTLS if provided
+	if tlsConfig.CertFile != "" && tlsConfig.KeyFile != "" {
+		cert, err := tls.LoadX509KeyPair(tlsConfig.CertFile, tlsConfig.KeyFile)
+		if err != nil {
+			return nil, fmt.Errorf("failed to load client certificate pair (%s, %s): %w", tlsConfig.CertFile, tlsConfig.KeyFile, err)
+		}
+		transport.TLSClientConfig.Certificates = []tls.Certificate{cert}
+		log.G(ctx).Info("Loaded client certificate for mTLS from: ", tlsConfig.CertFile, " and ", tlsConfig.KeyFile)
+	}
+
+	return &http.Client{Transport: transport}, nil
+}
+
 func doRequestWithClient(req *http.Request, token string, httpClient *http.Client) (*http.Response, error) {
 	if token != "" {
 		req.Header.Add("Authorization", "Bearer "+token)
@@ -116,7 +158,14 @@ func PingInterLink(ctx context.Context, config Config) (bool, int, error) {
 	// Add session number for end-to-end from VK to API to InterLink plugin (eg interlink-slurm-plugin)
 	AddSessionContext(req, "PingInterLink#"+strconv.Itoa(rand.Intn(100000)))
 
-	resp, err := http.DefaultClient.Do(req)
+	// Create TLS-enabled HTTP client
+	httpClient, err := createTLSHTTPClient(ctx, config.TLS)
+	if err != nil {
+		log.G(ctx).Error("Failed to create TLS HTTP client: ", err)
+		return false, retVal, err
+	}
+
+	resp, err := httpClient.Do(req)
 	if err != nil {
 		spanHTTP.SetAttributes(attribute.Int("exit.code", http.StatusInternalServerError))
 		return false, retVal, err
@@ -165,7 +214,14 @@ func updateCacheRequest(ctx context.Context, config Config, pod v1.Pod, token st
 	// Add session number for end-to-end from VK to API to InterLink plugin (eg interlink-slurm-plugin)
 	AddSessionContext(req, "UpdateCache#"+strconv.Itoa(rand.Intn(100000)))
 
-	resp, err := http.DefaultClient.Do(req)
+	// Create TLS-enabled HTTP client
+	httpClient, err := createTLSHTTPClient(ctx, config.TLS)
+	if err != nil {
+		log.L.Error("Failed to create TLS HTTP client: ", err)
+		return err
+	}
+
+	resp, err := httpClient.Do(req)
 	if err != nil {
 		log.L.Error(err)
 		return err
@@ -215,7 +271,13 @@ func createRequest(ctx context.Context, config Config, pod types.PodCreateReques
 	// Add session number for end-to-end from VK to API to InterLink plugin (eg interlink-slurm-plugin)
 	AddSessionContext(req, "CreatePod#"+strconv.Itoa(rand.Intn(100000)))
 
-	resp, err := doRequest(req, token)
+	// Create TLS-enabled HTTP client
+	httpClient, err := createTLSHTTPClient(ctx, config.TLS)
+	if err != nil {
+		return nil, fmt.Errorf("failed to create TLS HTTP client: %w", err)
+	}
+
+	resp, err := doRequestWithClient(req, token, httpClient)
 	if err != nil {
 		return nil, fmt.Errorf("error doing doRequest() in createRequest() log request: %s error: %w", fmt.Sprintf("%#v", req), err)
 	}
@@ -257,7 +319,14 @@ func deleteRequest(ctx context.Context, config Config, pod *v1.Pod, token string
 	// Add session number for end-to-end from VK to API to InterLink plugin (eg interlink-slurm-plugin)
 	AddSessionContext(req, "DeletePod#"+strconv.Itoa(rand.Intn(100000)))
 
-	resp, err := doRequest(req, token)
+	// Create TLS-enabled HTTP client
+	httpClient, err := createTLSHTTPClient(ctx, config.TLS)
+	if err != nil {
+		log.G(context.Background()).Error("Failed to create TLS HTTP client: ", err)
+		return nil, err
+	}
+
+	resp, err := doRequestWithClient(req, token, httpClient)
 	if err != nil {
 		log.G(context.Background()).Error(err)
 		return nil, err
@@ -319,7 +388,13 @@ func statusRequest(ctx context.Context, config Config, podsList []*v1.Pod, token
 	// Add session number for end-to-end from VK to API to InterLink plugin (eg interlink-slurm-plugin)
 	AddSessionContext(req, "GetStatus#"+strconv.Itoa(rand.Intn(100000)))
 
-	resp, err := doRequest(req, token)
+	// Create TLS-enabled HTTP client
+	httpClient, err := createTLSHTTPClient(ctx, config.TLS)
+	if err != nil {
+		return nil, fmt.Errorf("failed to create TLS HTTP client: %w", err)
+	}
+
+	resp, err := doRequestWithClient(req, token, httpClient)
 	if err != nil {
 		return nil, err
 	}

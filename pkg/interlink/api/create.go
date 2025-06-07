@@ -18,7 +18,7 @@ import (
 	trace "go.opentelemetry.io/otel/trace"
 )
 
-// CreateHandler collects and rearranges all needed ConfigMaps/Secrets/EmptyDirs to ship them to the sidecar, then sends a response to the client
+// CreateHandler collects and lls needed ConfigMaps/Secrets/EmptyDirs to ship them to the sidecar, then sends a response to the client
 func (h *InterLinkHandler) CreateHandler(w http.ResponseWriter, r *http.Request) {
 	start := time.Now().UnixMicro()
 	tracer := otel.Tracer("interlink-API")
@@ -56,8 +56,6 @@ func (h *InterLinkHandler) CreateHandler(w http.ResponseWriter, r *http.Request)
 		attribute.String("pod.namespace", pod.Pod.Namespace),
 		attribute.String("pod.uid", string(pod.Pod.UID)),
 	)
-
-	var retrievedData []types.RetrievedPodData
 
 	data, err := getData(h.Ctx, h.Config, pod, span)
 	if err != nil {
@@ -137,39 +135,37 @@ func (h *InterLinkHandler) CreateHandler(w http.ResponseWriter, r *http.Request)
 		data.JobScript = tpl.String()
 	}
 
-	retrievedData = append(retrievedData, data)
+	// updated to handle single data
+	retrievedData := data
 
-	if retrievedData != nil {
-		podIP, ok := retrievedData[0].Pod.Annotations["interlink.eu/pod-ip"]
-		if ok {
-			retrievedData[0].Pod.DeepCopy().Status.PodIP = podIP
-		}
-		bodyBytes, err = json.Marshal(retrievedData)
-		if err != nil {
-			w.WriteHeader(http.StatusInternalServerError)
-			log.G(h.Ctx).Error(err)
-			return
-		}
-		log.G(h.Ctx).Debug(string(bodyBytes))
-		reader := bytes.NewReader(bodyBytes)
+	podIP, ok := retrievedData.Pod.Annotations["interlink.eu/pod-ip"]
+	if ok {
+		retrievedData.Pod.DeepCopy().Status.PodIP = podIP
+	}
+	bodyBytes, err = json.Marshal(retrievedData)
+	if err != nil {
+		w.WriteHeader(http.StatusInternalServerError)
+		log.G(h.Ctx).Error(err)
+		return
+	}
+	log.G(h.Ctx).Debug(string(bodyBytes))
+	reader := bytes.NewReader(bodyBytes)
 
-		log.G(h.Ctx).Info(req)
-		req, err = http.NewRequest(http.MethodPost, h.SidecarEndpoint+"/create", reader)
-		if err != nil {
-			statusCode = http.StatusInternalServerError
-			w.WriteHeader(statusCode)
-			log.G(h.Ctx).Error(err)
-			return
-		}
+	log.G(h.Ctx).Info(req)
+	req, err = http.NewRequest(http.MethodPost, h.SidecarEndpoint+"/create", reader)
+	if err != nil {
+		statusCode = http.StatusInternalServerError
+		w.WriteHeader(statusCode)
+		log.G(h.Ctx).Error(err)
+		return
+	}
 
-		log.G(h.Ctx).Info("InterLink: forwarding Create call to sidecar")
+	log.G(h.Ctx).Info("InterLink: forwarding Create call to sidecar")
 
-		sessionContext := GetSessionContext(r)
-		_, err := ReqWithError(h.Ctx, req, w, start, span, true, false, sessionContext, h.ClientHTTP)
-		if err != nil {
-			log.L.Error(err)
-			return
-		}
-
+	sessionContext := GetSessionContext(r)
+	_ , err = ReqWithError(h.Ctx, req, w, start, span, true, false, sessionContext, h.ClientHTTP)
+	if err != nil {
+		log.L.Error(err)
+		return
 	}
 }

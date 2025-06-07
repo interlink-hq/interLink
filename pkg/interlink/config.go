@@ -68,6 +68,15 @@ type Config struct {
 	VerboseLogging       bool               `yaml:"VerboseLogging"`
 	ErrorsOnlyLogging    bool               `yaml:"ErrorsOnlyLogging"`
 	DataRootFolder       string             `yaml:"DataRootFolder"`
+	TLS                  TLSConfig          `yaml:"TLS,omitempty"`
+}
+
+// TLSConfig holds TLS/mTLS configuration for secure communication
+type TLSConfig struct {
+	Enabled    bool   `yaml:"Enabled"`
+	CertFile   string `yaml:"CertFile,omitempty"`
+	KeyFile    string `yaml:"KeyFile,omitempty"`
+	CACertFile string `yaml:"CACertFile,omitempty"`
 }
 
 func SetupTelemetry(ctx context.Context, serviceName string) (*sdktrace.TracerProvider, error) {

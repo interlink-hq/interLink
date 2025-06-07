@@ -22,6 +22,15 @@ type Config struct {
 	Resources               Resources   `yaml:"Resources"`
 	NodeLabels              []string    `yaml:"NodeLabels"`
 	NodeTaints              []TaintSpec `yaml:"NodeTaints"`
+	TLS                     TLSConfig   `yaml:"TLS,omitempty"`
+}
+
+// TLSConfig holds TLS/mTLS configuration for secure communication with interLink API
+type TLSConfig struct {
+	Enabled    bool   `yaml:"Enabled"`
+	CertFile   string `yaml:"CertFile,omitempty"`
+	KeyFile    string `yaml:"KeyFile,omitempty"`
+	CACertFile string `yaml:"CACertFile,omitempty"`
 }
 
 type HTTP struct {
