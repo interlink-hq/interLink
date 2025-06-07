@@ -20,13 +20,687 @@ communication.
   }}
 />
 
-## Install interLink
+## SSH Tunnel Setup for interLink
 
-### Deploy Remote components
+This guide explains how to configure SSH tunneling between Virtual Kubelet and interLink API server using the built-in `ssh-tunnel` command. SSH tunneling enables secure communication in scenarios where direct network connectivity is not available or desired.
+
+### Overview
+
+The SSH tunnel functionality allows you to:
+
+- Connect Virtual Kubelet to a remote interLink API server through an SSH tunnel
+- Secure communication over untrusted networks
+- Bypass network restrictions and firewalls
+- Enable the **tunneled deployment pattern** where the API server runs locally and the plugin runs remotely
+
+### Architecture
+
+In a tunneled deployment:
+
+1. **Virtual Kubelet** runs in your local Kubernetes cluster
+2. **interLink API server** runs locally (same network as Virtual Kubelet)  
+3. **SSH tunnel** forwards traffic from local Unix socket to remote TCP port
+4. **Plugin** runs on the remote compute resource (HPC cluster, cloud, etc.)
+
+```
+[Virtual Kubelet] -> [interLink API] -> [Unix Socket] -> [SSH Tunnel] -> [Remote Plugin]
+     (local)            (local)          (local)        (ssh bridge)      (remote)
+```
+
+### Prerequisites
+
+Before setting up SSH tunneling, ensure you have:
+
+1. **SSH access** to the remote system where the plugin runs
+2. **SSH key pair** for authentication
+3. **Network connectivity** from local system to remote SSH server
+4. **interLink binary** built with ssh-tunnel command (`make ssh-tunnel`)
+
+#### SSH Key Setup
+
+Generate an SSH key pair if you don't have one:
+
+```bash
+# Generate SSH key pair
+ssh-keygen -t rsa -b 4096 -f ~/.ssh/interlink_rsa
+
+# Copy public key to remote server
+ssh-copy-id -i ~/.ssh/interlink_rsa.pub user@remote-server
+
+# Test SSH connection
+ssh -i ~/.ssh/interlink_rsa user@remote-server
+```
+
+#### Optional: Host Key Verification
+
+For enhanced security, extract the remote server's host key:
+
+```bash
+# Extract host public key from remote server
+ssh-keyscan -t rsa remote-server > ~/.ssh/interlink_host_key
+
+# Or get it from known_hosts
+ssh-keygen -F remote-server -f ~/.ssh/known_hosts | grep -o 'ssh-rsa.*' > ~/.ssh/interlink_host_key
+```
+
+### Configuration
+
+#### Step 1: Configure interLink API Server
+
+Configure the interLink API server to listen on a Unix socket instead of a TCP port:
+
+```yaml title="InterLinkConfig.yaml"
+# Use Unix socket for local communication
+InterlinkAddress: "unix:///tmp/interlink.sock"
+InterlinkPort: ""  # Not used for Unix sockets
+
+# Remote plugin configuration
+SidecarURL: "http://remote-plugin"
+SidecarPort: "4000"
+
+VerboseLogging: true
+ErrorsOnlyLogging: false
+DataRootFolder: "/tmp/interlink"
+```
+
+#### Step 2: Configure Virtual Kubelet
+
+Configure Virtual Kubelet to connect to the Unix socket:
+
+```yaml title="VirtualKubeletConfig.yaml"
+# Connect to Unix socket
+InterlinkURL: "unix:///tmp/interlink.sock"
+InterlinkPort: ""  # Not used for Unix sockets
+
+VerboseLogging: true
+ErrorsOnlyLogging: false
+
+# Node configuration
+NodeName: "my-interlink-node"
+NodeLabels:
+  "interlink.cern.ch/provider": "remote-hpc"
+```
+
+#### Step 3: Start SSH Tunnel
+
+Use the built-in `ssh-tunnel` command to establish the tunnel:
+
+##### Basic Usage
+
+```bash
+# Start SSH tunnel
+./bin/ssh-tunnel \
+  -addr "remote-server:22" \
+  -user "username" \
+  -keyfile "~/.ssh/interlink_rsa" \
+  -lsock "/tmp/interlink.sock" \
+  -rport "4000"
+```
+
+##### With Host Key Verification
+
+```bash
+# Start SSH tunnel with host key verification
+./bin/ssh-tunnel \
+  -addr "remote-server:22" \
+  -user "username" \
+  -keyfile "~/.ssh/interlink_rsa" \
+  -lsock "/tmp/interlink.sock" \
+  -rport "4000" \
+  -hostkeyfile "~/.ssh/interlink_host_key"
+```
+
+##### Command Line Options
+
+| Option | Description | Required |
+|--------|-------------|----------|
+| `-addr` | SSH server address as `hostname:port` | Yes |
+| `-user` | Username for SSH authentication | Yes |
+| `-keyfile` | Path to private key file | Yes |
+| `-lsock` | Path to local Unix socket | Yes |
+| `-rport` | Remote port where plugin listens | Yes |
+| `-hostkeyfile` | Path to host public key for verification | No |
+
+### Complete Deployment Example
+
+#### Step 1: Prepare Remote Environment
+
+On the remote server, start your interLink plugin:
+
+```bash
+# Example: Start SLURM plugin on remote HPC system
+cd /path/to/plugin
+python3 slurm_plugin.py --port 4000
+```
+
+#### Step 2: Start Local Components
+
+Start components in this order:
+
+```bash
+# 1. Start SSH tunnel (runs in foreground)
+./bin/ssh-tunnel \
+  -addr "hpc-cluster.example.com:22" \
+  -user "hpc-user" \
+  -keyfile "~/.ssh/interlink_rsa" \
+  -lsock "/tmp/interlink.sock" \
+  -rport "4000" \
+  -hostkeyfile "~/.ssh/interlink_host_key"
+```
+
+In separate terminals:
+
+```bash
+# 2. Start interLink API server
+export INTERLINKCONFIGPATH=/path/to/InterLinkConfig.yaml
+./bin/interlink
+
+# 3. Start Virtual Kubelet
+export KUBECONFIG=~/.kube/config
+./bin/virtual-kubelet \
+  --provider interlink \
+  --nodename interlink-node \
+  --config /path/to/VirtualKubeletConfig.yaml
+```
+
+#### Step 3: Verify Connection
+
+Test the complete setup:
+
+```bash
+# Check if node appears in Kubernetes
+kubectl get nodes
+
+# Deploy a test pod
+kubectl apply -f - <<EOF
+apiVersion: v1
+kind: Pod
+metadata:
+  name: test-tunnel
+spec:
+  nodeSelector:
+    kubernetes.io/hostname: interlink-node
+  containers:
+  - name: test
+    image: busybox
+    command: ["sleep", "3600"]
+EOF
+
+# Check pod status
+kubectl get pod test-tunnel -o wide
+```
+
+## Systemd Service Configuration
+
+For production deployments, it's recommended to manage all tunneled components using systemd services. This provides automatic startup, restart on failure, and proper logging.
+
+### Create System User
+
+First, create a dedicated system user for running interLink services:
+
+```bash
+sudo useradd --system --create-home --home-dir /opt/interlink --shell /bin/bash interlink
+sudo mkdir -p /opt/interlink/{bin,config,logs,.ssh}
+sudo chown -R interlink:interlink /opt/interlink
+```
+
+### Copy Binaries and Configuration
+
+Move your interLink components to the system directories:
+
+```bash
+# Copy binaries
+sudo cp ./bin/ssh-tunnel /opt/interlink/bin/
+sudo cp ./bin/interlink /opt/interlink/bin/
+sudo cp ./bin/virtual-kubelet /opt/interlink/bin/
+sudo chmod +x /opt/interlink/bin/*
+
+# Copy configuration files
+sudo cp InterLinkConfig.yaml /opt/interlink/config/
+sudo cp VirtualKubeletConfig.yaml /opt/interlink/config/
+
+# Copy SSH keys
+sudo cp ~/.ssh/interlink_rsa /opt/interlink/.ssh/id_rsa
+sudo cp ~/.ssh/interlink_rsa.pub /opt/interlink/.ssh/id_rsa.pub
+sudo cp ~/.ssh/interlink_host_key /opt/interlink/.ssh/host_key
+
+# Set ownership and permissions
+sudo chown -R interlink:interlink /opt/interlink
+sudo chmod 600 /opt/interlink/.ssh/id_rsa
+sudo chmod 644 /opt/interlink/.ssh/id_rsa.pub
+sudo chmod 644 /opt/interlink/.ssh/host_key
+```
+
+### SSH Tunnel Service
+
+Create the SSH tunnel systemd service:
+
+```ini title="/etc/systemd/system/interlink-tunnel.service"
+[Unit]
+Description=interLink SSH Tunnel
+After=network.target
+Wants=network.target
+
+[Service]
+Type=simple
+User=interlink
+Group=interlink
+WorkingDirectory=/opt/interlink
+ExecStart=/opt/interlink/bin/ssh-tunnel \
+  -addr "remote-server:22" \
+  -user "interlink" \
+  -keyfile "/opt/interlink/.ssh/id_rsa" \
+  -lsock "/tmp/interlink.sock" \
+  -rport "4000" \
+  -hostkeyfile "/opt/interlink/.ssh/host_key"
+
+Restart=always
+RestartSec=10
+StandardOutput=append:/opt/interlink/logs/ssh-tunnel.log
+StandardError=append:/opt/interlink/logs/ssh-tunnel.log
+
+# Security settings
+NoNewPrivileges=true
+ProtectSystem=strict
+ProtectHome=true
+ReadWritePaths=/opt/interlink/logs /tmp
+PrivateTmp=true
+
+[Install]
+WantedBy=multi-user.target
+```
+
+### interLink API Server Service
+
+Create the interLink API server systemd service:
+
+```ini title="/etc/systemd/system/interlink-api.service"
+[Unit]
+Description=interLink API Server (Tunneled)
+After=network.target interlink-tunnel.service
+Wants=network.target
+Requires=interlink-tunnel.service
+
+[Service]
+Type=simple
+User=interlink
+Group=interlink
+WorkingDirectory=/opt/interlink
+Environment=INTERLINKCONFIGPATH=/opt/interlink/config/InterLinkConfig.yaml
+ExecStart=/opt/interlink/bin/interlink
+ExecReload=/bin/kill -HUP $MAINPID
+Restart=always
+RestartSec=10
+StandardOutput=append:/opt/interlink/logs/interlink-api.log
+StandardError=append:/opt/interlink/logs/interlink-api.log
+
+# Security settings
+NoNewPrivileges=true
+ProtectSystem=strict
+ProtectHome=true
+ReadWritePaths=/opt/interlink/logs /tmp
+PrivateTmp=true
+
+[Install]
+WantedBy=multi-user.target
+```
+
+### Virtual Kubelet Service
+
+Create the Virtual Kubelet systemd service:
+
+```ini title="/etc/systemd/system/interlink-virtual-kubelet.service"
+[Unit]
+Description=interLink Virtual Kubelet (Tunneled)
+After=network.target interlink-api.service
+Wants=network.target
+Requires=interlink-api.service
+
+[Service]
+Type=simple
+User=interlink
+Group=interlink
+WorkingDirectory=/opt/interlink
+Environment=KUBECONFIG=/opt/interlink/.kube/config
+ExecStart=/opt/interlink/bin/virtual-kubelet \
+  --provider interlink \
+  --nodename interlink-node \
+  --config /opt/interlink/config/VirtualKubeletConfig.yaml
+ExecReload=/bin/kill -HUP $MAINPID
+Restart=always
+RestartSec=10
+StandardOutput=append:/opt/interlink/logs/virtual-kubelet.log
+StandardError=append:/opt/interlink/logs/virtual-kubelet.log
+
+# Security settings
+NoNewPrivileges=true
+ProtectSystem=strict
+ProtectHome=true
+ReadWritePaths=/opt/interlink/logs /tmp
+PrivateTmp=true
+
+[Install]
+WantedBy=multi-user.target
+```
+
+### Remote Plugin Service (for Remote Server)
+
+For the remote server where the plugin runs, create a systemd service:
+
+```ini title="/etc/systemd/system/interlink-remote-plugin.service"
+[Unit]
+Description=interLink Remote Plugin
+After=network.target
+Wants=network.target
+
+[Service]
+Type=simple
+User=interlink
+Group=interlink
+WorkingDirectory=/opt/interlink-plugin
+Environment=PLUGIN_CONFIG=/opt/interlink-plugin/config/plugin-config.yaml
+ExecStart=/opt/interlink-plugin/bin/plugin
+ExecReload=/bin/kill -HUP $MAINPID
+Restart=always
+RestartSec=10
+StandardOutput=append:/var/log/interlink/plugin.log
+StandardError=append:/var/log/interlink/plugin.log
+
+# Security settings
+NoNewPrivileges=true
+ProtectSystem=strict
+ProtectHome=true
+ReadWritePaths=/var/log/interlink /opt/interlink-plugin/jobs /tmp
+PrivateTmp=true
+
+[Install]
+WantedBy=multi-user.target
+```
+
+### Kubernetes Configuration
+
+Set up the kubeconfig for the interLink user:
+
+```bash
+# Copy kubeconfig for interLink user
+sudo mkdir -p /opt/interlink/.kube
+sudo cp ~/.kube/config /opt/interlink/.kube/config
+sudo chown -R interlink:interlink /opt/interlink/.kube
+sudo chmod 600 /opt/interlink/.kube/config
+```
+
+### Log Rotation Configuration
+
+Create log rotation configuration:
+
+```bash title="/etc/logrotate.d/interlink-tunneled"
+/opt/interlink/logs/*.log {
+    daily
+    rotate 30
+    compress
+    delaycompress
+    missingok
+    notifempty
+    postrotate
+        systemctl reload interlink-tunnel interlink-api interlink-virtual-kubelet 2>/dev/null || true
+    endscript
+}
+
+/var/log/interlink/*.log {
+    daily
+    rotate 30
+    compress
+    delaycompress
+    missingok
+    notifempty
+    postrotate
+        systemctl reload interlink-remote-plugin 2>/dev/null || true
+    endscript
+}
+```
+
+### Service Management Commands
+
+Enable and start all services in the correct order:
+
+```bash
+# Local services (where Virtual Kubelet runs)
+sudo systemctl daemon-reload
+sudo systemctl enable interlink-tunnel interlink-api interlink-virtual-kubelet
+
+# Start services in dependency order
+sudo systemctl start interlink-tunnel
+sudo systemctl start interlink-api
+sudo systemctl start interlink-virtual-kubelet
+
+# Remote services (on the plugin server)
+sudo systemctl daemon-reload
+sudo systemctl enable interlink-remote-plugin
+sudo systemctl start interlink-remote-plugin
+
+# Check service status
+sudo systemctl status interlink-tunnel
+sudo systemctl status interlink-api
+sudo systemctl status interlink-virtual-kubelet
+```
+
+### Service Operations
+
+Common systemd operations for managing tunneled interLink services:
+
+```bash
+# View service logs
+sudo journalctl -u interlink-tunnel -f
+sudo journalctl -u interlink-api -f
+sudo journalctl -u interlink-virtual-kubelet -f
+
+# Restart tunnel (will cascade to dependent services)
+sudo systemctl restart interlink-tunnel
+
+# Stop all local interLink services
+sudo systemctl stop interlink-virtual-kubelet interlink-api interlink-tunnel
+
+# Start all local interLink services
+sudo systemctl start interlink-tunnel interlink-api interlink-virtual-kubelet
+
+# Check service dependencies
+sudo systemctl list-dependencies interlink-virtual-kubelet
+```
+
+### Monitoring and Health Checks
+
+Create a comprehensive health check script for tunneled deployment:
+
+```bash title="/opt/interlink/bin/tunneled-health-check.sh"
+#!/bin/bash
+
+# Health check script for tunneled interLink deployment
+LOG_FILE="/opt/interlink/logs/health-check.log"
+SOCKET_PATH="/tmp/interlink.sock"
+REMOTE_HOST="remote-server"
+REMOTE_PORT="4000"
+
+echo "$(date): Starting tunneled deployment health check" >> "$LOG_FILE"
+
+# Check SSH tunnel connectivity
+if ! pgrep -f "ssh-tunnel" > /dev/null; then
+    echo "$(date): ERROR - SSH tunnel process not running" >> "$LOG_FILE"
+    exit 1
+fi
+
+# Check if Unix socket exists and is responding
+if [ -S "$SOCKET_PATH" ]; then
+    response=$(curl -s --unix-socket "$SOCKET_PATH" http://unix/pinglink 2>/dev/null)
+    if [ $? -eq 0 ]; then
+        echo "$(date): Local API health check passed - $response" >> "$LOG_FILE"
+    else
+        echo "$(date): ERROR - Local API not responding via socket" >> "$LOG_FILE"
+        exit 1
+    fi
+else
+    echo "$(date): ERROR - Unix socket not found at $SOCKET_PATH" >> "$LOG_FILE"
+    exit 1
+fi
+
+# Check Virtual Kubelet node status
+if kubectl get node interlink-node --no-headers 2>/dev/null | grep -q Ready; then
+    echo "$(date): Virtual Kubelet node is Ready" >> "$LOG_FILE"
+else
+    echo "$(date): WARNING - Virtual Kubelet node not Ready" >> "$LOG_FILE"
+fi
+
+# Test remote connectivity through tunnel
+if nc -z -w5 127.0.0.1 4000 2>/dev/null; then
+    echo "$(date): Remote plugin connectivity through tunnel - OK" >> "$LOG_FILE"
+else
+    echo "$(date): WARNING - Cannot reach remote plugin through tunnel" >> "$LOG_FILE"
+fi
+
+echo "$(date): Tunneled deployment health check completed" >> "$LOG_FILE"
+exit 0
+```
+
+```bash
+# Make executable
+sudo chmod +x /opt/interlink/bin/tunneled-health-check.sh
+sudo chown interlink:interlink /opt/interlink/bin/tunneled-health-check.sh
+```
+
+Create systemd timer for health checks:
+
+```ini title="/etc/systemd/system/interlink-tunneled-health-check.service"
+[Unit]
+Description=interLink Tunneled Health Check
+After=interlink-virtual-kubelet.service
+Requires=interlink-virtual-kubelet.service
+
+[Service]
+Type=oneshot
+User=interlink
+Group=interlink
+ExecStart=/opt/interlink/bin/tunneled-health-check.sh
+```
+
+```ini title="/etc/systemd/system/interlink-tunneled-health-check.timer"
+[Unit]
+Description=Run interLink Tunneled Health Check every 5 minutes
+Requires=interlink-tunneled-health-check.service
+
+[Timer]
+OnCalendar=*:0/5
+Persistent=true
+
+[Install]
+WantedBy=timers.target
+```
+
+Enable the health check timer:
+
+```bash
+sudo systemctl daemon-reload
+sudo systemctl enable interlink-tunneled-health-check.timer
+sudo systemctl start interlink-tunneled-health-check.timer
+```
+
+### Troubleshooting Tunneled Deployment
+
+#### SSH Tunnel Issues
+
+```bash
+# Check SSH tunnel process
+ps aux | grep ssh-tunnel
+
+# Test SSH connection manually
+sudo -u interlink ssh -i /opt/interlink/.ssh/id_rsa interlink@remote-server
+
+# Check SSH tunnel logs
+sudo journalctl -u interlink-tunnel --since "1 hour ago"
+
+# Test local socket
+echo "test" | nc -U /tmp/interlink.sock
+```
+
+#### Virtual Kubelet Issues
+
+```bash
+# Check Virtual Kubelet logs
+sudo journalctl -u interlink-virtual-kubelet -f
+
+# Verify kubeconfig access
+sudo -u interlink kubectl get nodes
+
+# Check node status
+kubectl describe node interlink-node
+```
+
+#### Remote Plugin Issues
+
+```bash
+# On remote server, check plugin status
+sudo systemctl status interlink-remote-plugin
+
+# Check if plugin port is listening
+netstat -tlnp | grep :4000
+
+# Test plugin connectivity from remote server
+curl -X GET http://localhost:4000/status
+```
+
+### Security Considerations for Tunneled Deployment
+
+#### SSH Security
+
+1. **Dedicated SSH keys**: Use separate keys for interLink tunneling
+2. **Key restrictions**: Add restrictions in `authorized_keys`:
+
+```bash
+# On remote server in ~/.ssh/authorized_keys
+command="/usr/bin/false",no-pty,no-X11-forwarding,no-agent-forwarding,no-port-forwarding ssh-rsa AAAAB3... interlink-tunnel-key
+```
+
+3. **SSH configuration**: Secure SSH server configuration:
+
+```bash title="/etc/ssh/sshd_config.d/interlink.conf"
+# Dedicated configuration for interLink tunnel user
+Match User interlink
+    AllowTcpForwarding yes
+    AllowStreamLocalForwarding yes
+    PermitTunnel no
+    X11Forwarding no
+    AllowAgentForwarding no
+    PermitTTY no
+    ForceCommand /bin/false
+```
+
+#### Network Security
+
+```bash
+# Firewall rules for local server
+sudo ufw allow in on lo
+sudo ufw allow out 22/tcp comment "SSH for tunnel"
+
+# Firewall rules for remote server  
+sudo ufw allow from <local-server-ip> to any port 22 comment "SSH tunnel"
+sudo ufw allow 4000/tcp comment "Plugin API"
+```
+
+#### File Permissions
+
+```bash
+# Secure SSH directory
+sudo chmod 700 /opt/interlink/.ssh
+sudo chmod 600 /opt/interlink/.ssh/id_rsa
+sudo chmod 644 /opt/interlink/.ssh/id_rsa.pub /opt/interlink/.ssh/host_key
+
+# Secure configuration files
+sudo chmod 640 /opt/interlink/config/*
+sudo chown root:interlink /opt/interlink/config/*
+```
+
+This comprehensive tunneled deployment setup provides a robust, secure, and manageable solution for connecting Kubernetes clusters to remote compute resources through SSH tunneling.
 
 :::note
 
-We do have case studies already implementing it, if you are interested reach out
-to the slack channel.
+For additional case studies and advanced configurations, reach out to the interLink community through the Slack channel.
 
 :::
