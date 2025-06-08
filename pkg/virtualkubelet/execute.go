@@ -60,10 +60,6 @@ func traceExecute(ctx context.Context, pod *v1.Pod, name string, startHTTPCall i
 	return &spanHTTP
 }
 
-func doRequest(req *http.Request, token string) (*http.Response, error) {
-	return doRequestWithClient(req, token, http.DefaultClient)
-}
-
 // createTLSHTTPClient creates an HTTP client with TLS/mTLS configuration
 func createTLSHTTPClient(ctx context.Context, tlsConfig TLSConfig) (*http.Client, error) {
 	if !tlsConfig.Enabled {
