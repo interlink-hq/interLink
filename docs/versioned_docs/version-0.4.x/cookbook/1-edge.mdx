@@ -1,0 +1,335 @@
+---
+sidebar_position: 3
+---
+
+import Tabs from "@theme/Tabs";
+import TabItem from "@theme/TabItem";
+import ThemedImage from "@theme/ThemedImage";
+import useBaseUrl from "@docusaurus/useBaseUrl";
+
+# Edge node deployment
+
+Deploy interLink on an edge node, outside the local K8S cluster.
+
+<ThemedImage
+  alt="Docusaurus themed image"
+  sources={{
+    light: useBaseUrl("/img/scenario-1_light.svg"),
+    dark: useBaseUrl("/img/scenario-1_dark.svg"),
+  }}
+/>
+
+## Install interLink
+
+### Deploy Remote components
+
+In general, starting from the deployment of the remote components is adviced.
+Since the kubernetes virtual node won't reach the `Ready` status until all the
+stack is successfully deployed.
+
+#### Interlink API server
+
+**For this deployment mode the remote host has to allow the kubernetes cluster
+to connect to the Oauth2 proxy service port (30443 if you use the automatic
+script for installation)**
+
+You first need to initialize an OIDC client with you Identity Provider (IdP).
+
+Since any OIDC provider working with
+[OAuth2 Proxy](https://oauth2-proxy.github.io/oauth2-proxy/) tool will do the
+work, we are going to put the configuration for a generic OIDC identity provider
+in this cookbook. Nevertheless you can find more detailed on dedicated pages
+with instructions ready for
+[GitHub](../guides/deploy-interlink#create-an-oauth-github-app),
+[EGI checkin](../guides/04-oidc-IAM.md#egi-check-in),
+[INFN IAM](../guides/oidc-IAM#indigo-iam).
+
+Then download the
+[latest release](https://github.com/interlink-hq/interLink/releases) of the
+interLink installer:
+
+```bash
+mkdir -p $HOME/.interlink
+export VERSION=$(curl -s https://api.github.com/repos/interlink-hq/interlink/releases/latest  | jq -r .name)
+wget -O $HOME/interlink-installer https://github.com/interlink-hq/interLink/releases/download/$VERSION/interlink-installer_Linux_x86_64
+chmod +x $HOME/.interlink/interlink-installer
+```
+
+Create a template configuration with the init option:
+
+```bash
+mkdir -p $HOME/.interlink/logs
+mkdir -p $HOME/.interlink/bin
+mkdir -p $HOME/.interlink/config
+$HOME/.interlink/interlink-installer --init --config $HOME/.interlink/installer.yaml
+```
+
+The configuration file should be filled as followed. This is the case where the
+`my-node` will contact an edge service that will be listening on `PUBLIC_IP` and
+`API_PORT` authenticating requests from an OIDC provider
+`https://my_oidc_idp.com`:
+
+```bash title="$HOME/.interlink/installer.yaml"
+interlink_ip: PUBLIC_IP
+interlink_port: API_PORT
+interlink_version: X.X.X
+kubelet_node_name: my-node
+kubernetes_namespace: interlink
+node_limits:
+    cpu: "1000"
+    # MEMORY in GB
+    memory: 25600
+    pods: "100"
+oauth:
+  provider: oidc
+  issuer: https://my_oidc_idp.com/
+  scopes:
+    - "openid"
+    - "email"
+    - "offline_access"
+    - "profile"
+  audience: interlink
+  grant_type: authorization_code
+  group_claim: groups
+  group: "my_vk_allowed_group"
+  token_url: "https://my_oidc_idp.com/token"
+  device_code_url: "https://my_oidc_idp/auth/device"
+  client_id: "oidc-client-xx"
+  client_secret: "xxxxxx"
+insecure_http: true
+```
+
+:::note
+
+Please fill interlink_version with the desired version.  
+In alternative get the latest with:
+
+```bash
+curl -s https://api.github.com/repos/interlink-hq/interlink/releases/latest  | jq -r .name
+```
+
+:::
+
+Now you are ready to start the OIDC authentication flow to generate all your
+manifests and configuration files for the interLink components. To do so, just
+execute the installer:
+
+```bash
+$HOME/.interlink/interlink-installer --config $HOME/.interlink/installer.yaml --output-dir $HOME/.interlink/manifests/
+```
+
+Install Oauth2-Proxy and interLink API server services and configurations with:
+
+```bash
+chmod +x $HOME/.interlink/manifests/interlink-remote.sh
+$HOME/.interlink/manifests/interlink-remote.sh install
+```
+
+Then start the services with:
+
+```bash
+$HOME/.interlink/manifests/interlink-remote.sh start
+```
+
+With `stop` command you can stop the service. By default logs are store in
+`~/.interlink/logs`, checkout there for any error before moving to the next
+step.
+
+:::note
+
+**N.B.** you can look the oauth2_proxy configuration parameters looking directly
+into the `interlink-remote.sh` script.
+
+:::
+
+:::warning
+
+**N.B.** logs (expecially if in verbose mode) can become pretty huge, consider
+to implement your favorite rotation routine for all the logs in
+`~/.interlink/logs/`.
+
+:::
+
+#### Plugin service
+
+Select here the featured plugin you want to try:
+
+<Tabs groupId="plugins">
+  <TabItem value="docker" label="Docker" default>
+    _Offload your pods to a remote machine with Docker engine available._
+
+    - Create a configuration file:
+
+      ```bash title="$HOME/.interlink/config/plugin-config.yaml"
+      ## Multi user host
+      Socket: "unix:///home/myusername/.interlink/.plugin.sock"
+      InterlinkPort: "0"
+      SidecarPort: "0"
+
+      CommandPrefix: ""
+      DataRootFolder: "/home/myusername/.interlink/jobs/"
+      BashPath: /bin/bash
+      VerboseLogging: false
+      ErrorsOnlyLogging: false
+      ```
+      - __N.B.__ Depending on wheter you edge is single user or not,
+      you should know by previous steps which section to uncomment here.
+      - More on configuration options at
+      [official repo](https://github.com/interlink-hq/interlink-docker-plugin/blob/main/README.md)
+
+    - Download the [latest release](https://github.com/interlink-hq/interlink-docker-plugin/releases)
+    binary in `$HOME/.interlink/bin/plugin` for either GPU host or CPU host (tags ending with `no-GPU`)
+    - Start the plugins passing the configuration that you have just created:
+
+      ```bash
+      export INTERLINKCONFIGPATH=$HOME/.interlink/config/plugin-config.yaml
+      $HOME/.interlink/bin/plugin &> $HOME/.interlink/logs/plugin.log &
+      echo $! > $HOME/.interlink/plugin.pid
+      ```
+
+    - Check the logs in `$HOME/.interlink/logs/plugin.log`.
+    - To kill and restart the process is enough:
+
+      ```bash
+      # kill
+      kill $(cat $HOME/.interlink/plugin.pid)
+
+      # restart
+      export INTERLINKCONFIGPATH=$HOME/.interlink/config/plugin-config.yaml
+      $HOME/.interlink/bin/plugin &> $HOME/.interlink/logs/plugin.log &
+      echo $! > $HOME/.interlink/plugin.pid
+
+    Almost there! Now it's time to add this virtual node into the Kubernetes cluster!
+
+  </TabItem>
+
+  <TabItem value="slurm" label="SLURM">
+    _Offload your pods to an HPC SLURM based batch system._
+
+    - Please be sure that you have a shared filesystem area with the SLURM nodes available from the edge node. In this case our `DataRootFolder` is `$HOME/.interlink/jobs`
+    - Create a configuration file (__remember to substitute `/home/username/` with your actual home path__):
+
+      ```bash title="./interlink/manifests/plugin-config.yaml"
+      Socket: "unix:///home/myusername/.interlink/.plugin.sock"
+      InterlinkPort: "0"
+      SidecarPort: "0"
+
+      CommandPrefix: ""
+      DataRootFolder: "/home/myusername/.interlink/jobs/"
+      BashPath: /bin/bash
+      VerboseLogging: false
+      ErrorsOnlyLogging: false
+      SbatchPath: "/usr/bin/sbatch"
+      ScancelPath: "/usr/bin/scancel"
+      SqueuePath: "/usr/bin/squeue"
+      SingularityPrefix: ""
+      ```
+
+      - More on configuration options at
+      [official repo](https://github.com/interlink-hq/interlink-slurm-plugin/blob/main/README.md)
+
+    - Download the [latest release](https://github.com/interlink-hq/interlink-slurm-plugin/releases)
+    binary in `$HOME/.interlink/bin/plugin`
+
+      ```bash
+      export PLUGIN_VERSION=$(curl -s https://api.github.com/repos/interlink-hq/interlink-slurm-plugin/releases/latest  | jq -r .name)
+      wget -O $HOME/.interlink/bin/plugin https://github.com/interlink-hq/interlink-slurm-plugin/releases/download/${PLUGIN_VERSION}/interlink-sidecar-slurm_Linux_x86_64
+      ```
+
+    - Start the plugins passing the configuration that you have just created:
+
+      ```bash
+      export SLURMCONFIGPATH=$HOME/.interlink/manifests/plugin-config.yaml
+      $HOME/.interlink/bin/plugin &> $HOME/.interlink/logs/plugin.log &
+      echo $! > $HOME/.interlink/plugin.pid
+      ```
+
+    - Check the logs in `$HOME/.interlink/logs/plugin.log`.
+    - To kill and restart the process is enough:
+
+      ```bash
+      # kill
+      kill $(cat $HOME/.interlink/plugin.pid)
+
+      # restart
+      export SLURMCONFIGPATH=$HOME/.interlink/manifests/plugin-config.yaml
+      $HOME/.interlink/bin/plugin &> $HOME/.interlink/logs/plugin.log &
+      echo $! > $HOME/.interlink/plugin.pid
+
+    Almost there! Now it's time to add this virtual node into the Kubernetes cluster!
+
+  </TabItem>
+
+  <TabItem value="kubernetes" label="Kubernetes">
+    _Offload your pods to a remote Kubernetes cluster._
+
+    KUBERNETES PLUGIN IS COMING SOON! For test instructions contact us!
+
+  </TabItem>
+
+</Tabs>
+
+:::tip
+
+Yes, if you will, you can also manage all interLink processes through `systemd`.
+Reach out to receive guidance on how we do it in production. You can find an
+example in the interlink repo `./systemd` folder.
+
+:::
+
+##### 3rd-party plugins
+
+There are more 3rd-party plugins developed that you can get inspired by or even
+use out of the box. You can find some ref in the
+[quick start section](../guides/deploy-interlink#attach-your-favorite-plugin-or-develop-one)
+
+#### Test interLink stack health
+
+interLink comes with a call that can be used to monitor the overall status of
+both interlink server and plugins, at once.
+
+```
+curl -v --unix-socket ${HOME}/.interlink/.interlink.sock  http://unix/pinglink
+```
+
+This call will return the status of the system and its readiness to submit jobs.
+
+### Deploy Kubernetes components
+
+The deployment of the Kubernetes components are managed by the official
+[HELM chart](https://github.com/interlink-hq/interlink-helm-chart). Depending on
+the scenario you selected, there might be additional operations to be done.
+
+You can now install the helm chart with the preconfigured (by the installer
+script) helm values in `./interlink/manifests/values.yaml`
+
+```bash
+  export INTERLINK_CHART_VERSION="X.X.X"
+  helm upgrade --install \
+  --create-namespace \
+  -n interlink \
+  my-node \
+  oci://ghcr.io/interlink-hq/interlink-helm-chart/interlink \
+  --version $INTERLINK_CHART_VERSION \
+  --values ./.interlink/manifests/values.yaml
+```
+
+:::warning
+
+Remember to pick the
+[version of the chart](https://github.com/interlink-hq/interlink-helm-chart/blob/main/interlink/Chart.yaml#L18)
+and put it into the `INTERLINK_CHART_VERSION` env var above.
+
+:::
+
+Whenever you see the node ready, you are good to go!
+
+:::note
+
+You can find a demo pod to test your setup
+[here](../guides/develop-a-plugin#lets-test-is-out).
+
+:::
+
+To start debugging in case of problems we suggest starting from the pod
+containers logs!
