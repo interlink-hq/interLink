@@ -193,6 +193,8 @@ EOF`}).
 		return nil, err
 	}
 
+	time.Sleep(60 * time.Second) // wait for k3s to be ready
+
 	m.Manifests = manifests
 	m.KubeAPIs = K3s.Server()
 	m.KubeConfig = K3s.Config(dagger.K3SConfigOpts{Local: false})
