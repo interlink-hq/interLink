@@ -70,6 +70,29 @@ paths:
                   $ref: '#/components/schemas/InterlinkPodStatus'
 components:
   schemas:
+    InterlinkApptainerOptions:
+      type: object
+      properties:
+        cleanenv:
+          type: boolean
+        containall:
+          type: boolean
+        executable:
+          type: string
+        fakeroot:
+          type: boolean
+        fuseMode:
+          type: string
+        noHome:
+          type: boolean
+        noInit:
+          type: boolean
+        noPrivs:
+          type: boolean
+        nvidiaSupport:
+          type: boolean
+        unsquash:
+          type: boolean
     InterlinkContainerLogOpts:
       type: object
       properties:
@@ -109,6 +132,8 @@ components:
           items:
             $ref: '#/components/schemas/V1ConfigMap'
           nullable: true
+        jobscriptURL:
+          type: string
         pod:
           $ref: '#/components/schemas/V1Pod'
         projectedvolumesmaps:
@@ -175,8 +200,46 @@ components:
           items:
             $ref: '#/components/schemas/InterlinkRetrievedContainer'
           nullable: true
+        jobConfig:
+          $ref: '#/components/schemas/InterlinkScriptBuildConfig'
+        jobScript:
+          type: string
         pod:
           $ref: '#/components/schemas/V1Pod'
+    InterlinkScriptBuildConfig:
+      type: object
+      properties:
+        ApptainerOptions:
+          $ref: '#/components/schemas/InterlinkApptainerOptions'
+        SingularityHubProxy:
+          $ref: '#/components/schemas/InterlinkSingularityHubConfig'
+        Volumes:
+          $ref: '#/components/schemas/InterlinkVolumesOptions'
+    InterlinkSingularityHubConfig:
+      type: object
+      properties:
+        cache_validity_seconds:
+          type: integer
+        master_token:
+          type: string
+        server:
+          type: string
+    InterlinkVolumesOptions:
+      type: object
+      properties:
+        additional_directories_in_path:
+          type: array
+          items:
+            type: string
+          nullable: true
+        apptainer_cachedir:
+          type: string
+        fuse_sleep_seconds:
+          type: integer
+        image_dir:
+          type: string
+        scratch_area:
+          type: string
     IntstrIntOrString:
       type: object
     ResourceQuantity:
@@ -201,6 +264,14 @@ components:
           $ref: '#/components/schemas/V1PodAffinity'
         podAntiAffinity:
           $ref: '#/components/schemas/V1PodAntiAffinity'
+    V1AppArmorProfile:
+      type: object
+      properties:
+        localhostProfile:
+          type: string
+          nullable: true
+        type:
+          type: string
     V1AzureDiskVolumeSource:
       type: object
       properties:
@@ -286,15 +357,6 @@ components:
           $ref: '#/components/schemas/V1LocalObjectReference'
         volumeID:
           type: string
-    V1ClaimSource:
-      type: object
-      properties:
-        resourceClaimName:
-          type: string
-          nullable: true
-        resourceClaimTemplateName:
-          type: string
-          nullable: true
     V1ClusterTrustBundleProjection:
       type: object
       properties:
@@ -508,6 +570,10 @@ components:
       properties:
         allocatedResources:
           $ref: '#/components/schemas/V1ResourceList'
+        allocatedResourcesStatus:
+          type: array
+          items:
+            $ref: '#/components/schemas/V1ResourceStatus'
         containerID:
           type: string
         image:
@@ -529,6 +595,20 @@ components:
           nullable: true
         state:
           $ref: '#/components/schemas/V1ContainerState'
+        stopSignal:
+          type: string
+          nullable: true
+        user:
+          $ref: '#/components/schemas/V1ContainerUser'
+        volumeMounts:
+          type: array
+          items:
+            $ref: '#/components/schemas/V1VolumeMountStatus'
+    V1ContainerUser:
+      type: object
+      properties:
+        linux:
+          $ref: '#/components/schemas/V1LinuxContainerUser'
     V1DownwardAPIProjection:
       type: object
       properties:
@@ -827,6 +907,13 @@ components:
           $ref: '#/components/schemas/V1LocalObjectReference'
         targetPortal:
           type: string
+    V1ImageVolumeSource:
+      type: object
+      properties:
+        pullPolicy:
+          type: string
+        reference:
+          type: string
     V1KeyToPath:
       type: object
       properties:
@@ -866,6 +953,9 @@ components:
           $ref: '#/components/schemas/V1LifecycleHandler'
         preStop:
           $ref: '#/components/schemas/V1LifecycleHandler'
+        stopSignal:
+          type: string
+          nullable: true
     V1LifecycleHandler:
       type: object
       properties:
@@ -877,6 +967,17 @@ components:
           $ref: '#/components/schemas/V1SleepAction'
         tcpSocket:
           $ref: '#/components/schemas/V1TCPSocketAction'
+    V1LinuxContainerUser:
+      type: object
+      properties:
+        gid:
+          type: integer
+        supplementalGroups:
+          type: array
+          items:
+            type: integer
+        uid:
+          type: integer
     V1LocalObjectReference:
       type: object
       properties:
@@ -1127,6 +1228,8 @@ components:
           type: string
         message:
           type: string
+        observedGeneration:
+          type: integer
         reason:
           type: string
         status:
@@ -1176,8 +1279,12 @@ components:
       properties:
         name:
           type: string
-        source:
-          $ref: '#/components/schemas/V1ClaimSource'
+        resourceClaimName:
+          type: string
+          nullable: true
+        resourceClaimTemplateName:
+          type: string
+          nullable: true
     V1PodResourceClaimStatus:
       type: object
       properties:
@@ -1194,6 +1301,8 @@ components:
     V1PodSecurityContext:
       type: object
       properties:
+        appArmorProfile:
+          $ref: '#/components/schemas/V1AppArmorProfile'
         fsGroup:
           type: integer
           nullable: true
@@ -1209,6 +1318,9 @@ components:
         runAsUser:
           type: integer
           nullable: true
+        seLinuxChangePolicy:
+          type: string
+          nullable: true
         seLinuxOptions:
           $ref: '#/components/schemas/V1SELinuxOptions'
         seccompProfile:
@@ -1217,6 +1329,9 @@ components:
           type: array
           items:
             type: integer
+        supplementalGroupsPolicy:
+          type: string
+          nullable: true
         sysctls:
           type: array
           items:
@@ -1299,6 +1414,8 @@ components:
           type: array
           items:
             $ref: '#/components/schemas/V1PodResourceClaim'
+        resources:
+          $ref: '#/components/schemas/V1ResourceRequirements'
         restartPolicy:
           type: string
         runtimeClassName:
@@ -1368,6 +1485,8 @@ components:
           type: string
         nominatedNodeName:
           type: string
+        observedGeneration:
+          type: integer
         phase:
           type: string
         podIP:
@@ -1481,6 +1600,8 @@ components:
       properties:
         name:
           type: string
+        request:
+          type: string
     V1ResourceFieldSelector:
       type: object
       properties:
@@ -1489,6 +1610,13 @@ components:
         divisor:
           $ref: '#/components/schemas/ResourceQuantity'
         resource:
+          type: string
+    V1ResourceHealth:
+      type: object
+      properties:
+        health:
+          type: string
+        resourceID:
           type: string
     V1ResourceList:
       type: object
@@ -1505,6 +1633,15 @@ components:
           $ref: '#/components/schemas/V1ResourceList'
         requests:
           $ref: '#/components/schemas/V1ResourceList'
+    V1ResourceStatus:
+      type: object
+      properties:
+        name:
+          type: string
+        resources:
+          type: array
+          items:
+            $ref: '#/components/schemas/V1ResourceHealth'
     V1SELinuxOptions:
       type: object
       properties:
@@ -1621,6 +1758,8 @@ components:
         allowPrivilegeEscalation:
           type: boolean
           nullable: true
+        appArmorProfile:
+          $ref: '#/components/schemas/V1AppArmorProfile'
         capabilities:
           $ref: '#/components/schemas/V1Capabilities'
         privileged:
@@ -1787,6 +1926,8 @@ components:
           $ref: '#/components/schemas/V1GlusterfsVolumeSource'
         hostPath:
           $ref: '#/components/schemas/V1HostPathVolumeSource'
+        image:
+          $ref: '#/components/schemas/V1ImageVolumeSource'
         iscsi:
           $ref: '#/components/schemas/V1ISCSIVolumeSource'
         name:
@@ -1832,10 +1973,25 @@ components:
           type: string
         readOnly:
           type: boolean
+        recursiveReadOnly:
+          type: string
+          nullable: true
         subPath:
           type: string
         subPathExpr:
           type: string
+    V1VolumeMountStatus:
+      type: object
+      properties:
+        mountPath:
+          type: string
+        name:
+          type: string
+        readOnly:
+          type: boolean
+        recursiveReadOnly:
+          type: string
+          nullable: true
     V1VolumeProjection:
       type: object
       properties:

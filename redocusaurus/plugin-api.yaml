@@ -1,8 +1,8 @@
 openapi: 3.1.0
 info:
-  title: interLink sidecar
-  description: openapi spec for interLink apis <-> provider sidecar communication
-  version: v0.0.0
+  title: interLink Plugin spec
+  description: openapi spec for interLink apis <-> provider plugin communication
+  version: v0.4.0
 paths:
   /create:
     post:
@@ -12,10 +12,7 @@ paths:
         content:
           application/json:
             schema:
-              items:
-                $ref: '#/components/schemas/Pod'
-              type: array
-              title: Pod
+              $ref: '#/components/schemas/Pod'
         required: true
       responses:
         '200':
@@ -114,14 +111,12 @@ components:
           $ref: '#/components/schemas/Metadata'
         data:
           anyOf:
-            - additionalProperties: true
-              type: object
+            - type: object
             - type: 'null'
           title: Data
         binary_data:
           anyOf:
-            - additionalProperties: true
-              type: object
+            - type: object
             - type: 'null'
           title: Binary Data
         type:
@@ -212,8 +207,7 @@ components:
           default: []
         resources:
           anyOf:
-            - additionalProperties: true
-              type: object
+            - type: object
             - type: 'null'
           title: Resources
           default: {}
@@ -546,8 +540,7 @@ components:
           title: Name
         empty_dir:
           anyOf:
-            - additionalProperties: true
-              type: object
+            - type: object
             - type: 'null'
           title: Empty Dir
         secret:
@@ -568,14 +561,12 @@ components:
           $ref: '#/components/schemas/Metadata'
         data:
           anyOf:
-            - additionalProperties: true
-              type: object
+            - type: object
             - type: 'null'
           title: Data
         string_data:
           anyOf:
-            - additionalProperties: true
-              type: object
+            - type: object
             - type: 'null'
           title: String Data
         type:
