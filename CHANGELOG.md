@@ -22,12 +22,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - OAuth2 audience specification issue (#413)
 - Installation script issues (#415)
 - golangci-lint compliance issues
+- Documentation links for versioned guides
+- Plugin development guide links and references
 
 ### Documentation
 - Added comprehensive CLAUDE.md for AI-assisted development
 - Enhanced mTLS integration guides
 - Improved SSH tunnel setup documentation
 - Updated SystemD service configuration guides
+- Added versioned documentation for 0.4.x release series
+- Fixed broken documentation links across version guides
+- Updated plugin development guide with correct references
 
 ## [0.4.2-pre1] - 2025-05-16
 
