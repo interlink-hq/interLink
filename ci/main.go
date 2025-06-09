@@ -85,7 +85,7 @@ func New(name string,
 	// +default="ghcr.io/interlink-hq/interlink/interlink:0.4.0"
 	InterlinkRef string,
 	// +optional
-	// +default="ghcr.io/interlink-hq/interlink-sidecar-slurm/interlink-sidecar-slurm:0.4.0"
+	// +default="ghcr.io/interlink-hq/interlink-sidecar-slurm/interlink-sidecar-slurm:0.5.0-pre1"
 	pluginRef string,
 ) *Interlink {
 	return &Interlink{
