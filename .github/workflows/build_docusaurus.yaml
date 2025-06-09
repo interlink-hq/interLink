@@ -16,19 +16,19 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@v4
 
-      - name: Remove existing openapi.json
-        run: rm ./docs/openapi/plugin-openapi.json
-
-      - name: Download openapi.json
-        uses: robinraju/release-downloader@v1
-        with:
-          latest: true
-          preRelease: false
-          fileName: 'openAPISpec'
-          out-file-path: 'docs/openapi'
-      
-      - name: Rename openAPISpec to openapi.json
-        run: mv ./docs/openapi/openAPISpec ./docs/openapi/plugin-openapi.json
+      # - name: Remove existing openapi.json
+      #   run: rm ./docs/openapi/plugin-openapi.json
+      #
+      # - name: Download openapi.json
+      #   uses: robinraju/release-downloader@v1
+      #   with:
+      #     latest: true
+      #     preRelease: false
+      #     fileName: 'openAPISpec'
+      #     out-file-path: 'docs/openapi'
+      #
+      # - name: Rename openAPISpec to openapi.json
+      #   run: mv ./docs/openapi/openAPISpec ./docs/openapi/plugin-openapi.json
 
       - name: Set up Node.js
         uses: actions/setup-node@v4
