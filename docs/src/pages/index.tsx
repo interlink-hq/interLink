@@ -111,7 +111,7 @@ export default function Home(): JSX.Element {
             <div className={styles.cncfLogoContainer}>
               <img 
                 className={styles.cncfLogo} 
-                src="/img/cncf-color.svg" 
+                src="https://www.cncf.io/wp-content/uploads/2022/07/cncf-stacked-color-bg.svg" 
                 alt="Cloud Native Computing Foundation logo"
               />
             </div>
