@@ -24,15 +24,59 @@ import (
 	"gopkg.in/yaml.v2"
 )
 
+type VolumesOptions struct {
+	ScratchArea                 string   `json:"scratch_area" yaml:"scratch_area"`
+	ApptainerCacheDir           string   `json:"apptainer_cachedir" yaml:"apptainer_cachedir"`
+	ImageDir                    string   `json:"image_dir" yaml:"image_dir"`
+	AdditionalDirectoriesInPath []string `json:"additional_directories_in_path" yaml:"additional_directories_in_path"`
+	FuseSleepSeconds            int      `json:"fuse_sleep_seconds" yaml:"fuse_sleep_seconds"`
+}
+
+type SingularityHubConfig struct {
+	Server               string `json:"server" yaml:"server"`
+	MasterToken          string `json:"master_token" yaml:"master_token"`
+	CacheValiditySeconds int    `json:"cache_validity_seconds" yaml:"cache_validity_seconds"`
+}
+
+type ApptainerOptions struct {
+	Executable    string `json:"executable" yaml:"executable"`
+	Fakeroot      bool   `json:"fakeroot" yaml:"fakeroot"`
+	ContainAll    bool   `json:"containall" yaml:"containall"`
+	FuseMode      string `json:"fuseMode" yaml:"fuse_mode"`
+	NoInit        bool   `json:"noInit" yaml:"no_init"`
+	NoHome        bool   `json:"noHome" yaml:"no_home"`
+	NoPrivs       bool   `json:"noPrivs" yaml:"no_privs"`
+	NvidiaSupport bool   `json:"nvidiaSupport" yaml:"nvidia_support"`
+	Cleanenv      bool   `json:"cleanenv" yaml:"cleanenv"`
+	Unsquash      bool   `json:"unsquash" yaml:"unsquash"`
+}
+
+type ScriptBuildConfig struct {
+	SingularityHub   SingularityHubConfig `json:"SingularityHubProxy" yaml:"singularity_hub"`
+	ApptainerOptions ApptainerOptions     `json:"ApptainerOptions" yaml:"apptainer_options"`
+	VolumesOptions   VolumesOptions       `json:"Volumes" yaml:"volumes_options"`
+}
+
 // Config holds the whole configuration
 type Config struct {
-	InterlinkAddress  string `yaml:"InterlinkAddress"`
-	Interlinkport     string `yaml:"InterlinkPort"`
-	Sidecarurl        string `yaml:"SidecarURL"`
-	Sidecarport       string `yaml:"SidecarPort"`
-	VerboseLogging    bool   `yaml:"VerboseLogging"`
-	ErrorsOnlyLogging bool   `yaml:"ErrorsOnlyLogging"`
-	DataRootFolder    string `yaml:"DataRootFolder"`
+	InterlinkAddress     string             `yaml:"InterlinkAddress"`
+	Interlinkport        string             `yaml:"InterlinkPort"`
+	Sidecarurl           string             `yaml:"SidecarURL"`
+	Sidecarport          string             `yaml:"SidecarPort"`
+	JobScriptBuildConfig *ScriptBuildConfig `yaml:"JobScriptBuildConfig,omitempty"`
+	JobScriptTemplate    string             `yaml:"JobScriptTemplate,omitempty"`
+	VerboseLogging       bool               `yaml:"VerboseLogging"`
+	ErrorsOnlyLogging    bool               `yaml:"ErrorsOnlyLogging"`
+	DataRootFolder       string             `yaml:"DataRootFolder"`
+	TLS                  TLSConfig          `yaml:"TLS,omitempty"`
+}
+
+// TLSConfig holds TLS/mTLS configuration for secure communication
+type TLSConfig struct {
+	Enabled    bool   `yaml:"Enabled"`
+	CertFile   string `yaml:"CertFile,omitempty"`
+	KeyFile    string `yaml:"KeyFile,omitempty"`
+	CACertFile string `yaml:"CACertFile,omitempty"`
 }
 
 func SetupTelemetry(ctx context.Context, serviceName string) (*sdktrace.TracerProvider, error) {

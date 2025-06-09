@@ -2,6 +2,8 @@ package main
 
 import (
 	"context"
+	"crypto/tls"
+	"crypto/x509"
 	"flag"
 	"fmt"
 	"net"
@@ -21,6 +23,7 @@ import (
 	"github.com/interlink-hq/interlink/pkg/interlink"
 	"github.com/interlink-hq/interlink/pkg/interlink/api"
 	"github.com/interlink-hq/interlink/pkg/virtualkubelet"
+	"k8s.io/cri-client/pkg/util"
 )
 
 // UnixSocketRoundTripper is a custom RoundTripper for Unix socket connections
@@ -35,6 +38,50 @@ func (rt *UnixSocketRoundTripper) RoundTrip(req *http.Request) (*http.Response, 
 		req.URL.Host = "unix"
 	}
 	return rt.Transport.RoundTrip(req)
+}
+
+// createTLSConfig creates TLS configuration for the interLink server
+func createTLSConfig(ctx context.Context, tlsConfig interlink.TLSConfig) (*tls.Config, error) {
+	if !tlsConfig.Enabled {
+		return nil, nil
+	}
+
+	config := &tls.Config{
+		MinVersion: tls.VersionTLS12,
+	}
+
+	// Load server certificate and key
+	if tlsConfig.CertFile != "" && tlsConfig.KeyFile != "" {
+		cert, err := tls.LoadX509KeyPair(tlsConfig.CertFile, tlsConfig.KeyFile)
+		if err != nil {
+			return nil, fmt.Errorf("failed to load server certificate pair (%s, %s): %w", tlsConfig.CertFile, tlsConfig.KeyFile, err)
+		}
+		config.Certificates = []tls.Certificate{cert}
+		log.G(ctx).Info("Loaded server certificate for TLS from: ", tlsConfig.CertFile, " and ", tlsConfig.KeyFile)
+	} else {
+		return nil, fmt.Errorf("TLS enabled but CertFile or KeyFile not provided")
+	}
+
+	// Load CA certificate for client verification (mTLS)
+	if tlsConfig.CACertFile != "" {
+		caCert, err := os.ReadFile(tlsConfig.CACertFile)
+		if err != nil {
+			return nil, fmt.Errorf("failed to read CA certificate file %s: %w", tlsConfig.CACertFile, err)
+		}
+
+		caCertPool := x509.NewCertPool()
+		if !caCertPool.AppendCertsFromPEM(caCert) {
+			return nil, fmt.Errorf("failed to parse CA certificate from %s", tlsConfig.CACertFile)
+		}
+		config.ClientCAs = caCertPool
+		config.ClientAuth = tls.RequireAndVerifyClientCert
+		log.G(ctx).Info("Loaded CA certificate for mTLS client verification from: ", tlsConfig.CACertFile)
+		log.G(ctx).Info("mTLS enabled - clients must provide valid certificates")
+	} else {
+		log.G(ctx).Info("TLS enabled without client certificate verification")
+	}
+
+	return config, nil
 }
 
 func main() {
@@ -178,7 +225,50 @@ func main() {
 		if err != nil {
 			log.G(ctx).Fatal(err)
 		}
+	case strings.HasPrefix(interLinkConfig.InterlinkAddress, "https://"):
+		interLinkEndpoint = strings.ReplaceAll(interLinkConfig.InterlinkAddress, "https://", "") + ":" + interLinkConfig.Interlinkport
+
+		// Create TLS configuration
+		tlsConfig, err := createTLSConfig(ctx, interLinkConfig.TLS)
+		if err != nil {
+			log.G(ctx).Fatal("Failed to create TLS configuration: ", err)
+		}
+
+		server := http.Server{
+			Addr:              interLinkEndpoint,
+			Handler:           mutex,
+			ReadTimeout:       30 * time.Second,
+			ReadHeaderTimeout: 10 * time.Second,
+			TLSConfig:         tlsConfig,
+		}
+
+		log.G(ctx).Info("Starting HTTPS server on: ", interLinkEndpoint)
+		if tlsConfig != nil && tlsConfig.ClientAuth == tls.RequireAndVerifyClientCert {
+			log.G(ctx).Info("mTLS enabled - requiring client certificates")
+		}
+
+		// Use ListenAndServeTLS with cert files from config
+		err = server.ListenAndServeTLS(interLinkConfig.TLS.CertFile, interLinkConfig.TLS.KeyFile)
+		if err != nil {
+			log.G(ctx).Fatal(err)
+		}
 	default:
-		log.G(ctx).Fatal("Interlink URL should either start per unix:// or http://. Getting: ", interLinkConfig.InterlinkAddress)
+		log.G(ctx).Fatal("Interlink URL should start with unix://, http://, or https://. Getting: ", interLinkConfig.InterlinkAddress)
 	}
+
+	interlinkRuntime := NewFakeRemoteRuntime()
+	err = interlinkRuntime.Start("unix:///tmp/kubelet_remote_1000.sock")
+	if err != nil {
+		interlinkRuntime.Stop()
+		log.G(ctx).Fatal(err)
+	}
+	defer func() {
+		interlinkRuntime.Stop()
+		// clear endpoint file
+		if addr, _, err := util.GetAddressAndDialer("unix:///tmp/kubelet_remote_1000.sock"); err == nil {
+			if _, err := os.Stat(addr); err == nil {
+				os.Remove(addr)
+			}
+		}
+	}()
 }

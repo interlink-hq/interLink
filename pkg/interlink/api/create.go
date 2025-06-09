@@ -3,8 +3,10 @@ package api
 import (
 	"bytes"
 	"encoding/json"
+	"fmt"
 	"io"
 	"net/http"
+	"text/template"
 	"time"
 
 	"github.com/containerd/containerd/log"
@@ -16,7 +18,7 @@ import (
 	trace "go.opentelemetry.io/otel/trace"
 )
 
-// CreateHandler collects and rearranges all needed ConfigMaps/Secrets/EmptyDirs to ship them to the sidecar, then sends a response to the client
+// CreateHandler collects and lls needed ConfigMaps/Secrets/EmptyDirs to ship them to the sidecar, then sends a response to the client
 func (h *InterLinkHandler) CreateHandler(w http.ResponseWriter, r *http.Request) {
 	start := time.Now().UnixMicro()
 	tracer := otel.Tracer("interlink-API")
@@ -55,8 +57,6 @@ func (h *InterLinkHandler) CreateHandler(w http.ResponseWriter, r *http.Request)
 		attribute.String("pod.uid", string(pod.Pod.UID)),
 	)
 
-	var retrievedData []types.RetrievedPodData
-
 	data, err := getData(h.Ctx, h.Config, pod, span)
 	if err != nil {
 		statusCode = http.StatusInternalServerError
@@ -76,10 +76,19 @@ func (h *InterLinkHandler) CreateHandler(w http.ResponseWriter, r *http.Request)
 		}
 	}
 
-	retrievedData = append(retrievedData, data)
+	// Here we fill the job.sh template is passed.
+	switch {
+	case pod.JobScriptBuilderURL != "":
+		log.G(h.Ctx).Info("JobScriptBuilderURL: ", pod.JobScriptBuilderURL)
+		if h.Config.JobScriptBuildConfig == nil {
+			log.L.Error(fmt.Errorf("JobScript URL requested, but interlink does not have any Script build config set"))
+			return
+		}
+		log.G(h.Ctx).Info("InterLink: asking JobScriptURL for job.sh")
 
-	if retrievedData != nil {
-		bodyBytes, err = json.Marshal(retrievedData)
+		data.JobScriptBuild = *h.Config.JobScriptBuildConfig
+
+		bodyBytes, err = json.Marshal(data)
 		if err != nil {
 			w.WriteHeader(http.StatusInternalServerError)
 			log.G(h.Ctx).Error(err)
@@ -87,24 +96,76 @@ func (h *InterLinkHandler) CreateHandler(w http.ResponseWriter, r *http.Request)
 		}
 		log.G(h.Ctx).Debug(string(bodyBytes))
 		reader := bytes.NewReader(bodyBytes)
-
-		log.G(h.Ctx).Info(req)
-		req, err = http.NewRequest(http.MethodPost, h.SidecarEndpoint+"/create", reader)
-		if err != nil {
-			statusCode = http.StatusInternalServerError
-			w.WriteHeader(statusCode)
-			log.G(h.Ctx).Error(err)
-			return
-		}
-
-		log.G(h.Ctx).Info("InterLink: forwarding Create call to sidecar")
-
-		sessionContext := GetSessionContext(r)
-		_, err := ReqWithError(h.Ctx, req, w, start, span, true, false, sessionContext, h.ClientHTTP)
+		req, err = http.NewRequest(http.MethodPost, pod.JobScriptBuilderURL, reader)
 		if err != nil {
 			log.L.Error(err)
 			return
 		}
 
+		sessionContext := GetSessionContext(r)
+
+		req.Header.Set("Content-Type", "application/json")
+		bodyBytesResp, err := ReqWithError(h.Ctx, req, w, start, span, false, true, sessionContext, http.DefaultClient)
+		if err != nil {
+			log.L.Error(err)
+			return
+		}
+
+		data.JobScript = string(bodyBytesResp)
+
+	case h.Config.JobScriptTemplate != "":
+
+		tmp, err := template.ParseFiles(h.Config.JobScriptTemplate)
+		if err != nil {
+			statusCode = http.StatusInternalServerError
+			log.G(h.Ctx).Error(err)
+			w.WriteHeader(statusCode)
+			return
+		}
+
+		var tpl bytes.Buffer
+		err = tmp.Execute(&tpl, data)
+		if err != nil {
+			statusCode = http.StatusInternalServerError
+			log.G(h.Ctx).Error(err)
+			w.WriteHeader(statusCode)
+			return
+		}
+
+		data.JobScript = tpl.String()
+	}
+
+	// updated to handle single data
+	retrievedData := data
+
+	podIP, ok := retrievedData.Pod.Annotations["interlink.eu/pod-ip"]
+	if ok {
+		retrievedData.Pod.DeepCopy().Status.PodIP = podIP
+	}
+	bodyBytes, err = json.Marshal(retrievedData)
+	if err != nil {
+		w.WriteHeader(http.StatusInternalServerError)
+		log.G(h.Ctx).Error(err)
+		return
+	}
+	log.G(h.Ctx).Debug(string(bodyBytes))
+	reader := bytes.NewReader(bodyBytes)
+
+	log.G(h.Ctx).Info(req)
+	req, err = http.NewRequest(http.MethodPost, h.SidecarEndpoint+"/create", reader)
+	if err != nil {
+		statusCode = http.StatusInternalServerError
+		w.WriteHeader(statusCode)
+		log.G(h.Ctx).Error(err)
+		return
+	}
+
+	log.G(h.Ctx).Info("InterLink: forwarding Create call to sidecar")
+
+	sessionContext := GetSessionContext(r)
+	_, err = ReqWithError(h.Ctx, req, w, start, span, true, false, sessionContext, h.ClientHTTP)
+	if err != nil {
+		log.L.Error(err)
+		return
 	}
 }

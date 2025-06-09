@@ -8,11 +8,13 @@ type Config struct {
 	KubernetesAPIPort       string      `yaml:"KubernetesApiPort"`
 	KubernetesAPICaCrt      string      `yaml:"KubernetesApiCaCrt"`
 	DisableProjectedVolumes bool        `yaml:"DisableProjectedVolumes"`
+	JobScriptBuilderURL     string      `yaml:"JobScriptBuilderURL,omitempty"`
 	VKConfigPath            string      `yaml:"VKConfigPath"`
 	VKTokenFile             string      `yaml:"VKTokenFile"`
 	ServiceAccount          string      `yaml:"ServiceAccount"`
 	Namespace               string      `yaml:"Namespace"`
 	PodIP                   string      `yaml:"PodIP"`
+	PodCIDR                 PodCIDR     `yaml:"PodCIDR"`
 	VerboseLogging          bool        `yaml:"VerboseLogging"`
 	ErrorsOnlyLogging       bool        `yaml:"ErrorsOnlyLogging"`
 	HTTP                    HTTP        `yaml:"HTTP"`
@@ -20,10 +22,20 @@ type Config struct {
 	Resources               Resources   `yaml:"Resources"`
 	NodeLabels              []string    `yaml:"NodeLabels"`
 	NodeTaints              []TaintSpec `yaml:"NodeTaints"`
+	TLS                     TLSConfig   `yaml:"TLS,omitempty"`
+}
+
+// TLSConfig holds TLS/mTLS configuration for secure communication with interLink API
+type TLSConfig struct {
+	Enabled    bool   `yaml:"Enabled"`
+	CertFile   string `yaml:"CertFile,omitempty"`
+	KeyFile    string `yaml:"KeyFile,omitempty"`
+	CACertFile string `yaml:"CACertFile,omitempty"`
 }
 
 type HTTP struct {
-	Insecure bool `yaml:"Insecure"`
+	Insecure bool   `yaml:"Insecure"`
+	CaCert   string `yaml:"CaCert"`
 }
 
 type Resources struct {
@@ -43,4 +55,10 @@ type TaintSpec struct {
 	Key    string `yaml:"Key"`
 	Value  string `yaml:"Value"`
 	Effect string `yaml:"Effect"`
+}
+
+type PodCIDR struct {
+	Subnet string `yaml:"Subnet"`
+	MaxIP  int    `yaml:"MaxIP"`
+	MinIP  int    `yaml:"MinIP"`
 }

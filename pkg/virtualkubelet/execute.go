@@ -3,6 +3,8 @@ package virtualkubelet
 import (
 	"bytes"
 	"context"
+	"crypto/tls"
+	"crypto/x509"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -23,6 +25,7 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 
 	types "github.com/interlink-hq/interlink/pkg/interlink"
+	k8sTypes "k8s.io/apimachinery/pkg/types"
 )
 
 const (
@@ -57,8 +60,44 @@ func traceExecute(ctx context.Context, pod *v1.Pod, name string, startHTTPCall i
 	return &spanHTTP
 }
 
-func doRequest(req *http.Request, token string) (*http.Response, error) {
-	return doRequestWithClient(req, token, http.DefaultClient)
+// createTLSHTTPClient creates an HTTP client with TLS/mTLS configuration
+func createTLSHTTPClient(ctx context.Context, tlsConfig TLSConfig) (*http.Client, error) {
+	if !tlsConfig.Enabled {
+		return http.DefaultClient, nil
+	}
+
+	transport := &http.Transport{
+		TLSClientConfig: &tls.Config{
+			MinVersion: tls.VersionTLS12,
+		},
+	}
+
+	// Load CA certificate if provided
+	if tlsConfig.CACertFile != "" {
+		caCert, err := os.ReadFile(tlsConfig.CACertFile)
+		if err != nil {
+			return nil, fmt.Errorf("failed to read CA certificate file %s: %w", tlsConfig.CACertFile, err)
+		}
+
+		caCertPool := x509.NewCertPool()
+		if !caCertPool.AppendCertsFromPEM(caCert) {
+			return nil, fmt.Errorf("failed to parse CA certificate from %s", tlsConfig.CACertFile)
+		}
+		transport.TLSClientConfig.RootCAs = caCertPool
+		log.G(ctx).Info("Loaded CA certificate for TLS client from: ", tlsConfig.CACertFile)
+	}
+
+	// Load client certificate and key for mTLS if provided
+	if tlsConfig.CertFile != "" && tlsConfig.KeyFile != "" {
+		cert, err := tls.LoadX509KeyPair(tlsConfig.CertFile, tlsConfig.KeyFile)
+		if err != nil {
+			return nil, fmt.Errorf("failed to load client certificate pair (%s, %s): %w", tlsConfig.CertFile, tlsConfig.KeyFile, err)
+		}
+		transport.TLSClientConfig.Certificates = []tls.Certificate{cert}
+		log.G(ctx).Info("Loaded client certificate for mTLS from: ", tlsConfig.CertFile, " and ", tlsConfig.KeyFile)
+	}
+
+	return &http.Client{Transport: transport}, nil
 }
 
 func doRequestWithClient(req *http.Request, token string, httpClient *http.Client) (*http.Response, error) {
@@ -115,7 +154,14 @@ func PingInterLink(ctx context.Context, config Config) (bool, int, error) {
 	// Add session number for end-to-end from VK to API to InterLink plugin (eg interlink-slurm-plugin)
 	AddSessionContext(req, "PingInterLink#"+strconv.Itoa(rand.Intn(100000)))
 
-	resp, err := http.DefaultClient.Do(req)
+	// Create TLS-enabled HTTP client
+	httpClient, err := createTLSHTTPClient(ctx, config.TLS)
+	if err != nil {
+		log.G(ctx).Error("Failed to create TLS HTTP client: ", err)
+		return false, retVal, err
+	}
+
+	resp, err := httpClient.Do(req)
 	if err != nil {
 		spanHTTP.SetAttributes(attribute.Int("exit.code", http.StatusInternalServerError))
 		return false, retVal, err
@@ -164,7 +210,14 @@ func updateCacheRequest(ctx context.Context, config Config, pod v1.Pod, token st
 	// Add session number for end-to-end from VK to API to InterLink plugin (eg interlink-slurm-plugin)
 	AddSessionContext(req, "UpdateCache#"+strconv.Itoa(rand.Intn(100000)))
 
-	resp, err := http.DefaultClient.Do(req)
+	// Create TLS-enabled HTTP client
+	httpClient, err := createTLSHTTPClient(ctx, config.TLS)
+	if err != nil {
+		log.L.Error("Failed to create TLS HTTP client: ", err)
+		return err
+	}
+
+	resp, err := httpClient.Do(req)
 	if err != nil {
 		log.L.Error(err)
 		return err
@@ -184,6 +237,10 @@ func updateCacheRequest(ctx context.Context, config Config, pod v1.Pod, token st
 func createRequest(ctx context.Context, config Config, pod types.PodCreateRequests, token string) ([]byte, error) {
 	tracer := otel.Tracer("interlink-service")
 	interLinkEndpoint := getSidecarEndpoint(ctx, config.InterlinkURL, config.InterlinkPort)
+
+	if config.JobScriptBuilderURL != "" {
+		pod.JobScriptBuilderURL = config.JobScriptBuilderURL
+	}
 
 	bodyBytes, err := json.Marshal(pod)
 	if err != nil {
@@ -210,7 +267,13 @@ func createRequest(ctx context.Context, config Config, pod types.PodCreateReques
 	// Add session number for end-to-end from VK to API to InterLink plugin (eg interlink-slurm-plugin)
 	AddSessionContext(req, "CreatePod#"+strconv.Itoa(rand.Intn(100000)))
 
-	resp, err := doRequest(req, token)
+	// Create TLS-enabled HTTP client
+	httpClient, err := createTLSHTTPClient(ctx, config.TLS)
+	if err != nil {
+		return nil, fmt.Errorf("failed to create TLS HTTP client: %w", err)
+	}
+
+	resp, err := doRequestWithClient(req, token, httpClient)
 	if err != nil {
 		return nil, fmt.Errorf("error doing doRequest() in createRequest() log request: %s error: %w", fmt.Sprintf("%#v", req), err)
 	}
@@ -252,7 +315,14 @@ func deleteRequest(ctx context.Context, config Config, pod *v1.Pod, token string
 	// Add session number for end-to-end from VK to API to InterLink plugin (eg interlink-slurm-plugin)
 	AddSessionContext(req, "DeletePod#"+strconv.Itoa(rand.Intn(100000)))
 
-	resp, err := doRequest(req, token)
+	// Create TLS-enabled HTTP client
+	httpClient, err := createTLSHTTPClient(ctx, config.TLS)
+	if err != nil {
+		log.G(context.Background()).Error("Failed to create TLS HTTP client: ", err)
+		return nil, err
+	}
+
+	resp, err := doRequestWithClient(req, token, httpClient)
 	if err != nil {
 		log.G(context.Background()).Error(err)
 		return nil, err
@@ -314,7 +384,13 @@ func statusRequest(ctx context.Context, config Config, podsList []*v1.Pod, token
 	// Add session number for end-to-end from VK to API to InterLink plugin (eg interlink-slurm-plugin)
 	AddSessionContext(req, "GetStatus#"+strconv.Itoa(rand.Intn(100000)))
 
-	resp, err := doRequest(req, token)
+	// Create TLS-enabled HTTP client
+	httpClient, err := createTLSHTTPClient(ctx, config.TLS)
+	if err != nil {
+		return nil, fmt.Errorf("failed to create TLS HTTP client: %w", err)
+	}
+
+	resp, err := doRequestWithClient(req, token, httpClient)
 	if err != nil {
 		return nil, err
 	}
@@ -899,6 +975,7 @@ func handleContainersUpdate(ctx context.Context, podRemoteStatus types.PodStatus
 			case containerRemoteStatus.State.Running != nil:
 				podRunning = true
 				log.G(ctx).Debug("Pod " + podRemoteStatus.PodName + ": Service " + containerRemoteStatus.Name + " is running on Sidecar")
+				podRefInCluster.Status.Phase = v1.PodPhase(v1.PodReady)
 				podRefInCluster.Status.ContainerStatuses[index].Ready = true
 				podRefInCluster.Status.ContainerStatuses[index].State.Running = containerRemoteStatus.State.Running
 			}
@@ -911,11 +988,11 @@ func handleContainersUpdate(ctx context.Context, podRemoteStatus types.PodStatus
 // checkPodsStatus is regularly called by the VK itself at regular intervals of time to query InterLink for Pods' status.
 // It basically append all available pods registered to the VK to a slice and passes this slice to the statusRequest function.
 // After the statusRequest returns a response, this function uses that response to update every Pod and Container status.
-func checkPodsStatus(ctx context.Context, p *Provider, podsList []*v1.Pod, token string, config Config) ([]types.PodStatus, error) {
+func checkPodsStatus(ctx context.Context, p *Provider, pod *v1.Pod, token string, config Config) ([]types.PodStatus, error) {
 	var ret []types.PodStatus
 
 	// retrieve pod status from remote interlink
-	returnVal, err := statusRequest(ctx, config, podsList, token)
+	returnVal, err := statusRequest(ctx, config, []*v1.Pod{pod}, token)
 	if err != nil {
 		return nil, err
 	}
@@ -928,132 +1005,141 @@ func checkPodsStatus(ctx context.Context, p *Provider, podsList []*v1.Pod, token
 			return nil, errWithContext
 		}
 
-		// if there is a pod status available go ahead to match with the latest state available in etcd
-		if podsList != nil {
-			for _, podRemoteStatus := range ret {
-
-				log.G(ctx).Debug(fmt.Sprintln("Get status from remote status len: ", len(podRemoteStatus.Containers)))
-				// avoid asking for status too early, when etcd as not been updated
-
-				if podRemoteStatus.PodName == "" {
-					log.G(ctx).Warning("PodName is empty, skipping")
-					continue
-				}
-
-				// get pod reference from cluster etcd
-				podRefInCluster, err := p.GetPod(ctx, podRemoteStatus.PodNamespace, podRemoteStatus.PodName)
-				if err != nil {
-					log.G(ctx).Warning(err)
-					continue
-				}
-				log.G(ctx).Debug(fmt.Sprintln("Get pod from k8s cluster status: ", podRefInCluster.Status.ContainerStatuses))
-
-				// if the PodUID match with the one in etcd we are talking of the same thing. GOOD
-				if podRemoteStatus.PodUID == string(podRefInCluster.UID) {
-					podInit := false    // if a init container is running, the other containers phase is PodInitializing
-					podRunning := false // if a normale container is running, the phase is PodRunning
-					podErrored := false
-					podInitErrored := false              // if a container is in error, the phase is PodFailed
-					podCompleted := false                // if all containers are terminated, the phase is PodSucceeded, but if one is in error, the phase is PodFailed
-					podWaitingForInitContainers := false // if init containers are waiting, the phase is PodPending
-					failedReason := ""
-					failedReasonInit := ""
-
-					nContainersInPod := 0
-					if podRemoteStatus.Containers != nil {
-						nContainersInPod = len(podRemoteStatus.Containers)
-					}
-					counterOfTerminatedContainers := 0
-
-					nInitContainersInPod := 0
-					if podRemoteStatus.InitContainers != nil {
-						nInitContainersInPod = len(podRemoteStatus.InitContainers)
-					}
-					counterOfTerminatedInitContainers := 0
-
-					log.G(ctx).Debug("Number of containers in POD:      " + strconv.Itoa(nContainersInPod))
-					log.G(ctx).Debug("Number of init containers in POD: " + strconv.Itoa(nInitContainersInPod))
-
-					// if there are init containers, we need to check them first
-					if nInitContainersInPod > 0 {
-						podWaitingForInitContainers, podInit, podInitErrored, failedReasonInit, counterOfTerminatedInitContainers = handleInitContainersUpdate(ctx, podRemoteStatus, podRefInCluster, nInitContainersInPod)
-					}
-
-					if podInitErrored {
-						log.G(ctx).Error("At least one init container is in error with reason: " + failedReasonInit)
-					}
-
-					// call handleContainersUpdate to update the status of the containers
-					counterOfTerminatedContainers, podErrored, failedReason, podRunning = handleContainersUpdate(ctx, podRemoteStatus, podRefInCluster, podWaitingForInitContainers, podInit, nInitContainersInPod, counterOfTerminatedInitContainers)
-
-					if counterOfTerminatedContainers == nContainersInPod {
-						podCompleted = true
-					}
-
-					if podCompleted {
-						// it means that all containers are terminated, check if some of them are errored
-						if podErrored || podInitErrored {
-							podRefInCluster.Status.Phase = v1.PodFailed
-							if podErrored {
-								podRefInCluster.Status.Reason = failedReason
-							} else {
-								podRefInCluster.Status.Reason = failedReasonInit
-							}
-							// override all the ContainerStatuses to set Reason to failedReason or failedReasonInit
-							for i := range podRefInCluster.Status.ContainerStatuses {
-								if podErrored {
-									podRefInCluster.Status.ContainerStatuses[i].State.Terminated.Reason = failedReason
-								} else {
-									podRefInCluster.Status.ContainerStatuses[i].State.Terminated.Reason = failedReasonInit
-								}
-							}
-						} else {
-							podRefInCluster.Status.Conditions = append(podRefInCluster.Status.Conditions, v1.PodCondition{Type: v1.PodReady, Status: v1.ConditionFalse})
-							podRefInCluster.Status.Phase = v1.PodSucceeded
-							podRefInCluster.Status.Reason = PodPhaseCompleted
-						}
-					} else {
-						if podInit {
-							podRefInCluster.Status.Phase = v1.PodPending
-							podRefInCluster.Status.Reason = "Init"
-						}
-						if podWaitingForInitContainers {
-							podRefInCluster.Status.Phase = v1.PodPending
-							podRefInCluster.Status.Reason = "Waiting for init containers"
-						}
-						if podRunning && podRefInCluster.Status.Phase != v1.PodRunning { // do not update the status if it is already running
-							podRefInCluster.Status.Phase = v1.PodRunning
-							podRefInCluster.Status.Conditions = append(podRefInCluster.Status.Conditions, v1.PodCondition{Type: v1.PodReady, Status: v1.ConditionTrue})
-							podRefInCluster.Status.Reason = "Running"
-						}
-					}
-				} else {
-					list, err := p.clientSet.CoreV1().Pods(podRemoteStatus.PodNamespace).List(ctx, metav1.ListOptions{})
-					if err != nil {
-						log.G(ctx).Error(err)
-						return nil, err
-					}
-
-					pods := list.Items
-
-					for _, pod := range pods {
-						if string(pod.UID) == podRemoteStatus.PodUID {
-							err = updateCacheRequest(ctx, config, pod, token)
-							if err != nil {
-								log.G(ctx).Error(err)
-								continue
-							}
-						}
-					}
-
-				}
-
-			}
-			log.G(ctx).Info("No errors while getting statuses")
-			log.G(ctx).Debug(ret)
+		if len(ret) == 0 {
+			log.G(ctx).Warning("No status available from InterLink for pod ", pod.Name, "and Pod uid ", pod.UID)
 			return nil, nil
 		}
 
+		// if there is a pod status available go ahead to match with the latest state available in etcd
+		podRemoteStatus := ret[0]
+
+		log.G(ctx).Debug(fmt.Sprintln("Get status from remote status len: ", len(podRemoteStatus.Containers)))
+		// avoid asking for status too early, when etcd as not been updated
+
+		if podRemoteStatus.PodName == "" {
+			log.G(ctx).Warning("PodName is empty, skipping")
+			return nil, err
+		}
+
+		// get pod reference from cluster etcd
+		podRefInCluster, err := p.GetPodByUID(ctx, podRemoteStatus.PodNamespace, podRemoteStatus.PodName, k8sTypes.UID(podRemoteStatus.PodUID))
+		if err != nil {
+			log.G(ctx).Warning(err)
+			return nil, err
+		}
+		log.G(ctx).Debug(fmt.Sprintln("Get pod from k8s cluster status: ", podRefInCluster.Status.ContainerStatuses))
+
+		// if the PodUID match with the one in etcd we are talking of the same thing. GOOD
+		if podRemoteStatus.PodUID == string(podRefInCluster.UID) {
+			// check if the pod is already in a terminal state (Failed or Succeeded)
+			if p.pods[podRemoteStatus.PodUID].Status.Phase == v1.PodFailed || p.pods[podRemoteStatus.PodUID].Status.Phase == v1.PodSucceeded {
+				if podRefInCluster.Status.Phase == p.pods[podRemoteStatus.PodUID].Status.Phase {
+					log.G(ctx).Debug("Pod " + podRemoteStatus.PodName + " is already in phase " + string(p.pods[podRemoteStatus.PodUID].Status.Phase))
+					return nil, err
+				}
+			}
+
+			podInit := false    // if a init container is running, the other containers phase is PodInitializing
+			podRunning := false // if a normale container is running, the phase is PodRunning
+			podErrored := false
+			podInitErrored := false              // if a container is in error, the phase is PodFailed
+			podCompleted := false                // if all containers are terminated, the phase is PodSucceeded, but if one is in error, the phase is PodFailed
+			podWaitingForInitContainers := false // if init containers are waiting, the phase is PodPending
+			failedReason := ""
+			failedReasonInit := ""
+
+			nContainersInPod := 0
+			if podRemoteStatus.Containers != nil {
+				nContainersInPod = len(podRemoteStatus.Containers)
+			}
+			counterOfTerminatedContainers := 0
+
+			nInitContainersInPod := 0
+			if podRemoteStatus.InitContainers != nil {
+				nInitContainersInPod = len(podRemoteStatus.InitContainers)
+			}
+			counterOfTerminatedInitContainers := 0
+
+			log.G(ctx).Debug("Number of containers in POD:      " + strconv.Itoa(nContainersInPod))
+			log.G(ctx).Debug("Number of init containers in POD: " + strconv.Itoa(nInitContainersInPod))
+
+			// if there are init containers, we need to check them first
+			if nInitContainersInPod > 0 {
+				podWaitingForInitContainers, podInit, podInitErrored, failedReasonInit, counterOfTerminatedInitContainers = handleInitContainersUpdate(ctx, podRemoteStatus, podRefInCluster, nInitContainersInPod)
+			}
+
+			if podInitErrored {
+				log.G(ctx).Error("At least one init container is in error with reason: " + failedReasonInit)
+			}
+
+			// call handleContainersUpdate to update the status of the containers
+			counterOfTerminatedContainers, podErrored, failedReason, podRunning = handleContainersUpdate(ctx, podRemoteStatus, podRefInCluster, podWaitingForInitContainers, podInit, nInitContainersInPod, counterOfTerminatedInitContainers)
+
+			if counterOfTerminatedContainers == nContainersInPod {
+				podCompleted = true
+			}
+
+			if podCompleted {
+				// it means that all containers are terminated, check if some of them are errored
+				if podErrored || podInitErrored {
+					podRefInCluster.Status.Phase = v1.PodFailed
+					if podErrored {
+						podRefInCluster.Status.Reason = failedReason
+					} else {
+						podRefInCluster.Status.Reason = failedReasonInit
+					}
+					// override all the ContainerStatuses to set Reason to failedReason or failedReasonInit
+					for i := range podRefInCluster.Status.ContainerStatuses {
+						if podErrored {
+							podRefInCluster.Status.ContainerStatuses[i].State.Terminated.Reason = failedReason
+						} else {
+							podRefInCluster.Status.ContainerStatuses[i].State.Terminated.Reason = failedReasonInit
+						}
+					}
+				} else {
+					podRefInCluster.Status.Conditions = append(podRefInCluster.Status.Conditions, v1.PodCondition{Type: v1.PodReady, Status: v1.ConditionFalse})
+					podRefInCluster.Status.Phase = v1.PodSucceeded
+					podRefInCluster.Status.Reason = PodPhaseCompleted
+				}
+			} else {
+				if podInit {
+					podRefInCluster.Status.Phase = v1.PodPending
+					podRefInCluster.Status.Reason = "Init"
+				}
+				if podWaitingForInitContainers {
+					podRefInCluster.Status.Phase = v1.PodPending
+					podRefInCluster.Status.Reason = "Waiting for init containers"
+				}
+				if podRunning && podRefInCluster.Status.Phase != v1.PodRunning { // do not update the status if it is already running
+					podRefInCluster.Status.Phase = v1.PodRunning
+					podRefInCluster.Status.Conditions = []v1.PodCondition{{Type: v1.PodReady, Status: v1.ConditionTrue}}
+					podRefInCluster.Status.Reason = "Running"
+				}
+			}
+		} else {
+			list, err := p.clientSet.CoreV1().Pods(podRemoteStatus.PodNamespace).List(ctx, metav1.ListOptions{})
+			if err != nil {
+				log.G(ctx).Error(err)
+				return nil, err
+			}
+
+			pods := list.Items
+
+			for _, pod := range pods {
+				if string(pod.UID) == podRemoteStatus.PodUID {
+					err = updateCacheRequest(ctx, config, pod, token)
+					if err != nil {
+						log.G(ctx).Error(err)
+						continue
+					}
+				}
+			}
+
+		}
+
+		log.G(ctx).Info("No errors while getting statuses")
+		log.G(ctx).Debug(ret)
+		return nil, nil
 	}
 
 	return nil, err

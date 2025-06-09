@@ -107,7 +107,7 @@ type oauthStruct struct {
 // It contains all the information needed to generate deployment manifests
 // and installation scripts.
 //
-// TODO: insert in-cluster and socket option e.g. --> no need OAUTH
+// OAuth is optional for in-cluster and SSH tunnel deployments
 type dataStruct struct {
 	// InterLinkIP is the IP address where the interLink API will be exposed
 	InterLinkIP string `yaml:"interlink_ip"`
@@ -132,6 +132,12 @@ type dataStruct struct {
 
 	// HTTPInsecure determines whether to allow insecure HTTP connections
 	HTTPInsecure bool `default:"true" yaml:"insecure_http"`
+
+	// CaCert is the CA certificate for secure connections
+	CACert string `yaml:"ca_cert,omitempty"`
+
+	// DisableTLSVerify disables TLS verification for secure connections
+	DisableProjectedVolumes bool `default:"true" yaml:"disable_projected_volumes"`
 }
 
 // evalManifest evaluates a template file using the provided configuration data.
@@ -223,6 +229,7 @@ func root(cmd *cobra.Command, _ []string) error {
 				DeviceCodeURL: "https://my_oidc_idp/auth/device",
 				Provider:      "oidc",
 				Issuer:        "https://my_oidc_idp.com/",
+				Audience:      "OIDC_AUDIENCE_HERE",
 			},
 			HTTPInsecure: true,
 		}
@@ -272,48 +279,54 @@ func root(cmd *cobra.Command, _ []string) error {
 	}
 
 	// Handle OAuth authentication based on the grant type
+	// Skip OAuth configuration if grant type is empty (for SSH tunnel or in-cluster deployments)
 	var token *oauth2.Token
 	ctx := context.Background()
 
-	switch configCLI.OAUTH.GrantType {
-	case "authorization_code":
-		// Set up OAuth configuration for device authorization flow
-		cfg := oauth2.Config{
-			ClientID:     configCLI.OAUTH.ClientID,
-			ClientSecret: configCLI.OAUTH.ClientSecret,
-			Endpoint: oauth2.Endpoint{
-				TokenURL:      configCLI.OAUTH.TokenURL,
-				DeviceAuthURL: configCLI.OAUTH.DeviceCodeURL,
-			},
-			RedirectURL: "http://localhost:8080",
-			Scopes:      configCLI.OAUTH.Scopes,
+	if configCLI.OAUTH.GrantType != "" {
+		switch configCLI.OAUTH.GrantType {
+		case "authorization_code":
+			// Set up OAuth configuration for device authorization flow
+			cfg := oauth2.Config{
+				ClientID:     configCLI.OAUTH.ClientID,
+				ClientSecret: configCLI.OAUTH.ClientSecret,
+				Endpoint: oauth2.Endpoint{
+					TokenURL:      configCLI.OAUTH.TokenURL,
+					DeviceAuthURL: configCLI.OAUTH.DeviceCodeURL,
+				},
+				RedirectURL: "http://localhost:8080",
+				Scopes:      configCLI.OAUTH.Scopes,
+			}
+
+			// Initiate device authorization flow
+			response, err := cfg.DeviceAuth(ctx, oauth2.AccessTypeOffline)
+			if err != nil {
+				panic(err)
+			}
+
+			// Prompt the user to enter the code at the verification URI
+			fmt.Printf("please enter code %s at %s\n", response.UserCode, response.VerificationURI)
+
+			// Exchange the device code for an access token and refresh token
+			token, err = cfg.DeviceAccessToken(ctx, response, oauth2.AccessTypeOffline)
+			if err != nil {
+				panic(err)
+			}
+
+			// Store the refresh token in the configuration
+			// The refresh token is used for obtaining new access tokens without user interaction
+			configCLI.OAUTH.RefreshToken = token.RefreshToken
+		case "client_credentials":
+			// Client credentials grant type doesn't use refresh tokens
+			fmt.Println("Client_credentials set, I won't try to get any refresh token.")
+
+		default:
+			// Unsupported grant type
+			panic(fmt.Errorf("wrong grant type specified in the configuration. Only client_credentials and authorization_code are supported"))
 		}
-
-		// Initiate device authorization flow
-		response, err := cfg.DeviceAuth(ctx, oauth2.AccessTypeOffline)
-		if err != nil {
-			panic(err)
-		}
-
-		// Prompt the user to enter the code at the verification URI
-		fmt.Printf("please enter code %s at %s\n", response.UserCode, response.VerificationURI)
-
-		// Exchange the device code for an access token and refresh token
-		token, err = cfg.DeviceAccessToken(ctx, response, oauth2.AccessTypeOffline)
-		if err != nil {
-			panic(err)
-		}
-
-		// Store the refresh token in the configuration
-		// The refresh token is used for obtaining new access tokens without user interaction
-		configCLI.OAUTH.RefreshToken = token.RefreshToken
-	case "client_credentials":
-		// Client credentials grant type doesn't use refresh tokens
-		fmt.Println("Client_credentials set, I won't try to get any refresh token.")
-
-	default:
-		// Unsupported grant type
-		panic(fmt.Errorf("wrong grant type specified in the configuration. Only client_credentials and authorization_code are supported"))
+	} else {
+		// OAuth is disabled - useful for SSH tunnel or in-cluster deployments
+		fmt.Println("OAuth grant type not specified, skipping OAuth configuration.")
 	}
 
 	// Generate the values.yaml manifest from the template

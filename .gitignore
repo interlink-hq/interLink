@@ -30,3 +30,5 @@ examples/sidecar/templates/python/__pycache__/*
 # Eclipse IDE
 .project
 .settings
+CLAUDE.md
+.dagger

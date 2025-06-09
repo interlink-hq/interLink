@@ -15,6 +15,7 @@ virtualNode:
     HTTP: null
     HTTPs: null
   HTTP:
+    CACert: {{ .CACert }}
     Insecure: {{.HTTPInsecure}} 
   # uncomment to enable custom nodeSelector and nodeTaints
   #nodeLabels:

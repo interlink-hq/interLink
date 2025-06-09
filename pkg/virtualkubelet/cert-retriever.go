@@ -16,7 +16,6 @@ import (
 	certificates "k8s.io/api/certificates/v1"
 	"k8s.io/client-go/kubernetes"
 	"k8s.io/client-go/util/certificate"
-	"k8s.io/klog"
 	// k8s.io/kubernetes/pkg/apis/certificates"
 )
 
@@ -67,7 +66,6 @@ func NewCertificateRetriever(kubeClient kubernetes.Interface, signer, nodeName s
 			certificates.UsageServerAuth,
 		},
 		CertificateStore: certificateStore,
-		Logf:             klog.V(2).Infof,
 	})
 	if err != nil {
 		return nil, fmt.Errorf("failed to initialize server certificate manager: %w", err)

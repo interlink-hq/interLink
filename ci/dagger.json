@@ -7,7 +7,7 @@
   "dependencies": [
     {
       "name": "k3s",
-      "source": "github.com/marcosnils/daggerverse/k3s@k3s/v0.1.9",
+      "source": "github.com/marcosnils/daggerverse/k3s@k3s/v0.1.10",
       "pin": "8b07ea65d6d60b79d8e28db965f0a3bb2fa58541"
     }
   ]
