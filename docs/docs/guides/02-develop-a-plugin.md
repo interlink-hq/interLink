@@ -28,7 +28,7 @@ Before diving into development, familiarize yourself with the complete plugin
 API specification. The OpenAPI specification defines all the endpoints,
 request/response schemas, and data types your plugin must implement:
 
-📋 **[Plugin OpenAPI Specification](../../../openapi/plugin-openapi.json)**
+📋 **[Plugin OpenAPI Specification](./03-api-reference.mdx#plugin-api-spec)**
 
 This specification is the authoritative reference for:
 
