@@ -1,0 +1,938 @@
+---
+sidebar_position: 3
+---
+
+import Tabs from "@theme/Tabs";
+import TabItem from "@theme/TabItem";
+import ThemedImage from "@theme/ThemedImage";
+import useBaseUrl from "@docusaurus/useBaseUrl";
+
+# Edge node deployment
+
+Deploy interLink on an edge node, outside the local K8S cluster.
+
+<ThemedImage
+  alt="Docusaurus themed image"
+  sources={{
+    light: useBaseUrl("/img/scenario-1_light.svg"),
+    dark: useBaseUrl("/img/scenario-1_dark.svg"),
+  }}
+/>
+
+## Install interLink
+
+### Deploy Remote components
+
+In general, starting from the deployment of the remote components is adviced.
+Since the kubernetes virtual node won't reach the `Ready` status until all the
+stack is successfully deployed.
+
+#### Interlink API server
+
+**For this deployment mode the remote host has to allow the kubernetes cluster
+to connect to the Oauth2 proxy service port (30443 if you use the automatic
+script for installation)**
+
+## Authentication Methods
+
+interLink supports two primary authentication methods for secure communication between the Kubernetes cluster and the edge node:
+
+### Option 1: OIDC Authentication (OAuth2 Proxy)
+
+You first need to initialize an OIDC client with you Identity Provider (IdP).
+
+Since any OIDC provider working with
+[OAuth2 Proxy](https://oauth2-proxy.github.io/oauth2-proxy/) tool will do the
+work, we are going to put the configuration for a generic OIDC identity provider
+in this cookbook. Nevertheless you can find more detailed on dedicated pages
+with instructions ready for
+[GitHub](../guides/deploy-interlink#create-an-oauth-github-app),
+[EGI checkin](../guides/04-oidc-IAM.md#egi-check-in),
+[INFN IAM](../guides/oidc-IAM#indigo-iam).
+
+### Option 2: mTLS Authentication (Mutual TLS)
+
+As an alternative to OIDC, you can use mutual TLS (mTLS) for authentication, which provides strong cryptographic authentication without requiring an external identity provider.
+
+#### Prerequisites for mTLS
+
+1. A Certificate Authority (CA) certificate
+2. Server certificate and private key for the interLink API server
+3. Client certificate and private key for the Virtual Kubelet
+
+#### Generate Certificates for mTLS
+
+```bash
+# Generate CA private key
+openssl genrsa -out ca-key.pem 4096
+
+# Generate CA certificate
+openssl req -new -x509 -days 365 -key ca-key.pem -sha256 -out ca.pem -subj "/C=US/ST=CA/L=San Francisco/O=InterLink/CN=InterLink CA"
+
+# Generate server private key
+openssl genrsa -out server-key.pem 4096
+
+# Generate server certificate signing request
+openssl req -subj "/C=US/ST=CA/L=San Francisco/O=InterLink/CN=interlink-server" -sha256 -new -key server-key.pem -out server.csr
+
+# Generate server certificate signed by CA
+openssl x509 -req -days 365 -sha256 -in server.csr -CA ca.pem -CAkey ca-key.pem -out server-cert.pem -extensions v3_req
+
+# Generate client private key
+openssl genrsa -out client-key.pem 4096
+
+# Generate client certificate signing request
+openssl req -subj "/C=US/ST=CA/L=San Francisco/O=InterLink/CN=interlink-client" -sha256 -new -key client-key.pem -out client.csr
+
+# Generate client certificate signed by CA
+openssl x509 -req -days 365 -sha256 -in client.csr -CA ca.pem -CAkey ca-key.pem -out client-cert.pem -extensions v3_req
+
+# Clean up CSR files
+rm server.csr client.csr
+```
+
+---
+
+## Installation Instructions
+
+Choose one of the authentication methods above and follow the corresponding installation steps below.
+
+### OIDC Authentication Installation
+
+Then download the
+[latest release](https://github.com/interlink-hq/interLink/releases) of the
+interLink installer:
+
+```bash
+mkdir -p $HOME/.interlink
+export VERSION=$(curl -s https://api.github.com/repos/interlink-hq/interlink/releases/latest  | jq -r .name)
+wget -O $HOME/interlink-installer https://github.com/interlink-hq/interLink/releases/download/$VERSION/interlink-installer_Linux_x86_64
+chmod +x $HOME/.interlink/interlink-installer
+```
+
+Create a template configuration with the init option:
+
+```bash
+mkdir -p $HOME/.interlink/logs
+mkdir -p $HOME/.interlink/bin
+mkdir -p $HOME/.interlink/config
+$HOME/.interlink/interlink-installer --init --config $HOME/.interlink/installer.yaml
+```
+
+The configuration file should be filled as followed. This is the case where the
+`my-node` will contact an edge service that will be listening on `PUBLIC_IP` and
+`API_PORT` authenticating requests from an OIDC provider
+`https://my_oidc_idp.com`:
+
+```bash title="$HOME/.interlink/installer.yaml"
+interlink_ip: PUBLIC_IP
+interlink_port: API_PORT
+interlink_version: X.X.X
+kubelet_node_name: my-node
+kubernetes_namespace: interlink
+node_limits:
+    cpu: "1000"
+    # MEMORY in GB
+    memory: 25600
+    pods: "100"
+oauth:
+  provider: oidc
+  issuer: https://my_oidc_idp.com/
+  scopes:
+    - "openid"
+    - "email"
+    - "offline_access"
+    - "profile"
+  audience: interlink
+  grant_type: authorization_code
+  group_claim: groups
+  group: "my_vk_allowed_group"
+  token_url: "https://my_oidc_idp.com/token"
+  device_code_url: "https://my_oidc_idp/auth/device"
+  client_id: "oidc-client-xx"
+  client_secret: "xxxxxx"
+insecure_http: true
+```
+
+### mTLS Authentication Installation
+
+For mTLS authentication, you don't need OAuth2 Proxy. Instead, configure interLink directly with TLS certificates.
+
+#### Prepare Certificate Files
+
+First, copy your generated certificates to the appropriate locations:
+
+```bash
+mkdir -p $HOME/.interlink/certs
+mkdir -p $HOME/.interlink/config
+mkdir -p $HOME/.interlink/logs
+mkdir -p $HOME/.interlink/bin
+
+# Copy certificates (assuming you generated them as shown above)
+cp ca.pem server-cert.pem server-key.pem $HOME/.interlink/certs/
+cp ca.pem client-cert.pem client-key.pem $HOME/.interlink/certs/
+```
+
+#### Create mTLS Configuration
+
+Create the interLink configuration file with mTLS settings:
+
+```yaml title="$HOME/.interlink/config/InterLinkConfig.yaml"
+InterlinkAddress: https://0.0.0.0
+InterlinkPort: "3000"
+SidecarURL: http://plugin
+SidecarPort: "4000"
+VerboseLogging: true
+ErrorsOnlyLogging: false
+DataRootFolder: "/tmp/interlink"
+
+# mTLS Configuration
+TLS:
+  Enabled: true
+  CertFile: "/home/myusername/.interlink/certs/server-cert.pem"
+  KeyFile: "/home/myusername/.interlink/certs/server-key.pem"
+  CACertFile: "/home/myusername/.interlink/certs/ca.pem"
+```
+
+#### Download and Configure interLink Binary
+
+```bash
+export VERSION=$(curl -s https://api.github.com/repos/interlink-hq/interlink/releases/latest | jq -r .name)
+wget -O $HOME/.interlink/bin/interlink https://github.com/interlink-hq/interLink/releases/download/$VERSION/interlink_Linux_x86_64
+chmod +x $HOME/.interlink/bin/interlink
+```
+
+#### Start interLink API Server
+
+```bash
+# Start interLink API server with mTLS
+export INTERLINKCONFIGPATH=$HOME/.interlink/config/InterLinkConfig.yaml
+$HOME/.interlink/bin/interlink &> $HOME/.interlink/logs/interlink.log &
+echo $! > $HOME/.interlink/interlink.pid
+```
+
+#### Configure Virtual Kubelet for mTLS
+
+For the Kubernetes side (Virtual Kubelet), you'll need to configure it to use client certificates. This configuration will be used when setting up the Helm chart:
+
+```yaml title="mTLS values for Helm chart"
+virtualkubelet:
+  config:
+    InterlinkURL: https://PUBLIC_IP  # Your edge node IP
+    InterlinkPort: "3000"
+    TLS:
+      Enabled: true
+      CertFile: "/etc/vk/certs/client-cert.pem"
+      KeyFile: "/etc/vk/certs/client-key.pem" 
+      CACertFile: "/etc/vk/certs/ca.pem"
+  
+  # Certificate secret mounts
+  extraVolumes:
+    - name: vk-tls-certs
+      secret:
+        secretName: vk-tls-certs
+  
+  extraVolumeMounts:
+    - name: vk-tls-certs
+      mountPath: /etc/vk/certs
+      readOnly: true
+```
+
+#### Create Kubernetes Secrets for Certificates
+
+Before deploying the Helm chart, create the necessary secrets:
+
+```bash
+# Create namespace
+kubectl create namespace interlink
+
+# Create secret with client certificates for Virtual Kubelet
+kubectl create secret generic vk-tls-certs \
+  --from-file=ca.pem=$HOME/.interlink/certs/ca.pem \
+  --from-file=client-cert.pem=$HOME/.interlink/certs/client-cert.pem \
+  --from-file=client-key.pem=$HOME/.interlink/certs/client-key.pem \
+  -n interlink
+```
+
+#### mTLS Security Considerations
+
+**Certificate Management:**
+- Implement regular certificate rotation for production deployments
+- Store private keys securely with restricted file permissions (600)
+- Keep CA private key highly secure and consider using a proper PKI solution
+- Monitor certificate expiration dates
+
+**Network Security:**
+```bash
+# Example firewall configuration
+sudo ufw allow from <kubernetes-cluster-cidr> to any port 3000 comment "interLink mTLS API"
+sudo ufw deny 3000 comment "Block public access to interLink API"
+```
+
+**Certificate Validation:**
+```bash
+# Verify certificate details and chain
+openssl x509 -in server-cert.pem -text -noout
+openssl verify -CAfile ca.pem server-cert.pem
+
+# Test mTLS connection
+openssl s_client -connect YOUR_EDGE_NODE_IP:3000 -CAfile ca.pem -cert client-cert.pem -key client-key.pem
+```
+
+#### mTLS Troubleshooting
+
+**Common Issues:**
+1. **Certificate verification errors** - Check certificate chain and CA
+2. **Permission denied** - Verify file permissions and paths
+3. **Handshake failures** - Ensure client certificate is signed by the same CA
+
+**Debug Commands:**
+```bash
+# Check certificate chain
+openssl verify -CAfile ca.pem client-cert.pem
+
+# Test server connectivity
+curl -v --cacert ca.pem --cert client-cert.pem --key client-key.pem https://YOUR_EDGE_NODE_IP:3000/pinglink
+
+# Check interLink logs for TLS errors
+tail -f $HOME/.interlink/logs/interlink.log | grep -i tls
+```
+
+**Log Messages to Monitor:**
+- "Loaded CA certificate for TLS client"
+- "mTLS enabled - requiring client certificates"
+- "Failed to create TLS HTTP client"
+- "certificate verification failed"
+
+:::note
+
+Please fill interlink_version with the desired version.  
+In alternative get the latest with:
+
+```bash
+curl -s https://api.github.com/repos/interlink-hq/interlink/releases/latest  | jq -r .name
+```
+
+:::
+
+Now you are ready to start the OIDC authentication flow to generate all your
+manifests and configuration files for the interLink components. To do so, just
+execute the installer:
+
+```bash
+$HOME/.interlink/interlink-installer --config $HOME/.interlink/installer.yaml --output-dir $HOME/.interlink/manifests/
+```
+
+Install Oauth2-Proxy and interLink API server services and configurations with:
+
+```bash
+chmod +x $HOME/.interlink/manifests/interlink-remote.sh
+$HOME/.interlink/manifests/interlink-remote.sh install
+```
+
+Then start the services with:
+
+```bash
+$HOME/.interlink/manifests/interlink-remote.sh start
+```
+
+With `stop` command you can stop the service. By default logs are store in
+`~/.interlink/logs`, checkout there for any error before moving to the next
+step.
+
+:::note
+
+**N.B.** you can look the oauth2_proxy configuration parameters looking directly
+into the `interlink-remote.sh` script.
+
+:::
+
+:::warning
+
+**N.B.** logs (expecially if in verbose mode) can become pretty huge, consider
+to implement your favorite rotation routine for all the logs in
+`~/.interlink/logs/`.
+
+:::
+
+#### Plugin service
+
+Select here the featured plugin you want to try:
+
+<Tabs groupId="plugins">
+  <TabItem value="docker" label="Docker" default>
+    _Offload your pods to a remote machine with Docker engine available._
+
+    - Create a configuration file:
+
+      ```bash title="$HOME/.interlink/config/plugin-config.yaml"
+      ## Multi user host
+      Socket: "unix:///home/myusername/.interlink/.plugin.sock"
+      InterlinkPort: "0"
+      SidecarPort: "0"
+
+      CommandPrefix: ""
+      DataRootFolder: "/home/myusername/.interlink/jobs/"
+      BashPath: /bin/bash
+      VerboseLogging: false
+      ErrorsOnlyLogging: false
+      ```
+      - __N.B.__ Depending on wheter you edge is single user or not,
+      you should know by previous steps which section to uncomment here.
+      - More on configuration options at
+      [official repo](https://github.com/interlink-hq/interlink-docker-plugin/blob/main/README.md)
+
+    - Download the [latest release](https://github.com/interlink-hq/interlink-docker-plugin/releases)
+    binary in `$HOME/.interlink/bin/plugin` for either GPU host or CPU host (tags ending with `no-GPU`)
+    - Start the plugins passing the configuration that you have just created:
+
+      ```bash
+      export INTERLINKCONFIGPATH=$HOME/.interlink/config/plugin-config.yaml
+      $HOME/.interlink/bin/plugin &> $HOME/.interlink/logs/plugin.log &
+      echo $! > $HOME/.interlink/plugin.pid
+      ```
+
+    - Check the logs in `$HOME/.interlink/logs/plugin.log`.
+    - To kill and restart the process is enough:
+
+      ```bash
+      # kill
+      kill $(cat $HOME/.interlink/plugin.pid)
+
+      # restart
+      export INTERLINKCONFIGPATH=$HOME/.interlink/config/plugin-config.yaml
+      $HOME/.interlink/bin/plugin &> $HOME/.interlink/logs/plugin.log &
+      echo $! > $HOME/.interlink/plugin.pid
+
+    Almost there! Now it's time to add this virtual node into the Kubernetes cluster!
+
+  </TabItem>
+
+  <TabItem value="slurm" label="SLURM">
+    _Offload your pods to an HPC SLURM based batch system._
+
+    - Please be sure that you have a shared filesystem area with the SLURM nodes available from the edge node. In this case our `DataRootFolder` is `$HOME/.interlink/jobs`
+    - Create a configuration file (__remember to substitute `/home/username/` with your actual home path__):
+
+      ```bash title="./interlink/manifests/plugin-config.yaml"
+      Socket: "unix:///home/myusername/.interlink/.plugin.sock"
+      InterlinkPort: "0"
+      SidecarPort: "0"
+
+      CommandPrefix: ""
+      DataRootFolder: "/home/myusername/.interlink/jobs/"
+      BashPath: /bin/bash
+      VerboseLogging: false
+      ErrorsOnlyLogging: false
+      SbatchPath: "/usr/bin/sbatch"
+      ScancelPath: "/usr/bin/scancel"
+      SqueuePath: "/usr/bin/squeue"
+      SingularityPrefix: ""
+      ```
+
+      - More on configuration options at
+      [official repo](https://github.com/interlink-hq/interlink-slurm-plugin/blob/main/README.md)
+
+    - Download the [latest release](https://github.com/interlink-hq/interlink-slurm-plugin/releases)
+    binary in `$HOME/.interlink/bin/plugin`
+
+      ```bash
+      export PLUGIN_VERSION=$(curl -s https://api.github.com/repos/interlink-hq/interlink-slurm-plugin/releases/latest  | jq -r .name)
+      wget -O $HOME/.interlink/bin/plugin https://github.com/interlink-hq/interlink-slurm-plugin/releases/download/${PLUGIN_VERSION}/interlink-sidecar-slurm_Linux_x86_64
+      ```
+
+    - Start the plugins passing the configuration that you have just created:
+
+      ```bash
+      export SLURMCONFIGPATH=$HOME/.interlink/manifests/plugin-config.yaml
+      $HOME/.interlink/bin/plugin &> $HOME/.interlink/logs/plugin.log &
+      echo $! > $HOME/.interlink/plugin.pid
+      ```
+
+    - Check the logs in `$HOME/.interlink/logs/plugin.log`.
+    - To kill and restart the process is enough:
+
+      ```bash
+      # kill
+      kill $(cat $HOME/.interlink/plugin.pid)
+
+      # restart
+      export SLURMCONFIGPATH=$HOME/.interlink/manifests/plugin-config.yaml
+      $HOME/.interlink/bin/plugin &> $HOME/.interlink/logs/plugin.log &
+      echo $! > $HOME/.interlink/plugin.pid
+
+    Almost there! Now it's time to add this virtual node into the Kubernetes cluster!
+
+  </TabItem>
+
+  <TabItem value="kubernetes" label="Kubernetes">
+    _Offload your pods to a remote Kubernetes cluster._
+
+    KUBERNETES PLUGIN IS COMING SOON! For test instructions contact us!
+
+  </TabItem>
+
+</Tabs>
+
+## Systemd Service Configuration
+
+For production deployments, it's recommended to manage interLink components using systemd services. This provides automatic startup, restart on failure, and proper logging.
+
+### Create System User
+
+First, create a dedicated system user for running interLink services:
+
+```bash
+sudo useradd --system --create-home --home-dir /opt/interlink --shell /bin/bash interlink
+sudo mkdir -p /opt/interlink/{bin,config,logs}
+sudo chown -R interlink:interlink /opt/interlink
+```
+
+### Copy Binaries and Configuration
+
+Move your interLink components to the system directories:
+
+```bash
+# Copy binaries
+sudo cp $HOME/.interlink/bin/* /opt/interlink/bin/
+sudo cp $HOME/.interlink/manifests/interlink-remote.sh /opt/interlink/bin/
+sudo chmod +x /opt/interlink/bin/*
+
+# Copy configuration files
+sudo cp $HOME/.interlink/config/* /opt/interlink/config/
+sudo cp $HOME/.interlink/manifests/*.yaml /opt/interlink/config/
+
+# Set ownership
+sudo chown -R interlink:interlink /opt/interlink
+```
+
+### OAuth2 Proxy Service
+
+Create the OAuth2 proxy systemd service:
+
+```ini title="/etc/systemd/system/interlink-oauth2-proxy.service"
+[Unit]
+Description=OAuth2 Proxy for interLink
+After=network.target
+Wants=network.target
+
+[Service]
+Type=simple
+User=interlink
+Group=interlink
+WorkingDirectory=/opt/interlink
+Environment=OAUTH2_PROXY_CONFIG=/opt/interlink/config/oauth2-proxy.cfg
+ExecStart=/opt/interlink/bin/oauth2-proxy --config=/opt/interlink/config/oauth2-proxy.cfg
+ExecReload=/bin/kill -HUP $MAINPID
+Restart=always
+RestartSec=10
+StandardOutput=append:/opt/interlink/logs/oauth2-proxy.log
+StandardError=append:/opt/interlink/logs/oauth2-proxy.log
+
+# Security settings
+NoNewPrivileges=true
+ProtectSystem=strict
+ProtectHome=true
+ReadWritePaths=/opt/interlink/logs /tmp
+PrivateTmp=true
+
+[Install]
+WantedBy=multi-user.target
+```
+
+### interLink API Server Service
+
+Create the interLink API server systemd service:
+
+```ini title="/etc/systemd/system/interlink-api.service"
+[Unit]
+Description=interLink API Server
+After=network.target interlink-oauth2-proxy.service
+Wants=network.target
+Requires=interlink-oauth2-proxy.service
+
+[Service]
+Type=simple
+User=interlink
+Group=interlink
+WorkingDirectory=/opt/interlink
+Environment=INTERLINKCONFIGPATH=/opt/interlink/config/InterLinkConfig.yaml
+ExecStart=/opt/interlink/bin/interlink
+ExecReload=/bin/kill -HUP $MAINPID
+Restart=always
+RestartSec=10
+StandardOutput=append:/opt/interlink/logs/interlink-api.log
+StandardError=append:/opt/interlink/logs/interlink-api.log
+
+# Security settings
+NoNewPrivileges=true
+ProtectSystem=strict
+ProtectHome=true
+ReadWritePaths=/opt/interlink/logs /opt/interlink/jobs /tmp
+PrivateTmp=true
+
+[Install]
+WantedBy=multi-user.target
+```
+
+### Plugin Service
+
+Create the plugin systemd service (example for Docker plugin):
+
+<Tabs groupId="plugins">
+  <TabItem value="docker" label="Docker Plugin" default>
+
+```ini title="/etc/systemd/system/interlink-docker-plugin.service"
+[Unit]
+Description=interLink Docker Plugin
+After=network.target docker.service interlink-api.service
+Wants=network.target
+Requires=docker.service interlink-api.service
+
+[Service]
+Type=simple
+User=interlink
+Group=interlink
+WorkingDirectory=/opt/interlink
+Environment=INTERLINKCONFIGPATH=/opt/interlink/config/plugin-config.yaml
+ExecStart=/opt/interlink/bin/plugin
+ExecReload=/bin/kill -HUP $MAINPID
+Restart=always
+RestartSec=10
+StandardOutput=append:/opt/interlink/logs/plugin.log
+StandardError=append:/opt/interlink/logs/plugin.log
+
+# Security settings
+NoNewPrivileges=true
+ProtectSystem=strict
+ProtectHome=true
+ReadWritePaths=/opt/interlink/logs /opt/interlink/jobs /tmp /var/run/docker.sock
+PrivateTmp=true
+
+# Docker access
+SupplementaryGroups=docker
+
+[Install]
+WantedBy=multi-user.target
+```
+
+  </TabItem>
+
+  <TabItem value="slurm" label="SLURM Plugin">
+
+```ini title="/etc/systemd/system/interlink-slurm-plugin.service"
+[Unit]
+Description=interLink SLURM Plugin
+After=network.target interlink-api.service
+Wants=network.target
+Requires=interlink-api.service
+
+[Service]
+Type=simple
+User=interlink
+Group=interlink
+WorkingDirectory=/opt/interlink
+Environment=SLURMCONFIGPATH=/opt/interlink/config/plugin-config.yaml
+ExecStart=/opt/interlink/bin/plugin
+ExecReload=/bin/kill -HUP $MAINPID
+Restart=always
+RestartSec=10
+StandardOutput=append:/opt/interlink/logs/plugin.log
+StandardError=append:/opt/interlink/logs/plugin.log
+
+# Security settings
+NoNewPrivileges=true
+ProtectSystem=strict
+ProtectHome=true
+ReadWritePaths=/opt/interlink/logs /opt/interlink/jobs /tmp
+PrivateTmp=true
+
+[Install]
+WantedBy=multi-user.target
+```
+
+  </TabItem>
+</Tabs>
+
+### Log Rotation Configuration
+
+Create log rotation configuration to prevent log files from growing too large:
+
+```bash title="/etc/logrotate.d/interlink"
+/opt/interlink/logs/*.log {
+    daily
+    rotate 30
+    compress
+    delaycompress
+    missingok
+    notifempty
+    postrotate
+        systemctl reload interlink-oauth2-proxy interlink-api interlink-*-plugin 2>/dev/null || true
+    endscript
+}
+```
+
+### Service Management Commands
+
+Enable and start all services:
+
+```bash
+# Enable services to start on boot
+sudo systemctl daemon-reload
+sudo systemctl enable interlink-oauth2-proxy interlink-api interlink-docker-plugin
+
+# Start services in order
+sudo systemctl start interlink-oauth2-proxy
+sudo systemctl start interlink-api
+sudo systemctl start interlink-docker-plugin
+
+# Check service status
+sudo systemctl status interlink-oauth2-proxy
+sudo systemctl status interlink-api
+sudo systemctl status interlink-docker-plugin
+```
+
+### Service Operations
+
+Common systemd operations for managing interLink services:
+
+```bash
+# View service logs
+sudo journalctl -u interlink-api -f
+sudo journalctl -u interlink-oauth2-proxy -f
+sudo journalctl -u interlink-docker-plugin -f
+
+# Restart a service
+sudo systemctl restart interlink-api
+
+# Stop all interLink services
+sudo systemctl stop interlink-docker-plugin interlink-api interlink-oauth2-proxy
+
+# Start all interLink services
+sudo systemctl start interlink-oauth2-proxy interlink-api interlink-docker-plugin
+
+# View service configuration
+sudo systemctl cat interlink-api
+```
+
+### Monitoring and Health Checks
+
+Create a simple health check script:
+
+```bash title="/opt/interlink/bin/health-check.sh"
+#!/bin/bash
+
+# Health check script for interLink services
+SOCKET_PATH="/opt/interlink/.interlink.sock"
+LOG_FILE="/opt/interlink/logs/health-check.log"
+
+echo "$(date): Starting health check" >> "$LOG_FILE"
+
+# Check if socket exists and is responding
+if [ -S "$SOCKET_PATH" ]; then
+    response=$(curl -s --unix-socket "$SOCKET_PATH" http://unix/pinglink)
+    if [ $? -eq 0 ]; then
+        echo "$(date): Health check passed - $response" >> "$LOG_FILE"
+        exit 0
+    else
+        echo "$(date): Health check failed - no response from socket" >> "$LOG_FILE"
+        exit 1
+    fi
+else
+    echo "$(date): Health check failed - socket not found" >> "$LOG_FILE"
+    exit 1
+fi
+```
+
+```bash
+# Make executable
+sudo chmod +x /opt/interlink/bin/health-check.sh
+sudo chown interlink:interlink /opt/interlink/bin/health-check.sh
+```
+
+Add a systemd timer for regular health checks:
+
+```ini title="/etc/systemd/system/interlink-health-check.service"
+[Unit]
+Description=interLink Health Check
+After=interlink-api.service
+Requires=interlink-api.service
+
+[Service]
+Type=oneshot
+User=interlink
+Group=interlink
+ExecStart=/opt/interlink/bin/health-check.sh
+```
+
+```ini title="/etc/systemd/system/interlink-health-check.timer"
+[Unit]
+Description=Run interLink Health Check every 5 minutes
+Requires=interlink-health-check.service
+
+[Timer]
+OnCalendar=*:0/5
+Persistent=true
+
+[Install]
+WantedBy=timers.target
+```
+
+Enable the health check timer:
+
+```bash
+sudo systemctl daemon-reload
+sudo systemctl enable interlink-health-check.timer
+sudo systemctl start interlink-health-check.timer
+```
+
+### Troubleshooting Systemd Issues
+
+Common troubleshooting steps:
+
+```bash
+# Check service status
+sudo systemctl status interlink-api --no-pager -l
+
+# View recent logs
+sudo journalctl -u interlink-api --since "1 hour ago"
+
+# Check configuration syntax
+sudo systemd-analyze verify /etc/systemd/system/interlink-api.service
+
+# View service dependencies
+sudo systemctl list-dependencies interlink-api
+
+# Reset failed state
+sudo systemctl reset-failed interlink-api
+```
+
+### Security Considerations
+
+The systemd configuration includes several security features:
+
+1. **Dedicated user**: Services run as non-privileged `interlink` user
+2. **Filesystem protection**: `ProtectSystem` and `ProtectHome` limit filesystem access
+3. **No new privileges**: `NoNewPrivileges` prevents privilege escalation
+4. **Private temp**: `PrivateTmp` provides isolated temporary directories
+5. **Minimal permissions**: `ReadWritePaths` restricts write access to necessary directories
+
+For additional security, consider:
+
+```bash
+# Set up firewall rules
+sudo ufw allow 30443/tcp comment "OAuth2 Proxy"
+sudo ufw allow from <kubernetes-cluster-cidr> to any port 3000 comment "interLink API"
+
+# Secure configuration files
+sudo chmod 640 /opt/interlink/config/*
+sudo chown root:interlink /opt/interlink/config/*
+```
+
+##### 3rd-party plugins
+
+There are more 3rd-party plugins developed that you can get inspired by or even
+use out of the box. You can find some ref in the
+[quick start section](../guides/deploy-interlink#attach-your-favorite-plugin-or-develop-one)
+
+#### Test interLink stack health
+
+interLink comes with a call that can be used to monitor the overall status of
+both interlink server and plugins, at once.
+
+```
+curl -v --unix-socket ${HOME}/.interlink/.interlink.sock  http://unix/pinglink
+```
+
+This call will return the status of the system and its readiness to submit jobs.
+
+### Deploy Kubernetes components
+
+The deployment of the Kubernetes components are managed by the official
+[HELM chart](https://github.com/interlink-hq/interlink-helm-chart). The deployment steps differ based on your chosen authentication method.
+
+#### For OIDC Authentication
+
+You can install the helm chart with the preconfigured (by the installer script) helm values in `./interlink/manifests/values.yaml`
+
+```bash
+export INTERLINK_CHART_VERSION="X.X.X"
+helm upgrade --install \
+  --create-namespace \
+  -n interlink \
+  my-node \
+  oci://ghcr.io/interlink-hq/interlink-helm-chart/interlink \
+  --version $INTERLINK_CHART_VERSION \
+  --values ./.interlink/manifests/values.yaml
+```
+
+#### For mTLS Authentication
+
+For mTLS, create a custom values file and deploy:
+
+```bash
+# Create values file for mTLS
+cat > $HOME/.interlink/mtls-values.yaml << EOF
+virtualkubelet:
+  config:
+    InterlinkURL: https://YOUR_EDGE_NODE_IP
+    InterlinkPort: "3000"
+    TLS:
+      Enabled: true
+      CertFile: "/etc/vk/certs/client-cert.pem"
+      KeyFile: "/etc/vk/certs/client-key.pem" 
+      CACertFile: "/etc/vk/certs/ca.pem"
+  
+  extraVolumes:
+    - name: vk-tls-certs
+      secret:
+        secretName: vk-tls-certs
+  
+  extraVolumeMounts:
+    - name: vk-tls-certs
+      mountPath: /etc/vk/certs
+      readOnly: true
+
+  nodeSelector:
+    kubernetes.io/arch: amd64
+    kubernetes.io/os: linux
+
+  nodeName: "my-node"
+  
+  resources:
+    limits:
+      cpu: "1000m"
+      memory: "25600Mi"
+    pods: "100"
+EOF
+
+# Deploy with mTLS configuration
+export INTERLINK_CHART_VERSION="X.X.X"
+helm upgrade --install \
+  --create-namespace \
+  -n interlink \
+  my-node \
+  oci://ghcr.io/interlink-hq/interlink-helm-chart/interlink \
+  --version $INTERLINK_CHART_VERSION \
+  --values $HOME/.interlink/mtls-values.yaml
+```
+
+:::warning
+
+Remember to pick the
+[version of the chart](https://github.com/interlink-hq/interlink-helm-chart/blob/main/interlink/Chart.yaml#L18)
+and put it into the `INTERLINK_CHART_VERSION` env var above.
+
+:::
+
+Whenever you see the node ready, you are good to go!
+
+:::note
+
+You can find a demo pod to test your setup
+[here](../guides/develop-a-plugin#lets-test-is-out).
+
+:::
+
+To start debugging in case of problems we suggest starting from the pod
+containers logs!
