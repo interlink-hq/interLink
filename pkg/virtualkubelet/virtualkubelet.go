@@ -221,7 +221,7 @@ func NodeCondition(ready bool) []v1.NodeCondition {
 
 func NodeConditionWithInterlink(ready bool, interlinkStatus v1.ConditionStatus, interlinkReason, interlinkMessage string) []v1.NodeCondition {
 	conditions := NodeCondition(ready)
-	
+
 	// Add custom InterLink connectivity condition
 	interlinkCondition := v1.NodeCondition{
 		Type:               "InterlinkConnectivity",
@@ -231,7 +231,7 @@ func NodeConditionWithInterlink(ready bool, interlinkStatus v1.ConditionStatus, 
 		Reason:             interlinkReason,
 		Message:            interlinkMessage,
 	}
-	
+
 	return append(conditions, interlinkCondition)
 }
 
@@ -559,7 +559,7 @@ func (p *Provider) nodeUpdate(ctx context.Context) {
 				errorMsg = fmt.Sprintf("%s. Response: %s", errorMsg, respBody)
 			}
 			p.node.Status.Conditions = NodeConditionWithInterlink(false, v1.ConditionFalse, "InterlinkPingFailed", errorMsg)
-			
+
 			// Also store in annotation for backwards compatibility
 			if p.node.Annotations == nil {
 				p.node.Annotations = make(map[string]string)
@@ -569,13 +569,13 @@ func (p *Provider) nodeUpdate(ctx context.Context) {
 			log.G(ctx).Error("Ping Failed with exit code: ", code)
 			log.G(ctx).Error("Error: ", err)
 		} else {
-			// Use custom condition with InterLink status information  
+			// Use custom condition with InterLink status information
 			successMsg := fmt.Sprintf("Ping successful with code %d", code)
 			if respBody != "" {
 				successMsg = fmt.Sprintf("%s. Response: %s", successMsg, respBody)
 			}
 			p.node.Status.Conditions = NodeConditionWithInterlink(true, v1.ConditionTrue, "InterlinkPingSuccessful", successMsg)
-			
+
 			// Also store in annotation for backwards compatibility
 			if p.node.Annotations == nil {
 				p.node.Annotations = make(map[string]string)

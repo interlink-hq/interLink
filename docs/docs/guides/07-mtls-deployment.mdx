@@ -118,7 +118,7 @@ Before deploying the Helm chart, create the necessary secrets:
 kubectl create namespace interlink
 
 # Create secret with client certificates for Virtual Kubelet
-kubectl create secret generic vk-tls-certs \
+kubectl create secret generic <NODE NAME>-tls-certs \
   --from-file=ca.pem=$HOME/.interlink/certs/ca.pem \
   --from-file=client-cert.pem=$HOME/.interlink/certs/client-cert.pem \
   --from-file=client-key.pem=$HOME/.interlink/certs/client-key.pem \
@@ -142,16 +142,6 @@ virtualkubelet:
       KeyFile: "/etc/vk/certs/client-key.pem" 
       CACertFile: "/etc/vk/certs/ca.pem"
   
-  extraVolumes:
-    - name: vk-tls-certs
-      secret:
-        secretName: vk-tls-certs
-  
-  extraVolumeMounts:
-    - name: vk-tls-certs
-      mountPath: /etc/vk/certs
-      readOnly: true
-
   nodeSelector:
     kubernetes.io/arch: amd64
     kubernetes.io/os: linux
