@@ -174,6 +174,22 @@ func NodeCondition(ready bool) []v1.NodeCondition {
 	}
 }
 
+func NodeConditionWithInterlink(ready bool, interlinkStatus v1.ConditionStatus, interlinkReason, interlinkMessage string) []v1.NodeCondition {
+	conditions := NodeCondition(ready)
+	
+	// Add custom InterLink connectivity condition
+	interlinkCondition := v1.NodeCondition{
+		Type:               "InterlinkConnectivity",
+		Status:             interlinkStatus,
+		LastHeartbeatTime:  metav1.Now(),
+		LastTransitionTime: metav1.Now(),
+		Reason:             interlinkReason,
+		Message:            interlinkMessage,
+	}
+	
+	return append(conditions, interlinkCondition)
+}
+
 func GetResources(config Config) v1.ResourceList {
 	gpuCount := map[string]int{}
 	fpgaCount := map[string]int{}
@@ -485,15 +501,31 @@ func (p *Provider) nodeUpdate(ctx context.Context) {
 			return
 		case <-t.C:
 		}
-		_, code, err := PingInterLink(ctx, p.config)
+		_, code, responseBody, err := PingInterLink(ctx, p.config)
 		if err != nil || code != 200 {
-			p.node.Status.Conditions = NodeCondition(false)
+			var interlinkReason, interlinkMessage string
+			if err != nil {
+				interlinkReason = "InterlinkError"
+				interlinkMessage = fmt.Sprintf("Error communicating with InterLink: %v", err)
+			} else {
+				interlinkReason = "InterlinkUnhealthy" 
+				interlinkMessage = fmt.Sprintf("InterLink returned status code: %d", code)
+			}
+			if responseBody != "" {
+				interlinkMessage += fmt.Sprintf(", Response: %s", responseBody)
+			}
+			
+			p.node.Status.Conditions = NodeConditionWithInterlink(false, v1.ConditionFalse, interlinkReason, interlinkMessage)
 			p.onNodeChangeCallback(p.node)
 			log.G(ctx).Error("Ping Failed with exit code: ", code)
 			log.G(ctx).Error("Error: ", err)
 		} else {
-
-			p.node.Status.Conditions = NodeCondition(true)
+			interlinkMessage := "InterLink is healthy and responding"
+			if responseBody != "" {
+				interlinkMessage += fmt.Sprintf(", Response: %s", responseBody)
+			}
+			
+			p.node.Status.Conditions = NodeConditionWithInterlink(true, v1.ConditionTrue, "InterlinkHealthy", interlinkMessage)
 			log.G(ctx).Info("Ping succeded with exit code: ", code)
 			p.onNodeChangeCallback(p.node)
 		}

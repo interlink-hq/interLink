@@ -87,7 +87,8 @@ func getSidecarEndpoint(ctx context.Context, interLinkURL string, interLinkPort 
 }
 
 // PingInterLink pings the InterLink API and returns true if there's an answer. The second return value is given by the answer provided by the API.
-func PingInterLink(ctx context.Context, config Config) (bool, int, error) {
+// The third return value contains the response body from the ping call.
+func PingInterLink(ctx context.Context, config Config) (bool, int, string, error) {
 	tracer := otel.Tracer("interlink-service")
 	interLinkEndpoint := getSidecarEndpoint(ctx, config.InterlinkURL, config.InterlinkPort)
 	log.G(ctx).Info("Pinging: " + interLinkEndpoint + "/pinglink")
@@ -101,7 +102,7 @@ func PingInterLink(ctx context.Context, config Config) (bool, int, error) {
 		token, err := os.ReadFile(config.VKTokenFile) // just pass the file name
 		if err != nil {
 			log.G(ctx).Error(err)
-			return false, retVal, err
+			return false, retVal, "", err
 		}
 		req.Header.Add("Authorization", "Bearer "+string(token))
 	}
@@ -119,23 +120,23 @@ func PingInterLink(ctx context.Context, config Config) (bool, int, error) {
 	resp, err := http.DefaultClient.Do(req)
 	if err != nil {
 		spanHTTP.SetAttributes(attribute.Int("exit.code", http.StatusInternalServerError))
-		return false, retVal, err
+		return false, retVal, "", err
 	}
 	defer resp.Body.Close()
 
 	types.SetDurationSpan(startHTTPCall, spanHTTP, types.WithHTTPReturnCode(resp.StatusCode))
-	_, err = io.ReadAll(resp.Body)
+	respBody, err := io.ReadAll(resp.Body)
 	if err != nil {
 		log.G(ctx).Error(err)
-		return false, retVal, err
+		return false, retVal, "", err
 	}
 
 	if resp.StatusCode != http.StatusOK {
 		log.G(ctx).Error("server error: " + fmt.Sprint(resp.StatusCode))
-		return false, retVal, nil
+		return false, retVal, string(respBody), nil
 	}
 
-	return true, resp.StatusCode, nil
+	return true, resp.StatusCode, string(respBody), nil
 }
 
 // updateCacheRequest is called when the VK receives the status of a pod already deleted. It performs a REST call InterLink API to update the cache deleting that pod from the cached structure
