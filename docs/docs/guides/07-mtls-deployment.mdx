@@ -118,10 +118,12 @@ Before deploying the Helm chart, create the necessary secrets:
 kubectl create namespace interlink
 
 # Create secret with client certificates for Virtual Kubelet
-kubectl create secret generic <NODE NAME>-tls-certs \
-  --from-file=ca.pem=$HOME/.interlink/certs/ca.pem \
-  --from-file=client-cert.pem=$HOME/.interlink/certs/client-cert.pem \
-  --from-file=client-key.pem=$HOME/.interlink/certs/client-key.pem \
+# Note: The secret name must match the pattern: <nodeName>-tls-certs
+# where <nodeName> corresponds to the nodeName value in your helm values
+kubectl create secret generic my-node-tls-certs \
+  --from-file=ca.crt=$HOME/.interlink/certs/ca.pem \
+  --from-file=tls.crt=$HOME/.interlink/certs/client-cert.pem \
+  --from-file=tls.key=$HOME/.interlink/certs/client-key.pem \
   -n interlink
 ```
 
@@ -132,27 +134,29 @@ Create a custom values file for mTLS deployment:
 ```bash
 # Create values file for mTLS
 cat > $HOME/.interlink/mtls-values.yaml << EOF
-virtualkubelet:
-  config:
-    InterlinkURL: https://YOUR_EDGE_NODE_IP
-    InterlinkPort: "3000"
-    TLS:
-      Enabled: true
-      CertFile: "/etc/vk/certs/client-cert.pem"
-      KeyFile: "/etc/vk/certs/client-key.pem" 
-      CACertFile: "/etc/vk/certs/ca.pem"
+virtualNode:
+  enabled: true
+  nodeName: "my-node"
   
   nodeSelector:
     kubernetes.io/arch: amd64
     kubernetes.io/os: linux
 
-  nodeName: "my-node"
-  
   resources:
-    limits:
-      cpu: "1000m"
-      memory: "25600Mi"
+    cpu: "1000m"
+    memory: "25600Mi"
     pods: "100"
+
+  # InterLink API connection
+  InterlinkURL: https://YOUR_EDGE_NODE_IP
+  InterlinkPort: "3000"
+
+  # mTLS Configuration
+  TLS:
+    Enabled: true
+    CertFile: "/etc/vk/certs/client-cert.pem"
+    KeyFile: "/etc/vk/certs/client-key.pem" 
+    CACertFile: "/etc/vk/certs/ca.pem"
 EOF
 
 # Deploy with mTLS configuration
