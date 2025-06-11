@@ -219,6 +219,22 @@ func NodeCondition(ready bool) []v1.NodeCondition {
 	}
 }
 
+func NodeConditionWithInterlink(ready bool, interlinkStatus v1.ConditionStatus, interlinkReason, interlinkMessage string) []v1.NodeCondition {
+	conditions := NodeCondition(ready)
+
+	// Add custom InterLink connectivity condition
+	interlinkCondition := v1.NodeCondition{
+		Type:               "InterlinkConnectivity",
+		Status:             interlinkStatus,
+		LastHeartbeatTime:  metav1.Now(),
+		LastTransitionTime: metav1.Now(),
+		Reason:             interlinkReason,
+		Message:            interlinkMessage,
+	}
+
+	return append(conditions, interlinkCondition)
+}
+
 func GetResources(config Config) v1.ResourceList {
 	gpuCount := map[string]int{}
 	fpgaCount := map[string]int{}
@@ -532,15 +548,39 @@ func (p *Provider) nodeUpdate(ctx context.Context) {
 			return
 		case <-t.C:
 		}
-		_, code, err := PingInterLink(ctx, p.config)
+		_, code, respBody, err := PingInterLink(ctx, p.config)
 		if err != nil || code != 200 {
-			p.node.Status.Conditions = NodeCondition(false)
+			// Use custom condition with InterLink status information
+			errorMsg := fmt.Sprintf("Ping failed with code %d", code)
+			if err != nil {
+				errorMsg = fmt.Sprintf("Ping failed: %v", err)
+			}
+			if respBody != "" {
+				errorMsg = fmt.Sprintf("%s. Response: %s", errorMsg, respBody)
+			}
+			p.node.Status.Conditions = NodeConditionWithInterlink(false, v1.ConditionFalse, "InterlinkPingFailed", errorMsg)
+
+			// Also store in annotation for backwards compatibility
+			if p.node.Annotations == nil {
+				p.node.Annotations = make(map[string]string)
+			}
+			p.node.Annotations["interlink.virtual-kubelet.io/ping-response"] = ""
 			p.onNodeChangeCallback(p.node)
 			log.G(ctx).Error("Ping Failed with exit code: ", code)
 			log.G(ctx).Error("Error: ", err)
 		} else {
+			// Use custom condition with InterLink status information
+			successMsg := fmt.Sprintf("Ping successful with code %d", code)
+			if respBody != "" {
+				successMsg = fmt.Sprintf("%s. Response: %s", successMsg, respBody)
+			}
+			p.node.Status.Conditions = NodeConditionWithInterlink(true, v1.ConditionTrue, "InterlinkPingSuccessful", successMsg)
 
-			p.node.Status.Conditions = NodeCondition(true)
+			// Also store in annotation for backwards compatibility
+			if p.node.Annotations == nil {
+				p.node.Annotations = make(map[string]string)
+			}
+			p.node.Annotations["interlink.virtual-kubelet.io/ping-response"] = respBody
 			log.G(ctx).Info("Ping succeded with exit code: ", code)
 			p.onNodeChangeCallback(p.node)
 		}
