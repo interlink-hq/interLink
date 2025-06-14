@@ -134,29 +134,34 @@ Create a custom values file for mTLS deployment:
 ```bash
 # Create values file for mTLS
 cat > $HOME/.interlink/mtls-values.yaml << EOF
+nodeName: "my-node"
+
 virtualNode:
-  enabled: true
-  nodeName: "my-node"
-  
-  nodeSelector:
-    kubernetes.io/arch: amd64
-    kubernetes.io/os: linux
-
   resources:
-    cpu: "1000m"
-    memory: "25600Mi"
-    pods: "100"
+    CPUs: 8
+    memGiB: 49
+    pods: 100
+  HTTPProxies:
+    HTTP: null
+    HTTPs: null
+  HTTP:
+    insecure: true
+    CACert: ""
+  kubeletHTTP:
+    insecure: true
+  # Tracing configuration
+  tracing:
+    enabled: false
 
-  # InterLink API connection
-  InterlinkURL: https://YOUR_EDGE_NODE_IP
-  InterlinkPort: "3000"
-
-  # mTLS Configuration
-  TLS:
-    Enabled: true
-    CertFile: "/etc/vk/certs/client-cert.pem"
-    KeyFile: "/etc/vk/certs/client-key.pem" 
-    CACertFile: "/etc/vk/certs/ca.pem"
+interlink:
+  enabled: false
+  address: https://172.16.213.51
+  port: 3000
+  tls:
+    enabled: true
+    certFile: "/etc/vk/certs/tls.crt"
+    keyFile: "/etc/vk/certs/tls.key"
+    caCertFile: "/etc/vk/certs/ca.crt"
 EOF
 
 # Deploy with mTLS configuration
