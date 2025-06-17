@@ -25,3 +25,10 @@ test:
     new-interlink \
     test stdout
 
+test-tls:
+	dagger call -m ./ci \
+    --name my-mtls-tests \
+    build-images \
+    new-interlink-mtls \
+    test-mtls stdout
+
