@@ -20,7 +20,7 @@ var interLinkChart = `
 nodeName: virtual-kubelet
 
 interlink:
-	enabled: false
+  enabled: false
   address: http://{{.InterLinkURL}}
   port: "3000"
   disableProjectedVolumes: true
