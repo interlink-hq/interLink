@@ -24,17 +24,21 @@ use any language you want as long as the API spec is satisfied.
 
 ## Plugin API Specification
 
-Before diving into development, familiarize yourself with the complete plugin API specification. The OpenAPI specification defines all the endpoints, request/response schemas, and data types your plugin must implement:
+Before diving into development, familiarize yourself with the complete plugin
+API specification. The OpenAPI specification defines all the endpoints,
+request/response schemas, and data types your plugin must implement:
 
-📋 **[Plugin OpenAPI Specification](../../../openapi/plugin-openapi.json)**
+📋 **[Plugin OpenAPI Specification](./03-api-reference.mdx#plugin-api-spec)**
 
 This specification is the authoritative reference for:
+
 - Required HTTP endpoints (`/create`, `/delete`, `/status`, `/getLogs`)
 - Request and response data structures
 - Error handling and status codes
 - Authentication requirements
 
-Any plugin implementation in any programming language must comply with this API specification to work with interLink.
+Any plugin implementation in any programming language must comply with this API
+specification to work with interLink.
 
 ## Setup the python SDK
 
@@ -64,13 +68,18 @@ pip install "uvicorn[standard]" "git+https://github.com/interlink-hq/interlink-p
 
 ## Understanding the Plugin Architecture
 
-InterLink plugins act as "sidecar" containers that handle the actual execution of workloads on remote resources. The plugin communicates with the interLink API server via REST endpoints and translates Kubernetes pod specifications into commands suitable for your target infrastructure.
+InterLink plugins act as "sidecar" containers that handle the actual execution
+of workloads on remote resources. The plugin communicates with the interLink API
+server via REST endpoints and translates Kubernetes pod specifications into
+commands suitable for your target infrastructure.
 
 ### Core Data Structures
 
-The plugin interface uses several key data structures defined in the interLink types:
+The plugin interface uses several key data structures defined in the interLink
+types:
 
 #### PodCreateRequests
+
 ```json
 {
     "pod": {...},           // Standard Kubernetes Pod spec
@@ -82,6 +91,7 @@ The plugin interface uses several key data structures defined in the interLink t
 ```
 
 #### PodStatus
+
 ```json
 {
     "name": "pod-name",
@@ -94,10 +104,11 @@ The plugin interface uses several key data structures defined in the interLink t
 ```
 
 #### CreateStruct
+
 ```json
 {
-    "PodUID": "kubernetes-pod-uid",
-    "PodJID": "remote-system-job-id"
+  "PodUID": "kubernetes-pod-uid",
+  "PodJID": "remote-system-job-id"
 }
 ```
 
@@ -106,34 +117,36 @@ The plugin interface uses several key data structures defined in the interLink t
 Your plugin must implement the following REST API endpoints:
 
 ### POST /create
+
 Creates one or more pods on the remote system.
 
-**Request Body**: `List[PodCreateRequests]`
-**Response**: `List[CreateStruct]`
+**Request Body**: `List[PodCreateRequests]` **Response**: `List[CreateStruct]`
 
 ### POST /delete
+
 Deletes a pod from the remote system.
 
-**Request Body**: `PodStatus`
-**Response**: Success/error status
+**Request Body**: `PodStatus` **Response**: Success/error status
 
 ### GET /status
+
 Retrieves the current status of one or more pods.
 
-**Query Parameters**: List of pod UIDs
-**Response**: `List[PodStatus]`
+**Query Parameters**: List of pod UIDs **Response**: `List[PodStatus]`
 
 ### GET /getLogs
+
 Retrieves logs from a specific container.
 
-**Query Parameters**: Pod UID, container name, log options
-**Response**: Container logs (plain text)
+**Query Parameters**: Pod UID, container name, log options **Response**:
+Container logs (plain text)
 
 ## Developing with the Python SDK
 
 ### Basic Plugin Structure
 
-Here's a complete example of a Docker-based plugin using the interLink Python SDK:
+Here's a complete example of a Docker-based plugin using the interLink Python
+SDK:
 
 ```python
 import interlink
@@ -152,7 +165,7 @@ class MyProvider(interlink.provider.Provider):
     def __init__(self, docker):
         super().__init__(docker)
         self.container_pod_map = {}
-        
+
         # Recover already running containers
         statuses = self.docker.api.containers(all=True)
         for status in statuses:
@@ -164,11 +177,11 @@ class MyProvider(interlink.provider.Provider):
     def create(self, pod: interlink.Pod) -> None:
         """Create a pod by running Docker containers"""
         container = pod.pod.spec.containers[0]
-        
+
         # Handle volumes if present
         if pod.pod.spec.volumes:
             self.dump_volumes(pod.pod.spec.volumes, pod.container)
-        
+
         # Set up volume mounts
         volumes = []
         if container.volume_mounts:
@@ -181,12 +194,12 @@ class MyProvider(interlink.provider.Provider):
                     volumes.append(
                         f"{pod.pod.metadata.namespace}-{mount.name}:{mount.mount_path}"
                     )
-        
+
         try:
             # Prepare command and arguments
             cmds = " ".join(container.command) if container.command else ""
             args = " ".join(container.args) if container.args else ""
-            
+
             # Run the container
             docker_container = self.docker.containers.run(
                 f"{container.image}",
@@ -198,12 +211,12 @@ class MyProvider(interlink.provider.Provider):
                 # environment=container.env,
                 # ports=container.ports,
             )
-            
+
             # Store container mapping
             self.container_pod_map.update({
                 pod.pod.metadata.uid: [docker_container.id]
             })
-            
+
         except Exception as ex:
             raise HTTPException(status_code=500, detail=str(ex))
 
@@ -216,7 +229,7 @@ class MyProvider(interlink.provider.Provider):
             self.container_pod_map.pop(pod.metadata.uid)
         except KeyError:
             raise HTTPException(
-                status_code=404, 
+                status_code=404,
                 detail="No containers found for UUID"
             )
 
@@ -228,17 +241,17 @@ class MyProvider(interlink.provider.Provider):
             status = container.status
         except KeyError:
             raise HTTPException(
-                status_code=404, 
+                status_code=404,
                 detail="No containers found for UUID"
             )
-        
+
         # Map Docker status to Kubernetes container status
         if status == "running":
             statuses = self.docker.api.containers(
                 filters={"status": "running", "id": container.id}
             )
             started_at = statuses[0]["Created"]
-            
+
             return interlink.PodStatus(
                 name=pod.metadata.name,
                 UID=pod.metadata.uid,
@@ -261,11 +274,11 @@ class MyProvider(interlink.provider.Provider):
             )
             reason = statuses[0]["Status"]
             pattern = re.compile(r"Exited \((.*?)\)")
-            
+
             exit_code = -1
             for match in re.findall(pattern, reason):
                 exit_code = int(match)
-            
+
             return interlink.PodStatus(
                 name=pod.metadata.name,
                 UID=pod.metadata.uid,
@@ -277,14 +290,14 @@ class MyProvider(interlink.provider.Provider):
                             running=None,
                             waiting=None,
                             terminated=interlink.StateTerminated(
-                                reason=reason, 
+                                reason=reason,
                                 exitCode=exit_code
                             ),
                         ),
                     )
                 ],
             )
-        
+
         # Default completed status
         return interlink.PodStatus(
             name=pod.metadata.name,
@@ -297,7 +310,7 @@ class MyProvider(interlink.provider.Provider):
                         running=None,
                         waiting=None,
                         terminated=interlink.StateTerminated(
-                            reason="Completed", 
+                            reason="Completed",
                             exitCode=0
                         ),
                     ),
@@ -317,41 +330,41 @@ class MyProvider(interlink.provider.Provider):
             return log
         except KeyError:
             raise HTTPException(
-                status_code=404, 
+                status_code=404,
                 detail="No containers found for UUID"
             )
 
     def dump_volumes(self, pod_volumes: List, container_volumes: List) -> List[str]:
         """Handle ConfigMaps, Secrets, and other volume types"""
         data_list = []
-        
+
         for volume in container_volumes:
             # Handle ConfigMaps
             if volume.config_maps:
                 for config_map in volume.config_maps:
                     for pod_vol in pod_volumes:
-                        if (pod_vol.volume_source.config_map and 
+                        if (pod_vol.volume_source.config_map and
                             pod_vol.name == config_map.metadata.name):
-                            
+
                             for filename, content in config_map.data.items():
                                 path = f"{config_map.metadata.namespace}-{config_map.metadata.name}/{filename}"
                                 os.makedirs(os.path.dirname(path), exist_ok=True)
-                                
+
                                 with open(path, "w") as f:
                                     f.write(content)
                                 data_list.append(path)
-            
+
             # Handle Secrets (base64 decode)
             if volume.secrets:
                 for secret in volume.secrets:
                     # Similar logic for secrets
                     pass
-            
+
             # Handle EmptyDirs
             if volume.empty_dirs:
                 # Create empty directories
                 pass
-        
+
         return data_list
 
 # Initialize provider
@@ -426,7 +439,7 @@ def apply_resource_limits(self, container_spec, docker_params):
 def setup_environment(self, container_spec, secrets, config_maps):
     """Set up environment variables from various sources"""
     env_vars = {}
-    
+
     # Direct environment variables
     for env in container_spec.env or []:
         if env.value:
@@ -441,7 +454,7 @@ def setup_environment(self, container_spec, secrets, config_maps):
                 cm_name = env.value_from.config_map_key_ref.name
                 cm_key = env.value_from.config_map_key_ref.key
                 env_vars[env.name] = self.get_configmap_value(config_maps, cm_name, cm_key)
-    
+
     return env_vars
 ```
 
@@ -540,13 +553,13 @@ spec:
         app: my-plugin
     spec:
       containers:
-      - name: plugin
-        image: my-plugin:latest
-        ports:
-        - containerPort: 8000
-        env:
-        - name: PLUGIN_CONFIG
-          value: "/etc/plugin/config.yaml"
+        - name: plugin
+          image: my-plugin:latest
+          ports:
+            - containerPort: 8000
+          env:
+            - name: PLUGIN_CONFIG
+              value: "/etc/plugin/config.yaml"
 ---
 apiVersion: v1
 kind: Service
@@ -556,8 +569,8 @@ spec:
   selector:
     app: my-plugin
   ports:
-  - port: 8000
-    targetPort: 8000
+    - port: 8000
+      targetPort: 8000
 ```
 
 ## Real-World Examples
@@ -571,7 +584,7 @@ class SLURMProvider(interlink.provider.Provider):
     def create(self, pod: interlink.Pod) -> None:
         # Convert pod spec to SLURM job script
         job_script = self.generate_slurm_script(pod)
-        
+
         # Submit to SLURM
         result = subprocess.run(
             ["sbatch", "--parsable"],
@@ -579,10 +592,10 @@ class SLURMProvider(interlink.provider.Provider):
             capture_output=True,
             text=True
         )
-        
+
         job_id = result.stdout.strip()
         self.job_pod_map[pod.pod.metadata.uid] = job_id
-    
+
     def generate_slurm_script(self, pod):
         container = pod.pod.spec.containers[0]
         return f"""#!/bin/bash
@@ -604,20 +617,21 @@ class CloudProvider(interlink.provider.Provider):
     def create(self, pod: interlink.Pod) -> None:
         # Convert to cloud-native format
         task_definition = self.pod_to_task_definition(pod)
-        
+
         # Submit to cloud provider
         response = self.cloud_client.run_task(
             taskDefinition=task_definition,
             cluster=self.cluster_name
         )
-        
+
         task_arn = response['tasks'][0]['taskArn']
         self.task_pod_map[pod.pod.metadata.uid] = task_arn
 ```
 
 ### Kubernetes Plugin (Cross-Cluster)
 
-Based on the [interLink Kubernetes Plugin](https://github.com/interlink-hq/interlink-kubernetes-plugin):
+Based on the
+[interLink Kubernetes Plugin](https://github.com/interlink-hq/interlink-kubernetes-plugin):
 
 ```python
 class KubernetesProvider(interlink.provider.Provider):
@@ -627,15 +641,15 @@ class KubernetesProvider(interlink.provider.Provider):
             kubernetes.config.load_kube_config(remote_kubeconfig)
         )
         self.core_v1 = kubernetes.client.CoreV1Api(self.k8s_client)
-    
+
     def create(self, pod: interlink.Pod) -> None:
         # Handle volume offloading
         self.sync_volumes(pod)
-        
+
         # Handle microservice offloading with TCP tunnels
         if self.has_exposed_ports(pod):
             self.setup_tcp_tunnel(pod)
-        
+
         # Create pod on remote cluster
         try:
             response = self.core_v1.create_namespaced_pod(
@@ -645,7 +659,7 @@ class KubernetesProvider(interlink.provider.Provider):
             self.pod_map[pod.pod.metadata.uid] = response.metadata.name
         except kubernetes.client.ApiException as e:
             raise HTTPException(status_code=500, detail=str(e))
-    
+
     def sync_volumes(self, pod):
         """Sync ConfigMaps, Secrets, and PVCs to remote cluster"""
         for volume in pod.container:
@@ -659,11 +673,14 @@ class KubernetesProvider(interlink.provider.Provider):
 
 ## Best Practices
 
-1. **Error Handling**: Always provide meaningful error messages and appropriate HTTP status codes
+1. **Error Handling**: Always provide meaningful error messages and appropriate
+   HTTP status codes
 2. **Logging**: Implement comprehensive logging for debugging and monitoring
-3. **Resource Cleanup**: Ensure proper cleanup of resources when pods are deleted
+3. **Resource Cleanup**: Ensure proper cleanup of resources when pods are
+   deleted
 4. **State Persistence**: Consider persisting plugin state to handle restarts
-5. **Security**: Implement proper authentication and authorization for your plugin endpoints
+5. **Security**: Implement proper authentication and authorization for your
+   plugin endpoints
 6. **Monitoring**: Add health checks and metrics endpoints for observability
 7. **Idempotency**: Make operations idempotent to handle retries gracefully
 8. **Resource Limits**: Always respect and enforce Kubernetes resource limits
@@ -724,8 +741,14 @@ CMD ["uvicorn", "main:app", "--host", "0.0.0.0", "--port", "8000"]
 
 ## Next Steps
 
-- Explore the [interLink Kubernetes Plugin](https://github.com/interlink-hq/interlink-kubernetes-plugin) for a production example
-- Check out the [Plugin SDK documentation](https://github.com/interlink-hq/interlink-plugin-sdk) for API details
-- Review the [monitoring guide](./05-monitoring.md) to add observability to your plugin
-- Study the [API reference](./03-api-reference.mdx) for detailed endpoint specifications
+- Explore the
+  [interLink Kubernetes Plugin](https://github.com/interlink-hq/interlink-kubernetes-plugin)
+  for a production example
+- Check out the
+  [Plugin SDK documentation](https://github.com/interlink-hq/interlink-plugin-sdk)
+  for API details
+- Review the [monitoring guide](./05-monitoring.md) to add observability to your
+  plugin
+- Study the [API reference](./03-api-reference.mdx) for detailed endpoint
+  specifications
 - Join the interLink community for support and contributions
