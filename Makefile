@@ -30,5 +30,5 @@ test-tls:
     --name my-mtls-tests \
     build-images \
     new-interlink-mtls \
-    test-mtls stdout
+    test stdout
 
