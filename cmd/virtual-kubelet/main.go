@@ -101,31 +101,8 @@ type Opts struct {
 	ErrorsOnly bool
 }
 
-func createCertPool(ctx context.Context, interLinkConfig commonIL.Config) *x509.CertPool {
-	certPool, err := x509.SystemCertPool()
-	if err != nil {
-		log.G(ctx).Fatalf("Failed to parse system rootCAs for client: %v", err)
-	}
-
-	if interLinkConfig.HTTP.CaCert != "" {
-
-		certContent, err := os.ReadFile(interLinkConfig.HTTP.CaCert)
-		if err != nil {
-			log.G(ctx).Fatalf("Failed to read config-provided rootCAs for client: %v", err)
-		}
-
-		certFromConfig, err := x509.ParseCertificate(certContent)
-		if err != nil {
-			log.G(ctx).Fatalf("Failed to parse config-provided rootCAs for client: %v", err)
-		}
-		certPool.AddCert(certFromConfig)
-	}
-	return certPool
-}
-
-func main() {
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
+// parseConfiguration parses command line flags and environment variables
+func parseConfiguration() (string, string) {
 	flagnodename := flag.String("nodename", "", "The name of the node")
 	flagpath := flag.String("configpath", "", "Path to the VK config")
 	flag.Parse()
@@ -150,11 +127,11 @@ func main() {
 		panic(fmt.Errorf("you must specify a Node name"))
 	}
 
-	interLinkConfig, err := commonIL.LoadConfig(ctx, configpath)
-	if err != nil {
-		panic(err)
-	}
+	return configpath, nodename
+}
 
+// setupLogging configures the logging system
+func setupLogging(interLinkConfig commonIL.Config) {
 	logger := logrus.StandardLogger()
 	switch {
 	case interLinkConfig.VerboseLogging:
@@ -165,28 +142,32 @@ func main() {
 		logger.SetLevel(logrus.InfoLevel)
 	}
 	log.L = logruslogger.FromLogrus(logrus.NewEntry(logger))
+}
 
-	log.G(ctx).Info("Config dump", interLinkConfig)
-
-	if os.Getenv("ENABLE_TRACING") == "1" {
-		shutdown, err := interlink.InitTracer(ctx, "VK-InterLink-")
-		if err != nil {
-			log.G(ctx).Fatal(err)
-		}
-		defer func() {
-			if err = shutdown(ctx); err != nil {
-				log.G(ctx).Fatal("failed to shutdown TracerProvider: %w", err)
-			}
-		}()
-
-		log.G(ctx).Info("Tracer setup succeeded")
-
-		// TODO: disable this through options
-		trace.T = opentelemetry.Adapter{}
+// setupTracing initializes OpenTelemetry tracing if enabled
+func setupTracing(ctx context.Context) func() {
+	if os.Getenv("ENABLE_TRACING") != "1" {
+		return func() {}
 	}
 
-	var kubeletURL string
+	shutdown, err := interlink.InitTracer(ctx, "VK-InterLink-")
+	if err != nil {
+		log.G(ctx).Fatal(err)
+	}
 
+	log.G(ctx).Info("Tracer setup succeeded")
+	trace.T = opentelemetry.Adapter{}
+
+	return func() {
+		if err = shutdown(ctx); err != nil {
+			log.G(ctx).Fatal("failed to shutdown TracerProvider: %w", err)
+		}
+	}
+}
+
+// getKubeletEndpoint gets the kubelet URL and port from environment variables
+func getKubeletEndpoint() (string, int32) {
+	var kubeletURL string
 	if envString, found := os.LookupEnv("KUBELET_URL"); !found {
 		kubeletURL = "0.0.0.0"
 	} else {
@@ -199,34 +180,48 @@ func main() {
 	} else {
 		kubeletPort = envString
 	}
+
 	dport, err := strconv.ParseInt(kubeletPort, 10, 32)
 	if err != nil {
-		log.G(ctx).Fatal(err)
+		log.G(context.Background()).Fatal(err)
 	}
 
-	cfg := Config{
-		ConfigPath:      configpath,
-		NodeName:        nodename,
-		NodeVersion:     commonIL.KubeletVersion,
-		OperatingSystem: "Linux",
-		// https://github.com/liqotech/liqo/blob/d8798732002abb7452c2ff1c99b3e5098f848c93/deployments/liqo/templates/liqo-gateway-deployment.yaml#L69
-		InternalIP: os.Getenv("POD_IP"),
-		DaemonPort: int32(dport),
+	return kubeletURL, int32(dport)
+}
+
+func createCertPool(ctx context.Context, interLinkConfig commonIL.Config) *x509.CertPool {
+	certPool, err := x509.SystemCertPool()
+	if err != nil {
+		log.G(ctx).Fatalf("Failed to parse system rootCAs for client: %v", err)
 	}
 
+	if interLinkConfig.HTTP.CaCert != "" {
+
+		certContent, err := os.ReadFile(interLinkConfig.HTTP.CaCert)
+		if err != nil {
+			log.G(ctx).Fatalf("Failed to read config-provided rootCAs for client: %v", err)
+		}
+
+		certFromConfig, err := x509.ParseCertificate(certContent)
+		if err != nil {
+			log.G(ctx).Fatalf("Failed to parse config-provided rootCAs for client: %v", err)
+		}
+		certPool.AddCert(certFromConfig)
+	}
+	return certPool
+}
+
+// createHTTPServer creates and starts the HTTPS server
+func createHTTPServer(ctx context.Context, cfg Config, interLinkConfig commonIL.Config) *http.ServeMux {
 	mux := http.NewServeMux()
-	// retriever, err := newCertificateRetriever(localClient, certificates.KubeletServingSignerName, cfg.NodeName, parsedIP)
-	// if err != nil {
-	//	log.G(ctx).Fatal("failed to initialize certificate manager: %w", err)
-	// }
-	// TODO: create a csr auto approver https://github.com/liqotech/liqo/blob/master/cmd/liqo-controller-manager/main.go#L498
 	retriever := commonIL.NewSelfSignedCertificateRetriever(cfg.NodeName, net.ParseIP(cfg.InternalIP))
 
+	kubeletURL, _ := getKubeletEndpoint()
 	server := &http.Server{
-		Addr:              fmt.Sprintf("%s:%s", kubeletURL, kubeletPort),
+		Addr:              fmt.Sprintf("%s:%d", kubeletURL, cfg.DaemonPort),
 		Handler:           mux,
 		ReadTimeout:       30 * time.Second,
-		ReadHeaderTimeout: 10 * time.Second, // Required to limit the effects of the Slowloris attack.
+		ReadHeaderTimeout: 10 * time.Second,
 		TLSConfig: &tls.Config{
 			GetCertificate:     retriever,
 			MinVersion:         tls.VersionTLS12,
@@ -236,16 +231,17 @@ func main() {
 
 	go func() {
 		log.G(ctx).Infof("Starting the virtual kubelet HTTPs server %q", server.Addr)
-
-		// Key and certificate paths are not specified, since already configured as part of the TLSConfig.
 		if err := server.ListenAndServeTLS("", ""); err != nil {
 			log.G(ctx).Errorf("Failed to start the HTTPs server: %v", err)
 			os.Exit(1)
 		}
 	}()
 
-	// TODO: if token specified http.DefaultClient = ...
-	// and remove reading from file
+	return mux
+}
+
+// createHTTPTransport creates the HTTP transport with TLS configuration
+func createHTTPTransport(ctx context.Context, interLinkConfig commonIL.Config, vkConfig commonIL.Config) *http.Transport {
 	var socketPath string
 	if strings.HasPrefix(interLinkConfig.InterlinkURL, "unix://") {
 		socketPath = strings.ReplaceAll(interLinkConfig.InterlinkURL, "unix://", "")
@@ -257,6 +253,24 @@ func main() {
 		Timeout:   90 * time.Second,
 		KeepAlive: 90 * time.Second,
 	}
+
+	// Create TLS client config with client certificates for mTLS if configured
+	tlsClientConfig := &tls.Config{
+		InsecureSkipVerify: interLinkConfig.HTTP.Insecure,
+		RootCAs:            certPool,
+		MinVersion:         tls.VersionTLS12,
+	}
+
+	// Load client certificate and key for mTLS if provided in VK config
+	if vkConfig.TLS.Enabled && vkConfig.TLS.CertFile != "" && vkConfig.TLS.KeyFile != "" {
+		cert, err := tls.LoadX509KeyPair(vkConfig.TLS.CertFile, vkConfig.TLS.KeyFile)
+		if err != nil {
+			log.G(ctx).Fatalf("Failed to load client certificate pair (%s, %s): %v", vkConfig.TLS.CertFile, vkConfig.TLS.KeyFile, err)
+		}
+		tlsClientConfig.Certificates = []tls.Certificate{cert}
+		log.G(ctx).Info("Loaded client certificate for mTLS from: ", vkConfig.TLS.CertFile, " and ", vkConfig.TLS.KeyFile)
+	}
+
 	transport := &http.Transport{
 		MaxConnsPerHost:       10000,
 		MaxIdleConnsPerHost:   1000,
@@ -268,10 +282,7 @@ func main() {
 			}
 			return dialer.DialContext(ctx, network, addr)
 		},
-		TLSClientConfig: &tls.Config{
-			InsecureSkipVerify: interLinkConfig.HTTP.Insecure,
-			RootCAs:            certPool,
-		},
+		TLSClientConfig: tlsClientConfig,
 	}
 
 	http.DefaultClient = &http.Client{
@@ -280,6 +291,11 @@ func main() {
 		},
 	}
 
+	return transport
+}
+
+// setupKubernetesClient creates the Kubernetes client configuration
+func setupKubernetesClient(ctx context.Context) (*rest.Config, *kubernetes.Clientset) {
 	var kubecfg *rest.Config
 	kubecfgFile, err := os.ReadFile(os.Getenv("KUBECONFIG"))
 	if err != nil {
@@ -305,6 +321,82 @@ func main() {
 	}
 
 	localClient := kubernetes.NewForConfigOrDie(kubecfg)
+	return kubecfg, localClient
+}
+
+// setupInformers creates and starts the Kubernetes informers
+func setupInformers(ctx context.Context, localClient *kubernetes.Clientset, nodeName string) (informers.SharedInformerFactory, informers.SharedInformerFactory, chan struct{}) {
+	resync, err := time.ParseDuration("30s")
+	if err != nil {
+		log.G(ctx).Fatal(err)
+	}
+
+	podInformerFactory := informers.NewSharedInformerFactoryWithOptions(
+		localClient,
+		resync,
+		PodInformerFilter(nodeName),
+	)
+
+	scmInformerFactory := informers.NewSharedInformerFactoryWithOptions(
+		localClient,
+		resync,
+	)
+
+	// stop signal for the informer
+	stopper := make(chan struct{})
+
+	// start informers
+	go podInformerFactory.Start(stopper)
+	go scmInformerFactory.Start(stopper)
+
+	// start to sync and call list
+	if !cache.WaitForCacheSync(stopper, podInformerFactory.Core().V1().Pods().Informer().HasSynced) {
+		log.G(ctx).Fatal(fmt.Errorf("timed out waiting for caches to sync"))
+	}
+
+	return podInformerFactory, scmInformerFactory, stopper
+}
+
+func main() {
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	configpath, nodename := parseConfiguration()
+
+	interLinkConfig, err := commonIL.LoadConfig(ctx, configpath)
+	if err != nil {
+		panic(err)
+	}
+
+	// Load Virtual Kubelet config to get TLS settings for client certificates
+	vkConfig, err := commonIL.LoadConfig(ctx, configpath)
+	if err != nil {
+		panic(err)
+	}
+
+	setupLogging(interLinkConfig)
+	log.G(ctx).Info("Config dump", interLinkConfig)
+
+	shutdownTracing := setupTracing(ctx)
+	defer shutdownTracing()
+
+	_, dport := getKubeletEndpoint()
+
+	cfg := Config{
+		ConfigPath:      configpath,
+		NodeName:        nodename,
+		NodeVersion:     commonIL.KubeletVersion,
+		OperatingSystem: "Linux",
+		// https://github.com/liqotech/liqo/blob/d8798732002abb7452c2ff1c99b3e5098f848c93/deployments/liqo/templates/liqo-gateway-deployment.yaml#L69
+		InternalIP: os.Getenv("POD_IP"),
+		DaemonPort: dport,
+	}
+
+	mux := createHTTPServer(ctx, cfg, interLinkConfig)
+
+	transport := createHTTPTransport(ctx, interLinkConfig, vkConfig)
+
+	kubecfg, localClient := setupKubernetesClient(ctx)
 
 	nodeProvider, err := commonIL.NewProvider(
 		ctx,
@@ -339,21 +431,10 @@ func main() {
 	}()
 
 	eb := record.NewBroadcaster()
-
 	EventRecorder := eb.NewRecorder(scheme.Scheme, v1.EventSource{Component: path.Join(cfg.NodeName, "pod-controller")})
 
-	resync, err := time.ParseDuration("30s")
-
-	podInformerFactory := informers.NewSharedInformerFactoryWithOptions(
-		localClient,
-		resync,
-		PodInformerFilter(cfg.NodeName),
-	)
-
-	scmInformerFactory := informers.NewSharedInformerFactoryWithOptions(
-		localClient,
-		resync,
-	)
+	podInformerFactory, scmInformerFactory, stopper := setupInformers(ctx, localClient, cfg.NodeName)
+	defer close(stopper)
 
 	podControllerConfig := node.PodControllerConfig{
 		PodClient:         localClient.CoreV1(),
@@ -363,20 +444,6 @@ func main() {
 		SecretInformer:    scmInformerFactory.Core().V1().Secrets(),
 		ConfigMapInformer: scmInformerFactory.Core().V1().ConfigMaps(),
 		ServiceInformer:   scmInformerFactory.Core().V1().Services(),
-	}
-
-	// stop signal for the informer
-	stopper := make(chan struct{})
-	defer close(stopper)
-
-	// start informers ->
-	go podInformerFactory.Start(stopper)
-	go scmInformerFactory.Start(stopper)
-
-	// start to sync and call list
-	if !cache.WaitForCacheSync(stopper, podInformerFactory.Core().V1().Pods().Informer().HasSynced) {
-		log.G(ctx).Fatal(fmt.Errorf("timed out waiting for caches to sync"))
-		return
 	}
 
 	// // DEBUG

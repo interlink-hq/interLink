@@ -1,6 +1,6 @@
 {
   "name": "interlink",
-  "engineVersion": "v0.18.3",
+  "engineVersion": "v0.18.9",
   "sdk": {
     "source": "go"
   },
