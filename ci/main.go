@@ -94,7 +94,7 @@ OAUTH:
 // `
 
 // generateMTLSCerts creates a container with mTLS certificates for testing
-func generateMTLSCerts() *dagger.Container {
+func generateMTLSCerts(san string) *dagger.Container {
 	return dag.Container().From("alpine:latest").
 		WithExec([]string{"apk", "add", "--no-cache", "openssl"}).
 		WithExec([]string{"mkdir", "-p", "/certs"}).
@@ -112,10 +112,13 @@ func generateMTLSCerts() *dagger.Container {
 			"openssl", "req", "-new", "-key", "/certs/server-key.pem",
 			"-out", "/certs/server.csr", "-subj", "/C=US/ST=CA/L=San Francisco/O=InterLink/OU=Server/CN=interlink",
 		}).
-		// Generate server certificate signed by CA
+		// Generate server certificate signed by CA with SAN
 		WithExec([]string{
 			"openssl", "x509", "-req", "-days", "365", "-in", "/certs/server.csr",
 			"-CA", "/certs/ca.pem", "-CAkey", "/certs/ca-key.pem", "-CAcreateserial", "-out", "/certs/server-cert.pem",
+			"-extensions", "v3_req", "-extfile", "/dev/stdin",
+		}, dagger.ContainerWithExecOpts{
+			Stdin: fmt.Sprintf("[v3_req]\nsubjectAltName = DNS:%s", san),
 		}).
 		// Generate client private key
 		WithExec([]string{"openssl", "genrsa", "-out", "/certs/client-key.pem", "4096"}).
@@ -167,7 +170,7 @@ func New(name string,
 	// +default="ghcr.io/interlink-hq/interlink/interlink:0.4.0"
 	InterlinkRef string,
 	// +optional
-	// +default="ghcr.io/interlink-hq/interlink-sidecar-slurm/interlink-sidecar-slurm:0.5.0-pre1"
+	// +default="ghcr.io/interlink-hq/interlink-sidecar-slurm/interlink-sidecar-slurm:0.5.0"
 	pluginRef string,
 ) *Interlink {
 	return &Interlink{
@@ -373,8 +376,11 @@ func (m *Interlink) NewInterlinkMTLS(
 			WithExposedPort(5000).AsService()
 	}
 
+	// Extract hostname from URL for SAN
+	interlinkHost := "interlink"
+
 	// Generate mTLS certificates
-	certContainer := generateMTLSCerts()
+	certContainer := generateMTLSCerts(interlinkHost)
 
 	// Create interlink config with mTLS enabled
 	interlinkConfigMTLS := dag.Container().From("alpine").
@@ -399,19 +405,31 @@ TLS:
 	// Create plugin config
 	pluginConfigFile := dag.Container().From("alpine").
 		WithNewFile("/etc/interlink/InterLinkConfig.yaml", `
-InterlinkAddress: "https://0.0.0.0"
+InterlinkURL: "http://interlink"
 InterlinkPort: "3000"
 SidecarURL: "http://0.0.0.0"
 SidecarPort: "4000"
 VerboseLogging: true
 ErrorsOnlyLogging: false
-DataRootFolder: "~/.interlink"
-Slurm:
-  SlurmConfigPath: "/etc/interlink/InterLinkConfig.yaml"
+# NEEDED PATH FOR GITHUB ACTIONS
+#DataRootFolder: "/home/runner/work/interLink/interLink/.interlink/"
+# on your host use something like:
+DataRootFolder: "/home/ubuntu/.interlink/"
+ExportPodData: true
+SbatchPath: "/usr/bin/sbatch"
+ScancelPath: "/usr/bin/scancel"
+SqueuePath: "/usr/bin/squeue"
+CommandPrefix: ""
+SingularityPrefix: ""
+Namespace: "vk"
+Tsocks: false
+TsocksPath: "$WORK/tsocks-1.8beta5+ds1/libtsocks.so"
+TsocksLoginNode: "login01"
+BashPath: /bin/bash
 `)
 
-	// Setup plugin with standard config
 	var err error
+	// Setup plugin with standard config
 	if pluginEndpoint == nil {
 		m.PluginContainer = dag.Container().From(m.PluginRef).
 			WithFile("/etc/interlink/InterLinkConfig.yaml", pluginConfigFile.File("/etc/interlink/InterLinkConfig.yaml")).
@@ -450,11 +468,6 @@ Slurm:
 		}
 	}
 
-	interlinkURL, err := interlinkEndpoint.Endpoint(ctx, dagger.ServiceEndpointOpts{})
-	if err != nil {
-		return nil, err
-	}
-
 	K3s := dag.K3S(m.Name).With(func(k *dagger.K3S) *dagger.K3S {
 		return k.WithContainer(
 			k.Container().
@@ -483,11 +496,23 @@ EOF`}).
 	m.KubeConfig = K3s.Config(dagger.K3SConfigOpts{Local: false})
 	m.KubeConfigHost = K3s.Config(dagger.K3SConfigOpts{Local: true})
 
+	interlinkEndpointURL, err := interlinkEndpoint.Hostname(ctx)
+	if err != nil {
+		return nil, err
+	}
+	hostname, err := dag.Container().From("nicolaka/netshoot").
+		WithServiceBinding("interlink", interlinkEndpoint).
+		WithExec([]string{"sh", "-c", fmt.Sprintf("host %s | awk '{print $4}'", interlinkEndpointURL)}).Stdout(ctx)
+	if err != nil {
+		fmt.Println("Error getting hostname:", err)
+		return nil, err
+	}
+
 	// create Kustomize patch for images to be used with mTLS
 	patch := patchSchema{
 		InterLinkRef:      m.InterlinkRef,
 		VirtualKubeletRef: m.VirtualKubeletRef,
-		InterLinkURL:      strings.Split(interlinkURL, ":")[0],
+		InterLinkURL:      "interlink",
 	}
 
 	bufferIL := new(bytes.Buffer)
@@ -562,6 +587,15 @@ EOF`}).
 			"--version", "0.5.0",
 			"--values", "/manifests/vk_helm_chart_mtls.yaml",
 		}).Stdout(ctx)
+
+	kubectl.WithExec([]string{
+		"kubectl",
+		"patch",
+		"deployment",
+		"-n", "interlink",
+		"virtual-kubelet-node",
+		"-p", fmt.Sprintf("{\"spec\":{\"template\":{\"spec\":{\"hostAliases\":[{\"ip\":\"%s\",\"hostnames\":[\"interlink\"]}]}}}}", strings.TrimRight(hostname, "\n")),
+	}).Stdout(ctx)
 
 	return m, nil
 }
