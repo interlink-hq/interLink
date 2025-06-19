@@ -143,3 +143,57 @@ func NewSelfSignedCertificateRetriever(nodeName string, nodeIP net.IP) Crtretrie
 		return cert, nil
 	}
 }
+
+// NewCSRCertificateRetriever creates a certificate retriever that uses Kubernetes CSR API
+// for more native certificate management. This function creates CSRs, submits them to the 
+// Kubernetes API server, and automatically manages certificate lifecycle.
+func NewCSRCertificateRetriever(kubeClient kubernetes.Interface, nodeName string, nodeIP net.IP) (Crtretriever, error) {
+	const (
+		vkCertsPath   = "/tmp/certs"
+		vkCertsPrefix = "virtual-kubelet-csr"
+	)
+
+	certificateStore, err := certificate.NewFileStore(vkCertsPrefix, vkCertsPath, vkCertsPath, "", "")
+	if err != nil {
+		return nil, fmt.Errorf("failed to initialize CSR certificate store: %w", err)
+	}
+
+	getTemplate := func() *x509.CertificateRequest {
+		return &x509.CertificateRequest{
+			Subject: pkix.Name{
+				CommonName:   fmt.Sprintf("system:node:%s", nodeName),
+				Organization: []string{"system:nodes"},
+			},
+			IPAddresses: []net.IP{nodeIP},
+			DNSNames:    []string{nodeName, fmt.Sprintf("%s.local", nodeName)},
+		}
+	}
+
+	// Use kubernetes.io/kubelet-serving signer for virtual kubelet server certificates
+	mgr, err := certificate.NewManager(&certificate.Config{
+		ClientsetFn: func(_ *tls.Certificate) (kubernetes.Interface, error) {
+			return kubeClient, nil
+		},
+		GetTemplate: getTemplate,
+		SignerName:  "kubernetes.io/kubelet-serving",
+		Usages: []certificates.KeyUsage{
+			certificates.UsageDigitalSignature,
+			certificates.UsageKeyEncipherment,
+			certificates.UsageServerAuth,
+		},
+		CertificateStore: certificateStore,
+	})
+	if err != nil {
+		return nil, fmt.Errorf("failed to initialize CSR certificate manager: %w", err)
+	}
+
+	mgr.Start()
+
+	return func(*tls.ClientHelloInfo) (*tls.Certificate, error) {
+		cert := mgr.Current()
+		if cert == nil {
+			return nil, fmt.Errorf("no serving certificate available from CSR")
+		}
+		return cert, nil
+	}, nil
+}

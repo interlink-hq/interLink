@@ -21,7 +21,107 @@ Before setting up mTLS, ensure you have:
 
 ## Certificate Generation
 
-### Generate Certificates for mTLS
+You can generate certificates for mTLS using either Kubernetes-native CSR API or traditional OpenSSL commands.
+
+### Option A: Kubernetes CSR API (Recommended)
+
+This approach uses Kubernetes' built-in Certificate Signing Request API for a more cloud-native certificate management experience.
+
+#### Step 1: Generate Private Keys
+
+```bash
+# Generate server private key
+openssl genrsa -out server-key.pem 4096
+
+# Generate client private key  
+openssl genrsa -out client-key.pem 4096
+```
+
+#### Step 2: Create Certificate Signing Requests
+
+```bash
+# Generate server CSR
+openssl req -new -key server-key.pem -out server.csr -subj "/CN=system:node:interlink-server/O=system:nodes"
+
+# Generate client CSR
+openssl req -new -key client-key.pem -out client.csr -subj "/CN=system:node:interlink-client/O=system:nodes"
+```
+
+#### Step 3: Create Kubernetes CSR Resources
+
+Create the server CSR manifest:
+
+```yaml title="server-csr.yaml"
+apiVersion: certificates.k8s.io/v1
+kind: CertificateSigningRequest
+metadata:
+  name: interlink-server-csr
+spec:
+  request: LS0tLS1CRUdJTiBDRVJUSUZJQ0FURSBSRVFVRVNULS0tLS0K...  # base64 encoded server.csr
+  signerName: kubernetes.io/kubelet-serving
+  expirationSeconds: 31536000  # 1 year
+  usages:
+  - digital signature
+  - key encipherment
+  - server auth
+```
+
+Create the client CSR manifest:
+
+```yaml title="client-csr.yaml"
+apiVersion: certificates.k8s.io/v1
+kind: CertificateSigningRequest
+metadata:
+  name: interlink-client-csr
+spec:
+  request: LS0tLS1CRUdJTiBDRVJUSUZJQ0FURSBSRVFVRVNULS0tLS0K...  # base64 encoded client.csr
+  signerName: kubernetes.io/kube-apiserver-client
+  expirationSeconds: 31536000  # 1 year
+  usages:
+  - digital signature
+  - key encipherment
+  - client auth
+```
+
+#### Step 4: Apply CSRs and Approve
+
+```bash
+# Encode CSR files to base64 and update manifests
+SERVER_CSR=$(cat server.csr | base64 | tr -d '\n')
+CLIENT_CSR=$(cat client.csr | base64 | tr -d '\n')
+
+# Update the manifests with actual base64 encoded CSRs
+sed -i "s/LS0tLS1CRUdJTiBDRVJUSUZJQ0FURSBSRVFVRVNULS0tLS0K.../$SERVER_CSR/" server-csr.yaml
+sed -i "s/LS0tLS1CRUdJTiBDRVJUSUZJQ0FURSBSRVFVRVNULS0tLS0K.../$CLIENT_CSR/" client-csr.yaml
+
+# Apply CSRs to Kubernetes
+kubectl apply -f server-csr.yaml
+kubectl apply -f client-csr.yaml
+
+# Approve CSRs (requires cluster-admin privileges)
+kubectl certificate approve interlink-server-csr
+kubectl certificate approve interlink-client-csr
+```
+
+#### Step 5: Extract Certificates
+
+```bash
+# Extract server certificate
+kubectl get csr interlink-server-csr -o jsonpath='{.status.certificate}' | base64 -d > server-cert.pem
+
+# Extract client certificate
+kubectl get csr interlink-client-csr -o jsonpath='{.status.certificate}' | base64 -d > client-cert.pem
+
+# Get cluster CA certificate
+kubectl config view --raw -o jsonpath='{.clusters[0].cluster.certificate-authority-data}' | base64 -d > ca.pem
+
+# Clean up CSR files
+rm server.csr client.csr server-csr.yaml client-csr.yaml
+```
+
+### Option B: Manual OpenSSL (Alternative)
+
+If you prefer traditional certificate generation or don't have cluster-admin access for CSR approval:
 
 ```bash
 # Generate CA private key

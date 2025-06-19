@@ -23,6 +23,7 @@ type Config struct {
 	NodeLabels              []string    `yaml:"NodeLabels"`
 	NodeTaints              []TaintSpec `yaml:"NodeTaints"`
 	TLS                     TLSConfig   `yaml:"TLS,omitempty"`
+	KubeletHTTPSCertMode    string      `yaml:"KubeletHTTPSCertMode,omitempty"` // "self-signed" or "csr"
 }
 
 // TLSConfig holds TLS/mTLS configuration for secure communication with interLink API
