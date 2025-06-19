@@ -256,7 +256,7 @@ func main() {
 		log.G(ctx).Fatal("Interlink URL should start with unix://, http://, or https://. Getting: ", interLinkConfig.InterlinkAddress)
 	}
 
-	interlinkRuntime := NewFakeRemoteRuntime()
+	interlinkRuntime := NewFakeRemoteRuntime(&interLinkAPIs)
 	err = interlinkRuntime.Start("unix:///tmp/kubelet_remote_1000.sock")
 	if err != nil {
 		interlinkRuntime.Stop()

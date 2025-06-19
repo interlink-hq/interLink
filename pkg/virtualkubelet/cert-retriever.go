@@ -145,7 +145,7 @@ func NewSelfSignedCertificateRetriever(nodeName string, nodeIP net.IP) Crtretrie
 }
 
 // NewCSRCertificateRetriever creates a certificate retriever that uses Kubernetes CSR API
-// for more native certificate management. This function creates CSRs, submits them to the 
+// for more native certificate management. This function creates CSRs, submits them to the
 // Kubernetes API server, and automatically manages certificate lifecycle.
 func NewCSRCertificateRetriever(kubeClient kubernetes.Interface, nodeName string, nodeIP net.IP) (Crtretriever, error) {
 	const (

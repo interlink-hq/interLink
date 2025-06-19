@@ -214,10 +214,10 @@ func createCertPool(ctx context.Context, interLinkConfig commonIL.Config) *x509.
 // createHTTPServer creates and starts the HTTPS server
 func createHTTPServer(ctx context.Context, cfg Config, interLinkConfig commonIL.Config, kubeClient *kubernetes.Clientset) *http.ServeMux {
 	mux := http.NewServeMux()
-	
+
 	var retriever commonIL.Crtretriever
 	var err error
-	
+
 	// Choose certificate retriever based on configuration
 	if interLinkConfig.KubeletHTTPSCertMode == "csr" {
 		retriever, err = commonIL.NewCSRCertificateRetriever(kubeClient, cfg.NodeName, net.ParseIP(cfg.InternalIP))
