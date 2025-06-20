@@ -1,14 +1,23 @@
 package main
 
 import (
+	"bytes"
 	"context"
+	"crypto/tls"
+	"crypto/x509"
 	"encoding/json"
 	"fmt"
+	"io"
+	"math/rand"
+	"net/http"
+	"os"
+	"strings"
 	"time"
 
+	"github.com/containerd/containerd/log"
 	types "github.com/interlink-hq/interlink/pkg/interlink"
-	"github.com/interlink-hq/interlink/pkg/interlink/api"
 	apitest "github.com/interlink-hq/interlink/pkg/interlink/cri"
+	vkconfig "github.com/interlink-hq/interlink/pkg/virtualkubelet"
 	"google.golang.org/grpc"
 	v1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/api/resource"
@@ -19,76 +28,208 @@ import (
 	utilexec "k8s.io/utils/exec"
 )
 
-// Helper functions to work with PodStatuses since mutex is not exported
-// We'll need to implement a simpler approach for CRI integration
+// InterLink API functions for CRI integration (similar to virtual-kubelet execute.go pattern)
 
-func getPodStatus(uid string) (types.PodStatus, bool) {
-	// Use checkIfCached to check existence (it's not exported but we'll work around it)
-	status := api.PodStatuses.Statuses[uid]
-	return status, status.PodUID != ""
+// CRI-specific session context management (similar to virtual-kubelet)
+func addSessionContext(req *http.Request, sessionContext string) {
+	req.Header.Set("X-Session-Context", sessionContext)
 }
 
-func updatePodStatusContainer(sandboxID string, containerStatus v1.ContainerStatus) {
-	// Get current status
-	if currentStatus, exists := getPodStatus(sandboxID); exists {
-		// Update or add container status
-		updated := false
-		for i, cs := range currentStatus.Containers {
-			if cs.Name == containerStatus.Name {
-				currentStatus.Containers[i] = containerStatus
-				updated = true
-				break
-			}
-		}
-		if !updated {
-			currentStatus.Containers = append(currentStatus.Containers, containerStatus)
-		}
-
-		// Since updateStatuses expects a slice, create one
-		api.PodStatuses.Statuses[sandboxID] = currentStatus
+// createTLSHTTPClient creates an HTTP client with TLS/mTLS configuration (from virtual-kubelet pattern)
+func createTLSHTTPClient(ctx context.Context, tlsConfig vkconfig.TLSConfig) (*http.Client, error) {
+	if !tlsConfig.Enabled {
+		return http.DefaultClient, nil
 	}
-}
 
-func removePodStatusContainer(sandboxID string, containerName string) {
-	if currentStatus, exists := getPodStatus(sandboxID); exists {
-		updatedContainers := []v1.ContainerStatus{}
-		for _, cs := range currentStatus.Containers {
-			if cs.Name != containerName {
-				updatedContainers = append(updatedContainers, cs)
-			}
-		}
-		currentStatus.Containers = updatedContainers
-		api.PodStatuses.Statuses[sandboxID] = currentStatus
+	transport := &http.Transport{
+		TLSClientConfig: &tls.Config{
+			MinVersion: tls.VersionTLS12,
+		},
 	}
+
+	// Load CA certificate if provided
+	if tlsConfig.CACertFile != "" {
+		caCert, err := os.ReadFile(tlsConfig.CACertFile)
+		if err != nil {
+			return nil, fmt.Errorf("failed to read CA certificate file %s: %w", tlsConfig.CACertFile, err)
+		}
+
+		caCertPool := x509.NewCertPool()
+		if !caCertPool.AppendCertsFromPEM(caCert) {
+			return nil, fmt.Errorf("failed to parse CA certificate from %s", tlsConfig.CACertFile)
+		}
+		transport.TLSClientConfig.RootCAs = caCertPool
+		log.G(ctx).Info("Loaded CA certificate for TLS client from: ", tlsConfig.CACertFile)
+	}
+
+	// Load client certificate and key for mTLS if provided
+	if tlsConfig.CertFile != "" && tlsConfig.KeyFile != "" {
+		cert, err := tls.LoadX509KeyPair(tlsConfig.CertFile, tlsConfig.KeyFile)
+		if err != nil {
+			return nil, fmt.Errorf("failed to load client certificate pair (%s, %s): %w", tlsConfig.CertFile, tlsConfig.KeyFile, err)
+		}
+		transport.TLSClientConfig.Certificates = []tls.Certificate{cert}
+		log.G(ctx).Info("Loaded client certificate for mTLS from: ", tlsConfig.CertFile, " and ", tlsConfig.KeyFile)
+	}
+
+	return &http.Client{Transport: transport}, nil
 }
 
-func removePodStatus(uid string) {
-	// Since deleteCachedStatus is not exported, we'll work directly with the map
-	// This is not ideal but necessary for the CRI integration
-	delete(api.PodStatuses.Statuses, uid)
+// getInterlinkEndpoint constructs the interLink API endpoint
+func getInterlinkEndpoint(ctx context.Context, interlinkURL string, interlinkPort string) string {
+	interlinkEndpoint := ""
+	log.G(ctx).Info("InterlinkURL: ", interlinkURL)
+	switch {
+	case strings.HasPrefix(interlinkURL, "unix://"):
+		interlinkEndpoint = "http://unix"
+	case strings.HasPrefix(interlinkURL, "http://"):
+		interlinkEndpoint = interlinkURL + ":" + interlinkPort
+	case strings.HasPrefix(interlinkURL, "https://"):
+		interlinkEndpoint = interlinkURL + ":" + interlinkPort
+	default:
+		log.G(ctx).Fatal("InterLinkURL should either start with unix:// or http(s)://")
+	}
+	return interlinkEndpoint
 }
 
-// RemoteRuntime represents a remote container runtime that integrates with interLink.
+// doRequestWithClient performs HTTP request with authentication (similar to virtual-kubelet)
+func doRequestWithClient(req *http.Request, token string, httpClient *http.Client) (*http.Response, error) {
+	if token != "" {
+		req.Header.Add("Authorization", "Bearer "+token)
+	}
+	req.Header.Set("Content-Type", "application/json")
+	return httpClient.Do(req)
+}
+
+// createPodRequest performs a REST call to the InterLink API to create a pod
+func (f *RemoteRuntime) createPodRequest(ctx context.Context, pod types.PodCreateRequests) ([]byte, error) {
+	interlinkEndpoint := getInterlinkEndpoint(ctx, f.Config.InterlinkURL, f.Config.InterlinkPort)
+
+	bodyBytes, err := json.Marshal(pod)
+	if err != nil {
+		log.G(ctx).Error(err)
+		return nil, err
+	}
+
+	reader := bytes.NewReader(bodyBytes)
+	req, err := http.NewRequest(http.MethodPost, interlinkEndpoint+"/create", reader)
+	if err != nil {
+		log.G(ctx).Error(err)
+		return nil, err
+	}
+
+	// Add session context for tracing
+	sessionContext := fmt.Sprintf("CRI-CreatePod#%d", rand.Intn(100000))
+	addSessionContext(req, sessionContext)
+
+	// Get token if configured
+	token := ""
+	if f.Config.VKTokenFile != "" {
+		tokenBytes, err := os.ReadFile(f.Config.VKTokenFile)
+		if err != nil {
+			log.G(ctx).Error(err)
+			return nil, err
+		}
+		token = string(tokenBytes)
+	}
+
+	// Create TLS-enabled HTTP client
+	httpClient, err := createTLSHTTPClient(ctx, f.Config.TLS)
+	if err != nil {
+		return nil, fmt.Errorf("failed to create TLS HTTP client: %w", err)
+	}
+
+	resp, err := doRequestWithClient(req, token, httpClient)
+	if err != nil {
+		return nil, fmt.Errorf("error doing doRequest() in createPodRequest(): %w", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		return nil, fmt.Errorf("unexpected error creating pod. Status code: %d", resp.StatusCode)
+	}
+
+	return io.ReadAll(resp.Body)
+}
+
+// deletePodRequest performs a REST call to the InterLink API to delete a pod
+func (f *RemoteRuntime) deletePodRequest(ctx context.Context, pod *v1.Pod) error {
+	interlinkEndpoint := getInterlinkEndpoint(ctx, f.Config.InterlinkURL, f.Config.InterlinkPort)
+
+	bodyBytes, err := json.Marshal(pod)
+	if err != nil {
+		log.G(ctx).Error(err)
+		return err
+	}
+
+	reader := bytes.NewReader(bodyBytes)
+	req, err := http.NewRequest(http.MethodDelete, interlinkEndpoint+"/delete", reader)
+	if err != nil {
+		log.G(ctx).Error(err)
+		return err
+	}
+
+	// Add session context for tracing
+	sessionContext := fmt.Sprintf("CRI-DeletePod#%d", rand.Intn(100000))
+	addSessionContext(req, sessionContext)
+
+	// Get token if configured
+	token := ""
+	if f.Config.VKTokenFile != "" {
+		tokenBytes, err := os.ReadFile(f.Config.VKTokenFile)
+		if err != nil {
+			log.G(ctx).Error(err)
+			return err
+		}
+		token = string(tokenBytes)
+	}
+
+	// Create TLS-enabled HTTP client
+	httpClient, err := createTLSHTTPClient(ctx, f.Config.TLS)
+	if err != nil {
+		return fmt.Errorf("failed to create TLS HTTP client: %w", err)
+	}
+
+	resp, err := doRequestWithClient(req, token, httpClient)
+	if err != nil {
+		return fmt.Errorf("error doing doRequest() in deletePodRequest(): %w", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		return fmt.Errorf("unexpected error deleting pod. Status code: %d", resp.StatusCode)
+	}
+
+	return nil
+}
+
+// RemoteRuntime represents a remote container runtime that integrates with interLink server API.
 type RemoteRuntime struct {
 	server *grpc.Server
-	// Fake runtime service.
+	// Fake runtime service for CRI compatibility
 	RuntimeService *apitest.FakeRuntimeService
-	// Fake image service.
+	// Fake image service for CRI compatibility
 	ImageService *apitest.FakeImageService
-	// InterLink API handler for container lifecycle management
-	InterLinkHandler *api.InterLinkHandler
+	// Configuration for interLink API communication (like virtual-kubelet)
+	Config vkconfig.Config
+	// Context for the runtime
+	Ctx context.Context
+	// Container-to-Pod mapping for tracking
+	ContainerPodMap map[string]string // containerID -> podUID
 }
 
-// NewFakeRemoteRuntime creates a new RemoteRuntime with InterLink integration.
-func NewFakeRemoteRuntime(interLinkHandler *api.InterLinkHandler) *RemoteRuntime {
+// NewFakeRemoteRuntime creates a new RemoteRuntime with InterLink server API integration.
+func NewFakeRemoteRuntime(ctx context.Context, config vkconfig.Config) *RemoteRuntime {
 	fakeRuntimeService := apitest.NewFakeRuntimeService()
 	fakeImageService := apitest.NewFakeImageService()
 
 	f := &RemoteRuntime{
-		server:           grpc.NewServer(),
-		RuntimeService:   fakeRuntimeService,
-		ImageService:     fakeImageService,
-		InterLinkHandler: interLinkHandler,
+		server:          grpc.NewServer(),
+		RuntimeService:  fakeRuntimeService,
+		ImageService:    fakeImageService,
+		Config:          config,
+		Ctx:             ctx,
+		ContainerPodMap: make(map[string]string),
 	}
 	kubeapi.RegisterRuntimeServiceServer(f.server, f)
 	kubeapi.RegisterImageServiceServer(f.server, f.ImageService)
@@ -157,24 +298,40 @@ func (f *RemoteRuntime) StopPodSandbox(ctx context.Context, req *kubeapi.StopPod
 
 // RemovePodSandbox removes the sandbox using interLink lifecycle
 func (f *RemoteRuntime) RemovePodSandbox(ctx context.Context, req *kubeapi.RemovePodSandboxRequest) (*kubeapi.RemovePodSandboxResponse, error) {
-	// If InterLink handler is available, clean up pod tracking
-	if f.InterLinkHandler != nil {
-		if podStatus, found := getPodStatus(req.PodSandboxId); found {
-			// Create a pod object for deletion if we have tracking data
-			pod := &v1.Pod{
-				ObjectMeta: metav1.ObjectMeta{
-					Name:      podStatus.PodName,
-					Namespace: podStatus.PodNamespace,
-					UID:       ktypes.UID(podStatus.PodUID),
-				},
-			}
+	// Check if we have a pod to delete via interLink API
+	// Find any container mapped to this sandbox to get pod info
+	var podUID string
+	for containerID, uid := range f.ContainerPodMap {
+		f.RuntimeService.Lock()
+		container, exists := f.RuntimeService.Containers[containerID]
+		f.RuntimeService.Unlock()
 
-			// Signal to interLink that the pod should be deleted
-			_, err := json.Marshal(pod)
-			if err == nil {
-				// Note: In a real implementation, this would call the delete handler
-				// For now, we just clean up the tracking
-				removePodStatus(req.PodSandboxId)
+		if exists && container.SandboxID == req.PodSandboxId {
+			podUID = uid
+			break
+		}
+	}
+
+	if podUID != "" {
+		// Create a minimal pod object for deletion
+		pod := &v1.Pod{
+			ObjectMeta: metav1.ObjectMeta{
+				UID: ktypes.UID(podUID),
+			},
+		}
+
+		// Call interLink delete API
+		err := f.deletePodRequest(ctx, pod)
+		if err != nil {
+			log.G(ctx).Warning("Failed to delete pod via interLink API: ", err)
+		} else {
+			log.G(ctx).Info("Pod deleted successfully via interLink API: ", podUID)
+		}
+
+		// Clean up our container mappings for this sandbox
+		for containerID, uid := range f.ContainerPodMap {
+			if uid == podUID {
+				delete(f.ContainerPodMap, containerID)
 			}
 		}
 	}
@@ -272,30 +429,24 @@ func (f *RemoteRuntime) CreateContainer(ctx context.Context, req *kubeapi.Create
 		return nil, err
 	}
 
-	// If InterLink handler is available, integrate with interLink lifecycle
-	if f.InterLinkHandler != nil {
-		// Convert CRI config to interLink pod format
-		pod := f.convertToInterLinkPod(ctx, req.SandboxConfig, req.Config)
+	// Integrate with interLink server API
+	// Convert CRI config to interLink pod format
+	pod := f.convertToInterLinkPod(ctx, req.SandboxConfig, req.Config)
 
-		// Create pod creation request for interLink
-		podCreateReq := types.PodCreateRequests{
-			Pod: *pod,
-		}
+	// Create pod creation request for interLink
+	podCreateReq := types.PodCreateRequests{
+		Pod: *pod,
+	}
 
-		// Marshal the request (for potential future use)
-		_, err := json.Marshal(podCreateReq)
-		if err != nil {
-			return nil, fmt.Errorf("failed to marshal pod create request: %w", err)
-		}
-
-		// Store the pod in interLink's pod tracking
-		podStatus := types.PodStatus{
-			PodName:      pod.Name,
-			PodNamespace: pod.Namespace,
-			PodUID:       string(pod.UID),
-			Containers:   []v1.ContainerStatus{},
-		}
-		api.PodStatuses.Statuses[string(pod.UID)] = podStatus
+	// Call interLink server API to create the pod
+	_, err = f.createPodRequest(ctx, podCreateReq)
+	if err != nil {
+		log.G(ctx).Warning("Failed to create pod via interLink API: ", err)
+		// Continue with CRI response even if interLink fails
+	} else {
+		// Store container to pod mapping for lifecycle tracking
+		f.ContainerPodMap[containerID] = string(pod.UID)
+		log.G(ctx).Info("Pod created successfully via interLink API: ", pod.Name)
 	}
 
 	return &kubeapi.CreateContainerResponse{ContainerId: containerID}, nil
@@ -309,29 +460,9 @@ func (f *RemoteRuntime) StartContainer(ctx context.Context, req *kubeapi.StartCo
 		return nil, err
 	}
 
-	// If InterLink handler is available, update container state in interLink tracking
-	if f.InterLinkHandler != nil {
-		// Find the container in the fake runtime to get pod info
-		f.RuntimeService.Lock()
-		container, exists := f.RuntimeService.Containers[req.ContainerId]
-		f.RuntimeService.Unlock()
-
-		if exists {
-			// Update container status to running
-			containerStatus := v1.ContainerStatus{
-				Name:  container.Metadata.Name,
-				Image: container.Image.Image,
-				State: v1.ContainerState{
-					Running: &v1.ContainerStateRunning{
-						StartedAt: metav1.NewTime(time.Now()),
-					},
-				},
-				Ready: true,
-			}
-
-			updatePodStatusContainer(container.SandboxID, containerStatus)
-		}
-	}
+	// Container start is handled by interLink server API
+	// The pod was already created during CreateContainer, so starting is managed by the plugin
+	log.G(ctx).Info("Container started via CRI: ", req.ContainerId)
 
 	return &kubeapi.StartContainerResponse{}, nil
 }
@@ -344,48 +475,17 @@ func (f *RemoteRuntime) StopContainer(ctx context.Context, req *kubeapi.StopCont
 		return nil, err
 	}
 
-	// If InterLink handler is available, update container state in interLink tracking
-	if f.InterLinkHandler != nil {
-		// Find the container in the fake runtime to get pod info
-		f.RuntimeService.Lock()
-		container, exists := f.RuntimeService.Containers[req.ContainerId]
-		f.RuntimeService.Unlock()
-
-		if exists {
-			// Update container status to terminated
-			containerStatus := v1.ContainerStatus{
-				Name:  container.Metadata.Name,
-				Image: container.Image.Image,
-				State: v1.ContainerState{
-					Terminated: &v1.ContainerStateTerminated{
-						ExitCode:   0,
-						Reason:     "Completed",
-						FinishedAt: metav1.NewTime(time.Now()),
-					},
-				},
-				Ready: false,
-			}
-
-			updatePodStatusContainer(container.SandboxID, containerStatus)
-		}
-	}
+	// Container stop is handled by interLink server API
+	// The interLink plugin manages the container lifecycle
+	log.G(ctx).Info("Container stopped via CRI: ", req.ContainerId)
 
 	return &kubeapi.StopContainerResponse{}, nil
 }
 
 // RemoveContainer removes the container using interLink lifecycle
 func (f *RemoteRuntime) RemoveContainer(ctx context.Context, req *kubeapi.RemoveContainerRequest) (*kubeapi.RemoveContainerResponse, error) {
-	// If InterLink handler is available, handle cleanup before removing from fake runtime
-	if f.InterLinkHandler != nil {
-		// Find the container in the fake runtime to get pod info before removal
-		f.RuntimeService.Lock()
-		container, exists := f.RuntimeService.Containers[req.ContainerId]
-		f.RuntimeService.Unlock()
-
-		if exists {
-			removePodStatusContainer(container.SandboxID, container.Metadata.Name)
-		}
-	}
+	// Clean up container-to-pod mapping
+	delete(f.ContainerPodMap, req.ContainerId)
 
 	// Remove container from fake runtime
 	err := f.RuntimeService.RemoveContainer(ctx, req.ContainerId)
@@ -413,25 +513,10 @@ func (f *RemoteRuntime) ContainerStatus(ctx context.Context, req *kubeapi.Contai
 		return nil, err
 	}
 
-	// If InterLink handler is available, update status with interLink data
-	if f.InterLinkHandler != nil {
-		f.RuntimeService.Lock()
-		container, exists := f.RuntimeService.Containers[req.ContainerId]
-		f.RuntimeService.Unlock()
-
-		if exists {
-			if podStatus, found := getPodStatus(container.SandboxID); found {
-				// Find the matching container status in interLink tracking
-				for _, cs := range podStatus.Containers {
-					if cs.Name == container.Metadata.Name {
-						// For now, just ensure the container is tracked in interLink
-						// More complex state mapping can be added later
-						break
-					}
-				}
-			}
-		}
-	}
+	// Optionally get status from interLink server API
+	// For now, we rely on the fake runtime status since it provides CRI compatibility
+	// Future enhancement: query interLink status API for real container states
+	log.G(ctx).Debug("Container status requested for: ", req.ContainerId)
 
 	return resp, nil
 }

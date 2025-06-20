@@ -8,18 +8,27 @@ The interLink CRI implementation bridges the Kubernetes CRI with interLink's rem
 
 ## Architecture
 
+The interLink CRI implementation provides a standalone binary that acts as a bridge between kubelet and the interLink API server:
+
 ```
-┌─────────────┐    CRI gRPC     ┌─────────────────┐    HTTP/REST    ┌─────────────┐
-│   Kubelet   │ ──────────────▶ │ InterLink CRI   │ ──────────────▶ │ InterLink   │
-│             │                 │ Implementation  │                 │ Plugin      │
-└─────────────┘                 └─────────────────┘                 └─────────────┘
-                                         │
-                                         ▼
-                                ┌─────────────────┐
-                                │ Pod Status      │
-                                │ Tracking        │
-                                └─────────────────┘
+┌─────────────┐   CRI gRPC    ┌─────────────────┐   HTTP/REST     ┌─────────────────┐   Plugin API   ┌─────────────┐
+│   Kubelet   │ ─────────────▶│ InterLink CRI   │ ───────────────▶│ InterLink API   │ ──────────────▶│ InterLink   │
+│             │   (socket)    │ Binary          │ (AuthN/AuthZ)   │ Server          │                │ Plugin      │
+└─────────────┘               └─────────────────┘                 └─────────────────┘                └─────────────┘
+                                       │                                   │
+                                       ▼                                   ▼
+                              ┌─────────────────┐                 ┌─────────────────┐
+                              │ Pod Status      │                 │ Remote Resource │
+                              │ Tracking        │                 │ (HPC/Cloud)     │
+                              └─────────────────┘                 └─────────────────┘
 ```
+
+**Key Benefits of Standalone Architecture:**
+- Clean separation between CRI and interLink API server
+- Independent deployment and scaling
+- Standard CRI binary pattern (like containerd, cri-o)
+- Flexible authentication/authorization options
+- Can be used alongside existing container runtimes
 
 ## Prerequisites
 
@@ -30,68 +39,144 @@ The interLink CRI implementation bridges the Kubernetes CRI with interLink's rem
 
 ## Installation and Setup
 
-### 1. Build InterLink with CRI Support
+### 1. Build InterLink CRI Binary
+
+Build the standalone CRI binary:
 
 ```bash
 # Clone the interLink repository
 git clone https://github.com/interlink-hq/interlink.git
 cd interlink
 
-# Build interLink with CRI implementation
-make interlink
+# Build standalone CRI binary
+go build -o bin/interlink-cri cmd/interlink/cri.go
 
-# Or build directly
-go build -o bin/interlink cmd/interlink/main.go cmd/interlink/cri.go
+# Or use make target (if available)
+make cri
 ```
 
-### 2. Configure InterLink
+The CRI binary is completely independent from the interLink API server and can be deployed separately.
 
-Create an InterLink configuration file (`InterLinkConfig.yaml`):
+### 2. Configure InterLink CRI Binary
+
+Create a CRI-specific configuration file (`InterLinkCRIConfig.yaml`):
 
 ```yaml
-# InterLink API configuration
-InterlinkAddress: "unix:///var/run/interlink/interlink.sock"
+# InterLink API Server connection
+InterlinkAddress: "https://interlink-api.example.com"  # InterLink API server endpoint
 Interlinkport: "8080"
-SidecarURL: "http://localhost"
-Sidecarport: "4000"
 
-# CRI-specific configuration
+# CRI Socket configuration
+CRI:
+  SocketPath: "unix:///var/run/interlink/cri.sock"
+  RuntimeHandler: "interlink"
+
+# Logging configuration
 VerboseLogging: true
 ErrorsOnlyLogging: false
 
-# TLS Configuration (optional)
+# TLS Configuration for mTLS authentication with InterLink API server
 TLS:
   Enabled: true
-  CertFile: "/etc/interlink/tls/server.crt"
-  KeyFile: "/etc/interlink/tls/server.key"
-  CACertFile: "/etc/interlink/tls/ca.crt"
+  CertFile: "/etc/interlink/cri/tls/client.crt"    # Client certificate for mTLS
+  KeyFile: "/etc/interlink/cri/tls/client.key"     # Client private key
+  CACertFile: "/etc/interlink/cri/tls/ca.crt"      # CA certificate for server verification
 
-# Plugin configuration
-DataRootFolder: "/tmp/interlink"
+# Local data for pod tracking
+DataRootFolder: "/var/lib/interlink-cri"
 ```
 
-### 3. Start InterLink CRI Server
+**Note**: This configuration is for the CRI binary to connect to an existing interLink API server. The API server itself has its own separate configuration.
+
+### 3. Configure Authentication
+
+The CRI implementation supports OAuth token authentication and mTLS:
+
+#### OAuth Token Authentication
+
+For OAuth token authentication, the CRI implementation uses OIDC tokens following the same pattern as virtual-kubelet. Set the token file path via environment variable:
 
 ```bash
-# Start interLink with CRI support
-./bin/interlink --config InterLinkConfig.yaml
+export VK_TOKEN_FILE="/etc/interlink/tokens/oidc.token"
 ```
 
-The CRI server will be available at `unix:///tmp/kubelet_remote_1000.sock` by default.
+Refer to the Virtual Kubelet OAuth configuration guide for complete OIDC token setup instructions.
+
+**Note**: OIDC tokens are only required when using OAuth authentication. If using mTLS certificate authentication instead, token setup can be skipped.
+
+#### mTLS Certificate Authentication
+
+Generate client certificates for mutual TLS authentication:
+
+```bash
+# Generate client certificate (example with openssl)
+openssl genrsa -out client.key 2048
+openssl req -new -key client.key -out client.csr -subj "/CN=interlink-cri"
+openssl x509 -req -in client.csr -CA ca.crt -CAkey ca.key -CAcreateserial -out client.crt -days 365
+```
+
+### 4. Start InterLink CRI Binary
+
+```bash
+# Start the standalone CRI binary
+./bin/interlink-cri --config InterLinkCRIConfig.yaml
+
+# Or run as a systemd service
+sudo systemctl start interlink-cri
+```
+
+The CRI server will be available at the configured socket path (default: `unix:///var/run/interlink/cri.sock`).
+
+#### Systemd Service Configuration
+
+Create a systemd service file (`/etc/systemd/system/interlink-cri.service`):
+
+```ini
+[Unit]
+Description=InterLink CRI Runtime
+Documentation=https://interlink.readthedocs.io/
+After=network.target
+Wants=network.target
+
+[Service]
+Type=simple
+ExecStart=/usr/local/bin/interlink-cri --config /etc/interlink/cri/config.yaml
+Restart=always
+RestartSec=5
+KillMode=mixed
+User=root
+Group=root
+
+# Resource limits
+LimitNOFILE=1048576
+LimitNPROC=1048576
+LimitCORE=infinity
+
+[Install]
+WantedBy=multi-user.target
+```
+
+Enable and start the service:
+
+```bash
+sudo systemctl daemon-reload
+sudo systemctl enable interlink-cri
+sudo systemctl start interlink-cri
+```
 
 ## Kubelet Configuration
 
-### 1. Configure Kubelet for Remote CRI
+### 1. Configure Kubelet for Remote CRI (Primary Runtime)
 
-Create or modify the kubelet configuration file (`/etc/kubernetes/kubelet/config.yaml`):
+For using interLink CRI as the primary container runtime, create or modify the kubelet configuration file (`/etc/kubernetes/kubelet/config.yaml`):
 
 ```yaml
 apiVersion: kubelet.config.k8s.io/v1beta1
 kind: KubeletConfiguration
 
-# CRI Configuration
-containerRuntimeEndpoint: "unix:///tmp/kubelet_remote_1000.sock"
-imageServiceEndpoint: "unix:///tmp/kubelet_remote_1000.sock"
+# CRI Configuration - points to InterLink CRI binary socket
+containerRuntimeEndpoint: "unix:///var/run/interlink/cri.sock"
+imageServiceEndpoint: "unix:///var/run/interlink/cri.sock"
 
 # Runtime configuration
 containerRuntime: "remote"
@@ -119,21 +204,72 @@ featureGates:
   CRIContainerLogRotation: true
 ```
 
-### 2. Start Kubelet with CRI Configuration
+### 2. Configure Multiple Container Runtimes (RuntimeClass)
+
+For scenarios where interLink CRI is an additional runtime alongside the default container runtime (e.g., containerd), configure RuntimeClass:
+
+```yaml
+apiVersion: kubelet.config.k8s.io/v1beta1
+kind: KubeletConfiguration
+
+# Primary CRI (e.g., containerd)
+containerRuntimeEndpoint: "unix:///run/containerd/containerd.sock"
+imageServiceEndpoint: "unix:///run/containerd/containerd.sock"
+
+# Runtime configuration
+containerRuntime: "remote"
+runtimeRequestTimeout: "15m"
+
+# Enable RuntimeClass feature
+featureGates:
+  RuntimeClass: true
+```
+
+Create a RuntimeClass for interLink:
+
+```yaml
+apiVersion: node.k8s.io/v1
+kind: RuntimeClass
+metadata:
+  name: interlink
+handler: interlink
+overhead:
+  podFixed:
+    memory: "128Mi"
+    cpu: "100m"
+scheduling:
+  nodeClassification:
+    tolerations:
+    - key: "interlink.io/no-schedule"
+      operator: "Exists"
+      effect: "NoSchedule"
+```
+
+Configure the interLink CRI to register as a runtime handler:
+
+```yaml
+# In InterLinkConfig.yaml
+CRI:
+  Enabled: true
+  SocketPath: "unix:///var/run/interlink/interlink.sock"
+  RuntimeHandler: "interlink"
+```
+
+### 3. Start Kubelet with CRI Configuration
 
 ```bash
 # Start kubelet with the configuration
 kubelet --config=/etc/kubernetes/kubelet/config.yaml \
         --kubeconfig=/etc/kubernetes/kubelet/kubeconfig \
-        --container-runtime-endpoint=unix:///tmp/kubelet_remote_1000.sock \
+        --container-runtime-endpoint=unix:///var/run/interlink/cri.sock \
         --v=2
 ```
 
 ## Usage Examples
 
-### 1. Deploy a Simple Pod
+### 1. Deploy a Simple Pod (Primary Runtime)
 
-Create a test pod (`test-pod.yaml`):
+Create a test pod for primary runtime (`test-pod.yaml`):
 
 ```yaml
 apiVersion: v1
@@ -159,13 +295,87 @@ spec:
       value: "test-value"
 ```
 
-Deploy the pod:
+### 2. Deploy a Pod with Specific RuntimeClass
 
-```bash
-kubectl apply -f test-pod.yaml
+For multi-runtime setups, specify the RuntimeClass to use interLink CRI (`test-pod-interlink.yaml`):
+
+```yaml
+apiVersion: v1
+kind: Pod
+metadata:
+  name: test-pod-interlink
+  namespace: default
+spec:
+  runtimeClassName: interlink  # Use interLink CRI runtime
+  containers:
+  - name: hpc-workload
+    image: tensorflow/tensorflow:latest-gpu
+    command: ["python3", "/app/train.py"]
+    resources:
+      requests:
+        memory: "2Gi"
+        cpu: "4"
+        nvidia.com/gpu: "1"
+      limits:
+        memory: "8Gi"
+        cpu: "8"
+        nvidia.com/gpu: "2"
+    env:
+    - name: CUDA_VISIBLE_DEVICES
+      value: "0,1"
+    volumeMounts:
+    - name: data-volume
+      mountPath: /data
+  volumes:
+  - name: data-volume
+    persistentVolumeClaim:
+      claimName: hpc-data-pvc
+  tolerations:
+  - key: "interlink.io/no-schedule"
+    operator: "Exists"
+    effect: "NoSchedule"
 ```
 
-### 2. Monitor Pod Status
+### 3. Deploy Standard Pod (Default Runtime)
+
+Regular pods will use the default runtime (e.g., containerd) (`test-pod-default.yaml`):
+
+```yaml
+apiVersion: v1
+kind: Pod
+metadata:
+  name: test-pod-default
+  namespace: default
+spec:
+  # No runtimeClassName specified - uses default runtime
+  containers:
+  - name: web-server
+    image: nginx:latest
+    ports:
+    - containerPort: 80
+    resources:
+      requests:
+        memory: "64Mi"
+        cpu: "50m"
+      limits:
+        memory: "128Mi"
+        cpu: "100m"
+```
+
+Deploy the pods:
+
+```bash
+# Deploy primary runtime pod
+kubectl apply -f test-pod.yaml
+
+# Deploy interLink runtime pod (multi-runtime scenario)
+kubectl apply -f test-pod-interlink.yaml
+
+# Deploy default runtime pod (multi-runtime scenario)
+kubectl apply -f test-pod-default.yaml
+```
+
+### 4. Monitor Pod Status
 
 ```bash
 # Check pod status
@@ -178,7 +388,7 @@ kubectl describe pod test-pod
 kubectl logs test-pod
 ```
 
-### 3. Interactive Container Access
+### 5. Interactive Container Access
 
 ```bash
 # Execute commands in the container
@@ -190,27 +400,49 @@ kubectl exec test-pod -- nginx -v
 
 ## Configuration Options
 
-### CRI Socket Configuration
+### CRI Binary Configuration
 
-The CRI socket path can be configured in the interLink main function:
+The standalone CRI binary configuration file supports the following options:
 
-```go
-// In cmd/interlink/main.go
-interlinkRuntime := NewFakeRemoteRuntime(&interLinkAPIs)
-err = interlinkRuntime.Start("unix:///var/run/interlink/cri.sock")
+```yaml
+# InterLink API Server connection
+InterlinkAddress: "https://interlink-api.example.com"
+Interlinkport: "8080"
+
+# CRI Socket configuration
+CRI:
+  SocketPath: "unix:///var/run/interlink/cri.sock"  # Configurable socket path
+  RuntimeHandler: "interlink"                        # Runtime handler name
+  RequestTimeout: "15m"                             # Timeout for requests
+
+# Authentication
+TLS:
+  Enabled: true
+  CertFile: "/etc/interlink/cri/tls/client.crt"
+  KeyFile: "/etc/interlink/cri/tls/client.key"
+  CACertFile: "/etc/interlink/cri/tls/ca.crt"
+
+# Logging
+VerboseLogging: true
+ErrorsOnlyLogging: false
+
+# Local storage for pod tracking
+DataRootFolder: "/var/lib/interlink-cri"
 ```
 
-### InterLink Handler Configuration
+### Environment Variables
 
-The CRI implementation integrates with interLink through the `InterLinkHandler`:
+The CRI binary supports these environment variables:
 
-```go
-interLinkAPIs := api.InterLinkHandler{
-    Config:          interLinkConfig,
-    Ctx:             ctx,
-    SidecarEndpoint: sidecarEndpoint,
-    ClientHTTP:      clientHTTP,
-}
+```bash
+# OAuth token file (alternative to mTLS)
+export VK_TOKEN_FILE="/etc/interlink/tokens/oidc.token"
+
+# Override config file location
+export INTERLINK_CRI_CONFIG="/etc/interlink/cri/config.yaml"
+
+# Enable debug logging
+export INTERLINK_CRI_DEBUG="true"
 ```
 
 ## Troubleshooting
@@ -223,14 +455,18 @@ interLinkAPIs := api.InterLinkHandler{
 
 **Solution**:
 ```bash
-# Check if interLink CRI is running
-ps aux | grep interlink
+# Check if interLink CRI binary is running
+ps aux | grep interlink-cri
+systemctl status interlink-cri
 
-# Check socket permissions
-ls -la /tmp/kubelet_remote_1000.sock
+# Check socket permissions and existence
+ls -la /var/run/interlink/cri.sock
 
 # Verify socket is listening
-ss -xlp | grep kubelet_remote
+ss -xlp | grep cri.sock
+
+# Check CRI binary logs
+journalctl -u interlink-cri -f
 ```
 
 #### 2. Container Creation Failed
@@ -238,16 +474,24 @@ ss -xlp | grep kubelet_remote
 **Error**: `Failed to create container`
 
 **Check**:
-1. InterLink plugin connectivity
-2. Pod status tracking
-3. Container resource requirements
+1. InterLink API server connectivity
+2. Authentication (OIDC token or mTLS)
+3. Plugin connectivity from API server
+4. Container resource requirements
 
 ```bash
-# Check interLink logs
-journalctl -u interlink -f
+# Check CRI binary logs
+journalctl -u interlink-cri -f
 
-# Verify plugin status
-curl -X POST http://localhost:8080/pinglink
+# Check InterLink API server connectivity
+curl -k https://interlink-api.example.com:8080/pinglink
+
+# Test authentication
+curl -k -H "Authorization: Bearer $(cat /etc/interlink/tokens/oidc.token)" \
+     https://interlink-api.example.com:8080/status
+
+# Check API server logs (if accessible)
+journalctl -u interlink-api -f
 ```
 
 #### 3. Pod Status Not Updated
@@ -256,27 +500,35 @@ curl -X POST http://localhost:8080/pinglink
 
 **Debug**:
 ```bash
-# Check CRI container status
-crictl --runtime-endpoint unix:///tmp/kubelet_remote_1000.sock ps
+# Check CRI container status through CRI binary
+crictl --runtime-endpoint unix:///var/run/interlink/cri.sock ps
 
-# Check interLink pod tracking
-curl -X GET http://localhost:8080/status
+# Check InterLink API server pod tracking
+curl -k https://interlink-api.example.com:8080/status
+
+# Check CRI binary internal tracking
+journalctl -u interlink-cri --since "5 minutes ago"
 ```
 
 ### Debugging Commands
 
 ```bash
-# List CRI containers
-crictl --runtime-endpoint unix:///tmp/kubelet_remote_1000.sock ps -a
+# List CRI containers via standalone CRI binary
+crictl --runtime-endpoint unix:///var/run/interlink/cri.sock ps -a
 
 # Inspect container
-crictl --runtime-endpoint unix:///tmp/kubelet_remote_1000.sock inspect <container-id>
+crictl --runtime-endpoint unix:///var/run/interlink/cri.sock inspect <container-id>
 
 # Check container logs
-crictl --runtime-endpoint unix:///tmp/kubelet_remote_1000.sock logs <container-id>
+crictl --runtime-endpoint unix:///var/run/interlink/cri.sock logs <container-id>
 
 # List pod sandboxes
-crictl --runtime-endpoint unix:///tmp/kubelet_remote_1000.sock pods
+crictl --runtime-endpoint unix:///var/run/interlink/cri.sock pods
+
+# Test CRI binary directly
+curl -X POST --unix-socket /var/run/interlink/cri.sock \
+     -H "Content-Type: application/json" \
+     http://localhost/healthz
 ```
 
 ## Monitoring and Observability
@@ -418,4 +670,4 @@ To contribute to the CRI implementation:
 4. Add tests for new functionality
 5. Submit a pull request
 
-For detailed contribution guidelines, see [CONTRIBUTING.md](../CONTRIBUTING.md).
+For detailed contribution guidelines, see the project's contribution documentation.

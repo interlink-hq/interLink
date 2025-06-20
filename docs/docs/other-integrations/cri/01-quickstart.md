@@ -279,4 +279,4 @@ After getting the basic setup working:
 4. **Production**: Configure resource quotas and limits
 5. **Scale**: Deploy across multiple nodes
 
-For detailed information, see the full [CRI Usage Guide](CRI_USAGE.md).
+For detailed information, see the full [CRI Usage Guide](02-usage-guide.md).
