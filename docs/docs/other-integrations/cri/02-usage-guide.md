@@ -49,10 +49,10 @@ git clone https://github.com/interlink-hq/interlink.git
 cd interlink
 
 # Build standalone CRI binary
-go build -o bin/interlink-cri cmd/interlink/cri.go
+go build -o bin/interlink-cri cmd/interlink-cri/*.go
 
-# Or use make target (if available)
-make cri
+# Or use make target
+make interlink-cri
 ```
 
 The CRI binary is completely independent from the interLink API server and can be deployed separately.
