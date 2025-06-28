@@ -1,0 +1,8 @@
+{
+  "label": "Other Integrations",
+  "position": 4,
+  "link": {
+    "type": "generated-index",
+    "description": "Alternative ways to integrate interLink with Kubernetes and container runtimes."
+  }
+}
