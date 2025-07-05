@@ -1,1 +1,1 @@
-No instructions found. Please look around the filesystem and update me
+Environment for searching through interLink documentation files for test pod references, broken links, and incorrect YAML content. Has ripgrep installed for efficient searching.
