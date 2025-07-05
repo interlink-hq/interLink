@@ -1,0 +1,14 @@
+server:
+  host: "0.0.0.0"
+  port: 8080
+
+# Test mode enabled - no OIDC configuration required
+test_mode: true
+
+# OIDC configuration not needed in test mode but can be provided for reference
+oidc:
+  client_id: ""
+  client_secret: ""
+  redirect_url: "http://localhost:8080/auth/callback"
+  issuer: ""
+  scopes: []
