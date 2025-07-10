@@ -30,22 +30,59 @@ the scenario you selected, there might be additional operations to be done.
 - Create an helm values file:
 
 ```yaml title="values.yaml"
-nodeName: interlink-with-socket
-
-plugin:
-  enabled: true
-  image: "plugin docker image here"
-  command: ["/bin/bash", "-c"]
-  args: ["/app/plugin"]
-  config: |
-    your plugin
-    configuration
-    goes here!!!
-  socket: unix:///var/run/plugin.sock
+nodeName: interlink-in-cluster
 
 interlink:
   enabled: true
-  socket: unix:///var/run/interlink.sock
+  address: http://localhost
+  port: 3000
+  logging:
+    verboseLogging: true
+
+plugin:
+  enabled: true
+  image: "ghcr.io/interlink-hq/interlink-sidecar-slurm/interlink-sidecar-slurm:0.5.1"
+  address: "http://localhost"
+  port: 4000
+  privileged: true
+  extraVolumeMounts:
+    - name: plugin-data
+      mountPath: /slurm-data
+  envs:
+    - name: SLURMCONFIGPATH
+      value: "/etc/interlink/plugin.yaml"
+    - name: SHARED_FS
+      values: "true"
+  config: |
+    #Socket: "unix:///var/run/plugin.sock"
+    ImagePrefix: "docker://"
+    SidecarPort: 4000
+    VerboseLogging: true
+    ErrorsOnlyLogging: false
+    DataRootFolder: "/slurm-data/"
+    ExportPodData: true
+    SbatchPath: "/usr/bin/sbatch"
+    ScancelPath: "/usr/bin/scancel"
+    SqueuePath: "/usr/bin/squeue"
+    CommandPrefix: ""
+    SingularityPrefix: ""
+    Namespace: "vk"
+    Tsocks: false
+    TsocksPath: "$WORK/tsocks-1.8beta5+ds1/libtsocks.so"
+    TsocksLoginNode: "login01"
+    BashPath: /bin/bash
+
+virtualNode:
+  resources:
+    CPUs: 4
+    memGiB: 16
+    pods: 50
+
+extraVolumes:
+  - name: plugin-data
+    hostPath:
+      path: /tmp/test
+      type: DirectoryOrCreate
 ```
 
 Eventually deploy the latest release of the official:
@@ -58,7 +95,7 @@ Eventually deploy the latest release of the official:
   my-node \
   oci://ghcr.io/interlink-hq/interlink-helm-chart/interlink \
   --version $INTERLINK_CHART_VERSION \
-  --values ./interlink/manifests/values.yaml
+  --values values.yaml
 ```
 
 :::warning

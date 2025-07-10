@@ -38,7 +38,8 @@ script for installation)**
 InterLink supports two authentication methods for secure communication:
 
 1. **OIDC Authentication (OAuth2 Proxy)** - Described in this guide
-2. **mTLS Authentication (Mutual TLS)** - See the [mTLS Deployment Guide](../guides/mtls-deployment) for detailed instructions
+2. **mTLS Authentication (Mutual TLS)** - See the
+   [mTLS Deployment Guide](../guides/mtls-deployment) for detailed instructions
 
 :::
 
@@ -280,8 +281,9 @@ Select here the featured plugin you want to try:
 
 :::tip Production Deployment
 
-For production deployments, you can manage all InterLink processes through `systemd`.
-See the [Systemd Deployment Guide](../guides/systemd-deployment) for comprehensive instructions.
+For production deployments, you can manage all InterLink processes through
+`systemd`. See the [Systemd Deployment Guide](../guides/systemd-deployment) for
+comprehensive instructions.
 
 :::
 
@@ -341,3 +343,33 @@ You can find a demo pod to test your setup
 
 To start debugging in case of problems we suggest starting from the pod
 containers logs!
+
+#### Verify the setup
+
+Test the complete setup:
+
+```bash
+# Check if node appears in Kubernetes
+kubectl get nodes
+
+# Deploy a test pod
+kubectl apply -f - <<EOF
+apiVersion: v1
+kind: Pod
+metadata:
+  name: test-tunnel
+spec:
+  nodeSelector:
+    kubernetes.io/hostname: my-node
+  tolerations:
+    - key: virtual-node.interlink/no-schedule
+      operator: Exists
+  containers:
+  - name: test
+    image: busybox
+    command: ["sleep", "3600"]
+EOF
+
+# Check pod status
+kubectl get pod test-tunnel -o wide
+```
