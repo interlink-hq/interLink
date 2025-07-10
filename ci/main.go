@@ -647,7 +647,7 @@ func (m *Interlink) BuildImages(
 		WithEnvVariable("GOCACHE", "/go/build-cache").
 		WithEnvVariable("CGO_ENABLED", "0").
 		WithExec([]string{"bash", "-c", "KUBELET_VERSION=${VERSION} ./cmd/virtual-kubelet/set-version.sh"}).
-		WithExec([]string{"go", "build", "-o", "bin/interlink", "cmd/interlink/main.go", "cmd/interlink/cri.go"})
+		WithExec([]string{"go", "build", "-o", "bin/interlink", "cmd/interlink/main.go"})
 
 	m.InterlinkContainer = dag.Container().
 		From("alpine").

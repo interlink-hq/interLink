@@ -22,8 +22,7 @@ import (
 
 	"github.com/interlink-hq/interlink/pkg/interlink"
 	"github.com/interlink-hq/interlink/pkg/interlink/api"
-	"github.com/interlink-hq/interlink/pkg/virtualkubelet"
-	"k8s.io/cri-client/pkg/util"
+	vkconfig "github.com/interlink-hq/interlink/pkg/virtualkubelet"
 )
 
 // UnixSocketRoundTripper is a custom RoundTripper for Unix socket connections
@@ -89,7 +88,7 @@ func main() {
 	flag.Parse()
 
 	if *printVersion {
-		fmt.Println(virtualkubelet.KubeletVersion)
+		fmt.Println(vkconfig.KubeletVersion)
 		return
 	}
 	var cancel context.CancelFunc
@@ -130,7 +129,7 @@ func main() {
 
 	log.G(ctx).Info(interLinkConfig)
 
-	log.G(ctx).Info("interLink version: ", virtualkubelet.KubeletVersion)
+	log.G(ctx).Info("interLink version: ", vkconfig.KubeletVersion)
 
 	sidecarEndpoint := ""
 	var socketPath string
@@ -255,20 +254,4 @@ func main() {
 	default:
 		log.G(ctx).Fatal("Interlink URL should start with unix://, http://, or https://. Getting: ", interLinkConfig.InterlinkAddress)
 	}
-
-	interlinkRuntime := NewFakeRemoteRuntime()
-	err = interlinkRuntime.Start("unix:///tmp/kubelet_remote_1000.sock")
-	if err != nil {
-		interlinkRuntime.Stop()
-		log.G(ctx).Fatal(err)
-	}
-	defer func() {
-		interlinkRuntime.Stop()
-		// clear endpoint file
-		if addr, _, err := util.GetAddressAndDialer("unix:///tmp/kubelet_remote_1000.sock"); err == nil {
-			if _, err := os.Stat(addr); err == nil {
-				os.Remove(addr)
-			}
-		}
-	}()
 }
