@@ -220,6 +220,9 @@ metadata:
 spec:
   nodeSelector:
     kubernetes.io/hostname: interlink-node
+  tolerations:
+    - key: virtual-node.interlink/no-schedule
+      operator: Exists
   containers:
   - name: test
     image: busybox

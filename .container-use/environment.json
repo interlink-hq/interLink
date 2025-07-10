@@ -1,0 +1,7 @@
+{
+  "workdir": "/workdir",
+  "base_image": "ubuntu:24.04",
+  "setup_commands": [
+    "apt-get update \u0026\u0026 apt-get install -y ripgrep git"
+  ]
+}
