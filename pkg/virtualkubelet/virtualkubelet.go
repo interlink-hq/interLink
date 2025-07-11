@@ -650,7 +650,7 @@ func generateRandomPassword() string {
 }
 
 // createDummyPod creates wstunnel infrastructure from template for containers with exposed ports
-func (p *Provider) createDummyPod(ctx context.Context, originalPod *v1.Pod) (*v1.Pod, error) {
+func (p *Provider) createDummyPod(ctx context.Context, originalPod *v1.Pod) (*v1.Pod, *WstunnelTemplateData, error) {
 	log.G(ctx).Infof("Creating wstunnel infrastructure for %s/%s with exposed ports", originalPod.Namespace, originalPod.Name)
 
 	// Generate template data
@@ -665,17 +665,17 @@ func (p *Provider) createDummyPod(ctx context.Context, originalPod *v1.Pod) (*v1
 	// Load and execute template
 	manifestYAML, err := p.executeWstunnelTemplate(ctx, templateData)
 	if err != nil {
-		return nil, fmt.Errorf("failed to execute wstunnel template: %w", err)
+		return nil, nil, fmt.Errorf("failed to execute wstunnel template: %w", err)
 	}
 
 	// Apply the manifests
 	createdPod, err := p.applyWstunnelManifests(ctx, manifestYAML)
 	if err != nil {
-		return nil, fmt.Errorf("failed to apply wstunnel manifests: %w", err)
+		return nil, nil, fmt.Errorf("failed to apply wstunnel manifests: %w", err)
 	}
 
 	log.G(ctx).Infof("Created wstunnel infrastructure for %s/%s", originalPod.Namespace, originalPod.Name)
-	return createdPod, nil
+	return createdPod, &templateData, nil
 }
 
 // executeWstunnelTemplate loads and executes the wstunnel template
@@ -864,7 +864,7 @@ func (p *Provider) shouldCreateWstunnel(pod *v1.Pod) bool {
 // handleWstunnelCreation creates wstunnel infrastructure and returns the pod IP
 func (p *Provider) handleWstunnelCreation(ctx context.Context, pod *v1.Pod) (string, error) {
 	// Create wstunnel infrastructure outside virtual node for port exposure
-	dummyPod, err := p.createDummyPod(ctx, pod)
+	dummyPod, templateData, err := p.createDummyPod(ctx, pod)
 	if err != nil {
 		log.G(ctx).Errorf("Failed to create wstunnel infrastructure for %s/%s: %v", pod.Namespace, pod.Name, err)
 		return "", fmt.Errorf("failed to create wstunnel infrastructure for exposed ports: %w", err)
@@ -878,7 +878,49 @@ func (p *Provider) handleWstunnelCreation(ctx context.Context, pod *v1.Pod) (str
 		}
 	}
 
-	return p.waitForWstunnelPodIP(ctx, dummyPod, timeout, pod.Name+"-wstunnel", pod.Namespace)
+	podIP, err := p.waitForWstunnelPodIP(ctx, dummyPod, timeout, pod.Name+"-wstunnel", pod.Namespace)
+	if err != nil {
+		return "", err
+	}
+
+	// Add wstunnel client command annotation to the original pod
+	if err := p.addWstunnelClientAnnotation(ctx, pod, templateData); err != nil {
+		log.G(ctx).Warningf("Failed to add wstunnel client annotation to pod %s/%s: %v", pod.Namespace, pod.Name, err)
+	}
+
+	return podIP, nil
+}
+
+// addWstunnelClientAnnotation adds the wstunnel client command annotation to the original pod
+func (p *Provider) addWstunnelClientAnnotation(ctx context.Context, pod *v1.Pod, templateData *WstunnelTemplateData) error {
+	if pod.Annotations == nil {
+		pod.Annotations = make(map[string]string)
+	}
+
+	// Generate the ingress endpoint
+	ingressEndpoint := fmt.Sprintf("%s.%s", templateData.Name, templateData.WildcardDNS)
+	if templateData.WildcardDNS == "" {
+		ingressEndpoint = templateData.Name
+	}
+
+	// Generate -R options for each exposed port
+	var rOptions []string
+	for _, port := range templateData.ExposedPorts {
+		rOptions = append(rOptions, fmt.Sprintf("-R tcp://[::]:%d:localhost:%d", port.Port, port.Port))
+	}
+
+	// Create single command with all -R options
+	command := fmt.Sprintf("curl -L https://github.com/erebe/wstunnel/releases/latest/download/wstunnel-linux-x64 -o wstunnel && chmod +x wstunnel\n\n./wstunnel client --http-upgrade-path-prefix %s %s ws://%s:80",
+		templateData.RandomPassword,
+		strings.Join(rOptions, " "),
+		ingressEndpoint,
+	)
+
+	// Add annotation with the complete command
+	pod.Annotations["interlink.eu/wstunnel-client-commands"] = command
+
+	log.G(ctx).Infof("Added wstunnel client command annotation to pod %s/%s", pod.Namespace, pod.Name)
+	return nil
 }
 
 // waitForWstunnelPodIP waits for wstunnel pod to get an IP

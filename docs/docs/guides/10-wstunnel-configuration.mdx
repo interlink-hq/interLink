@@ -350,6 +350,57 @@ Examples:
 
 ---
 
+## Client Connection Commands
+
+### Automatic Command Generation
+
+When wstunnel is enabled, interLink automatically generates a client command annotation for each pod with exposed ports. This annotation contains the complete command needed to connect to the pod's services from a remote location.
+
+**Annotation:** `interlink.eu/wstunnel-client-commands`
+
+### Example
+
+For a pod with exposed ports, the annotation will contain:
+
+```bash
+curl -L https://github.com/erebe/wstunnel/releases/latest/download/wstunnel-linux-x64 -o wstunnel && chmod +x wstunnel
+
+./wstunnel client --http-upgrade-path-prefix a1b2c3d4e5f6 -R tcp://[::]:8080:localhost:8080 -R tcp://[::]:9090:localhost:9090 ws://ws-my-pod-wstunnel.tunnel.example.com:80
+```
+
+### Command Structure
+
+1. **Download**: Downloads the latest wstunnel client binary
+2. **Connect**: Establishes the websocket tunnel with:
+   - `--http-upgrade-path-prefix`: Unique random password for authentication
+   - `-R tcp://[::]:PORT:localhost:PORT`: Port forwarding rules (one per exposed port)
+   - `ws://ENDPOINT:80`: Websocket endpoint using generated hostname
+
+### Retrieving the Command
+
+```bash
+# Get the complete client command for a pod
+kubectl get pod my-pod -o jsonpath='{.metadata.annotations.interlink\.eu/wstunnel-client-commands}'
+
+# Or view all annotations
+kubectl describe pod my-pod
+```
+
+### Multiple Ports
+
+When a pod exposes multiple ports, all ports are included in a single command with multiple `-R` options:
+
+```bash
+# Pod with ports 8080, 9090, and 3000
+./wstunnel client --http-upgrade-path-prefix randompassword \
+  -R tcp://[::]:8080:localhost:8080 \
+  -R tcp://[::]:9090:localhost:9090 \
+  -R tcp://[::]:3000:localhost:3000 \
+  ws://ws-my-pod-wstunnel.tunnel.example.com:80
+```
+
+---
+
 ## Security Considerations
 
 ### Authentication
