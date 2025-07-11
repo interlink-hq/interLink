@@ -1,15 +1,20 @@
 package virtualkubelet
 
 import (
+	"bytes"
 	"context"
+	"crypto/rand"
+	"embed"
+	"encoding/hex"
 	"fmt"
 	"io"
-	"math/rand"
+	mathrand "math/rand"
 	"net"
 	"net/http"
 	"os"
 	"strconv"
 	"strings"
+	"text/template"
 	"time"
 
 	"gopkg.in/yaml.v2"
@@ -20,16 +25,23 @@ import (
 	"go.opentelemetry.io/otel"
 	"go.opentelemetry.io/otel/attribute"
 	trace "go.opentelemetry.io/otel/trace"
+	appsv1 "k8s.io/api/apps/v1"
 	v1 "k8s.io/api/core/v1"
+	networkingv1 "k8s.io/api/networking/v1"
 	"k8s.io/apimachinery/pkg/api/resource"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/runtime/serializer"
 	"k8s.io/client-go/kubernetes"
+	"k8s.io/client-go/kubernetes/scheme"
 	"k8s.io/client-go/tools/clientcmd"
 	stats "k8s.io/kubelet/pkg/apis/stats/v1alpha1"
 
 	types "github.com/interlink-hq/interlink/pkg/interlink"
 	k8stypes "k8s.io/apimachinery/pkg/types"
 )
+
+//go:embed templates/wstunnel-template.yaml
+var defaultWstunnelTemplate embed.FS
 
 const (
 	DefaultCPUCapacity    = "100"
@@ -48,6 +60,21 @@ const (
 	xilinxFPGA            = "xilinx.com/fpga"
 	intelFPGA             = "intel.com/fpga"
 )
+
+type WstunnelTemplateData struct {
+	Name           string
+	Namespace      string
+	RandomPassword string
+	ExposedPorts   []PortMapping
+	WildcardDNS    string
+}
+
+type PortMapping struct {
+	Port       int32
+	TargetPort int32
+	Name       string
+	Protocol   string
+}
 
 // Increment the given IP address
 func incrementIP(ip net.IP) {
@@ -593,6 +620,294 @@ func (p *Provider) Ping(_ context.Context) error {
 	return nil
 }
 
+// hasExposedPorts checks if any container in the pod has exposed ports
+func hasExposedPorts(pod *v1.Pod) bool {
+	for _, container := range pod.Spec.Containers {
+		if len(container.Ports) > 0 {
+			return true
+		}
+	}
+	for _, container := range pod.Spec.InitContainers {
+		if len(container.Ports) > 0 {
+			return true
+		}
+	}
+	return false
+}
+
+// generateRandomPassword creates a random password for the wstunnel
+func generateRandomPassword() string {
+	bytes := make([]byte, 16)
+	if _, err := rand.Read(bytes); err != nil {
+		// Fallback to time-based random source if crypto/rand fails
+		source := mathrand.NewSource(time.Now().UnixNano())
+		rng := mathrand.New(source)
+		for i := range bytes {
+			bytes[i] = byte(rng.Intn(256))
+		}
+	}
+	return hex.EncodeToString(bytes)
+}
+
+// createDummyPod creates wstunnel infrastructure from template for containers with exposed ports
+func (p *Provider) createDummyPod(ctx context.Context, originalPod *v1.Pod) (*v1.Pod, error) {
+	log.G(ctx).Infof("Creating wstunnel infrastructure for %s/%s with exposed ports", originalPod.Namespace, originalPod.Name)
+
+	// Generate template data
+	templateData := WstunnelTemplateData{
+		Name:           originalPod.Name + "-wstunnel",
+		Namespace:      originalPod.Namespace,
+		RandomPassword: generateRandomPassword(),
+		ExposedPorts:   extractPortMappings(originalPod),
+		WildcardDNS:    p.config.Network.WildcardDNS,
+	}
+
+	// Load and execute template
+	manifestYAML, err := p.executeWstunnelTemplate(ctx, templateData)
+	if err != nil {
+		return nil, fmt.Errorf("failed to execute wstunnel template: %w", err)
+	}
+
+	// Apply the manifests
+	createdPod, err := p.applyWstunnelManifests(ctx, manifestYAML)
+	if err != nil {
+		return nil, fmt.Errorf("failed to apply wstunnel manifests: %w", err)
+	}
+
+	log.G(ctx).Infof("Created wstunnel infrastructure for %s/%s", originalPod.Namespace, originalPod.Name)
+	return createdPod, nil
+}
+
+// executeWstunnelTemplate loads and executes the wstunnel template
+func (p *Provider) executeWstunnelTemplate(ctx context.Context, data WstunnelTemplateData) (string, error) {
+	var templateContent string
+
+	// Try to load from custom path first
+	if p.config.Network.WstunnelTemplatePath != "" {
+		content, err := os.ReadFile(p.config.Network.WstunnelTemplatePath)
+		if err != nil {
+			log.G(ctx).Warningf("Failed to read custom template from %s: %v, using default", p.config.Network.WstunnelTemplatePath, err)
+		} else {
+			templateContent = string(content)
+		}
+	}
+
+	// Fall back to embedded template
+	if templateContent == "" {
+		content, err := defaultWstunnelTemplate.ReadFile("templates/wstunnel-template.yaml")
+		if err != nil {
+			return "", fmt.Errorf("failed to read embedded template: %w", err)
+		}
+		templateContent = string(content)
+	}
+
+	// Parse and execute template
+	tmpl, err := template.New("wstunnel").Parse(templateContent)
+	if err != nil {
+		return "", fmt.Errorf("failed to parse template: %w", err)
+	}
+
+	var buf bytes.Buffer
+	if err := tmpl.Execute(&buf, data); err != nil {
+		return "", fmt.Errorf("failed to execute template: %w", err)
+	}
+
+	return buf.String(), nil
+}
+
+// applyWstunnelManifests applies the generated manifests and returns the first created pod
+func (p *Provider) applyWstunnelManifests(ctx context.Context, manifestYAML string) (*v1.Pod, error) {
+	// Split the YAML into individual resources
+	resources := strings.Split(manifestYAML, "---")
+
+	decoder := serializer.NewCodecFactory(scheme.Scheme).UniversalDeserializer()
+	var deploymentName string
+	var namespace string
+
+	for _, resource := range resources {
+		resource = strings.TrimSpace(resource)
+		if resource == "" {
+			continue
+		}
+
+		// Decode the resource
+		obj, _, err := decoder.Decode([]byte(resource), nil, nil)
+		if err != nil {
+			log.G(ctx).Warningf("Failed to decode resource: %v", err)
+			continue
+		}
+
+		// Apply based on resource type
+		switch o := obj.(type) {
+		case *appsv1.Deployment:
+			deployment, err := p.clientSet.AppsV1().Deployments(o.Namespace).Create(ctx, o, metav1.CreateOptions{})
+			if err != nil {
+				return nil, fmt.Errorf("failed to create deployment: %w", err)
+			}
+			deploymentName = deployment.Name
+			namespace = deployment.Namespace
+			log.G(ctx).Infof("Created deployment %s/%s", deployment.Namespace, deployment.Name)
+
+		case *v1.Service:
+			service, err := p.clientSet.CoreV1().Services(o.Namespace).Create(ctx, o, metav1.CreateOptions{})
+			if err != nil {
+				return nil, fmt.Errorf("failed to create service: %w", err)
+			}
+			log.G(ctx).Infof("Created service %s/%s", service.Namespace, service.Name)
+
+		case *networkingv1.Ingress:
+			ingress, err := p.clientSet.NetworkingV1().Ingresses(o.Namespace).Create(ctx, o, metav1.CreateOptions{})
+			if err != nil {
+				return nil, fmt.Errorf("failed to create ingress: %w", err)
+			}
+			log.G(ctx).Infof("Created ingress %s/%s", ingress.Namespace, ingress.Name)
+
+		default:
+			log.G(ctx).Warningf("Unsupported resource type: %T", obj)
+		}
+	}
+
+	// Wait for deployment to create a pod and return it
+	if deploymentName != "" {
+		return p.waitForDeploymentPod(ctx, deploymentName, namespace)
+	}
+
+	return nil, fmt.Errorf("no deployment found in manifests")
+}
+
+// waitForDeploymentPod waits for a deployment to create a pod and returns the first one
+func (p *Provider) waitForDeploymentPod(ctx context.Context, deploymentName, namespace string) (*v1.Pod, error) {
+	timeout := 30 * time.Second
+	start := time.Now()
+
+	for time.Since(start) < timeout {
+		pods, err := p.clientSet.CoreV1().Pods(namespace).List(ctx, metav1.ListOptions{
+			LabelSelector: fmt.Sprintf("app.kubernetes.io/component=%s", deploymentName),
+		})
+		if err != nil {
+			log.G(ctx).Warningf("Failed to list pods for deployment %s: %v", deploymentName, err)
+			time.Sleep(1 * time.Second)
+			continue
+		}
+
+		if len(pods.Items) > 0 {
+			return &pods.Items[0], nil
+		}
+
+		time.Sleep(1 * time.Second)
+	}
+
+	return nil, fmt.Errorf("no pod found for deployment %s within timeout", deploymentName)
+}
+
+// cleanupWstunnelResources removes all wstunnel resources for a given name and namespace
+func (p *Provider) cleanupWstunnelResources(ctx context.Context, wstunnelName, namespace string) {
+	log.G(ctx).Infof("Cleaning up wstunnel resources for %s/%s", namespace, wstunnelName)
+
+	// Delete deployment
+	err := p.clientSet.AppsV1().Deployments(namespace).Delete(ctx, wstunnelName, metav1.DeleteOptions{})
+	if err != nil {
+		log.G(ctx).Warningf("Failed to delete wstunnel deployment %s/%s: %v", namespace, wstunnelName, err)
+	} else {
+		log.G(ctx).Infof("Successfully deleted wstunnel deployment %s/%s", namespace, wstunnelName)
+	}
+
+	// Delete service
+	err = p.clientSet.CoreV1().Services(namespace).Delete(ctx, wstunnelName, metav1.DeleteOptions{})
+	if err != nil {
+		log.G(ctx).Warningf("Failed to delete wstunnel service %s/%s: %v", namespace, wstunnelName, err)
+	} else {
+		log.G(ctx).Infof("Successfully deleted wstunnel service %s/%s", namespace, wstunnelName)
+	}
+
+	// Delete ingress
+	err = p.clientSet.NetworkingV1().Ingresses(namespace).Delete(ctx, wstunnelName, metav1.DeleteOptions{})
+	if err != nil {
+		log.G(ctx).Warningf("Failed to delete wstunnel ingress %s/%s: %v", namespace, wstunnelName, err)
+	} else {
+		log.G(ctx).Infof("Successfully deleted wstunnel ingress %s/%s", namespace, wstunnelName)
+	}
+}
+
+// extractPortMappings extracts port mappings for the template
+func extractPortMappings(pod *v1.Pod) []PortMapping {
+	var portMappings []PortMapping
+	for _, container := range pod.Spec.Containers {
+		for _, port := range container.Ports {
+			portMappings = append(portMappings, PortMapping{
+				Port:       port.ContainerPort,
+				TargetPort: port.ContainerPort,
+				Name:       port.Name,
+				Protocol:   string(port.Protocol),
+			})
+		}
+	}
+	for _, container := range pod.Spec.InitContainers {
+		for _, port := range container.Ports {
+			portMappings = append(portMappings, PortMapping{
+				Port:       port.ContainerPort,
+				TargetPort: port.ContainerPort,
+				Name:       port.Name,
+				Protocol:   string(port.Protocol),
+			})
+		}
+	}
+	return portMappings
+}
+
+// shouldCreateWstunnel checks if wstunnel infrastructure should be created
+func (p *Provider) shouldCreateWstunnel(pod *v1.Pod) bool {
+	return p.config.Network.EnableTunnel && hasExposedPorts(pod) &&
+		pod.Annotations["interlink.eu/pod-vpn"] == ""
+}
+
+// handleWstunnelCreation creates wstunnel infrastructure and returns the pod IP
+func (p *Provider) handleWstunnelCreation(ctx context.Context, pod *v1.Pod) (string, error) {
+	// Create wstunnel infrastructure outside virtual node for port exposure
+	dummyPod, err := p.createDummyPod(ctx, pod)
+	if err != nil {
+		log.G(ctx).Errorf("Failed to create wstunnel infrastructure for %s/%s: %v", pod.Namespace, pod.Name, err)
+		return "", fmt.Errorf("failed to create wstunnel infrastructure for exposed ports: %w", err)
+	}
+
+	// Wait for wstunnel pod to get an IP with timeout
+	timeout := 30 * time.Second // Configurable timeout
+	if timeoutStr := pod.Annotations["interlink.virtual-kubelet.io/wstunnel-timeout"]; timeoutStr != "" {
+		if parsedTimeout, err := time.ParseDuration(timeoutStr); err == nil {
+			timeout = parsedTimeout
+		}
+	}
+
+	return p.waitForWstunnelPodIP(ctx, dummyPod, timeout, pod.Name+"-wstunnel", pod.Namespace)
+}
+
+// waitForWstunnelPodIP waits for wstunnel pod to get an IP
+func (p *Provider) waitForWstunnelPodIP(ctx context.Context, dummyPod *v1.Pod, timeout time.Duration, wstunnelName, namespace string) (string, error) {
+	log.G(ctx).Infof("Waiting up to %v for wstunnel pod %s/%s to get an IP", timeout, dummyPod.Namespace, dummyPod.Name)
+
+	start := time.Now()
+	for time.Since(start) < timeout {
+		updatedDummyPod, err := p.clientSet.CoreV1().Pods(dummyPod.Namespace).Get(ctx, dummyPod.Name, metav1.GetOptions{})
+		if err != nil {
+			log.G(ctx).Warningf("Failed to get wstunnel pod status: %v", err)
+			time.Sleep(1 * time.Second)
+			continue
+		}
+
+		if updatedDummyPod.Status.PodIP != "" {
+			podIP := updatedDummyPod.Status.PodIP
+			log.G(ctx).Infof("Using wstunnel pod IP %s for virtual pod %s/%s", podIP, namespace, dummyPod.Name)
+			return podIP, nil
+		}
+
+		time.Sleep(1 * time.Second)
+	}
+
+	// Clean up the wstunnel infrastructure since it didn't get an IP
+	p.cleanupWstunnelResources(ctx, wstunnelName, namespace)
+	return "", fmt.Errorf("wstunnel pod %s/%s failed to get an IP within %v timeout", dummyPod.Namespace, dummyPod.Name, timeout)
+}
+
 // CreatePod accepts a Pod definition and stores it in memory in p.pods
 func (p *Provider) CreatePod(ctx context.Context, pod *v1.Pod) error {
 	TracerUpdate(&ctx, "CreatePodVK", pod)
@@ -616,6 +931,15 @@ func (p *Provider) CreatePod(ctx context.Context, pod *v1.Pod) error {
 	state = runningState
 
 	podIP := "127.0.0.1"
+
+	// Handle wstunnel creation if needed
+	if p.shouldCreateWstunnel(pod) {
+		var err error
+		podIP, err = p.handleWstunnelCreation(ctx, pod)
+		if err != nil {
+			return err
+		}
+	}
 
 	if _, ok := pod.Annotations["interlink.eu/pod-vpn"]; ok {
 		podsVPN, err := p.clientSet.CoreV1().Pods("").List(ctx, metav1.ListOptions{})
@@ -771,6 +1095,14 @@ func (p *Provider) DeletePod(ctx context.Context, pod *v1.Pod) (err error) {
 
 	if _, exists := p.pods[string(key)]; !exists {
 		return errdefs.NotFound("pod not found")
+	}
+
+	// Clean up wstunnel resources if tunnel is enabled and they exist and no VPN annotation
+	if p.config.Network.EnableTunnel && hasExposedPorts(pod) {
+		if _, hasVPN := pod.Annotations["interlink.eu/pod-vpn"]; !hasVPN {
+			wstunnelName := pod.Name + "-wstunnel"
+			p.cleanupWstunnelResources(ctx, wstunnelName, pod.Namespace)
+		}
 	}
 
 	now := metav1.Now()
@@ -985,7 +1317,7 @@ func (p *Provider) GetLogs(ctx context.Context, namespace, podName, containerNam
 	defer types.SetDurationSpan(start, span)
 
 	// For debugging purpose, when we have many API calls, we can differentiate each one.
-	sessionNumber := rand.Intn(100000)
+	sessionNumber := mathrand.Intn(100000)
 	sessionContext := "GetLogs#" + strconv.Itoa(sessionNumber)
 	sessionContextMessage := GetSessionContextMessage(sessionContext)
 

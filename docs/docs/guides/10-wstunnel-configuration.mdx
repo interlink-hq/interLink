@@ -1,0 +1,592 @@
+---
+title: "Wstunnel Configuration"
+description: "Complete guide to configuring websocket tunneling for port exposure in interLink"
+sidebar_position: 10
+---
+
+# Wstunnel Configuration
+
+InterLink's wstunnel feature enables secure port exposure for pods with containers that have exposed ports. This feature automatically creates websocket tunnel infrastructure outside the virtual node, allowing external access to pod services without requiring VPN connectivity.
+
+## Overview
+
+The wstunnel integration provides:
+
+- **Automatic Infrastructure Creation**: Deployment, Service, and Ingress resources
+- **Secure Tunneling**: WebSocket-based tunneling with random password protection
+- **Port Forwarding**: Automatic forwarding of all exposed container ports
+- **External Access**: Ingress-based external access with customizable DNS
+- **Resource Management**: Automatic cleanup when pods are deleted
+
+:::info
+Wstunnel is disabled by default and must be explicitly enabled in the configuration.
+:::
+
+---
+
+## Configuration
+
+### Virtual Kubelet Configuration
+
+Add the wstunnel configuration to your Virtual Kubelet config file:
+
+```yaml
+# VirtualKubeletConfig.yaml
+InterlinkURL: "http://interlink-api:3000"
+InterlinkPort: "3000"
+VerboseLogging: true
+ErrorsOnlyLogging: false
+
+# Network configuration
+Network:
+  EnableTunnel: true                                    # Enable wstunnel feature
+  WildcardDNS: "tunnel.example.com"                    # DNS domain for ingress
+  WstunnelTemplatePath: "/etc/templates/custom.yaml"   # Optional: custom template path
+
+# Other configuration...
+Resources:
+  CPU: "10"
+  Memory: "20Gi"
+  Pods: "100"
+```
+
+### Configuration Options
+
+| Option | Type | Required | Default | Description |
+|--------|------|----------|---------|-------------|
+| `EnableTunnel` | `bool` | No | `false` | Enable/disable wstunnel feature |
+| `WildcardDNS` | `string` | Yes* | `""` | DNS domain for ingress hostnames |
+| `WstunnelTemplatePath` | `string` | No | `""` | Path to custom wstunnel template |
+
+*Required when `EnableTunnel` is `true`
+
+---
+
+## How It Works
+
+### Automatic Trigger
+
+Wstunnel infrastructure is automatically created when:
+1. `Network.EnableTunnel` is set to `true`
+2. Pod has containers with exposed ports
+3. Pod does NOT have `interlink.eu/pod-vpn` annotation
+
+### Resource Creation
+
+For each qualifying pod, interLink creates:
+
+1. **Deployment**: Runs wstunnel server with WireGuard
+2. **Service**: Exposes websocket and forwarded ports
+3. **Ingress**: Provides external access via DNS
+
+### Naming Convention
+
+Resources are named using the pattern: `{pod-name}-wstunnel`
+
+Example: Pod `my-web-app` → Resources `my-web-app-wstunnel`
+
+---
+
+## Template System
+
+### Default Template
+
+InterLink includes an embedded default template that creates:
+
+```yaml
+# Deployment with wstunnel server
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{.Name}}
+  namespace: {{.Namespace}}
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app.kubernetes.io/component: {{.Name}}
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/component: {{.Name}}
+    spec:
+      containers:
+      - name: wireguard
+        image: ghcr.io/dciangot/dciangot/wg:v0.2
+        command: ["bash", "-c"]
+        args:
+        - ./wstunnel server --log-lvl DEBUG --dns-resolver-prefer-ipv4 --restrict-http-upgrade-path-prefix {{.RandomPassword}} ws://0.0.0.0:8080
+        ports:
+        - containerPort: 8080
+          name: webhook
+          protocol: TCP
+        - containerPort: 51820
+          name: vpn
+          protocol: UDP
+        {{- range .ExposedPorts}}
+        - containerPort: {{.Port}}
+          name: {{.Name}}
+          protocol: {{.Protocol}}
+        {{- end}}
+        resources:
+          requests:
+            cpu: 100m
+            memory: 90Mi
+      nodeSelector:
+        kubernetes.io/os: linux
+
+---
+# Service for port exposure
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{.Name}}
+  namespace: {{.Namespace}}
+spec:
+  type: ClusterIP
+  selector:
+    app.kubernetes.io/component: {{.Name}}
+  ports:
+    - port: 8080
+      targetPort: 8080
+      name: ws
+    {{- range .ExposedPorts}}
+    - port: {{.Port}}
+      targetPort: {{.TargetPort}}
+      name: {{.Name}}
+      protocol: {{.Protocol}}
+    {{- end}}
+
+---
+# Ingress for external access
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: {{.Name}}
+  namespace: {{.Namespace}}
+  annotations:
+    nginx.ingress.kubernetes.io/proxy-read-timeout: "3600"
+    nginx.ingress.kubernetes.io/proxy-send-timeout: "3600"
+    nginx.ingress.kubernetes.io/server-snippets: |
+      location / {
+        proxy_set_header Upgrade $http_upgrade;
+        proxy_set_header Connection "upgrade";
+        proxy_http_version 1.1;
+        proxy_set_header X-Forwarded-For $remote_addr;
+        proxy_set_header Host $host;
+        proxy_cache_bypass $http_upgrade;
+      }
+    kubernetes.io/ingress.class: "nginx"
+spec:
+  rules:
+  - host: ws-{{.Name}}.{{.WildcardDNS}}
+    http:
+      paths:
+      - path: /
+        pathType: Prefix
+        backend:
+          service:
+            name: {{.Name}}
+            port:
+              number: 8080
+```
+
+### Template Variables
+
+The template system provides these variables:
+
+| Variable | Type | Description | Example |
+|----------|------|-------------|---------|
+| `{{.Name}}` | `string` | Resource name | `my-web-app-wstunnel` |
+| `{{.Namespace}}` | `string` | Pod namespace | `default` |
+| `{{.RandomPassword}}` | `string` | Security password | `a1b2c3d4e5f6...` |
+| `{{.WildcardDNS}}` | `string` | DNS domain | `tunnel.example.com` |
+| `{{.ExposedPorts}}` | `[]PortMapping` | Port mappings | See below |
+
+### Port Mapping Structure
+
+```go
+type PortMapping struct {
+    Port       int32  // Container port number
+    TargetPort int32  // Target port (usually same as Port)
+    Name       string // Port name
+    Protocol   string // Protocol (TCP/UDP)
+}
+```
+
+### Custom Templates
+
+You can provide custom templates by:
+
+1. **Creating a custom template file**:
+   ```yaml
+   # /etc/templates/custom-wstunnel.yaml
+   apiVersion: apps/v1
+   kind: Deployment
+   metadata:
+     name: {{.Name}}
+     namespace: {{.Namespace}}
+   spec:
+     # Your custom configuration...
+   ```
+
+2. **Configuring the template path**:
+   ```yaml
+   Network:
+     EnableTunnel: true
+     WildcardDNS: "tunnel.example.com"
+     WstunnelTemplatePath: "/etc/templates/custom-wstunnel.yaml"
+   ```
+
+3. **Mounting the template in the Virtual Kubelet deployment**:
+   ```yaml
+   apiVersion: apps/v1
+   kind: Deployment
+   metadata:
+     name: virtual-kubelet
+   spec:
+     template:
+       spec:
+         containers:
+         - name: virtual-kubelet
+           volumeMounts:
+           - name: wstunnel-template
+             mountPath: /etc/templates/custom-wstunnel.yaml
+             subPath: custom-wstunnel.yaml
+         volumes:
+         - name: wstunnel-template
+           configMap:
+             name: wstunnel-template
+   ```
+
+---
+
+## Pod Configuration
+
+### Basic Pod with Exposed Ports
+
+```yaml
+apiVersion: v1
+kind: Pod
+metadata:
+  name: web-server
+  namespace: default
+spec:
+  containers:
+  - name: nginx
+    image: nginx:latest
+    ports:
+    - containerPort: 80
+      name: http
+      protocol: TCP
+    - containerPort: 443
+      name: https
+      protocol: TCP
+  restartPolicy: Never
+```
+
+### Pod with Custom Timeout
+
+```yaml
+apiVersion: v1
+kind: Pod
+metadata:
+  name: web-server
+  namespace: default
+  annotations:
+    interlink.virtual-kubelet.io/wstunnel-timeout: "5m"
+spec:
+  containers:
+  - name: nginx
+    image: nginx:latest
+    ports:
+    - containerPort: 80
+      name: http
+  restartPolicy: Never
+```
+
+### Disabling Wstunnel for Specific Pods
+
+```yaml
+apiVersion: v1
+kind: Pod
+metadata:
+  name: web-server
+  namespace: default
+  annotations:
+    interlink.eu/pod-vpn: "true"  # Use VPN instead of wstunnel
+spec:
+  containers:
+  - name: nginx
+    image: nginx:latest
+    ports:
+    - containerPort: 80
+      name: http
+  restartPolicy: Never
+```
+
+---
+
+## DNS Configuration
+
+### Wildcard DNS Setup
+
+Configure your DNS provider to point wildcard subdomains to your ingress controller:
+
+```
+*.tunnel.example.com → your-ingress-controller-ip
+```
+
+### Generated Hostnames
+
+For each pod, the system generates hostnames using the pattern:
+```
+ws-{pod-name}-wstunnel.{WildcardDNS}
+```
+
+Examples:
+- Pod `web-server` → `ws-web-server-wstunnel.tunnel.example.com`
+- Pod `api-gateway` → `ws-api-gateway-wstunnel.tunnel.example.com`
+
+---
+
+## Security Considerations
+
+### Authentication
+
+- Each wstunnel instance uses a unique random password
+- Passwords are generated using cryptographically secure random numbers
+- Access is restricted via the `restrict-http-upgrade-path-prefix` parameter
+
+### Network Security
+
+- WebSocket connections are established over HTTP/HTTPS
+- Consider using TLS termination at the ingress level
+- Implement network policies to restrict traffic if needed
+
+### Resource Security
+
+- Wstunnel resources are automatically cleaned up when pods are deleted
+- Resources are labeled for easy identification and management
+- Consider implementing RBAC policies for wstunnel resources
+
+---
+
+## Monitoring and Troubleshooting
+
+### Checking Wstunnel Status
+
+```bash
+# List all wstunnel resources
+kubectl get deployment,service,ingress -l interlink.virtual-kubelet.io/type=wstunnel
+
+# Check specific pod's wstunnel resources
+kubectl get deployment,service,ingress -l app.kubernetes.io/component=my-pod-wstunnel
+
+# Check wstunnel pod logs
+kubectl logs -l app.kubernetes.io/component=my-pod-wstunnel
+```
+
+### Common Issues
+
+1. **Pod IP not assigned**
+   ```bash
+   # Check pod status
+   kubectl get pod my-pod -o yaml | grep -A 10 status
+   
+   # Check virtual kubelet logs
+   kubectl logs -l nodeName=virtual-kubelet
+   ```
+
+2. **Wstunnel timeout errors**
+   ```bash
+   # Increase timeout annotation
+   kubectl annotate pod my-pod interlink.virtual-kubelet.io/wstunnel-timeout=10m
+   ```
+
+3. **DNS resolution issues**
+   ```bash
+   # Test DNS resolution
+   nslookup ws-my-pod-wstunnel.tunnel.example.com
+   
+   # Check ingress configuration
+   kubectl get ingress my-pod-wstunnel -o yaml
+   ```
+
+4. **Template errors**
+   ```bash
+   # Check virtual kubelet logs for template parsing errors
+   kubectl logs -l nodeName=virtual-kubelet | grep -i template
+   ```
+
+### Debug Commands
+
+```bash
+# Get pod with full details
+kubectl get pod my-pod -o yaml
+
+# Check wstunnel deployment
+kubectl describe deployment my-pod-wstunnel
+
+# Test websocket connection
+curl -i -N -H "Connection: Upgrade" -H "Upgrade: websocket" \
+  -H "Sec-WebSocket-Key: test" -H "Sec-WebSocket-Version: 13" \
+  http://ws-my-pod-wstunnel.tunnel.example.com/your-random-password
+
+# Check service endpoints
+kubectl get endpoints my-pod-wstunnel
+```
+
+---
+
+## Best Practices
+
+### Configuration
+
+- Set appropriate `WildcardDNS` that you control
+- Use custom templates for specific requirements
+- Configure reasonable timeout values based on your infrastructure
+
+### Security
+
+- Regularly rotate ingress TLS certificates
+- Implement network policies to restrict access
+- Monitor wstunnel resource usage
+
+### Operations
+
+- Monitor DNS resolution and ingress health
+- Set up alerts for wstunnel pod failures
+- Regular cleanup of orphaned resources
+
+### Performance
+
+- Size wstunnel pods appropriately for your traffic
+- Use appropriate resource limits in custom templates
+- Consider using NodePort or LoadBalancer services for high traffic
+
+---
+
+## Migration Guide
+
+### From VPN to Wstunnel
+
+1. **Update Virtual Kubelet configuration**:
+   ```yaml
+   Network:
+     EnableTunnel: true
+     WildcardDNS: "tunnel.example.com"
+   ```
+
+2. **Remove VPN annotations from pods**:
+   ```bash
+   kubectl annotate pod my-pod interlink.eu/pod-vpn-
+   ```
+
+3. **Restart pods to trigger wstunnel creation**:
+   ```bash
+   kubectl delete pod my-pod
+   kubectl apply -f my-pod.yaml
+   ```
+
+### From Wstunnel to VPN
+
+1. **Add VPN annotation to pods**:
+   ```yaml
+   metadata:
+     annotations:
+       interlink.eu/pod-vpn: "true"
+   ```
+
+2. **Restart pods** to use VPN instead of wstunnel
+
+---
+
+## Advanced Configuration
+
+### Custom Ingress Controller
+
+```yaml
+# Custom template with different ingress controller
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: {{.Name}}
+  namespace: {{.Namespace}}
+  annotations:
+    traefik.ingress.kubernetes.io/router.entrypoints: websecure
+    traefik.ingress.kubernetes.io/router.tls: "true"
+spec:
+  tls:
+  - hosts:
+    - ws-{{.Name}}.{{.WildcardDNS}}
+    secretName: {{.Name}}-tls
+  rules:
+  - host: ws-{{.Name}}.{{.WildcardDNS}}
+    http:
+      paths:
+      - path: /
+        pathType: Prefix
+        backend:
+          service:
+            name: {{.Name}}
+            port:
+              number: 8080
+```
+
+### Resource Limits
+
+```yaml
+# Custom template with resource limits
+spec:
+  template:
+    spec:
+      containers:
+      - name: wireguard
+        resources:
+          requests:
+            cpu: 100m
+            memory: 90Mi
+          limits:
+            cpu: 500m
+            memory: 256Mi
+```
+
+### Multiple Ingress Rules
+
+```yaml
+# Multiple ingress rules for different services
+spec:
+  rules:
+  - host: ws-{{.Name}}.{{.WildcardDNS}}
+    http:
+      paths:
+      - path: /
+        pathType: Prefix
+        backend:
+          service:
+            name: {{.Name}}
+            port:
+              number: 8080
+  {{- range .ExposedPorts}}
+  - host: {{.Name}}-{{.Port}}.{{.WildcardDNS}}
+    http:
+      paths:
+      - path: /
+        pathType: Prefix
+        backend:
+          service:
+            name: {{.Name}}
+            port:
+              number: {{.Port}}
+  {{- end}}
+```
+
+---
+
+## Related Documentation
+
+- [Pod Annotations Reference](./09-pod-annotations.mdx) - Pod annotation documentation
+- [Deploy interLink](./01-deploy-interlink.mdx) - Basic deployment guide
+- [API Reference](./03-api-reference.mdx) - REST API documentation
+- [mTLS Deployment](./07-mtls-deployment.mdx) - Secure communication setup

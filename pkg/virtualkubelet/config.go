@@ -23,6 +23,7 @@ type Config struct {
 	NodeLabels              []string    `yaml:"NodeLabels"`
 	NodeTaints              []TaintSpec `yaml:"NodeTaints"`
 	TLS                     TLSConfig   `yaml:"TLS,omitempty"`
+	Network                 Network     `yaml:"Network,omitempty"`
 }
 
 // TLSConfig holds TLS/mTLS configuration for secure communication with interLink API
@@ -61,4 +62,10 @@ type PodCIDR struct {
 	Subnet string `yaml:"Subnet"`
 	MaxIP  int    `yaml:"MaxIP"`
 	MinIP  int    `yaml:"MinIP"`
+}
+
+type Network struct {
+	EnableTunnel         bool   `yaml:"EnableTunnel" default:"false"`
+	WildcardDNS          string `yaml:"WildcardDNS,omitempty"`
+	WstunnelTemplatePath string `yaml:"WstunnelTemplatePath,omitempty"`
 }

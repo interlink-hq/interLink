@@ -1,0 +1,95 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{.Name}}
+  namespace: {{.Namespace}}
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app.kubernetes.io/component: {{.Name}}
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/component: {{.Name}}
+    spec:
+      containers:
+      - args:
+        - ./wstunnel server --log-lvl DEBUG --dns-resolver-prefer-ipv4 --restrict-http-upgrade-path-prefix {{.RandomPassword}}  ws://0.0.0.0:8080
+        command:
+        - bash
+        - -c
+        image: ghcr.io/dciangot/dciangot/wg:v0.2
+        imagePullPolicy: IfNotPresent
+        name: wireguard
+        ports:
+        - containerPort: 8080
+          name: webhook
+          protocol: TCP
+        - containerPort: 51820
+          name: vpn
+          protocol: UDP
+        {{- range .ExposedPorts}}
+        - containerPort: {{.Port}}
+          name: {{.Name}}
+          protocol: {{.Protocol}}
+        {{- end}}
+        resources:
+          requests:
+            cpu: 100m
+            memory: 90Mi
+      nodeSelector:
+        kubernetes.io/os: linux
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{.Name}}
+  namespace: {{.Namespace}}
+spec:
+  type: ClusterIP
+  selector:
+    app.kubernetes.io/component: {{.Name}}
+  ports:
+    - port: 8080
+      targetPort: 8080
+      name: ws
+    {{- range .ExposedPorts}}
+    - port: {{.Port}}
+      targetPort: {{.TargetPort}}
+      name: {{.Name}}
+      {{- if .Protocol}}
+      protocol: {{.Protocol}}
+      {{- end}}
+    {{- end}}
+---
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: {{.Name}}
+  namespace: {{.Namespace}}
+  annotations:
+    nginx.ingress.kubernetes.io/proxy-read-timeout: "3600"
+    nginx.ingress.kubernetes.io/proxy-send-timeout: "3600"
+    nginx.ingress.kubernetes.io/server-snippets: |
+      location / {
+        proxy_set_header Upgrade $http_upgrade;
+        proxy_set_header Connection "upgrade";
+        proxy_http_version 1.1;
+        proxy_set_header X-Forwarded-For $remote_addr;
+        proxy_set_header Host $host;
+        proxy_cache_bypass $http_upgrade;
+      }
+    kubernetes.io/ingress.class: "nginx"
+spec:
+  rules:
+  - host: ws-{{.Name}}.{{.WildcardDNS}}
+    http:
+      paths:
+      - path: /
+        pathType: Prefix
+        backend:
+          service:
+            name: {{.Name}}
+            port:
+              number: 8080
