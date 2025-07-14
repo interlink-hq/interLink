@@ -28,6 +28,7 @@ import (
 	appsv1 "k8s.io/api/apps/v1"
 	v1 "k8s.io/api/core/v1"
 	networkingv1 "k8s.io/api/networking/v1"
+	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/api/resource"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime/serializer"
@@ -653,10 +654,33 @@ func generateRandomPassword() string {
 func (p *Provider) createDummyPod(ctx context.Context, originalPod *v1.Pod) (*v1.Pod, *WstunnelTemplateData, error) {
 	log.G(ctx).Infof("Creating wstunnel infrastructure for %s/%s with exposed ports", originalPod.Namespace, originalPod.Name)
 
+	// If not exists, create the namespace for wstunnel
+	if originalPod.Namespace == "" {
+		return nil, nil, fmt.Errorf("pod namespace is empty")
+	}
+	namespace := originalPod.Namespace + "-wstunnel"
+	_, err := p.clientSet.CoreV1().Namespaces().Get(ctx, namespace, metav1.GetOptions{})
+	if err != nil {
+		if !apierrors.IsNotFound(err) {
+			return nil, nil, fmt.Errorf("failed to get wstunnel namespace %s: %w", namespace, err)
+		}
+		// Create the namespace if it doesn't exist
+		ns := &v1.Namespace{
+			ObjectMeta: metav1.ObjectMeta{
+				Name: namespace,
+			},
+		}
+		_, err = p.clientSet.CoreV1().Namespaces().Create(ctx, ns, metav1.CreateOptions{})
+		if err != nil {
+			return nil, nil, fmt.Errorf("failed to create wstunnel namespace %s: %w", namespace, err)
+		}
+		log.G(ctx).Infof("Created wstunnel namespace %s", namespace)
+	}
+
 	// Generate template data
 	templateData := WstunnelTemplateData{
-		Name:           originalPod.Name + "-wstunnel",
-		Namespace:      originalPod.Namespace,
+		Name:           originalPod.Name + "-" + originalPod.Namespace,
+		Namespace:      namespace,
 		RandomPassword: generateRandomPassword(),
 		ExposedPorts:   extractPortMappings(originalPod),
 		WildcardDNS:    p.config.Network.WildcardDNS,
@@ -898,7 +922,7 @@ func (p *Provider) addWstunnelClientAnnotation(ctx context.Context, pod *v1.Pod,
 	}
 
 	// Generate the ingress endpoint
-	ingressEndpoint := fmt.Sprintf("%s.%s", templateData.Name, templateData.WildcardDNS)
+	ingressEndpoint := fmt.Sprintf("%s-%s.%s", templateData.Name, templateData.Namespace, templateData.WildcardDNS)
 	if templateData.WildcardDNS == "" {
 		ingressEndpoint = templateData.Name
 	}
@@ -1142,8 +1166,8 @@ func (p *Provider) DeletePod(ctx context.Context, pod *v1.Pod) (err error) {
 	// Clean up wstunnel resources if tunnel is enabled and they exist and no VPN annotation
 	if p.config.Network.EnableTunnel && hasExposedPorts(pod) {
 		if _, hasVPN := pod.Annotations["interlink.eu/pod-vpn"]; !hasVPN {
-			wstunnelName := pod.Name + "-wstunnel"
-			p.cleanupWstunnelResources(ctx, wstunnelName, pod.Namespace)
+			wstunnelName := pod.Name + "-" + pod.Namespace
+			p.cleanupWstunnelResources(ctx, wstunnelName, pod.Namespace+"-wstunnel")
 		}
 	}
 
