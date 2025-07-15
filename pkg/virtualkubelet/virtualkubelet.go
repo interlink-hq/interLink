@@ -60,6 +60,7 @@ const (
 	intelGPU              = "intel.com/gpu"
 	xilinxFPGA            = "xilinx.com/fpga"
 	intelFPGA             = "intel.com/fpga"
+	DefaultWstunnelCommand = "curl -L https://github.com/erebe/wstunnel/releases/download/v10.4.4/wstunnel_10.4.4_linux_amd64.tar.gz -o wstunnel.tar.gz && tar -xzvf wstunnel.tar.gz && chmod +x wstunnel\\n\\n./wstunnel client --http-upgrade-path-prefix %s %s ws://%s:80"
 )
 
 type WstunnelTemplateData struct {
@@ -332,6 +333,11 @@ func SetDefaultResource(config *Config) {
 				config.Resources.Accelerators[i].Available = defaultFPGACapacity
 			}
 		}
+	}
+
+	// Set default WStunnel command if not provided
+	if config.Network.WstunnelCommand == "" {
+		config.Network.WstunnelCommand = DefaultWstunnelCommand
 	}
 }
 
@@ -933,8 +939,14 @@ func (p *Provider) addWstunnelClientAnnotation(ctx context.Context, pod *v1.Pod,
 		rOptions = append(rOptions, fmt.Sprintf("-R tcp://[::]:%d:localhost:%d", port.Port, port.Port))
 	}
 
+	// Get the wstunnel command template from config, or use default
+	wstunnelCommandTemplate := p.config.Network.WstunnelCommand
+	if wstunnelCommandTemplate == "" {
+		wstunnelCommandTemplate = DefaultWstunnelCommand
+	}
+	
 	// Create single command with all -R options
-	command := fmt.Sprintf("curl -L https://github.com/erebe/wstunnel/releases/latest/download/wstunnel-linux-x64 -o wstunnel && chmod +x wstunnel\n\n./wstunnel client --http-upgrade-path-prefix %s %s ws://%s:80",
+	command := fmt.Sprintf(wstunnelCommandTemplate,
 		templateData.RandomPassword,
 		strings.Join(rOptions, " "),
 		ingressEndpoint,

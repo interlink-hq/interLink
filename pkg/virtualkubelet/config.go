@@ -68,4 +68,5 @@ type Network struct {
 	EnableTunnel         bool   `yaml:"EnableTunnel" default:"false"`
 	WildcardDNS          string `yaml:"WildcardDNS,omitempty"`
 	WstunnelTemplatePath string `yaml:"WstunnelTemplatePath,omitempty"`
+	WstunnelCommand      string `yaml:"WstunnelCommand,omitempty"`
 }
