@@ -45,21 +45,21 @@ import (
 var defaultWstunnelTemplate embed.FS
 
 const (
-	DefaultCPUCapacity    = "100"
-	DefaultMemoryCapacity = "3000G"
-	DefaultPodCapacity    = "10000"
-	DefaultGPUCapacity    = "0"
-	DefaultFPGACapacity   = "0"
-	DefaultListenPort     = 10250
-	NamespaceKey          = "namespace"
-	NameKey               = "name"
-	CREATE                = 0
-	DELETE                = 1
-	nvidiaGPU             = "nvidia.com/gpu"
-	amdGPU                = "amd.com/gpu"
-	intelGPU              = "intel.com/gpu"
-	xilinxFPGA            = "xilinx.com/fpga"
-	intelFPGA             = "intel.com/fpga"
+	DefaultCPUCapacity     = "100"
+	DefaultMemoryCapacity  = "3000G"
+	DefaultPodCapacity     = "10000"
+	DefaultGPUCapacity     = "0"
+	DefaultFPGACapacity    = "0"
+	DefaultListenPort      = 10250
+	NamespaceKey           = "namespace"
+	NameKey                = "name"
+	CREATE                 = 0
+	DELETE                 = 1
+	nvidiaGPU              = "nvidia.com/gpu"
+	amdGPU                 = "amd.com/gpu"
+	intelGPU               = "intel.com/gpu"
+	xilinxFPGA             = "xilinx.com/fpga"
+	intelFPGA              = "intel.com/fpga"
 	DefaultWstunnelCommand = "curl -L https://github.com/erebe/wstunnel/releases/download/v10.4.4/wstunnel_10.4.4_linux_amd64.tar.gz -o wstunnel.tar.gz && tar -xzvf wstunnel.tar.gz && chmod +x wstunnel\\n\\n./wstunnel client --http-upgrade-path-prefix %s %s ws://%s:80"
 )
 
@@ -944,7 +944,7 @@ func (p *Provider) addWstunnelClientAnnotation(ctx context.Context, pod *v1.Pod,
 	if wstunnelCommandTemplate == "" {
 		wstunnelCommandTemplate = DefaultWstunnelCommand
 	}
-	
+
 	// Create single command with all -R options
 	command := fmt.Sprintf(wstunnelCommandTemplate,
 		templateData.RandomPassword,
