@@ -862,6 +862,8 @@ func (p *Provider) cleanupWstunnelResources(ctx context.Context, wstunnelName, n
 // extractPortMappings extracts port mappings for the template
 func extractPortMappings(pod *v1.Pod) []PortMapping {
 	var portMappings []PortMapping
+
+	// Extract ports from container specs
 	for _, container := range pod.Spec.Containers {
 		for _, port := range container.Ports {
 			portMappings = append(portMappings, PortMapping{
@@ -882,12 +884,72 @@ func extractPortMappings(pod *v1.Pod) []PortMapping {
 			})
 		}
 	}
+
+	// Extract additional ports from annotation
+	if extraPorts, exists := pod.Annotations["interlink.eu/wstunnel-extra-ports"]; exists {
+		additionalPorts := parseExtraPortsAnnotation(extraPorts)
+		portMappings = append(portMappings, additionalPorts...)
+	}
+
 	return portMappings
+}
+
+// parseExtraPortsAnnotation parses additional ports from comma-separated annotation
+func parseExtraPortsAnnotation(annotation string) []PortMapping {
+	var portMappings []PortMapping
+
+	// Parse comma-separated format: "8080,9090:metrics:UDP,3000:api"
+	ports := strings.Split(annotation, ",")
+	for _, portStr := range ports {
+		portStr = strings.TrimSpace(portStr)
+		if portStr == "" {
+			continue
+		}
+
+		// Parse format: "port:name:protocol" or "port:name" or "port"
+		parts := strings.Split(portStr, ":")
+		if len(parts) == 0 {
+			continue
+		}
+
+		port, err := strconv.ParseInt(parts[0], 10, 32)
+		if err != nil {
+			continue
+		}
+
+		name := ""
+		if len(parts) > 1 {
+			name = parts[1]
+		}
+
+		protocol := "TCP"
+		if len(parts) > 2 {
+			protocol = strings.ToUpper(parts[2])
+		}
+
+		portMappings = append(portMappings, PortMapping{
+			Port:       int32(port),
+			TargetPort: int32(port),
+			Name:       name,
+			Protocol:   protocol,
+		})
+	}
+
+	return portMappings
+}
+
+// hasExtraPortsAnnotation checks if pod has extra ports annotation
+func hasExtraPortsAnnotation(pod *v1.Pod) bool {
+	if pod.Annotations == nil {
+		return false
+	}
+	extraPorts, exists := pod.Annotations["interlink.eu/wstunnel-extra-ports"]
+	return exists && strings.TrimSpace(extraPorts) != ""
 }
 
 // shouldCreateWstunnel checks if wstunnel infrastructure should be created
 func (p *Provider) shouldCreateWstunnel(pod *v1.Pod) bool {
-	return p.config.Network.EnableTunnel && hasExposedPorts(pod) &&
+	return p.config.Network.EnableTunnel && (hasExposedPorts(pod) || hasExtraPortsAnnotation(pod)) &&
 		pod.Annotations["interlink.eu/pod-vpn"] == ""
 }
 

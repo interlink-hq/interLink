@@ -327,6 +327,40 @@ spec:
   restartPolicy: Never
 ```
 
+### Adding Extra Ports
+
+You can specify additional ports to forward beyond those defined in the pod specification using the `interlink.eu/wstunnel-extra-ports` annotation:
+
+```yaml
+apiVersion: v1
+kind: Pod
+metadata:
+  name: web-server
+  namespace: default
+  annotations:
+    interlink.eu/wstunnel-extra-ports: "8080,9090:metrics:UDP,3000:api"
+spec:
+  containers:
+  - name: nginx
+    image: nginx:latest
+    ports:
+    - containerPort: 80
+      name: http
+  restartPolicy: Never
+```
+
+**Extra Ports Format:**
+- **Simple port**: `8080` - Forward port 8080 with TCP protocol
+- **Named port**: `9090:metrics` - Forward port 9090 with name "metrics" and TCP protocol  
+- **Full specification**: `3000:api:UDP` - Forward port 3000 with name "api" and UDP protocol
+- **Multiple ports**: `8080,9090:metrics:UDP,3000:api` - Comma-separated list
+
+This is useful for:
+- Internal services not exposed in container specs
+- Debug ports (e.g., pprof, metrics endpoints)
+- Dynamic port allocation scenarios
+- Services running on non-standard ports
+
 ---
 
 ## DNS Configuration

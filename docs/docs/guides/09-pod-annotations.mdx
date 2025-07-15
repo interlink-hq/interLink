@@ -159,6 +159,49 @@ spec:
 
 ---
 
+### `interlink.eu/wstunnel-extra-ports`
+
+Specifies additional ports to forward through the wstunnel beyond those defined in the pod specification.
+
+**Usage:**
+```yaml
+apiVersion: v1
+kind: Pod
+metadata:
+  name: my-pod
+  annotations:
+    interlink.eu/wstunnel-extra-ports: "8080,9090:metrics:UDP,3000:api"
+spec:
+  containers:
+  - name: web-server
+    image: nginx:latest
+    ports:
+    - containerPort: 80
+      name: http
+```
+
+**Format:**
+- **Simple port**: `8080` - Forward port 8080 with TCP protocol
+- **Named port**: `9090:metrics` - Forward port 9090 with name "metrics" and TCP protocol
+- **Full specification**: `3000:api:UDP` - Forward port 3000 with name "api" and UDP protocol
+- **Multiple ports**: `8080,9090:metrics:UDP,3000:api` - Comma-separated list
+
+**Behavior:**
+- Only effective when wstunnel feature is enabled (`Network.EnableTunnel: true`)
+- Allows forwarding ports not explicitly defined in container specs
+- Useful for internal services, debug ports, or dynamic port allocation
+- Ports are added to the generated wstunnel client command
+- Invalid port specifications are silently ignored
+
+**Protocol Support:**
+- `TCP` (default if not specified)
+- `UDP`
+- Case-insensitive protocol names
+
+**Default:** Not set (no additional ports forwarded)
+
+---
+
 ## Job Management
 
 ### `JobID`
