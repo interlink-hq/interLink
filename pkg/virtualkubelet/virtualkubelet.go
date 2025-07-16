@@ -73,10 +73,9 @@ type WstunnelTemplateData struct {
 }
 
 type PortMapping struct {
-	Port       int32
-	TargetPort int32
-	Name       string
-	Protocol   string
+	Port     int32
+	Name     string
+	Protocol string
 }
 
 // Increment the given IP address
@@ -989,10 +988,9 @@ func extractPortMappings(pod *v1.Pod) []PortMapping {
 			// Only add if not already present (first occurrence wins)
 			if _, exists := portMap[key]; !exists {
 				portMap[key] = PortMapping{
-					Port:       port.ContainerPort,
-					TargetPort: port.ContainerPort,
-					Name:       port.Name,
-					Protocol:   protocol,
+					Port:     port.ContainerPort,
+					Name:     port.Name,
+					Protocol: protocol,
 				}
 			}
 		}
@@ -1010,10 +1008,9 @@ func extractPortMappings(pod *v1.Pod) []PortMapping {
 			// Only add if not already present (first occurrence wins)
 			if _, exists := portMap[key]; !exists {
 				portMap[key] = PortMapping{
-					Port:       port.ContainerPort,
-					TargetPort: port.ContainerPort,
-					Name:       port.Name,
-					Protocol:   protocol,
+					Port:     port.ContainerPort,
+					Name:     port.Name,
+					Protocol: protocol,
 				}
 			}
 		}
@@ -1076,10 +1073,9 @@ func parseExtraPortsAnnotation(annotation string) []PortMapping {
 		}
 
 		portMappings = append(portMappings, PortMapping{
-			Port:       int32(port),
-			TargetPort: int32(port),
-			Name:       name,
-			Protocol:   protocol,
+			Port:     int32(port),
+			Name:     name,
+			Protocol: protocol,
 		})
 	}
 
