@@ -28,6 +28,7 @@ import (
 	appsv1 "k8s.io/api/apps/v1"
 	v1 "k8s.io/api/core/v1"
 	networkingv1 "k8s.io/api/networking/v1"
+	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/api/resource"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime/serializer"
@@ -44,21 +45,23 @@ import (
 var defaultWstunnelTemplate embed.FS
 
 const (
-	DefaultCPUCapacity    = "100"
-	DefaultMemoryCapacity = "3000G"
-	DefaultPodCapacity    = "10000"
-	DefaultGPUCapacity    = "0"
-	DefaultFPGACapacity   = "0"
-	DefaultListenPort     = 10250
-	NamespaceKey          = "namespace"
-	NameKey               = "name"
-	CREATE                = 0
-	DELETE                = 1
-	nvidiaGPU             = "nvidia.com/gpu"
-	amdGPU                = "amd.com/gpu"
-	intelGPU              = "intel.com/gpu"
-	xilinxFPGA            = "xilinx.com/fpga"
-	intelFPGA             = "intel.com/fpga"
+	DefaultCPUCapacity     = "100"
+	DefaultMemoryCapacity  = "3000G"
+	DefaultPodCapacity     = "10000"
+	DefaultGPUCapacity     = "0"
+	DefaultFPGACapacity    = "0"
+	DefaultListenPort      = 10250
+	NamespaceKey           = "namespace"
+	NameKey                = "name"
+	CREATE                 = 0
+	DELETE                 = 1
+	nvidiaGPU              = "nvidia.com/gpu"
+	amdGPU                 = "amd.com/gpu"
+	intelGPU               = "intel.com/gpu"
+	xilinxFPGA             = "xilinx.com/fpga"
+	intelFPGA              = "intel.com/fpga"
+	DefaultProtocol        = "TCP"
+	DefaultWstunnelCommand = "curl -L https://github.com/erebe/wstunnel/releases/download/v10.4.4/wstunnel_10.4.4_linux_amd64.tar.gz -o wstunnel.tar.gz && tar -xzvf wstunnel.tar.gz && chmod +x wstunnel\\n\\n./wstunnel client --http-upgrade-path-prefix %s %s ws://%s:80"
 )
 
 type WstunnelTemplateData struct {
@@ -70,10 +73,9 @@ type WstunnelTemplateData struct {
 }
 
 type PortMapping struct {
-	Port       int32
-	TargetPort int32
-	Name       string
-	Protocol   string
+	Port     int32
+	Name     string
+	Protocol string
 }
 
 // Increment the given IP address
@@ -331,6 +333,11 @@ func SetDefaultResource(config *Config) {
 				config.Resources.Accelerators[i].Available = defaultFPGACapacity
 			}
 		}
+	}
+
+	// Set default WStunnel command if not provided
+	if config.Network.WstunnelCommand == "" {
+		config.Network.WstunnelCommand = DefaultWstunnelCommand
 	}
 }
 
@@ -653,10 +660,33 @@ func generateRandomPassword() string {
 func (p *Provider) createDummyPod(ctx context.Context, originalPod *v1.Pod) (*v1.Pod, *WstunnelTemplateData, error) {
 	log.G(ctx).Infof("Creating wstunnel infrastructure for %s/%s with exposed ports", originalPod.Namespace, originalPod.Name)
 
+	// If not exists, create the namespace for wstunnel
+	if originalPod.Namespace == "" {
+		return nil, nil, fmt.Errorf("pod namespace is empty")
+	}
+	namespace := originalPod.Namespace + "-wstunnel"
+	_, err := p.clientSet.CoreV1().Namespaces().Get(ctx, namespace, metav1.GetOptions{})
+	if err != nil {
+		if !apierrors.IsNotFound(err) {
+			return nil, nil, fmt.Errorf("failed to get wstunnel namespace %s: %w", namespace, err)
+		}
+		// Create the namespace if it doesn't exist
+		ns := &v1.Namespace{
+			ObjectMeta: metav1.ObjectMeta{
+				Name: namespace,
+			},
+		}
+		_, err = p.clientSet.CoreV1().Namespaces().Create(ctx, ns, metav1.CreateOptions{})
+		if err != nil {
+			return nil, nil, fmt.Errorf("failed to create wstunnel namespace %s: %w", namespace, err)
+		}
+		log.G(ctx).Infof("Created wstunnel namespace %s", namespace)
+	}
+
 	// Generate template data
 	templateData := WstunnelTemplateData{
-		Name:           originalPod.Name + "-wstunnel",
-		Namespace:      originalPod.Namespace,
+		Name:           originalPod.Name + "-" + originalPod.Namespace,
+		Namespace:      namespace,
 		RandomPassword: generateRandomPassword(),
 		ExposedPorts:   extractPortMappings(originalPod),
 		WildcardDNS:    p.config.Network.WildcardDNS,
@@ -723,6 +753,7 @@ func (p *Provider) applyWstunnelManifests(ctx context.Context, manifestYAML stri
 	decoder := serializer.NewCodecFactory(scheme.Scheme).UniversalDeserializer()
 	var deploymentName string
 	var namespace string
+	var createdResources []string // Track what we've created for cleanup
 
 	for _, resource := range resources {
 		resource = strings.TrimSpace(resource)
@@ -742,25 +773,95 @@ func (p *Provider) applyWstunnelManifests(ctx context.Context, manifestYAML stri
 		case *appsv1.Deployment:
 			deployment, err := p.clientSet.AppsV1().Deployments(o.Namespace).Create(ctx, o, metav1.CreateOptions{})
 			if err != nil {
-				return nil, fmt.Errorf("failed to create deployment: %w", err)
+				if apierrors.IsAlreadyExists(err) {
+					// Update existing deployment
+					log.G(ctx).Infof("Deployment %s/%s already exists, updating", o.Namespace, o.Name)
+					existing, getErr := p.clientSet.AppsV1().Deployments(o.Namespace).Get(ctx, o.Name, metav1.GetOptions{})
+					if getErr != nil {
+						p.cleanupPartialWstunnelResources(ctx, createdResources, o.Namespace)
+						return nil, fmt.Errorf("failed to get existing deployment: %w", getErr)
+					}
+					// Preserve metadata but update spec
+					o.ResourceVersion = existing.ResourceVersion
+					o.UID = existing.UID
+					deployment, err = p.clientSet.AppsV1().Deployments(o.Namespace).Update(ctx, o, metav1.UpdateOptions{})
+					if err != nil {
+						p.cleanupPartialWstunnelResources(ctx, createdResources, o.Namespace)
+						return nil, fmt.Errorf("failed to update existing deployment: %w", err)
+					}
+					log.G(ctx).Infof("Updated deployment %s/%s", deployment.Namespace, deployment.Name)
+				} else {
+					// Clean up any resources we've already created
+					p.cleanupPartialWstunnelResources(ctx, createdResources, o.Namespace)
+					return nil, fmt.Errorf("failed to create deployment: %w", err)
+				}
+			} else {
+				log.G(ctx).Infof("Created deployment %s/%s", deployment.Namespace, deployment.Name)
 			}
 			deploymentName = deployment.Name
 			namespace = deployment.Namespace
-			log.G(ctx).Infof("Created deployment %s/%s", deployment.Namespace, deployment.Name)
+			createdResources = append(createdResources, "deployment:"+deployment.Name)
 
 		case *v1.Service:
 			service, err := p.clientSet.CoreV1().Services(o.Namespace).Create(ctx, o, metav1.CreateOptions{})
 			if err != nil {
-				return nil, fmt.Errorf("failed to create service: %w", err)
+				if apierrors.IsAlreadyExists(err) {
+					// Update existing service
+					log.G(ctx).Infof("Service %s/%s already exists, updating", o.Namespace, o.Name)
+					existing, getErr := p.clientSet.CoreV1().Services(o.Namespace).Get(ctx, o.Name, metav1.GetOptions{})
+					if getErr != nil {
+						p.cleanupPartialWstunnelResources(ctx, createdResources, o.Namespace)
+						return nil, fmt.Errorf("failed to get existing service: %w", getErr)
+					}
+					// Preserve metadata but update spec
+					o.ResourceVersion = existing.ResourceVersion
+					o.UID = existing.UID
+					o.Spec.ClusterIP = existing.Spec.ClusterIP // Preserve ClusterIP
+					service, err = p.clientSet.CoreV1().Services(o.Namespace).Update(ctx, o, metav1.UpdateOptions{})
+					if err != nil {
+						p.cleanupPartialWstunnelResources(ctx, createdResources, o.Namespace)
+						return nil, fmt.Errorf("failed to update existing service: %w", err)
+					}
+					log.G(ctx).Infof("Updated service %s/%s", service.Namespace, service.Name)
+				} else {
+					// Clean up any resources we've already created
+					p.cleanupPartialWstunnelResources(ctx, createdResources, o.Namespace)
+					return nil, fmt.Errorf("failed to create service: %w", err)
+				}
+			} else {
+				log.G(ctx).Infof("Created service %s/%s", service.Namespace, service.Name)
 			}
-			log.G(ctx).Infof("Created service %s/%s", service.Namespace, service.Name)
+			createdResources = append(createdResources, "service:"+service.Name)
 
 		case *networkingv1.Ingress:
 			ingress, err := p.clientSet.NetworkingV1().Ingresses(o.Namespace).Create(ctx, o, metav1.CreateOptions{})
 			if err != nil {
-				return nil, fmt.Errorf("failed to create ingress: %w", err)
+				if apierrors.IsAlreadyExists(err) {
+					// Update existing ingress
+					log.G(ctx).Infof("Ingress %s/%s already exists, updating", o.Namespace, o.Name)
+					existing, getErr := p.clientSet.NetworkingV1().Ingresses(o.Namespace).Get(ctx, o.Name, metav1.GetOptions{})
+					if getErr != nil {
+						p.cleanupPartialWstunnelResources(ctx, createdResources, o.Namespace)
+						return nil, fmt.Errorf("failed to get existing ingress: %w", getErr)
+					}
+					// Preserve metadata but update spec
+					o.ResourceVersion = existing.ResourceVersion
+					o.UID = existing.UID
+					ingress, err = p.clientSet.NetworkingV1().Ingresses(o.Namespace).Update(ctx, o, metav1.UpdateOptions{})
+					if err != nil {
+						p.cleanupPartialWstunnelResources(ctx, createdResources, o.Namespace)
+						return nil, fmt.Errorf("failed to update existing ingress: %w", err)
+					}
+					log.G(ctx).Infof("Updated ingress %s/%s", ingress.Namespace, ingress.Name)
+				} else {
+					// Clean up any resources we've already created
+					p.cleanupPartialWstunnelResources(ctx, createdResources, o.Namespace)
+					return nil, fmt.Errorf("failed to create ingress: %w", err)
+				}
+			} else {
+				log.G(ctx).Infof("Created ingress %s/%s", ingress.Namespace, ingress.Name)
 			}
-			log.G(ctx).Infof("Created ingress %s/%s", ingress.Namespace, ingress.Name)
+			createdResources = append(createdResources, "ingress:"+ingress.Name)
 
 		default:
 			log.G(ctx).Warningf("Unsupported resource type: %T", obj)
@@ -829,44 +930,183 @@ func (p *Provider) cleanupWstunnelResources(ctx context.Context, wstunnelName, n
 	}
 }
 
+// cleanupPartialWstunnelResources removes specific resources that were created before a failure
+func (p *Provider) cleanupPartialWstunnelResources(ctx context.Context, createdResources []string, namespace string) {
+	log.G(ctx).Infof("Cleaning up partial wstunnel resources in namespace %s", namespace)
+
+	for _, resource := range createdResources {
+		parts := strings.Split(resource, ":")
+		if len(parts) != 2 {
+			continue
+		}
+
+		resourceType := parts[0]
+		resourceName := parts[1]
+
+		switch resourceType {
+		case "deployment":
+			err := p.clientSet.AppsV1().Deployments(namespace).Delete(ctx, resourceName, metav1.DeleteOptions{})
+			if err != nil {
+				log.G(ctx).Warningf("Failed to delete partial deployment %s/%s: %v", namespace, resourceName, err)
+			} else {
+				log.G(ctx).Infof("Successfully deleted partial deployment %s/%s", namespace, resourceName)
+			}
+		case "service":
+			err := p.clientSet.CoreV1().Services(namespace).Delete(ctx, resourceName, metav1.DeleteOptions{})
+			if err != nil {
+				log.G(ctx).Warningf("Failed to delete partial service %s/%s: %v", namespace, resourceName, err)
+			} else {
+				log.G(ctx).Infof("Successfully deleted partial service %s/%s", namespace, resourceName)
+			}
+		case "ingress":
+			err := p.clientSet.NetworkingV1().Ingresses(namespace).Delete(ctx, resourceName, metav1.DeleteOptions{})
+			if err != nil {
+				log.G(ctx).Warningf("Failed to delete partial ingress %s/%s: %v", namespace, resourceName, err)
+			} else {
+				log.G(ctx).Infof("Successfully deleted partial ingress %s/%s", namespace, resourceName)
+			}
+		}
+	}
+}
+
 // extractPortMappings extracts port mappings for the template
 func extractPortMappings(pod *v1.Pod) []PortMapping {
-	var portMappings []PortMapping
+	// Use a map to track unique port/protocol combinations and avoid duplicates
+	portMap := make(map[string]PortMapping)
+
+	// Extract ports from container specs
 	for _, container := range pod.Spec.Containers {
 		for _, port := range container.Ports {
-			portMappings = append(portMappings, PortMapping{
-				Port:       port.ContainerPort,
-				TargetPort: port.ContainerPort,
-				Name:       port.Name,
-				Protocol:   string(port.Protocol),
-			})
+			protocol := string(port.Protocol)
+			if protocol == "" {
+				protocol = DefaultProtocol
+			}
+
+			// Create unique key for port/protocol combination
+			key := fmt.Sprintf("%d-%s", port.ContainerPort, protocol)
+
+			// Only add if not already present (first occurrence wins)
+			if _, exists := portMap[key]; !exists {
+				portMap[key] = PortMapping{
+					Port:     port.ContainerPort,
+					Name:     port.Name,
+					Protocol: protocol,
+				}
+			}
 		}
 	}
 	for _, container := range pod.Spec.InitContainers {
 		for _, port := range container.Ports {
-			portMappings = append(portMappings, PortMapping{
-				Port:       port.ContainerPort,
-				TargetPort: port.ContainerPort,
-				Name:       port.Name,
-				Protocol:   string(port.Protocol),
-			})
+			protocol := string(port.Protocol)
+			if protocol == "" {
+				protocol = DefaultProtocol
+			}
+
+			// Create unique key for port/protocol combination
+			key := fmt.Sprintf("%d-%s", port.ContainerPort, protocol)
+
+			// Only add if not already present (first occurrence wins)
+			if _, exists := portMap[key]; !exists {
+				portMap[key] = PortMapping{
+					Port:     port.ContainerPort,
+					Name:     port.Name,
+					Protocol: protocol,
+				}
+			}
 		}
 	}
+
+	// Extract additional ports from annotation
+	if extraPorts, exists := pod.Annotations["interlink.eu/wstunnel-extra-ports"]; exists {
+		additionalPorts := parseExtraPortsAnnotation(extraPorts)
+		for _, port := range additionalPorts {
+			// Create unique key for port/protocol combination
+			key := fmt.Sprintf("%d-%s", port.Port, port.Protocol)
+
+			// Only add if not already present (container specs take precedence)
+			if _, exists := portMap[key]; !exists {
+				portMap[key] = port
+			}
+		}
+	}
+
+	// Convert map back to slice
+	var portMappings []PortMapping
+	for _, portMapping := range portMap {
+		portMappings = append(portMappings, portMapping)
+	}
+
 	return portMappings
+}
+
+// parseExtraPortsAnnotation parses additional ports from comma-separated annotation
+func parseExtraPortsAnnotation(annotation string) []PortMapping {
+	var portMappings []PortMapping
+
+	// Parse comma-separated format: "8080,9090:metrics:UDP,3000:api"
+	ports := strings.Split(annotation, ",")
+	for _, portStr := range ports {
+		portStr = strings.TrimSpace(portStr)
+		if portStr == "" {
+			continue
+		}
+
+		// Parse format: "port:name:protocol" or "port:name" or "port"
+		parts := strings.Split(portStr, ":")
+		if len(parts) == 0 {
+			continue
+		}
+
+		port, err := strconv.ParseInt(parts[0], 10, 32)
+		if err != nil {
+			continue
+		}
+
+		name := ""
+		if len(parts) > 1 {
+			name = parts[1]
+		}
+
+		protocol := DefaultProtocol
+		if len(parts) > 2 {
+			protocol = strings.ToUpper(parts[2])
+		}
+
+		portMappings = append(portMappings, PortMapping{
+			Port:     int32(port),
+			Name:     name,
+			Protocol: protocol,
+		})
+	}
+
+	return portMappings
+}
+
+// hasExtraPortsAnnotation checks if pod has extra ports annotation
+func hasExtraPortsAnnotation(pod *v1.Pod) bool {
+	if pod.Annotations == nil {
+		return false
+	}
+	extraPorts, exists := pod.Annotations["interlink.eu/wstunnel-extra-ports"]
+	return exists && strings.TrimSpace(extraPorts) != ""
 }
 
 // shouldCreateWstunnel checks if wstunnel infrastructure should be created
 func (p *Provider) shouldCreateWstunnel(pod *v1.Pod) bool {
-	return p.config.Network.EnableTunnel && hasExposedPorts(pod) &&
+	return p.config.Network.EnableTunnel && (hasExposedPorts(pod) || hasExtraPortsAnnotation(pod)) &&
 		pod.Annotations["interlink.eu/pod-vpn"] == ""
 }
 
 // handleWstunnelCreation creates wstunnel infrastructure and returns the pod IP
 func (p *Provider) handleWstunnelCreation(ctx context.Context, pod *v1.Pod) (string, error) {
+	wstunnelName := pod.Name + "-wstunnel"
+
 	// Create wstunnel infrastructure outside virtual node for port exposure
 	dummyPod, templateData, err := p.createDummyPod(ctx, pod)
 	if err != nil {
 		log.G(ctx).Errorf("Failed to create wstunnel infrastructure for %s/%s: %v", pod.Namespace, pod.Name, err)
+		// Clean up any partially created resources
+		p.cleanupWstunnelResources(ctx, wstunnelName, pod.Namespace)
 		return "", fmt.Errorf("failed to create wstunnel infrastructure for exposed ports: %w", err)
 	}
 
@@ -878,14 +1118,19 @@ func (p *Provider) handleWstunnelCreation(ctx context.Context, pod *v1.Pod) (str
 		}
 	}
 
-	podIP, err := p.waitForWstunnelPodIP(ctx, dummyPod, timeout, pod.Name+"-wstunnel", pod.Namespace)
+	podIP, err := p.waitForWstunnelPodIP(ctx, dummyPod, timeout, wstunnelName, pod.Namespace)
 	if err != nil {
+		log.G(ctx).Errorf("Failed to get wstunnel pod IP for %s/%s: %v", pod.Namespace, pod.Name, err)
+		// Clean up resources since we failed to get a working pod
+		p.cleanupWstunnelResources(ctx, wstunnelName, pod.Namespace)
 		return "", err
 	}
 
 	// Add wstunnel client command annotation to the original pod
 	if err := p.addWstunnelClientAnnotation(ctx, pod, templateData); err != nil {
 		log.G(ctx).Warningf("Failed to add wstunnel client annotation to pod %s/%s: %v", pod.Namespace, pod.Name, err)
+		// Note: We don't clean up here since the wstunnel infrastructure is working,
+		// just the annotation failed (non-critical)
 	}
 
 	return podIP, nil
@@ -898,7 +1143,7 @@ func (p *Provider) addWstunnelClientAnnotation(ctx context.Context, pod *v1.Pod,
 	}
 
 	// Generate the ingress endpoint
-	ingressEndpoint := fmt.Sprintf("%s.%s", templateData.Name, templateData.WildcardDNS)
+	ingressEndpoint := fmt.Sprintf("%s-%s.%s", templateData.Name, templateData.Namespace, templateData.WildcardDNS)
 	if templateData.WildcardDNS == "" {
 		ingressEndpoint = templateData.Name
 	}
@@ -906,11 +1151,17 @@ func (p *Provider) addWstunnelClientAnnotation(ctx context.Context, pod *v1.Pod,
 	// Generate -R options for each exposed port
 	var rOptions []string
 	for _, port := range templateData.ExposedPorts {
-		rOptions = append(rOptions, fmt.Sprintf("-R tcp://[::]:%d:localhost:%d", port.Port, port.Port))
+		rOptions = append(rOptions, fmt.Sprintf("-R tcp://[::]:%d:0.0.0.0:%d", port.Port, port.Port))
+	}
+
+	// Get the wstunnel command template from config, or use default
+	wstunnelCommandTemplate := p.config.Network.WstunnelCommand
+	if wstunnelCommandTemplate == "" {
+		wstunnelCommandTemplate = DefaultWstunnelCommand
 	}
 
 	// Create single command with all -R options
-	command := fmt.Sprintf("curl -L https://github.com/erebe/wstunnel/releases/latest/download/wstunnel-linux-x64 -o wstunnel && chmod +x wstunnel\n\n./wstunnel client --http-upgrade-path-prefix %s %s ws://%s:80",
+	command := fmt.Sprintf(wstunnelCommandTemplate,
 		templateData.RandomPassword,
 		strings.Join(rOptions, " "),
 		ingressEndpoint,
@@ -1142,8 +1393,8 @@ func (p *Provider) DeletePod(ctx context.Context, pod *v1.Pod) (err error) {
 	// Clean up wstunnel resources if tunnel is enabled and they exist and no VPN annotation
 	if p.config.Network.EnableTunnel && hasExposedPorts(pod) {
 		if _, hasVPN := pod.Annotations["interlink.eu/pod-vpn"]; !hasVPN {
-			wstunnelName := pod.Name + "-wstunnel"
-			p.cleanupWstunnelResources(ctx, wstunnelName, pod.Namespace)
+			wstunnelName := pod.Name + "-" + pod.Namespace
+			p.cleanupWstunnelResources(ctx, wstunnelName, pod.Namespace+"-wstunnel")
 		}
 	}
 

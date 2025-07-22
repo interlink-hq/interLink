@@ -42,6 +42,7 @@ Network:
   EnableTunnel: true                                    # Enable wstunnel feature
   WildcardDNS: "tunnel.example.com"                    # DNS domain for ingress
   WstunnelTemplatePath: "/etc/templates/custom.yaml"   # Optional: custom template path
+  WstunnelCommand: "custom-wstunnel-command"           # Optional: custom wstunnel client command
 
 # Other configuration...
 Resources:
@@ -57,6 +58,7 @@ Resources:
 | `EnableTunnel` | `bool` | No | `false` | Enable/disable wstunnel feature |
 | `WildcardDNS` | `string` | Yes* | `""` | DNS domain for ingress hostnames |
 | `WstunnelTemplatePath` | `string` | No | `""` | Path to custom wstunnel template |
+| `WstunnelCommand` | `string` | No | `DefaultWstunnelCommand` | Custom wstunnel client command template |
 
 *Required when `EnableTunnel` is `true`
 
@@ -325,6 +327,40 @@ spec:
   restartPolicy: Never
 ```
 
+### Adding Extra Ports
+
+You can specify additional ports to forward beyond those defined in the pod specification using the `interlink.eu/wstunnel-extra-ports` annotation:
+
+```yaml
+apiVersion: v1
+kind: Pod
+metadata:
+  name: web-server
+  namespace: default
+  annotations:
+    interlink.eu/wstunnel-extra-ports: "8080,9090:metrics:UDP,3000:api"
+spec:
+  containers:
+  - name: nginx
+    image: nginx:latest
+    ports:
+    - containerPort: 80
+      name: http
+  restartPolicy: Never
+```
+
+**Extra Ports Format:**
+- **Simple port**: `8080` - Forward port 8080 with TCP protocol
+- **Named port**: `9090:metrics` - Forward port 9090 with name "metrics" and TCP protocol  
+- **Full specification**: `3000:api:UDP` - Forward port 3000 with name "api" and UDP protocol
+- **Multiple ports**: `8080,9090:metrics:UDP,3000:api` - Comma-separated list
+
+This is useful for:
+- Internal services not exposed in container specs
+- Debug ports (e.g., pprof, metrics endpoints)
+- Dynamic port allocation scenarios
+- Services running on non-standard ports
+
 ---
 
 ## DNS Configuration
@@ -399,6 +435,60 @@ When a pod exposes multiple ports, all ports are included in a single command wi
   ws://ws-my-pod-wstunnel.tunnel.example.com:80
 ```
 
+### Custom Client Command
+
+You can customize the wstunnel client command that gets generated in the pod annotations by setting the `WstunnelCommand` configuration option.
+
+#### Default Command Template
+
+The default command template is:
+```bash
+curl -L https://github.com/erebe/wstunnel/releases/download/v10.4.4/wstunnel_10.4.4_linux_amd64.tar.gz -o wstunnel.tar.gz && tar -xzvf wstunnel.tar.gz && chmod +x wstunnel\n\n./wstunnel client --http-upgrade-path-prefix %s %s ws://%s:80
+```
+
+#### Custom Command Configuration
+
+```yaml
+# VirtualKubeletConfig.yaml
+Network:
+  EnableTunnel: true
+  WildcardDNS: "tunnel.example.com"
+  WstunnelCommand: "wget https://example.com/wstunnel -O wstunnel && chmod +x wstunnel && ./wstunnel client --http-upgrade-path-prefix %s %s ws://%s:80"
+```
+
+#### Command Template Parameters
+
+The command template must include three `%s` placeholders in this order:
+1. **Random Password**: Unique authentication token for the tunnel
+2. **Port Options**: Space-separated `-R` options for each exposed port
+3. **Ingress Endpoint**: The websocket endpoint hostname
+
+#### Example Custom Commands
+
+**Using different wstunnel versions:**
+```yaml
+WstunnelCommand: "curl -L https://github.com/erebe/wstunnel/releases/download/v10.1.0/wstunnel_10.1.0_linux_amd64.tar.gz -o wstunnel.tar.gz && tar -xzvf wstunnel.tar.gz && chmod +x wstunnel && ./wstunnel client --http-upgrade-path-prefix %s %s ws://%s:80"
+```
+
+**Using pre-installed wstunnel:**
+```yaml
+WstunnelCommand: "wstunnel client --http-upgrade-path-prefix %s %s ws://%s:80"
+```
+
+**Using different download methods:**
+```yaml
+WstunnelCommand: "wget https://github.com/erebe/wstunnel/releases/download/v10.4.4/wstunnel_10.4.4_linux_amd64.tar.gz && tar -xzvf wstunnel_10.4.4_linux_amd64.tar.gz && chmod +x wstunnel && ./wstunnel client --http-upgrade-path-prefix %s %s ws://%s:80"
+```
+
+**Using custom binary location:**
+```yaml
+WstunnelCommand: "curl -L https://github.com/erebe/wstunnel/releases/download/v10.4.4/wstunnel_10.4.4_linux_amd64.tar.gz -o wstunnel.tar.gz && tar -xzvf wstunnel.tar.gz && chmod +x wstunnel && /usr/local/bin/wstunnel client --http-upgrade-path-prefix %s %s ws://%s:80"
+```
+
+:::warning
+The custom command template must be properly formatted with exactly three `%s` placeholders. Incorrect formatting will result in malformed client commands in the pod annotations.
+:::
+
 ---
 
 ## Security Considerations
@@ -470,6 +560,16 @@ kubectl logs -l app.kubernetes.io/component=my-pod-wstunnel
    kubectl logs -l nodeName=virtual-kubelet | grep -i template
    ```
 
+5. **Custom command issues**
+   ```bash
+   # Check if custom WstunnelCommand is properly formatted
+   kubectl get pod my-pod -o jsonpath='{.metadata.annotations.interlink\.eu/wstunnel-client-commands}'
+   
+   # Verify the command has exactly three %s placeholders
+   # Check virtual kubelet logs for command formatting errors
+   kubectl logs -l nodeName=virtual-kubelet | grep -i wstunnel
+   ```
+
 ### Debug Commands
 
 ```bash
@@ -497,6 +597,8 @@ kubectl get endpoints my-pod-wstunnel
 - Set appropriate `WildcardDNS` that you control
 - Use custom templates for specific requirements
 - Configure reasonable timeout values based on your infrastructure
+- When using custom `WstunnelCommand`, ensure it includes exactly three `%s` placeholders
+- Test custom commands thoroughly before deploying to production
 
 ### Security
 
