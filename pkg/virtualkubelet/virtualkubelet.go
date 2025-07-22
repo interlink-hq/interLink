@@ -1151,7 +1151,7 @@ func (p *Provider) addWstunnelClientAnnotation(ctx context.Context, pod *v1.Pod,
 	// Generate -R options for each exposed port
 	var rOptions []string
 	for _, port := range templateData.ExposedPorts {
-		rOptions = append(rOptions, fmt.Sprintf("-R tcp://[::]:%d:localhost:%d", port.Port, port.Port))
+		rOptions = append(rOptions, fmt.Sprintf("-R tcp://[::]:%d:0.0.0.0:%d", port.Port, port.Port))
 	}
 
 	// Get the wstunnel command template from config, or use default
