@@ -437,13 +437,14 @@ func main() {
 	defer close(stopper)
 
 	podControllerConfig := node.PodControllerConfig{
-		PodClient:         localClient.CoreV1(),
-		EventRecorder:     EventRecorder,
-		Provider:          nodeProvider,
-		PodInformer:       podInformerFactory.Core().V1().Pods(),
-		SecretInformer:    scmInformerFactory.Core().V1().Secrets(),
-		ConfigMapInformer: scmInformerFactory.Core().V1().ConfigMaps(),
-		ServiceInformer:   scmInformerFactory.Core().V1().Services(),
+		PodClient:                 localClient.CoreV1(),
+		EventRecorder:             EventRecorder,
+		Provider:                  nodeProvider,
+		PodInformer:               podInformerFactory.Core().V1().Pods(),
+		SecretInformer:            scmInformerFactory.Core().V1().Secrets(),
+		ConfigMapInformer:         scmInformerFactory.Core().V1().ConfigMaps(),
+		ServiceInformer:           scmInformerFactory.Core().V1().Services(),
+		SkipDownwardAPIResolution: interLinkConfig.SkipDownwardAPIResolution,
 	}
 
 	// // DEBUG

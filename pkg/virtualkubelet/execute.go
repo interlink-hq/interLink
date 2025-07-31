@@ -784,6 +784,41 @@ func remoteExecutionHandleVolumes(ctx context.Context, p *Provider, pod *v1.Pod,
 	return nil
 }
 
+func resolveEnvRefs(
+	ctx context.Context,
+	p *Provider,
+	pod *v1.Pod,
+	container *v1.Container,
+) {
+	for i, env := range container.Env {
+		if env.ValueFrom == nil {
+			continue
+		}
+
+		if env.ValueFrom.FieldRef != nil && env.ValueFrom.FieldRef.FieldPath == "status.podIP" {
+			container.Env[i].Value = pod.Status.PodIP
+			container.Env[i].ValueFrom = nil
+			continue
+		}
+
+		if ref := env.ValueFrom.SecretKeyRef; ref != nil {
+			secret, err := p.clientSet.CoreV1().
+				Secrets(pod.Namespace).
+				Get(ctx, ref.Name, metav1.GetOptions{})
+			if err != nil {
+				log.G(ctx).Errorf("resolving secret %s/%s: %v", pod.Namespace, ref.Name, err)
+				continue
+			}
+			if data, ok := secret.Data[ref.Key]; ok {
+				container.Env[i].Value = string(data)
+				container.Env[i].ValueFrom = nil
+			} else {
+				log.G(ctx).Errorf("secret %s missing key %q", ref.Name, ref.Key)
+			}
+		}
+	}
+}
+
 // RemoteExecution is called by the VK everytime a Pod is being registered or deleted to/from the VK.
 // Depending on the mode (CREATE/DELETE), it performs different actions, making different REST calls.
 // Note: for the CREATE mode, the function gets stuck up to 5 minutes waiting for every missing ConfigMap/Secret.
@@ -812,6 +847,13 @@ func RemoteExecution(ctx context.Context, config Config, p *Provider, pod *v1.Po
 
 		// Adds special Kubernetes env var. Note: the pod provided by VK is "immutable", well it is a copy. In InterLink, we can modify it.
 		addKubernetesServicesEnvVars(ctx, config, pod)
+
+		for i := range pod.Spec.InitContainers {
+			resolveEnvRefs(ctx, p, pod, &pod.Spec.InitContainers[i])
+		}
+		for i := range pod.Spec.Containers {
+			resolveEnvRefs(ctx, p, pod, &pod.Spec.Containers[i])
+		}
 
 		// For debugging purpose only.
 		for _, container := range pod.Spec.InitContainers {
