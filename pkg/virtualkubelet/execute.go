@@ -945,11 +945,14 @@ func RemoteExecution(ctx context.Context, config Config, p *Provider, pod *v1.Po
 		// Adds special Kubernetes env var. Note: the pod provided by VK is "immutable", well it is a copy. In InterLink, we can modify it.
 		addKubernetesServicesEnvVars(ctx, config, pod)
 
-		for i := range pod.Spec.InitContainers {
-			resolveEnvRefs(ctx, p, pod, &pod.Spec.InitContainers[i])
-		}
-		for i := range pod.Spec.Containers {
-			resolveEnvRefs(ctx, p, pod, &pod.Spec.Containers[i])
+		if config.SkipDownwardAPIResolution == true {
+			log.G(ctx).Info("SkipDownwardAPIResolution is set to true")
+			for i := range pod.Spec.InitContainers {
+				resolveEnvRefs(ctx, p, pod, &pod.Spec.InitContainers[i])
+			}
+			for i := range pod.Spec.Containers {
+				resolveEnvRefs(ctx, p, pod, &pod.Spec.Containers[i])
+			}
 		}
 
 		// For debugging purpose only.
