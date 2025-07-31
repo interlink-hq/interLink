@@ -349,11 +349,6 @@ func setupInformers(ctx context.Context, localClient *kubernetes.Clientset, node
 	go podInformerFactory.Start(stopper)
 	go scmInformerFactory.Start(stopper)
 
-	// start to sync and call list
-	if !cache.WaitForCacheSync(stopper, podInformerFactory.Core().V1().Pods().Informer().HasSynced) {
-		log.G(ctx).Fatal(fmt.Errorf("timed out waiting for caches to sync"))
-	}
-
 	return podInformerFactory, scmInformerFactory, stopper
 }
 
@@ -435,6 +430,19 @@ func main() {
 
 	podInformerFactory, scmInformerFactory, stopper := setupInformers(ctx, localClient, cfg.NodeName)
 	defer close(stopper)
+
+	podInformer := podInformerFactory.Core().V1().Pods().Informer()
+	secretInformer := scmInformerFactory.Core().V1().Secrets().Informer()
+	cfgInformer := scmInformerFactory.Core().V1().ConfigMaps().Informer()
+
+	go podInformer.Run(stopper)
+	go secretInformer.Run(stopper)
+	go cfgInformer.Run(stopper)
+
+	// start to sync and call list
+	if !cache.WaitForCacheSync(stopper, podInformerFactory.Core().V1().Pods().Informer().HasSynced) {
+		log.G(ctx).Fatal(fmt.Errorf("timed out waiting for caches to sync"))
+	}
 
 	podControllerConfig := node.PodControllerConfig{
 		PodClient:         localClient.CoreV1(),
