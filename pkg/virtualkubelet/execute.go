@@ -830,7 +830,12 @@ func resolveEnvRefs(
 			if resolved == "" {
 				log.G(ctx).Warnf("FieldRef %q resolved to empty string for pod %s/%s", fr.FieldPath, pod.Namespace, pod.Name)
 			} else {
-				log.G(ctx).Debugf("Resolved FieldRef %q => %q for env %s in pod %s/%s", fr.FieldPath, resolved, env.Name, pod.Namespace, pod.Name)
+				// Avoid logging potentially sensitive annotation values
+				if matches := annotationFieldRefRE.FindStringSubmatch(fr.FieldPath); len(matches) == 2 {
+					log.G(ctx).Debugf("Resolved FieldRef %q for env %s in pod %s/%s (value omitted for security)", fr.FieldPath, env.Name, pod.Namespace, pod.Name)
+				} else {
+					log.G(ctx).Debugf("Resolved FieldRef %q => %q for env %s in pod %s/%s", fr.FieldPath, resolved, env.Name, pod.Namespace, pod.Name)
+				}
 			}
 
 			container.Env[i].Value = resolved
