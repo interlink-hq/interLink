@@ -2,28 +2,29 @@ package virtualkubelet
 
 // Config holds the whole configuration
 type Config struct {
-	InterlinkURL            string      `yaml:"InterlinkURL"`
-	InterlinkPort           string      `yaml:"InterlinkPort"`
-	KubernetesAPIAddr       string      `yaml:"KubernetesApiAddr"`
-	KubernetesAPIPort       string      `yaml:"KubernetesApiPort"`
-	KubernetesAPICaCrt      string      `yaml:"KubernetesApiCaCrt"`
-	DisableProjectedVolumes bool        `yaml:"DisableProjectedVolumes"`
-	JobScriptBuilderURL     string      `yaml:"JobScriptBuilderURL,omitempty"`
-	VKConfigPath            string      `yaml:"VKConfigPath"`
-	VKTokenFile             string      `yaml:"VKTokenFile"`
-	ServiceAccount          string      `yaml:"ServiceAccount"`
-	Namespace               string      `yaml:"Namespace"`
-	PodIP                   string      `yaml:"PodIP"`
-	PodCIDR                 PodCIDR     `yaml:"PodCIDR"`
-	VerboseLogging          bool        `yaml:"VerboseLogging"`
-	ErrorsOnlyLogging       bool        `yaml:"ErrorsOnlyLogging"`
-	HTTP                    HTTP        `yaml:"HTTP"`
-	KubeletHTTP             HTTP        `yaml:"KubeletHTTP"`
-	Resources               Resources   `yaml:"Resources"`
-	NodeLabels              []string    `yaml:"NodeLabels"`
-	NodeTaints              []TaintSpec `yaml:"NodeTaints"`
-	TLS                     TLSConfig   `yaml:"TLS,omitempty"`
-	Network                 Network     `yaml:"Network,omitempty"`
+	InterlinkURL              string      `yaml:"InterlinkURL"`
+	InterlinkPort             string      `yaml:"InterlinkPort"`
+	KubernetesAPIAddr         string      `yaml:"KubernetesApiAddr"`
+	KubernetesAPIPort         string      `yaml:"KubernetesApiPort"`
+	KubernetesAPICaCrt        string      `yaml:"KubernetesApiCaCrt"`
+	DisableProjectedVolumes   bool        `yaml:"DisableProjectedVolumes"`
+	JobScriptBuilderURL       string      `yaml:"JobScriptBuilderURL,omitempty"`
+	VKConfigPath              string      `yaml:"VKConfigPath"`
+	VKTokenFile               string      `yaml:"VKTokenFile"`
+	ServiceAccount            string      `yaml:"ServiceAccount"`
+	Namespace                 string      `yaml:"Namespace"`
+	PodIP                     string      `yaml:"PodIP"`
+	PodCIDR                   PodCIDR     `yaml:"PodCIDR"`
+	VerboseLogging            bool        `yaml:"VerboseLogging"`
+	ErrorsOnlyLogging         bool        `yaml:"ErrorsOnlyLogging"`
+	HTTP                      HTTP        `yaml:"HTTP"`
+	KubeletHTTP               HTTP        `yaml:"KubeletHTTP"`
+	Resources                 Resources   `yaml:"Resources"`
+	NodeLabels                []string    `yaml:"NodeLabels"`
+	NodeTaints                []TaintSpec `yaml:"NodeTaints"`
+	TLS                       TLSConfig   `yaml:"TLS,omitempty"`
+	Network                   Network     `yaml:"Network,omitempty"`
+	SkipDownwardAPIResolution bool        `yaml:"SkipDownwardAPIResolution,omitempty"`
 }
 
 // TLSConfig holds TLS/mTLS configuration for secure communication with interLink API
