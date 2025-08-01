@@ -17,7 +17,19 @@ import (
 	trace "go.opentelemetry.io/otel/trace"
 )
 
-// DeleteHandler deletes the cached status for the provided Pod and forwards the request to the sidecar
+// DeleteHandler handles HTTP DELETE requests to remove pods from remote systems.
+// This endpoint processes pod deletion requests from the Virtual Kubelet by:
+//   1. Removing the pod from the local status cache
+//   2. Forwarding the deletion request to the sidecar plugin
+//
+// The handler ensures cleanup of both local state and remote resources.
+//
+// Request body: JSON-encoded v1.Pod object
+// Response: Success or error status from the sidecar plugin
+//
+// HTTP Status Codes:
+//   - 200: Pod deletion request processed successfully
+//   - 500: Internal server error (sidecar communication failures, JSON unmarshalling errors)
 func (h *InterLinkHandler) DeleteHandler(w http.ResponseWriter, r *http.Request) {
 	start := time.Now().UnixMicro()
 	tracer := otel.Tracer("interlink-API")

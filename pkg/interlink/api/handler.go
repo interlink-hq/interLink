@@ -1,3 +1,6 @@
+// Package api provides HTTP handlers for the interLink API server.
+// These handlers implement the core REST API endpoints that the Virtual Kubelet
+// uses to communicate with interLink for pod lifecycle management.
 package api
 
 import (
@@ -16,33 +19,64 @@ import (
 	"github.com/interlink-hq/interlink/pkg/interlink"
 )
 
+// InterLinkHandler handles HTTP requests for the interLink API server.
+// It acts as a proxy between the Virtual Kubelet and sidecar plugins,
+// forwarding requests and managing pod lifecycle operations.
 type InterLinkHandler struct {
-	Config          interlink.Config
-	Ctx             context.Context
+	// Config holds the interLink configuration
+	Config interlink.Config
+	// Ctx is the context for request processing
+	Ctx context.Context
+	// SidecarEndpoint is the URL of the sidecar plugin
 	SidecarEndpoint string
-	ClientHTTP      *http.Client
-	// TODO: http client with TLS
+	// ClientHTTP is the HTTP client for communicating with the sidecar
+	ClientHTTP *http.Client
 }
 
+// AddSessionContext adds a session identifier to the HTTP request headers.
+// This enables end-to-end tracing of requests from Virtual Kubelet through
+// interLink API to the sidecar plugin.
 func AddSessionContext(req *http.Request, sessionContext string) {
 	req.Header.Set("InterLink-Http-Session", sessionContext)
 }
 
+// GetSessionContext retrieves or generates a session context identifier for request tracing.
+// If no session context exists in the request headers, a new UUID-based identifier is generated.
+// Returns the session context string for use in logging and tracing.
 func GetSessionContext(r *http.Request) string {
 	sessionContext := r.Header.Get("InterLink-Http-Session")
 	if sessionContext == "" {
+		// Generate a new session ID if none exists
 		id := uuid.New()
 		sessionContext = "Request-" + id.String()
 	}
 	return sessionContext
 }
 
+// GetSessionContextMessage formats a session context into a standardized log message prefix.
+// This ensures consistent logging format across all HTTP operations.
 func GetSessionContextMessage(sessionContext string) string {
 	return "HTTP InterLink session " + sessionContext + ": "
 }
 
-// respondWithReturn: if false, return nil. Useful when body is too big to be contained in one big string.
-// sessionNumber: integer number for debugging purpose, generated from InterLink VK, to follow HTTP request from end-to-end.
+// ReqWithError executes an HTTP request to a sidecar plugin and handles the response.
+// This function provides comprehensive error handling, request tracing, and response streaming.
+// It supports both buffered and streaming response modes for efficient handling of large responses.
+//
+// Parameters:
+//   - ctx: Request context for cancellation and tracing
+//   - req: HTTP request to execute
+//   - w: Response writer to stream results to the client
+//   - start: Start timestamp for performance measurement
+//   - span: OpenTelemetry span for distributed tracing
+//   - respondWithValues: If true, write response data to the ResponseWriter
+//   - respondWithReturn: If true, return response data as bytes (use false for large responses)
+//   - sessionContext: Session identifier for request tracing
+//   - clientHTTP: HTTP client to use for the request
+//
+// Returns:
+//   - []byte: Response body (only if respondWithReturn is true)
+//   - error: Any error encountered during request processing
 func ReqWithError(
 	ctx context.Context,
 	req *http.Request,

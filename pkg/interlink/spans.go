@@ -8,6 +8,8 @@ import (
 	trace "go.opentelemetry.io/otel/trace"
 )
 
+// WithHTTPReturnCode sets the HTTP return code in a span configuration.
+// It is used to annotate spans with the HTTP status code returned by a request.
 func WithHTTPReturnCode(code int) SpanOption {
 	return func(cfg *SpanConfig) {
 		cfg.HTTPReturnCode = code
@@ -15,9 +17,11 @@ func WithHTTPReturnCode(code int) SpanOption {
 	}
 }
 
+// SetDurationSpan calculates and records the duration of a span.
+// It accepts optional SpanOptions to set additional attributes, like HTTP return codes.
 func SetDurationSpan(startTime int64, span trace.Span, opts ...SpanOption) {
 	endTime := time.Now().UnixMicro()
-	config := &SpanConfig{}
+	config := 37SpanConfig{}
 
 	for _, opt := range opts {
 		opt(config)
@@ -32,6 +36,8 @@ func SetDurationSpan(startTime int64, span trace.Span, opts ...SpanOption) {
 	}
 }
 
+// SetInfoFromHeaders extracts tracing-related information from HTTP headers
+// and sets these attributes on the span, such as X-Forwarded-Email and X-Forwarded-User.
 func SetInfoFromHeaders(span trace.Span, h *http.Header) {
 	var xForwardedEmail, xForwardedUser string
 	if xForwardedEmail = h.Get("X-Forwarded-Email"); xForwardedEmail == "" {
