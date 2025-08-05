@@ -12,6 +12,7 @@ import (
 	"math/rand"
 	"net/http"
 	"os"
+	"regexp"
 	"strconv"
 	"strings"
 	"time"
@@ -22,6 +23,7 @@ import (
 	trace "go.opentelemetry.io/otel/trace"
 	authenticationv1 "k8s.io/api/authentication/v1"
 	v1 "k8s.io/api/core/v1"
+	"k8s.io/apimachinery/pkg/api/resource"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 
 	types "github.com/interlink-hq/interlink/pkg/interlink"
@@ -784,6 +786,126 @@ func remoteExecutionHandleVolumes(ctx context.Context, p *Provider, pod *v1.Pod,
 	return nil
 }
 
+func resolveEnvRefs(
+	ctx context.Context,
+	p *Provider,
+	pod *v1.Pod,
+	container *v1.Container,
+) {
+	var annotationFieldRefRE = regexp.MustCompile(`^metadata\.annotations\[['"]?(.+?)['"]?\]$`)
+
+	for i, env := range container.Env {
+		if env.ValueFrom == nil {
+			continue
+		}
+
+		if fr := env.ValueFrom.FieldRef; fr != nil {
+
+			var resolved string
+			switch fr.FieldPath {
+			case "status.podIP":
+				resolved = pod.Status.PodIP
+			case "metadata.name":
+				resolved = pod.Name
+			case "metadata.namespace":
+				resolved = pod.Namespace
+			case "metadata.uid":
+				resolved = string(pod.UID)
+
+			default:
+				if matches := annotationFieldRefRE.FindStringSubmatch(fr.FieldPath); len(matches) == 2 {
+					annKey := matches[1]
+					val, ok := pod.Annotations[annKey]
+					if !ok {
+						continue
+					}
+					resolved = val
+				}
+			}
+
+			container.Env[i].Value = resolved
+			container.Env[i].ValueFrom = nil
+			continue
+
+		}
+
+		if sk := env.ValueFrom.SecretKeyRef; sk != nil {
+			secret, err := p.clientSet.CoreV1().
+				Secrets(pod.Namespace).
+				Get(ctx, sk.Name, metav1.GetOptions{})
+			if err != nil {
+				log.G(ctx).Errorf("resolving Secret %s/%s: %v", pod.Namespace, sk.Name, err)
+				continue
+			}
+			if data, ok := secret.Data[sk.Key]; ok {
+				container.Env[i].Value = string(data)
+				container.Env[i].ValueFrom = nil
+			} else {
+				log.G(ctx).Errorf("secret %s missing key %q", sk.Name, sk.Key)
+			}
+			continue
+		}
+
+		if cmr := env.ValueFrom.ConfigMapKeyRef; cmr != nil {
+			cm, err := p.clientSet.CoreV1().
+				ConfigMaps(pod.Namespace).
+				Get(ctx, cmr.Name, metav1.GetOptions{})
+			if err != nil {
+				log.G(ctx).Errorf("resolving ConfigMap %s/%s: %v", pod.Namespace, cmr.Name, err)
+				continue
+			}
+			if data, ok := cm.Data[cmr.Key]; ok {
+				container.Env[i].Value = data
+				container.Env[i].ValueFrom = nil
+			} else {
+				log.G(ctx).Errorf("configmap %s missing key %q", cmr.Name, cmr.Key)
+			}
+			continue
+		}
+
+		if rfr := env.ValueFrom.ResourceFieldRef; rfr != nil {
+			targetName := rfr.ContainerName
+			if targetName == "" {
+				targetName = container.Name
+			}
+			var target *v1.Container
+			for idx := range pod.Spec.Containers {
+				if pod.Spec.Containers[idx].Name == targetName {
+					target = &pod.Spec.Containers[idx]
+					break
+				}
+			}
+			if target == nil {
+				log.G(ctx).Errorf("resourceFieldRef: container %q not found", targetName)
+				continue
+			}
+
+			parts := strings.Split(rfr.Resource, ".")
+			if len(parts) != 2 {
+				log.G(ctx).Errorf("unsupported ResourceFieldRef %q", rfr.Resource)
+				continue
+			}
+
+			var qty resource.Quantity
+			switch parts[0] {
+			case "requests":
+				qty = target.Resources.Requests[v1.ResourceName(parts[1])]
+			case "limits":
+				qty = target.Resources.Limits[v1.ResourceName(parts[1])]
+			default:
+				log.G(ctx).Errorf("unsupported ResourceFieldRef scope %q", parts[0])
+				continue
+			}
+
+			container.Env[i].Value = qty.String()
+			container.Env[i].ValueFrom = nil
+			continue
+		}
+
+		log.G(ctx).Warnf("env var %q has unhandled ValueFrom, skipping", env.Name)
+	}
+}
+
 // RemoteExecution is called by the VK everytime a Pod is being registered or deleted to/from the VK.
 // Depending on the mode (CREATE/DELETE), it performs different actions, making different REST calls.
 // Note: for the CREATE mode, the function gets stuck up to 5 minutes waiting for every missing ConfigMap/Secret.
@@ -812,6 +934,16 @@ func RemoteExecution(ctx context.Context, config Config, p *Provider, pod *v1.Po
 
 		// Adds special Kubernetes env var. Note: the pod provided by VK is "immutable", well it is a copy. In InterLink, we can modify it.
 		addKubernetesServicesEnvVars(ctx, config, pod)
+
+		if config.SkipDownwardAPIResolution {
+			log.G(ctx).Info("SkipDownwardAPIResolution is set to true")
+			for i := range pod.Spec.InitContainers {
+				resolveEnvRefs(ctx, p, pod, &pod.Spec.InitContainers[i])
+			}
+			for i := range pod.Spec.Containers {
+				resolveEnvRefs(ctx, p, pod, &pod.Spec.Containers[i])
+			}
+		}
 
 		// For debugging purpose only.
 		for _, container := range pod.Spec.InitContainers {
