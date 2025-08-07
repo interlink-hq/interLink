@@ -14,7 +14,7 @@
 // limitations under the License.
 
 // Package main implements the virtual-kubelet executable for InterLink.
-// 
+//
 // The Virtual Kubelet acts as a bridge between Kubernetes and external compute resources
 // through the InterLink API. It creates a virtual node in the Kubernetes cluster that
 // can schedule pods to remote execution environments.
@@ -28,7 +28,8 @@
 //   - Provides kubelet-compatible HTTP API endpoints
 //
 // Usage:
-//   virtual-kubelet -nodename <node-name> -configpath <config-file>
+//
+//	virtual-kubelet -nodename <node-name> -configpath <config-file>
 //
 // Environment Variables:
 //   - NODENAME: Name of the virtual node (required)

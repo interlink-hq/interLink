@@ -19,8 +19,8 @@ import (
 
 // DeleteHandler handles HTTP DELETE requests to remove pods from remote systems.
 // This endpoint processes pod deletion requests from the Virtual Kubelet by:
-//   1. Removing the pod from the local status cache
-//   2. Forwarding the deletion request to the sidecar plugin
+//  1. Removing the pod from the local status cache
+//  2. Forwarding the deletion request to the sidecar plugin
 //
 // The handler ensures cleanup of both local state and remote resources.
 //

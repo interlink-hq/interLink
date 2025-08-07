@@ -71,6 +71,7 @@ type HTTP struct {
 	// CaCert is the path to the CA certificate for verifying server connections
 	CaCert string `yaml:"CaCert"`
 }
+
 // Resources defines the compute resources available to the virtual node.
 // These values are reported to Kubernetes and used for pod scheduling decisions.
 type Resources struct {

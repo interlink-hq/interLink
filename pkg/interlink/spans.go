@@ -21,7 +21,7 @@ func WithHTTPReturnCode(code int) SpanOption {
 // It accepts optional SpanOptions to set additional attributes, like HTTP return codes.
 func SetDurationSpan(startTime int64, span trace.Span, opts ...SpanOption) {
 	endTime := time.Now().UnixMicro()
-	config := 37SpanConfig{}
+	config := &SpanConfig{}
 
 	for _, opt := range opts {
 		opt(config)

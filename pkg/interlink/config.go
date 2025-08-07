@@ -276,9 +276,9 @@ func InitTracer(ctx context.Context, serviceName string) (func(context.Context) 
 
 // NewInterLinkConfig loads and returns the interLink configuration.
 // It reads configuration from a YAML file, with the path determined by:
-//   1. Command line flag --interlinkconfigpath
-//   2. Environment variable INTERLINKCONFIGPATH
-//   3. Default path /etc/interlink/InterLinkConfig.yaml
+//  1. Command line flag --interlinkconfigpath
+//  2. Environment variable INTERLINKCONFIGPATH
+//  3. Default path /etc/interlink/InterLinkConfig.yaml
 //
 // The function also processes command line flags for logging levels:
 //   - --verbose: Enable debug logging
