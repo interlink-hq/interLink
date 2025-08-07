@@ -47,6 +47,8 @@ type Config struct {
 	TLS TLSConfig `yaml:"TLS,omitempty"`
 	// Network contains network-related settings for the virtual node
 	Network Network `yaml:"Network,omitempty"`
+	// SkipDownwardAPIResolution disables downward API resolution to enable scheduling pods with downward API
+	SkipDownwardAPIResolution bool `yaml:"SkipDownwardAPIResolution,omitempty"`
 }
 
 // TLSConfig holds TLS/mTLS configuration for secure communication with interLink API.
