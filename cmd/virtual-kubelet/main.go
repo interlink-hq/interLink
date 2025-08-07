@@ -13,6 +13,31 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+// Package main implements the virtual-kubelet executable for InterLink.
+//
+// The Virtual Kubelet acts as a bridge between Kubernetes and external compute resources
+// through the InterLink API. It creates a virtual node in the Kubernetes cluster that
+// can schedule pods to remote execution environments.
+//
+// Key features:
+//   - Creates and manages a virtual node in Kubernetes
+//   - Proxies pod operations to InterLink API
+//   - Handles TLS/mTLS communication
+//   - Supports WebSocket tunneling for port exposure
+//   - Manages pod lifecycle and status updates
+//   - Provides kubelet-compatible HTTP API endpoints
+//
+// Usage:
+//
+//	virtual-kubelet -nodename <node-name> -configpath <config-file>
+//
+// Environment Variables:
+//   - NODENAME: Name of the virtual node (required)
+//   - CONFIGPATH: Path to configuration file
+//   - KUBECONFIG: Path to Kubernetes configuration
+//   - KUBELET_URL: Virtual kubelet HTTP server bind address
+//   - KUBELET_PORT: Virtual kubelet HTTP server port
+//   - ENABLE_TRACING: Enable OpenTelemetry tracing (set to "1")
 package main
 
 import (
@@ -60,11 +85,15 @@ import (
 	commonIL "github.com/interlink-hq/interlink/pkg/virtualkubelet"
 )
 
-// UnixSocketRoundTripper is a custom RoundTripper for Unix socket connections
+// UnixSocketRoundTripper is a custom RoundTripper for Unix socket connections.
+// It handles the http+unix scheme by converting it to regular http for Unix domain socket communication.
 type UnixSocketRoundTripper struct {
+	// Transport is the underlying HTTP transport to use
 	Transport http.RoundTripper
 }
 
+// RoundTrip implements the http.RoundTripper interface for Unix socket connections.
+// It converts http+unix URLs to regular http URLs for Unix domain socket communication.
 func (rt *UnixSocketRoundTripper) RoundTrip(req *http.Request) (*http.Response, error) {
 	if strings.HasPrefix(req.URL.Scheme, "http+unix") {
 		// Adjust the URL for Unix socket connections
@@ -74,30 +103,44 @@ func (rt *UnixSocketRoundTripper) RoundTrip(req *http.Request) (*http.Response, 
 	return rt.Transport.RoundTrip(req)
 }
 
+// PodInformerFilter creates a shared informer option that filters pods by node name.
+// This ensures the virtual kubelet only receives events for pods scheduled on its node.
 func PodInformerFilter(node string) informers.SharedInformerOption {
 	return informers.WithTweakListOptions(func(options *metav1.ListOptions) {
 		options.FieldSelector = fields.OneTermEqualSelector("spec.nodeName", node).String()
 	})
 }
 
+// Config holds the main configuration for the virtual kubelet instance.
+// It defines the node identity and connection parameters.
 type Config struct {
-	ConfigPath        string
-	NodeName          string
-	NodeVersion       string
-	OperatingSystem   string
-	InternalIP        string
-	DaemonPort        int32
+	// ConfigPath is the path to the configuration file
+	ConfigPath string
+	// NodeName is the name of the virtual node in Kubernetes
+	NodeName string
+	// NodeVersion is the kubelet version to report
+	NodeVersion string
+	// OperatingSystem is the OS type to report (typically "Linux")
+	OperatingSystem string
+	// InternalIP is the internal IP address of the virtual node
+	InternalIP string
+	// DaemonPort is the port for the kubelet HTTP API server
+	DaemonPort int32
+	// KubeClusterDomain is the cluster domain name (optional)
 	KubeClusterDomain string
 }
 
 // Opts stores all the options for configuring the root virtual-kubelet command.
-// It is used for setting flag values.
+// It is used for setting flag values and command-line parameters.
 type Opts struct {
+	// ConfigPath is the path to the configuration file
 	ConfigPath string
 
-	// Node name to use when creating a node in Kubernetes
-	NodeName   string
-	Verbose    bool
+	// NodeName is the name to use when creating a node in Kubernetes
+	NodeName string
+	// Verbose enables verbose logging output
+	Verbose bool
+	// ErrorsOnly restricts logging to error messages only
 	ErrorsOnly bool
 }
 
