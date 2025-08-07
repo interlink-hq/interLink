@@ -1391,11 +1391,9 @@ func (p *Provider) DeletePod(ctx context.Context, pod *v1.Pod) (err error) {
 	}
 
 	// Clean up wstunnel resources if tunnel is enabled and they exist and no VPN annotation
-	if p.config.Network.EnableTunnel && hasExposedPorts(pod) {
-		if _, hasVPN := pod.Annotations["interlink.eu/pod-vpn"]; !hasVPN {
-			wstunnelName := pod.Name + "-" + pod.Namespace
-			p.cleanupWstunnelResources(ctx, wstunnelName, pod.Namespace+"-wstunnel")
-		}
+	if p.shouldCreateWstunnel(pod) {
+		wstunnelName := pod.Name + "-" + pod.Namespace
+		p.cleanupWstunnelResources(ctx, wstunnelName, pod.Namespace+"-wstunnel")
 	}
 
 	now := metav1.Now()
