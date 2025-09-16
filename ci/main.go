@@ -225,7 +225,7 @@ func (m *Interlink) NewInterlink(
 			WithEnvVariable("SHARED_FS", "true").
 			WithExposedPort(4000)
 
-		pluginEndpoint, err = m.PluginContainer.AsService(dagger.ContainerAsServiceOpts{Args: []string{}, UseEntrypoint: true, InsecureRootCapabilities: true}).Start(ctx)
+		pluginEndpoint, err = m.PluginContainer.AsService(dagger.ContainerAsServiceOpts{UseEntrypoint: true, InsecureRootCapabilities: true}).Start(ctx)
 		if err != nil {
 			return nil, err
 		}
@@ -243,7 +243,6 @@ func (m *Interlink) NewInterlink(
 		interlinkEndpoint, err = interlink.
 			AsService(
 				dagger.ContainerAsServiceOpts{
-					Args:                     []string{},
 					UseEntrypoint:            true,
 					InsecureRootCapabilities: true,
 				}).Start(ctx)
