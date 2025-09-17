@@ -343,7 +343,7 @@ EOF`}).
 			"-n", "interlink",
 			"virtual-node",
 			"oci://ghcr.io/interlink-hq/interlink-helm-chart/interlink",
-			"--version", "0.5.0-pre1",
+			"--version", "0.5.3-pre3",
 			"--values", "/manifests/vk_helm_chart.yaml",
 		}).Stdout(ctx)
 
@@ -583,7 +583,7 @@ EOF`}).
 			"-n", "interlink",
 			"virtual-node-mtls",
 			"oci://ghcr.io/interlink-hq/interlink-helm-chart/interlink",
-			"--version", "0.5.0",
+			"--version", "0.5.3-pre3",
 			"--values", "/manifests/vk_helm_chart_mtls.yaml",
 		}).Stdout(ctx)
 
