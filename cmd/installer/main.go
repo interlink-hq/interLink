@@ -391,6 +391,20 @@ func root(cmd *cobra.Command, _ []string) error {
 	// Print information about the generated installation script and how to use it
 	fmt.Println("\n\n=== Installation script for remote interLink APIs stored at: " + outFolder + "/interlink-remote.sh ===\n\n  Please execute the script on the remote server: " + configCLI.InterLinkIP + "\n\n  \"./interlink-remote.sh install\" followed by \"interlink-remote.sh start\"")
 
+	// Print CSR approval warning
+	fmt.Println("\n\n⚠️  IMPORTANT: CSR MANUAL APPROVAL REQUIRED ⚠️")
+	fmt.Println("==============================================")
+	fmt.Println("Certificate Signing Requests (CSRs) must be manually approved by a cluster administrator.")
+	fmt.Println("Without CSR approval, kubectl logs and other log-related operations will fail.")
+	fmt.Println("\nRequired steps after deployment:")
+	fmt.Println("1. Check for pending CSRs:")
+	fmt.Println("   kubectl get csr")
+	fmt.Println("2. Approve the CSR (replace csr-xxxxx with actual CSR name):")
+	fmt.Println("   kubectl certificate approve csr-xxxxx")
+	fmt.Println("3. Verify logs are accessible:")
+	fmt.Println("   kubectl logs <pod-name-on-virtual-kubelet-node>")
+	fmt.Println("==============================================")
+
 	return nil
 }
 

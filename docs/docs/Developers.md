@@ -246,6 +246,27 @@ To verify CSR-based certificate functionality:
    kubectl logs -n interlink virtual-kubelet-<node-name>
    ```
 
+#### ⚠️ IMPORTANT: CSR Manual Approval Required
+
+:exclamation: **CRITICAL**: CSRs (Certificate Signing Requests) must be manually approved by a cluster administrator, otherwise **log access will not work**. Without CSR approval, `kubectl logs` and other log-related operations will fail.
+
+**Required steps for enabling log functionality:**
+
+1. **Check for pending CSRs**:
+   ```bash
+   kubectl get csr
+   ```
+
+2. **Approve the CSR** (replace `csr-xxxxx` with the actual CSR name):
+   ```bash
+   kubectl certificate approve csr-xxxxx
+   ```
+
+3. **Verify logs are accessible**:
+   ```bash
+   kubectl logs <pod-name-on-virtual-kubelet-node>
+   ```
+
 #### Troubleshooting
 
 - **CSR approval**: Ensure your cluster has automatic CSR approval configured or manually approve CSRs
