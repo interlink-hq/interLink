@@ -307,7 +307,7 @@ EOF`}).
 
 	fmt.Println(bufferVK.String())
 
-	kubectl := dag.Container().From("bitnami/kubectl:1.32-debian-12").
+	kubectl := dag.Container().From("bitnami/kubectl:1.33-debian-12").
 		WithServiceBinding("registry", m.Registry).
 		WithServiceBinding("plugin", pluginEndpoint).
 		WithEnvVariable("BUST", time.Now().String()).
@@ -531,7 +531,7 @@ EOF`}).
 	fmt.Println("mTLS enabled VK config:")
 	fmt.Println(bufferVK.String())
 
-	kubectl := dag.Container().From("bitnami/kubectl:1.32-debian-12").
+	kubectl := dag.Container().From("bitnami/kubectl:1.33-debian-12").
 		WithServiceBinding("registry", m.Registry).
 		WithServiceBinding("plugin", pluginEndpoint).
 		WithEnvVariable("BUST", time.Now().String()).
@@ -707,7 +707,7 @@ func (m *Interlink) Run(
 	// +defaultPath="./manifests"
 	manifests *dagger.Directory,
 ) (*dagger.Container, error) {
-	return dag.Container().From("bitnami/kubectl:1.29.7-debian-12-r3").
+	return dag.Container().From("bitnami/kubectl:1.33-debian-12").
 		WithUser("root").
 		WithExec([]string{"mkdir", "-p", "/opt/user"}).
 		WithExec([]string{"chown", "-R", "1001:0", "/opt/user"}).
