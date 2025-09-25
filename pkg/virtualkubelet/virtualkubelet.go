@@ -1151,7 +1151,7 @@ func (p *Provider) addWstunnelClientAnnotation(ctx context.Context, pod *v1.Pod,
 	// Generate -R options for each exposed port
 	var rOptions []string
 	for _, port := range templateData.ExposedPorts {
-		rOptions = append(rOptions, fmt.Sprintf("-R tcp://[::]:%d:0.0.0.0:%d", port.Port, port.Port))
+		rOptions = append(rOptions, fmt.Sprintf("-R tcp://0.0.0.0:%d:localhost:%d", port.Port, port.Port))
 	}
 
 	// Get the wstunnel command template from config, or use default
@@ -1391,11 +1391,9 @@ func (p *Provider) DeletePod(ctx context.Context, pod *v1.Pod) (err error) {
 	}
 
 	// Clean up wstunnel resources if tunnel is enabled and they exist and no VPN annotation
-	if p.config.Network.EnableTunnel && hasExposedPorts(pod) {
-		if _, hasVPN := pod.Annotations["interlink.eu/pod-vpn"]; !hasVPN {
-			wstunnelName := pod.Name + "-" + pod.Namespace
-			p.cleanupWstunnelResources(ctx, wstunnelName, pod.Namespace+"-wstunnel")
-		}
+	if p.shouldCreateWstunnel(pod) {
+		wstunnelName := pod.Name + "-" + pod.Namespace
+		p.cleanupWstunnelResources(ctx, wstunnelName, pod.Namespace+"-wstunnel")
 	}
 
 	now := metav1.Now()

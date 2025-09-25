@@ -10,6 +10,7 @@ This guide provides a comprehensive reference for configuring the interLink API 
 
 The interLink configuration is defined in `pkg/interlink/config.go` and consists of several main sections:
 
+
 - **Core Configuration**: Basic interLink and plugin connection settings
 - **TLS Configuration**: Security settings for encrypted communication
 - **Job Script Configuration**: Settings for container runtime and job execution
@@ -24,8 +25,10 @@ The main configuration file is typically located at `/etc/interlink/InterLinkCon
 # Core InterLink Settings
 InterlinkAddress: "0.0.0.0"        # IP address for interLink API server
 InterlinkPort: "3000"              # Port for interLink API server
+
 SidecarURL: "http://localhost"     # URL of the InterLink plugin
 SidecarPort: "4000"                # Port of the InterLink plugin
+
 
 # Data and Storage
 DataRootFolder: "/tmp/interlink"   # Root directory for temporary data
@@ -105,6 +108,7 @@ The `TLS` section enables secure communication between interLink components:
 
 ### Job Script Build Configuration
 
+
 The `JobScriptBuildConfig` section configures container runtime options and job script generation.
 
 :::info What is a Job?
@@ -130,6 +134,7 @@ The Singularity Hub configuration is specific to Apptainer/Singularity-based plu
 | `server` | string | Singularity Hub server URL (e.g., `https://singularityhub.org`) |
 | `master_token` | string | Authentication token for accessing private repositories |
 | `cache_validity_seconds` | int | Duration in seconds to cache downloaded images |
+
 
 #### Apptainer Options
 
@@ -167,6 +172,7 @@ The following environment variables can override configuration file values:
 | `INTERLINKPORT` | `InterlinkPort` | Override interLink server port |
 | `SIDECARURL` | `SidecarURL` | Override InterLink plugin URL |
 | `SIDECARPORT` | `SidecarPort` | Override InterLink plugin port |
+
 
 ## Telemetry Configuration
 
