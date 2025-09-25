@@ -212,9 +212,18 @@ func createCertPool(ctx context.Context, interLinkConfig commonIL.Config) *x509.
 }
 
 // createHTTPServer creates and starts the HTTPS server
-func createHTTPServer(ctx context.Context, cfg Config, interLinkConfig commonIL.Config) *http.ServeMux {
+func createHTTPServer(ctx context.Context, cfg Config, interLinkConfig commonIL.Config, kubeClient kubernetes.Interface) *http.ServeMux {
 	mux := http.NewServeMux()
-	retriever := commonIL.NewSelfSignedCertificateRetriever(cfg.NodeName, net.ParseIP(cfg.InternalIP))
+
+	// Use CSR-based certificate retriever for proper certificate management
+	// Standard kubelet serving certificate signer name
+	const kubeletServingSigner = "kubernetes.io/kubelet-serving"
+
+	retriever, err := commonIL.NewCertificateRetriever(kubeClient, kubeletServingSigner, cfg.NodeName, net.ParseIP(cfg.InternalIP))
+	if err != nil {
+		log.G(ctx).Warnf("Failed to create CSR-based certificate retriever, falling back to self-signed: %v", err)
+		retriever = commonIL.NewSelfSignedCertificateRetriever(cfg.NodeName, net.ParseIP(cfg.InternalIP))
+	}
 
 	kubeletURL, _ := getKubeletEndpoint()
 	server := &http.Server{
@@ -387,11 +396,11 @@ func main() {
 		DaemonPort: dport,
 	}
 
-	mux := createHTTPServer(ctx, cfg, interLinkConfig)
+	kubecfg, localClient := setupKubernetesClient(ctx)
+
+	mux := createHTTPServer(ctx, cfg, interLinkConfig, localClient)
 
 	transport := createHTTPTransport(ctx, interLinkConfig, vkConfig)
-
-	kubecfg, localClient := setupKubernetesClient(ctx)
 
 	nodeProvider, err := commonIL.NewProvider(
 		ctx,

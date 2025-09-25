@@ -225,7 +225,7 @@ func (m *Interlink) NewInterlink(
 			WithEnvVariable("SHARED_FS", "true").
 			WithExposedPort(4000)
 
-		pluginEndpoint, err = m.PluginContainer.AsService(dagger.ContainerAsServiceOpts{Args: []string{}, UseEntrypoint: true, InsecureRootCapabilities: true}).Start(ctx)
+		pluginEndpoint, err = m.PluginContainer.AsService(dagger.ContainerAsServiceOpts{UseEntrypoint: true, InsecureRootCapabilities: true}).Start(ctx)
 		if err != nil {
 			return nil, err
 		}
@@ -243,7 +243,6 @@ func (m *Interlink) NewInterlink(
 		interlinkEndpoint, err = interlink.
 			AsService(
 				dagger.ContainerAsServiceOpts{
-					Args:                     []string{},
 					UseEntrypoint:            true,
 					InsecureRootCapabilities: true,
 				}).Start(ctx)
@@ -308,7 +307,7 @@ EOF`}).
 
 	fmt.Println(bufferVK.String())
 
-	kubectl := dag.Container().From("bitnami/kubectl:1.32-debian-12").
+	kubectl := dag.Container().From("bitnamilegacy/kubectl:1.33-debian-12").
 		WithServiceBinding("registry", m.Registry).
 		WithServiceBinding("plugin", pluginEndpoint).
 		WithEnvVariable("BUST", time.Now().String()).
@@ -344,7 +343,7 @@ EOF`}).
 			"-n", "interlink",
 			"virtual-node",
 			"oci://ghcr.io/interlink-hq/interlink-helm-chart/interlink",
-			"--version", "0.5.0-pre1",
+			"--version", "0.5.3-pre3",
 			"--values", "/manifests/vk_helm_chart.yaml",
 		}).Stdout(ctx)
 
@@ -532,7 +531,7 @@ EOF`}).
 	fmt.Println("mTLS enabled VK config:")
 	fmt.Println(bufferVK.String())
 
-	kubectl := dag.Container().From("bitnami/kubectl:1.32-debian-12").
+	kubectl := dag.Container().From("bitnamilegacy/kubectl:1.33-debian-12").
 		WithServiceBinding("registry", m.Registry).
 		WithServiceBinding("plugin", pluginEndpoint).
 		WithEnvVariable("BUST", time.Now().String()).
@@ -584,7 +583,7 @@ EOF`}).
 			"-n", "interlink",
 			"virtual-node-mtls",
 			"oci://ghcr.io/interlink-hq/interlink-helm-chart/interlink",
-			"--version", "0.5.0",
+			"--version", "0.5.3-pre3",
 			"--values", "/manifests/vk_helm_chart_mtls.yaml",
 		}).Stdout(ctx)
 
@@ -708,7 +707,7 @@ func (m *Interlink) Run(
 	// +defaultPath="./manifests"
 	manifests *dagger.Directory,
 ) (*dagger.Container, error) {
-	return dag.Container().From("bitnami/kubectl:1.29.7-debian-12-r3").
+	return dag.Container().From("bitnamilegacy/kubectl:1.33-debian-12").
 		WithUser("root").
 		WithExec([]string{"mkdir", "-p", "/opt/user"}).
 		WithExec([]string{"chown", "-R", "1001:0", "/opt/user"}).
@@ -765,6 +764,9 @@ func (m *Interlink) Test(
 		return nil, err
 	}
 
+	// Automate CSR approval for testing - required for mTLS functionality and log access
+	c = c.WithExec([]string{"bash", "-c", "kubectl get csr -o name | xargs -r kubectl certificate approve"})
+
 	result := c.WithExec([]string{"bash", "-c", "source .venv/bin/activate && export KUBECONFIG=/.kube/config  && pytest -vk 'not rclone and not limits'"})
 	//_ = c.WithExec([]string{"bash", "-c", "source .venv/bin/activate && export KUBECONFIG=/.kube/config  && pytest -vk 'hello'"})
 	// result := c.WithExec([]string{"bash", "-c", "source .venv/bin/activate && export KUBECONFIG=/.kube/config  && pytest -vk 'hello'"})
@@ -799,6 +801,8 @@ func (m *Interlink) TestMTLS(
 	result := c.WithExec([]string{"bash", "-c", "source .venv/bin/activate && export KUBECONFIG=/.kube/config && pytest -v -k 'hello'"}).
 		// Wait for virtual node to be ready
 		WithExec([]string{"bash", "-c", "kubectl wait --for=condition=Ready node/virtual-kubelet --timeout=300s"}).
+		// Automate CSR approval for testing - required for mTLS functionality
+		WithExec([]string{"bash", "-c", "kubectl get csr -o name | xargs -r kubectl certificate approve"}).
 		// Create a test pod for getLogs testing
 		WithExec([]string{"bash", "-c", `
 kubectl apply -f - <<EOF
@@ -819,6 +823,8 @@ spec:
 EOF`}).
 		// Wait for pod to start
 		WithExec([]string{"bash", "-c", "kubectl wait --for=condition=PodReadyForStartup pod/mtls-log-test --timeout=120s || true"}).
+		// Ensure CSR approval before testing logs
+		WithExec([]string{"bash", "-c", "kubectl get csr -o name | xargs -r kubectl certificate approve"}).
 		// Test getLogs endpoint specifically - this should work with mTLS now
 		WithExec([]string{"bash", "-c", "kubectl logs mtls-log-test --tail=10 || echo 'getLogs failed - this indicates mTLS issue'"}).
 		// Run additional log streaming test
