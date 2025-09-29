@@ -19,6 +19,20 @@ import (
 	trace "go.opentelemetry.io/otel/trace"
 )
 
+// StatusHandler handles HTTP GET requests to retrieve pod status information.
+// This endpoint queries the sidecar plugin for the current status of one or more pods
+// and implements intelligent caching to reduce unnecessary requests to the remote system.
+//
+// The handler maintains a local cache of pod statuses and only queries the sidecar for:
+//   - Pods currently in Running or Pending state
+//   - Pods not present in the cache
+//
+// Request body: JSON-encoded array of v1.Pod objects
+// Response: JSON-encoded array of PodStatus objects
+//
+// HTTP Status Codes:
+//   - 200: Status query completed successfully
+//   - 500: Internal server error (sidecar communication failures, JSON marshalling errors)
 func (h *InterLinkHandler) StatusHandler(w http.ResponseWriter, r *http.Request) {
 	start := time.Now().UnixMicro()
 	tracer := otel.Tracer("interlink-API")

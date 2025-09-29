@@ -18,7 +18,21 @@ import (
 	trace "go.opentelemetry.io/otel/trace"
 )
 
-// CreateHandler collects and lls needed ConfigMaps/Secrets/EmptyDirs to ship them to the sidecar, then sends a response to the client
+// CreateHandler handles HTTP POST requests to create pods on remote systems.
+// This endpoint receives pod creation requests from the Virtual Kubelet, processes them
+// by gathering all necessary resources (ConfigMaps, Secrets, projected volumes), and
+// forwards the complete pod specification to the configured sidecar plugin.
+//
+// The handler supports optional job script generation through either:
+//   - JobScriptBuilderURL: An external service that generates job scripts
+//   - JobScriptTemplate: A local template file for job script generation
+//
+// Request body: JSON-encoded PodCreateRequests
+// Response: JSON-encoded CreateStruct array with pod UID to job ID mappings
+//
+// HTTP Status Codes:
+//   - 200: Pod creation request processed successfully
+//   - 500: Internal server error (configuration issues, sidecar communication failures)
 func (h *InterLinkHandler) CreateHandler(w http.ResponseWriter, r *http.Request) {
 	start := time.Now().UnixMicro()
 	tracer := otel.Tracer("interlink-API")

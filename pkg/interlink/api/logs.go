@@ -17,6 +17,20 @@ import (
 	trace "go.opentelemetry.io/otel/trace"
 )
 
+// GetLogsHandler handles HTTP GET requests to retrieve container logs.
+// This endpoint streams container logs from the sidecar plugin to the client,
+// supporting various log retrieval options such as tailing, following, and filtering.
+//
+// The handler validates log options to prevent conflicting parameters:
+//   - Tail and LimitBytes cannot both be set
+//   - SinceSeconds and SinceTime cannot both be set
+//
+// Request body: JSON-encoded LogStruct with container identification and log options
+// Response: Streamed plain text log data
+//
+// HTTP Status Codes:
+//   - 200: Log retrieval successful (may be empty if no logs available)
+//   - 500: Internal server error (parameter conflicts, sidecar communication failures)
 func (h *InterLinkHandler) GetLogsHandler(w http.ResponseWriter, r *http.Request) {
 	start := time.Now().UnixMicro()
 	tracer := otel.Tracer("interlink-API")
