@@ -206,3 +206,71 @@ TBD
 ### Develop your plugin
 
 :warning: Coming soon
+
+## SSL Certificate Management
+
+### CSR Integration for Virtual Kubelet
+
+As of this version, Virtual Kubelet now supports proper SSL certificate management using Kubernetes Certificate Signing Requests (CSRs) instead of self-signed certificates. This resolves compatibility issues with `kubectl logs` and other Kubernetes clients.
+
+#### Key Changes
+
+- **CSR-based certificates**: Virtual Kubelet now requests certificates from the Kubernetes cluster CA using the standard `kubernetes.io/kubelet-serving` signer
+- **Automatic fallback**: If CSR creation fails, the system falls back to self-signed certificates with a warning
+- **Improved compatibility**: No longer requires `--insecure-skip-tls-verify-backend` flag for `kubectl logs`
+
+#### Technical Details
+
+The implementation uses:
+- **Signer**: `kubernetes.io/kubelet-serving` (standard kubelet serving certificate signer)
+- **Certificate store**: `/tmp/certs` directory with `virtual-kubelet` prefix
+- **Subject**: `system:node:<node-name>` with `system:nodes` organization
+- **IP SANs**: Node IP address for proper certificate validation
+
+#### Testing Certificate Integration
+
+To verify CSR-based certificate functionality:
+
+1. **Check CSR creation**:
+   ```bash
+   kubectl get csr
+   ```
+   
+2. **Test kubectl logs without insecure flag**:
+   ```bash
+   kubectl logs <pod-name-on-virtual-kubelet-node>
+   ```
+
+3. **Monitor Virtual Kubelet logs** for certificate retrieval messages:
+   ```bash
+   kubectl logs -n interlink virtual-kubelet-<node-name>
+   ```
+
+#### ⚠️ IMPORTANT: CSR Manual Approval Required
+
+:exclamation: **CRITICAL**: CSRs (Certificate Signing Requests) must be manually approved by a cluster administrator, otherwise **log access will not work**. Without CSR approval, `kubectl logs` and other log-related operations will fail.
+
+**Required steps for enabling log functionality:**
+
+1. **Check for pending CSRs**:
+   ```bash
+   kubectl get csr
+   ```
+
+2. **Approve the CSR** (replace `csr-xxxxx` with the actual CSR name):
+   ```bash
+   kubectl certificate approve csr-xxxxx
+   ```
+
+3. **Verify logs are accessible**:
+   ```bash
+   kubectl logs <pod-name-on-virtual-kubelet-node>
+   ```
+
+#### Troubleshooting
+
+- **CSR approval**: Ensure your cluster has automatic CSR approval configured or manually approve CSRs
+- **RBAC permissions**: Virtual Kubelet needs permissions to create CSRs in the `certificates.k8s.io` API group
+- **Fallback behavior**: Check logs for warnings about falling back to self-signed certificates
+
+For clusters without proper CSR support, the system maintains backward compatibility by automatically using self-signed certificates with appropriate warnings.
