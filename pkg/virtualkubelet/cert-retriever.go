@@ -1,6 +1,7 @@
 package virtualkubelet
 
 import (
+	"context"
 	"crypto/ed25519"
 	cryptorand "crypto/rand"
 	"crypto/tls"
@@ -13,13 +14,82 @@ import (
 	"net"
 	"time"
 
+	"github.com/containerd/containerd/log"
 	certificates "k8s.io/api/certificates/v1"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/client-go/kubernetes"
 	"k8s.io/client-go/util/certificate"
 	// k8s.io/kubernetes/pkg/apis/certificates"
 )
 
 type Crtretriever func(*tls.ClientHelloInfo) (*tls.Certificate, error)
+
+// cleanupOldCSRs removes old or pending CSRs for this node to prevent accumulation
+func cleanupOldCSRs(ctx context.Context, kubeClient kubernetes.Interface, nodeName string) error {
+	// List all CSRs
+	csrList, err := kubeClient.CertificatesV1().CertificateSigningRequests().List(ctx, metav1.ListOptions{})
+	if err != nil {
+		log.G(ctx).Warningf("Failed to list CSRs for cleanup: %v", err)
+		return err
+	}
+
+	// Pattern to match CSR names for this node
+	// The certificate manager creates CSRs with names like "csr-<random>"
+	// but sets the username to "system:node:<nodename>"
+	expectedUsername := fmt.Sprintf("system:node:%s", nodeName)
+
+	deletedCount := 0
+	for _, csr := range csrList.Items {
+		// Check if this CSR belongs to our node
+		if csr.Spec.Username != expectedUsername {
+			continue
+		}
+
+		// Delete old CSRs that are:
+		// 1. Already approved and issued (completed, no longer needed)
+		// 2. Denied (failed, should be recreated)
+		// 3. Pending for more than 5 minutes (likely stale)
+		shouldDelete := false
+		reason := ""
+
+		for _, condition := range csr.Status.Conditions {
+			if condition.Type == certificates.CertificateApproved && csr.Status.Certificate != nil {
+				shouldDelete = true
+				reason = "already issued"
+				break
+			}
+			if condition.Type == certificates.CertificateDenied {
+				shouldDelete = true
+				reason = "denied"
+				break
+			}
+		}
+
+		// Check if pending for too long
+		if !shouldDelete && len(csr.Status.Conditions) == 0 {
+			if time.Since(csr.CreationTimestamp.Time) > 5*time.Minute {
+				shouldDelete = true
+				reason = "pending too long"
+			}
+		}
+
+		if shouldDelete {
+			log.G(ctx).Infof("Deleting old CSR %s for node %s (reason: %s)", csr.Name, nodeName, reason)
+			err := kubeClient.CertificatesV1().CertificateSigningRequests().Delete(ctx, csr.Name, metav1.DeleteOptions{})
+			if err != nil {
+				log.G(ctx).Warningf("Failed to delete CSR %s: %v", csr.Name, err)
+			} else {
+				deletedCount++
+			}
+		}
+	}
+
+	if deletedCount > 0 {
+		log.G(ctx).Infof("Cleaned up %d old CSR(s) for node %s", deletedCount, nodeName)
+	}
+
+	return nil
+}
 
 // NewCertificateManager creates a certificate manager for the kubelet when retrieving a server certificate, or returns an error.
 // This function is inspired by Liqo implementation:
@@ -29,6 +99,12 @@ func NewCertificateRetriever(kubeClient kubernetes.Interface, signer, nodeName s
 		vkCertsPath   = "/tmp/certs"
 		vkCertsPrefix = "virtual-kubelet"
 	)
+
+	// Clean up old CSRs before creating a new certificate manager
+	ctx := context.Background()
+	if err := cleanupOldCSRs(ctx, kubeClient, nodeName); err != nil {
+		log.G(ctx).Warningf("CSR cleanup had errors but continuing: %v", err)
+	}
 
 	certificateStore, err := certificate.NewFileStore(vkCertsPrefix, vkCertsPath, vkCertsPath, "", "")
 	if err != nil {
