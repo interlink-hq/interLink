@@ -2,6 +2,7 @@ package api
 
 import (
 	"context"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"testing"
@@ -95,7 +96,9 @@ func setupTestTracer() (*trace.TracerProvider, func()) {
 	otel.SetTracerProvider(tp)
 
 	cleanup := func() {
-		tp.Shutdown(context.Background())
+		if err := tp.Shutdown(context.Background()); err != nil {
+			panic(err)
+		}
 	}
 
 	return tp, cleanup
@@ -116,7 +119,9 @@ func TestReqWithError_HeadersSet(t *testing.T) {
 		assert.NotEmpty(t, r.Header.Get("InterLink-Http-Session"))
 
 		w.WriteHeader(http.StatusOK)
-		w.Write([]byte(`{"status":"ok"}`))
+		if _, err := io.WriteString(w, `{"status":"ok"}`); err != nil {
+			panic(err)
+		}
 	}))
 	defer testServer.Close()
 
@@ -185,9 +190,11 @@ func TestReqWithError_ErrorHandling(t *testing.T) {
 			defer span.End()
 
 			// Create test server with specific response
-			testServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			testServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 				w.WriteHeader(tt.serverStatus)
-				w.Write([]byte(tt.serverResponse))
+				if _, err := io.WriteString(w, tt.serverResponse); err != nil {
+					panic(err)
+				}
 			}))
 			defer testServer.Close()
 
@@ -268,9 +275,11 @@ func TestReqWithError_ResponseModes(t *testing.T) {
 			ctx, span := tracer.Start(context.Background(), "test-span")
 			defer span.End()
 
-			testServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			testServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 				w.WriteHeader(http.StatusOK)
-				w.Write([]byte(testData))
+				if _, err := io.WriteString(w, testData); err != nil {
+					panic(err)
+				}
 			}))
 			defer testServer.Close()
 
