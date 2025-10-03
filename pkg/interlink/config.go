@@ -21,7 +21,7 @@ import (
 	"google.golang.org/grpc/connectivity"
 	"google.golang.org/grpc/credentials"
 	"google.golang.org/grpc/credentials/insecure"
-	"gopkg.in/yaml.v2"
+	"github.com/goccy/go-yaml"
 )
 
 // VolumesOptions configures volume management for container runtimes like Apptainer.
