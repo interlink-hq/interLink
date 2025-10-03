@@ -13,10 +13,10 @@ import (
 func TestGetSidecarEndpoint(t *testing.T) {
 	ctx := context.Background()
 	tests := []struct {
-		name         string
-		interlinkURL string
+		name          string
+		interlinkURL  string
 		interlinkPort string
-		expected     string
+		expected      string
 	}{
 		{
 			name:          "HTTP URL",
@@ -116,7 +116,9 @@ func TestDoRequestWithClient(t *testing.T) {
 		}
 
 		w.WriteHeader(http.StatusOK)
-		w.Write([]byte(`{"status":"ok"}`))
+		if _, err := w.Write([]byte(`{"status":"ok"}`)); err != nil {
+			panic(err)
+		}
 	}))
 	defer testServer.Close()
 

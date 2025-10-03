@@ -165,7 +165,8 @@ func TestFakeRuntimeService_StartContainer(t *testing.T) {
 			Uid:       "12345",
 		},
 	}
-	sandboxID, _ := service.RunPodSandbox(ctx, sandboxConfig, "")
+	sandboxID, err := service.RunPodSandbox(ctx, sandboxConfig, "")
+	require.NoError(t, err)
 
 	containerConfig := &runtimeapi.ContainerConfig{
 		Metadata: &runtimeapi.ContainerMetadata{
@@ -175,10 +176,11 @@ func TestFakeRuntimeService_StartContainer(t *testing.T) {
 			Image: "nginx:latest",
 		},
 	}
-	containerID, _ := service.CreateContainer(ctx, sandboxID, containerConfig, sandboxConfig)
+	containerID, err := service.CreateContainer(ctx, sandboxID, containerConfig, sandboxConfig)
+	require.NoError(t, err)
 
 	// Start the container
-	err := service.StartContainer(ctx, containerID)
+	err = service.StartContainer(ctx, containerID)
 	require.NoError(t, err)
 
 	// Verify container is running
@@ -199,7 +201,8 @@ func TestFakeRuntimeService_StopContainer(t *testing.T) {
 			Uid:       "12345",
 		},
 	}
-	sandboxID, _ := service.RunPodSandbox(ctx, sandboxConfig, "")
+	sandboxID, err := service.RunPodSandbox(ctx, sandboxConfig, "")
+	require.NoError(t, err)
 
 	containerConfig := &runtimeapi.ContainerConfig{
 		Metadata: &runtimeapi.ContainerMetadata{
@@ -209,11 +212,13 @@ func TestFakeRuntimeService_StopContainer(t *testing.T) {
 			Image: "nginx:latest",
 		},
 	}
-	containerID, _ := service.CreateContainer(ctx, sandboxID, containerConfig, sandboxConfig)
-	service.StartContainer(ctx, containerID)
+	containerID, err := service.CreateContainer(ctx, sandboxID, containerConfig, sandboxConfig)
+	require.NoError(t, err)
+	err = service.StartContainer(ctx, containerID)
+	require.NoError(t, err)
 
 	// Stop the container
-	err := service.StopContainer(ctx, containerID, 10)
+	err = service.StopContainer(ctx, containerID, 10)
 	require.NoError(t, err)
 
 	// Verify container is exited
@@ -248,7 +253,8 @@ func TestFakeRuntimeService_ListPodSandbox(t *testing.T) {
 				Uid:       string(rune(i)),
 			},
 		}
-		service.RunPodSandbox(ctx, config, "")
+		_, err := service.RunPodSandbox(ctx, config, "")
+		require.NoError(t, err)
 	}
 
 	// List all sandboxes
@@ -270,19 +276,21 @@ func TestFakeRuntimeService_ListContainers(t *testing.T) {
 			Uid:       "12345",
 		},
 	}
-	sandboxID, _ := service.RunPodSandbox(ctx, sandboxConfig, "")
+	sandboxID, err := service.RunPodSandbox(ctx, sandboxConfig, "")
+	require.NoError(t, err)
 
 	for i := 0; i < 2; i++ {
 		containerConfig := &runtimeapi.ContainerConfig{
 			Metadata: &runtimeapi.ContainerMetadata{
-				Name: "test-container",
+				Name:    "test-container",
 				Attempt: uint32(i),
 			},
 			Image: &runtimeapi.ImageSpec{
 				Image: "nginx:latest",
 			},
 		}
-		service.CreateContainer(ctx, sandboxID, containerConfig, sandboxConfig)
+		_, err := service.CreateContainer(ctx, sandboxID, containerConfig, sandboxConfig)
+		require.NoError(t, err)
 	}
 
 	// List all containers
