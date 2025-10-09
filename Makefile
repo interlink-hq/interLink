@@ -18,6 +18,9 @@ openapi:
 clean:
 	rm -rf ./bin
 
+unit-test:
+	go test -v -race -coverprofile=coverage.out -covermode=atomic ./pkg/...
+
 test:
 	dagger call -m ./ci \
     --name my-tests \

@@ -741,6 +741,27 @@ func (m *Interlink) Lint(
 		WithExec([]string{"golangci-lint", "run", "-v", "--timeout=30m"}, dagger.ContainerWithExecOpts{UseEntrypoint: true})
 }
 
+// UnitTest runs the unit tests for the project
+func (m *Interlink) UnitTest(
+	ctx context.Context,
+	// +optional
+	// +defaultPath="../"
+	sourceFolder *dagger.Directory,
+) (string, error) {
+	buildCache := dag.CacheVolume(m.Name + "_go-build")
+	modCache := dag.CacheVolume(m.Name + "_go-mod")
+
+	return dag.Container().From("golang:1.24").
+		WithMountedDirectory("/src", sourceFolder).
+		WithWorkdir("/src").
+		WithMountedCache("/go/pkg/mod", modCache).
+		WithEnvVariable("GOMODCACHE", "/go/pkg/mod").
+		WithMountedCache("/go/build-cache", buildCache).
+		WithEnvVariable("GOCACHE", "/go/build-cache").
+		WithExec([]string{"go", "test", "-v", "-race", "-coverprofile=coverage.out", "-covermode=atomic", "./pkg/..."}).
+		Stdout(ctx)
+}
+
 // Wait for cluster to be ready, setup the test container, run all tests
 func (m *Interlink) Test(
 	ctx context.Context,
@@ -753,6 +774,13 @@ func (m *Interlink) Test(
 	// +defaultPath="../"
 	sourceFolder *dagger.Directory,
 ) (*dagger.Container, error) {
+	// Run unit tests first
+	unitTestOutput, err := m.UnitTest(ctx, sourceFolder)
+	if err != nil {
+		return nil, err
+	}
+	log.Printf("Unit test output: %s", unitTestOutput)
+
 	lint, err := m.Lint(sourceFolder).Stdout(ctx)
 	if err != nil {
 		return nil, err
@@ -786,6 +814,13 @@ func (m *Interlink) TestMTLS(
 	// +defaultPath="../"
 	sourceFolder *dagger.Directory,
 ) (*dagger.Container, error) {
+	// Run unit tests first
+	unitTestOutput, err := m.UnitTest(ctx, sourceFolder)
+	if err != nil {
+		return nil, err
+	}
+	log.Printf("Unit test output: %s", unitTestOutput)
+
 	lint, err := m.Lint(sourceFolder).Stdout(ctx)
 	if err != nil {
 		return nil, err
