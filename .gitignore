@@ -1,4 +1,6 @@
 interlink-install
+QWEN.md
+coverage.out
 vendor
 dist/*
 docs/yarn.lock
