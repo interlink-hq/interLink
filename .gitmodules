@@ -1,0 +1,9 @@
+[submodule "helm"]
+	path = helm
+	url = https://github.com/interlink-hq/interlink-helm-chart
+[submodule "plugins/slurm"]
+	path = plugins/slurm
+	url = https://github.com/interlink-hq/interlink-slurm-plugin
+[submodule "test/vk-test-set"]
+	path = test/vk-test-set
+	url = https://github.com/interlink-hq/vk-test-set
