@@ -451,16 +451,30 @@ BashPath: /bin/bash
 	var err error
 	// Setup plugin with standard config
 	if pluginEndpoint == nil {
-		m.PluginContainer = m.PluginContainer.
-			WithFile("/etc/interlink/InterLinkConfig.yaml", pluginConfigFile.File("/etc/interlink/InterLinkConfig.yaml")).
-			WithEnvVariable("BUST", time.Now().String()).
-			WithEnvVariable("SLURMCONFIGPATH", "/etc/interlink/InterLinkConfig.yaml").
-			WithEnvVariable("SHARED_FS", "true").
-			WithExposedPort(4000)
+		if m.PluginContainer == nil {
+			m.PluginContainer = dag.Container().From(m.PluginRef).
+				WithFile("/etc/interlink/InterLinkConfig.yaml", pluginConfigFile.File("/etc/interlink/InterLinkConfig.yaml")).
+				WithEnvVariable("BUST", time.Now().String()).
+				WithEnvVariable("SLURMCONFIGPATH", "/etc/interlink/InterLinkConfig.yaml").
+				WithEnvVariable("SHARED_FS", "true").
+				WithExposedPort(4000)
 
-		pluginEndpoint, err = m.PluginContainer.AsService(dagger.ContainerAsServiceOpts{Args: []string{}, UseEntrypoint: true, InsecureRootCapabilities: true}).Start(ctx)
-		if err != nil {
-			return nil, err
+			pluginEndpoint, err = m.PluginContainer.AsService(dagger.ContainerAsServiceOpts{UseEntrypoint: true, InsecureRootCapabilities: true}).Start(ctx)
+			if err != nil {
+				return nil, err
+			}
+		} else {
+			m.PluginContainer = m.PluginContainer.
+				WithFile("/etc/interlink/InterLinkConfig.yaml", pluginConfigFile.File("/etc/interlink/InterLinkConfig.yaml")).
+				WithEnvVariable("BUST", time.Now().String()).
+				WithEnvVariable("SLURMCONFIGPATH", "/etc/interlink/InterLinkConfig.yaml").
+				WithEnvVariable("SHARED_FS", "true").
+				WithExposedPort(4000)
+
+			pluginEndpoint, err = m.PluginContainer.AsService(dagger.ContainerAsServiceOpts{UseEntrypoint: true, InsecureRootCapabilities: true}).Start(ctx)
+			if err != nil {
+				return nil, err
+			}
 		}
 	}
 
