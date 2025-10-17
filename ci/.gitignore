@@ -3,3 +3,4 @@
 /internal/querybuilder
 /internal/telemetry
 kubeconfig.yaml
+/.env
