@@ -206,6 +206,9 @@ func (m *Interlink) NewInterlink(
 	// +optional
 	// +defaultPath="./manifests/plugin-config.yaml"
 	pluginConfig *dagger.File,
+	// +optional
+	// +defaultPath="../helm"
+	helmChart *dagger.Directory,
 ) (*Interlink, error) {
 	if localRegistry != nil {
 		m.Registry = localRegistry
@@ -331,6 +334,7 @@ EOF`}).
 
 	dag.Container().From("alpine/helm:3.16.1").
 		WithMountedFile("/.kube/config", m.KubeConfig).
+		WithDirectory("/helm", helmChart).
 		WithEnvVariable("BUST", time.Now().String()).
 		WithEnvVariable("KUBECONFIG", "/.kube/config").
 		WithNewFile("/manifests/vk_helm_chart.yaml", bufferVK.String(), dagger.ContainerWithNewFileOpts{
@@ -342,8 +346,7 @@ EOF`}).
 			"--create-namespace",
 			"-n", "interlink",
 			"virtual-node",
-			"oci://ghcr.io/interlink-hq/interlink-helm-chart/interlink",
-			"--version", "0.5.3-pre3",
+			"/helm/interlink",
 			"--values", "/manifests/vk_helm_chart.yaml",
 		}).Stdout(ctx)
 
@@ -366,6 +369,9 @@ func (m *Interlink) NewInterlinkMTLS(
 	interlinkEndpoint *dagger.Service,
 	// +optional
 	pluginEndpoint *dagger.Service,
+	// +optional
+	// +defaultPath="../helm"
+	helmChart *dagger.Directory,
 ) (*Interlink, error) {
 	if localRegistry != nil {
 		m.Registry = localRegistry
@@ -571,6 +577,7 @@ EOF`}).
 	// Deploy with mTLS certificates mounted
 	dag.Container().From("alpine/helm:3.16.1").
 		WithMountedFile("/.kube/config", m.KubeConfig).
+		WithDirectory("/helm", helmChart).
 		WithEnvVariable("BUST", time.Now().String()).
 		WithEnvVariable("KUBECONFIG", "/.kube/config").
 		WithNewFile("/manifests/vk_helm_chart_mtls.yaml", bufferVK.String(), dagger.ContainerWithNewFileOpts{
@@ -582,8 +589,7 @@ EOF`}).
 			"--create-namespace",
 			"-n", "interlink",
 			"virtual-node-mtls",
-			"oci://ghcr.io/interlink-hq/interlink-helm-chart/interlink",
-			"--version", "0.5.3-pre3",
+			"/helm/interlink",
 			"--values", "/manifests/vk_helm_chart_mtls.yaml",
 		}).Stdout(ctx)
 
@@ -620,6 +626,9 @@ func (m *Interlink) BuildImages(
 	// +optional
 	// +defaultPath="../"
 	sourceFolder *dagger.Directory,
+	// +optional
+	// +defaultPath="../plugins/slurm"
+	pluginSource *dagger.Directory,
 ) (*Interlink, error) {
 	// TODO: get tag
 	m.Registry = dag.Container().From("registry").
@@ -690,6 +699,25 @@ func (m *Interlink) BuildImages(
 	if err != nil {
 		return nil, err
 	}
+
+	// Build plugin from local submodule using Dockerfile
+	m.PluginRef = pluginRef
+
+	m.PluginContainer = dag.Container().
+		Build(pluginSource, dagger.ContainerBuildOpts{
+			Dockerfile: "docker/Dockerfile",
+		})
+
+	_, err = dag.Container().From("quay.io/skopeo/stable").
+		WithEnvVariable("BUST", time.Now().String()).
+		WithServiceBinding("registry", m.Registry).
+		WithMountedFile("image.tar", m.PluginContainer.AsTarball()).
+		WithExec([]string{"copy", "--dest-tls-verify=false", "docker-archive:image.tar", "docker://" + m.PluginRef}, dagger.ContainerWithExecOpts{UseEntrypoint: true}).
+		Sync(ctx)
+	if err != nil {
+		return nil, err
+	}
+
 	return m, nil
 }
 
@@ -706,6 +734,9 @@ func (m *Interlink) Run(
 	// +optional
 	// +defaultPath="./manifests"
 	manifests *dagger.Directory,
+	// +optional
+	// +defaultPath="../test/vk-test-set"
+	testSet *dagger.Directory,
 ) (*dagger.Container, error) {
 	return dag.Container().From("bitnamilegacy/kubectl:1.33-debian-12").
 		WithUser("root").
@@ -719,11 +750,12 @@ func (m *Interlink) Run(
 		WithExec([]string{"chown", "1001:0", "/.kube/config"}).
 		WithUser("1001").
 		WithDirectory("/manifests", manifests).
+		WithDirectory("/opt/user/vk-test-set", testSet).
 		WithEntrypoint([]string{"kubectl"}).
-		WithWorkdir("/opt/user").
-		WithExec([]string{"bash", "-c", "git clone https://github.com/interlink-hq/vk-test-set.git"}).
 		WithExec([]string{"bash", "-c", "cp /manifests/vktest_config.yaml /opt/user/vk-test-set/vktest_config.yaml"}).
 		WithWorkdir("/opt/user/vk-test-set").
+		// Automate CSR approval for testing - required for mTLS functionality and log access
+		WithExec([]string{"bash", "-c", "kubectl get csr -o name | xargs -r kubectl certificate approve"}).
 		WithExec([]string{"bash", "-c", "python3 -m venv .venv && source .venv/bin/activate && pip3 install -e ./ "}), nil
 }
 
@@ -773,6 +805,9 @@ func (m *Interlink) Test(
 	// +optional
 	// +defaultPath="../"
 	sourceFolder *dagger.Directory,
+	// +optional
+	// +defaultPath="../test/vk-test-set"
+	testSet *dagger.Directory,
 ) (*dagger.Container, error) {
 	// Run unit tests first
 	unitTestOutput, err := m.UnitTest(ctx, sourceFolder)
@@ -787,7 +822,7 @@ func (m *Interlink) Test(
 	}
 	log.Printf("Lint output: %s", lint)
 
-	c, err := m.Run(ctx, manifests)
+	c, err := m.Run(ctx, manifests, testSet)
 	if err != nil {
 		return nil, err
 	}
@@ -813,6 +848,9 @@ func (m *Interlink) TestMTLS(
 	// +optional
 	// +defaultPath="../"
 	sourceFolder *dagger.Directory,
+	// +optional
+	// +defaultPath="../test/vk-test-set"
+	testSet *dagger.Directory,
 ) (*dagger.Container, error) {
 	// Run unit tests first
 	unitTestOutput, err := m.UnitTest(ctx, sourceFolder)
@@ -827,7 +865,7 @@ func (m *Interlink) TestMTLS(
 	}
 	log.Printf("Lint output: %s", lint)
 
-	c, err := m.Run(ctx, manifests)
+	c, err := m.Run(ctx, manifests, testSet)
 	if err != nil {
 		return nil, err
 	}
@@ -866,6 +904,8 @@ EOF`}).
 		WithExec([]string{"bash", "-c", "timeout 10s kubectl logs -f mtls-log-test || echo 'Log streaming test completed'"}).
 		// Clean up test pod
 		WithExec([]string{"bash", "-c", "kubectl delete pod mtls-log-test --ignore-not-found"}).
+		// Automate CSR approval for testing - required for mTLS functionality and log access
+		WithExec([]string{"bash", "-c", "kubectl get csr -o name | xargs -r kubectl certificate approve"}).
 		// Run the full test suite (excluding resource-intensive tests)
 		WithExec([]string{"bash", "-c", "source .venv/bin/activate && export KUBECONFIG=/.kube/config && pytest -v -k 'not rclone and not limits and not stress'"})
 
