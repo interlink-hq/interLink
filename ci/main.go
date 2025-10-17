@@ -180,6 +180,7 @@ func New(name string,
 		InterlinkRef:       InterlinkRef,
 		InterlinkContainer: dag.Container(),
 		PluginRef:          pluginRef,
+		PluginContainer:    dag.Container(),
 	}
 }
 
@@ -221,16 +222,30 @@ func (m *Interlink) NewInterlink(
 	// docker run -p 4000:4000 -v ./manifests/plugin-config.yaml:/etc/interlink/InterLinkConfig.yaml -e SHARED_FS=true -e SLURMCONFIGPATH=/etc/interlink/InterLinkConfig.yaml ghcr.io/interlink-hq/interlink-sidecar-slurm/interlink-sidecar-slurm:0.4.0
 	var err error
 	if pluginEndpoint == nil {
-		m.PluginContainer = dag.Container().From(m.PluginRef).
-			WithFile("/etc/interlink/InterLinkConfig.yaml", pluginConfig).
-			WithEnvVariable("BUST", time.Now().String()).
-			WithEnvVariable("SLURMCONFIGPATH", "/etc/interlink/InterLinkConfig.yaml").
-			WithEnvVariable("SHARED_FS", "true").
-			WithExposedPort(4000)
+		if m.PluginContainer == nil {
+			m.PluginContainer = dag.Container().From(m.PluginRef).
+				WithFile("/etc/interlink/InterLinkConfig.yaml", pluginConfig).
+				WithEnvVariable("BUST", time.Now().String()).
+				WithEnvVariable("SLURMCONFIGPATH", "/etc/interlink/InterLinkConfig.yaml").
+				WithEnvVariable("SHARED_FS", "true").
+				WithExposedPort(4000)
 
-		pluginEndpoint, err = m.PluginContainer.AsService(dagger.ContainerAsServiceOpts{UseEntrypoint: true, InsecureRootCapabilities: true}).Start(ctx)
-		if err != nil {
-			return nil, err
+			pluginEndpoint, err = m.PluginContainer.AsService(dagger.ContainerAsServiceOpts{UseEntrypoint: true, InsecureRootCapabilities: true}).Start(ctx)
+			if err != nil {
+				return nil, err
+			}
+		} else {
+			m.PluginContainer = m.PluginContainer.
+				WithFile("/etc/interlink/InterLinkConfig.yaml", pluginConfig).
+				WithEnvVariable("BUST", time.Now().String()).
+				WithEnvVariable("SLURMCONFIGPATH", "/etc/interlink/InterLinkConfig.yaml").
+				WithEnvVariable("SHARED_FS", "true").
+				WithExposedPort(4000)
+
+			pluginEndpoint, err = m.PluginContainer.AsService(dagger.ContainerAsServiceOpts{UseEntrypoint: true, InsecureRootCapabilities: true}).Start(ctx)
+			if err != nil {
+				return nil, err
+			}
 		}
 	}
 
@@ -436,7 +451,7 @@ BashPath: /bin/bash
 	var err error
 	// Setup plugin with standard config
 	if pluginEndpoint == nil {
-		m.PluginContainer = dag.Container().From(m.PluginRef).
+		m.PluginContainer = m.PluginContainer.
 			WithFile("/etc/interlink/InterLinkConfig.yaml", pluginConfigFile.File("/etc/interlink/InterLinkConfig.yaml")).
 			WithEnvVariable("BUST", time.Now().String()).
 			WithEnvVariable("SLURMCONFIGPATH", "/etc/interlink/InterLinkConfig.yaml").
@@ -703,8 +718,8 @@ func (m *Interlink) BuildImages(
 	// Build plugin from local submodule using Dockerfile
 	m.PluginRef = pluginRef
 
-	m.PluginContainer = dag.Container().
-		Build(pluginSource, dagger.ContainerBuildOpts{
+	m.PluginContainer = pluginSource.
+		DockerBuild(dagger.DirectoryDockerBuildOpts{
 			Dockerfile: "docker/Dockerfile",
 		})
 
@@ -750,7 +765,7 @@ func (m *Interlink) Run(
 		WithExec([]string{"chown", "1001:0", "/.kube/config"}).
 		WithUser("1001").
 		WithDirectory("/manifests", manifests).
-		WithDirectory("/opt/user/vk-test-set", testSet).
+		WithDirectory("/opt/user/vk-test-set", testSet, dagger.ContainerWithDirectoryOpts{Owner: "1001:0"}).
 		WithEntrypoint([]string{"kubectl"}).
 		WithExec([]string{"bash", "-c", "cp /manifests/vktest_config.yaml /opt/user/vk-test-set/vktest_config.yaml"}).
 		WithWorkdir("/opt/user/vk-test-set").
