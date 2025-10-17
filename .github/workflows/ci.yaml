@@ -34,6 +34,6 @@ jobs:
         with:
           workdir: ci
           verb: call
-          args: -s --name slurm-test-mtls build-images new-interlink-mtls test stdout 
+          args: -s --name slurm-test-mtls build-images new-interlink-mtls test stdout
           cloud-token: ${{ secrets.DAGGER_CLOUD_TOKEN }}
-          version: "0.18.9"
+          version: "0.19.2"
