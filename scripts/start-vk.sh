@@ -17,7 +17,7 @@ else
   export POD_IP=$(ifconfig | grep "inet " | grep -v 127.0.0.1 | head -1 | awk '{print $2}')
 fi
 
-export NODENAME=virtual-kubelet-2
+export NODENAME=virtual-kubelet
 export KUBELET_PORT=10250
 export KUBELET_URL=0.0.0.0
 export CONFIGPATH="${PROJECT_ROOT}/scripts/virtual-kubelet-config.yaml"
