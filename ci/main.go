@@ -795,7 +795,7 @@ func (m *Interlink) Lint(
 ) *dagger.Container {
 	lintCache := dag.CacheVolume(m.Name + "_lint")
 
-	return dag.Container().From("golangci/golangci-lint:v2.1.1").
+	return dag.Container().From("golangci/golangci-lint:v2.5.0").
 		WithMountedDirectory("/app", sourceFolder).
 		WithMountedCache("/root/.cache", lintCache).
 		WithWorkdir("/app").
@@ -898,6 +898,8 @@ func (m *Interlink) TestMTLS(
 	if err != nil {
 		return nil, err
 	}
+	// Automate CSR approval for testing - required for mTLS functionality and log access
+	c = c.WithExec([]string{"bash", "-c", "kubectl get csr -o name | xargs -r kubectl certificate approve"})
 
 	// First run basic tests to ensure setup works
 	result := c.WithExec([]string{"bash", "-c", "source .venv/bin/activate && export KUBECONFIG=/.kube/config && pytest -v -k 'hello'"}).
