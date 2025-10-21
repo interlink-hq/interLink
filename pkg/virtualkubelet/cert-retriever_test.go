@@ -15,6 +15,8 @@ func TestCleanupOldCSRs(t *testing.T) {
 	ctx := context.Background()
 	nodeName := "test-node"
 	expectedUsername := fmt.Sprintf("system:node:%s", nodeName)
+	nodeSignerName := getNodeSignerName(nodeName)
+	otherNodeSignerName := getNodeSignerName("other-node")
 
 	tests := []struct {
 		name            string
@@ -31,7 +33,8 @@ func TestCleanupOldCSRs(t *testing.T) {
 						CreationTimestamp: metav1.Now(),
 					},
 					Spec: certificates.CertificateSigningRequestSpec{
-						Username: expectedUsername,
+						Username:   expectedUsername,
+						SignerName: nodeSignerName,
 					},
 					Status: certificates.CertificateSigningRequestStatus{
 						Conditions: []certificates.CertificateSigningRequestCondition{
@@ -56,7 +59,8 @@ func TestCleanupOldCSRs(t *testing.T) {
 						CreationTimestamp: metav1.Now(),
 					},
 					Spec: certificates.CertificateSigningRequestSpec{
-						Username: expectedUsername,
+						Username:   expectedUsername,
+						SignerName: nodeSignerName,
 					},
 					Status: certificates.CertificateSigningRequestStatus{
 						Conditions: []certificates.CertificateSigningRequestCondition{
@@ -80,7 +84,8 @@ func TestCleanupOldCSRs(t *testing.T) {
 						CreationTimestamp: metav1.Time{Time: time.Now().Add(-10 * time.Minute)},
 					},
 					Spec: certificates.CertificateSigningRequestSpec{
-						Username: expectedUsername,
+						Username:   expectedUsername,
+						SignerName: nodeSignerName,
 					},
 					Status: certificates.CertificateSigningRequestStatus{
 						Conditions: []certificates.CertificateSigningRequestCondition{},
@@ -91,7 +96,7 @@ func TestCleanupOldCSRs(t *testing.T) {
 			description:     "Should delete pending CSR older than 5 minutes",
 		},
 		{
-			name: "keep recent pending CSR",
+			name: "cleanup all CSRs with node signer",
 			existingCSRs: []certificates.CertificateSigningRequest{
 				{
 					ObjectMeta: metav1.ObjectMeta{
@@ -99,15 +104,16 @@ func TestCleanupOldCSRs(t *testing.T) {
 						CreationTimestamp: metav1.Now(),
 					},
 					Spec: certificates.CertificateSigningRequestSpec{
-						Username: expectedUsername,
+						Username:   expectedUsername,
+						SignerName: nodeSignerName,
 					},
 					Status: certificates.CertificateSigningRequestStatus{
 						Conditions: []certificates.CertificateSigningRequestCondition{},
 					},
 				},
 			},
-			expectedDeletes: 0,
-			description:     "Should keep recent pending CSR",
+			expectedDeletes: 1,
+			description:     "Should delete all CSRs with matching node signer",
 		},
 		{
 			name: "ignore CSRs from other nodes",
@@ -118,7 +124,8 @@ func TestCleanupOldCSRs(t *testing.T) {
 						CreationTimestamp: metav1.Now(),
 					},
 					Spec: certificates.CertificateSigningRequestSpec{
-						Username: "system:node:other-node",
+						Username:   "system:node:other-node",
+						SignerName: otherNodeSignerName,
 					},
 					Status: certificates.CertificateSigningRequestStatus{
 						Conditions: []certificates.CertificateSigningRequestCondition{
@@ -143,7 +150,8 @@ func TestCleanupOldCSRs(t *testing.T) {
 						CreationTimestamp: metav1.Now(),
 					},
 					Spec: certificates.CertificateSigningRequestSpec{
-						Username: expectedUsername,
+						Username:   expectedUsername,
+						SignerName: nodeSignerName,
 					},
 					Status: certificates.CertificateSigningRequestStatus{
 						Conditions: []certificates.CertificateSigningRequestCondition{
@@ -161,7 +169,8 @@ func TestCleanupOldCSRs(t *testing.T) {
 						CreationTimestamp: metav1.Now(),
 					},
 					Spec: certificates.CertificateSigningRequestSpec{
-						Username: expectedUsername,
+						Username:   expectedUsername,
+						SignerName: nodeSignerName,
 					},
 					Status: certificates.CertificateSigningRequestStatus{
 						Conditions: []certificates.CertificateSigningRequestCondition{
@@ -178,7 +187,8 @@ func TestCleanupOldCSRs(t *testing.T) {
 						CreationTimestamp: metav1.Time{Time: time.Now().Add(-10 * time.Minute)},
 					},
 					Spec: certificates.CertificateSigningRequestSpec{
-						Username: expectedUsername,
+						Username:   expectedUsername,
+						SignerName: nodeSignerName,
 					},
 					Status: certificates.CertificateSigningRequestStatus{
 						Conditions: []certificates.CertificateSigningRequestCondition{},

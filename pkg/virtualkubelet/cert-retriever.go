@@ -24,8 +24,15 @@ import (
 
 type Crtretriever func(*tls.ClientHelloInfo) (*tls.Certificate, error)
 
+// getNodeSignerName returns a unique signer name for the given node
+func getNodeSignerName(nodeName string) string {
+	return fmt.Sprintf("interlink-project.dev/node-%s", nodeName)
+}
+
 // cleanupOldCSRs removes old or pending CSRs for this node to prevent accumulation
 func cleanupOldCSRs(ctx context.Context, kubeClient kubernetes.Interface, nodeName string) error {
+	nodeSignerName := getNodeSignerName(nodeName)
+
 	// List all CSRs
 	csrList, err := kubeClient.CertificatesV1().CertificateSigningRequests().List(ctx, metav1.ListOptions{})
 	if err != nil {
@@ -33,57 +40,24 @@ func cleanupOldCSRs(ctx context.Context, kubeClient kubernetes.Interface, nodeNa
 		return err
 	}
 
-	// Pattern to match CSR names for this node
-	// The certificate manager creates CSRs with names like "csr-<random>"
-	// but sets the username to "system:node:<nodename>"
-	expectedUsername := fmt.Sprintf("system:node:%s", nodeName)
-
 	deletedCount := 0
 	for _, csr := range csrList.Items {
-		// Check if this CSR belongs to our node
-		if csr.Spec.Username != expectedUsername {
+		// Check if this CSR belongs to our node by matching the node-specific signer name
+		if csr.Spec.SignerName != nodeSignerName {
 			continue
 		}
 
-		// Delete old CSRs that are:
-		// 1. Already approved and issued (completed, no longer needed)
-		// 2. Denied (failed, should be recreated)
-		// 3. Pending for more than 5 minutes (likely stale)
-		shouldDelete := false
-		reason := ""
+		// Delete old CSRs for this node
+		reason := "virtual node CSR cleanup"
 
-		for _, condition := range csr.Status.Conditions {
-			if condition.Type == certificates.CertificateApproved && csr.Status.Certificate != nil {
-				shouldDelete = true
-				reason = "already issued"
-				break
-			}
-			if condition.Type == certificates.CertificateDenied {
-				shouldDelete = true
-				reason = "denied"
-				break
-			}
-		}
-
-		// Check if pending for too long
-		if !shouldDelete && len(csr.Status.Conditions) == 0 {
-			if time.Since(csr.CreationTimestamp.Time) > 5*time.Minute {
-				shouldDelete = true
-				reason = "pending too long"
-			}
-		}
-
-		if shouldDelete {
-			log.G(ctx).Infof("Deleting old CSR %s for node %s (reason: %s)", csr.Name, nodeName, reason)
-			err := kubeClient.CertificatesV1().CertificateSigningRequests().Delete(ctx, csr.Name, metav1.DeleteOptions{})
-			if err != nil {
-				log.G(ctx).Warningf("Failed to delete CSR %s: %v", csr.Name, err)
-			} else {
-				deletedCount++
-			}
+		log.G(ctx).Infof("Deleting old CSR %s for node %s (reason: %s)", csr.Name, nodeName, reason)
+		err := kubeClient.CertificatesV1().CertificateSigningRequests().Delete(ctx, csr.Name, metav1.DeleteOptions{})
+		if err != nil {
+			log.G(ctx).Warningf("Failed to delete CSR %s: %v", csr.Name, err)
+		} else {
+			deletedCount++
 		}
 	}
-
 	if deletedCount > 0 {
 		log.G(ctx).Infof("Cleaned up %d old CSR(s) for node %s", deletedCount, nodeName)
 	}
@@ -94,11 +68,15 @@ func cleanupOldCSRs(ctx context.Context, kubeClient kubernetes.Interface, nodeNa
 // NewCertificateManager creates a certificate manager for the kubelet when retrieving a server certificate, or returns an error.
 // This function is inspired by Liqo implementation:
 // https://github.com/liqotech/liqo/blob/master/cmd/virtual-kubelet/root/http.go#L149
-func NewCertificateRetriever(kubeClient kubernetes.Interface, signer, nodeName string, nodeIP net.IP) (Crtretriever, error) {
+// The signer parameter is kept for backward compatibility but is now ignored in favor of node-specific signers.
+func NewCertificateRetriever(kubeClient kubernetes.Interface, _ /* signer */, nodeName string, nodeIP net.IP) (Crtretriever, error) {
 	const (
 		vkCertsPath   = "/tmp/certs"
 		vkCertsPrefix = "virtual-kubelet"
 	)
+
+	// Use node-specific signer name instead of the passed signer parameter
+	nodeSignerName := getNodeSignerName(nodeName)
 
 	// Clean up old CSRs before creating a new certificate manager
 	ctx := context.Background()
@@ -126,7 +104,7 @@ func NewCertificateRetriever(kubeClient kubernetes.Interface, signer, nodeName s
 			return kubeClient, nil
 		},
 		GetTemplate: getTemplate,
-		SignerName:  signer,
+		SignerName:  nodeSignerName,
 		Usages: []certificates.KeyUsage{
 			// https://tools.ietf.org/html/rfc5280#section-4.2.1.3
 			//
@@ -142,6 +120,7 @@ func NewCertificateRetriever(kubeClient kubernetes.Interface, signer, nodeName s
 			certificates.UsageServerAuth,
 		},
 		CertificateStore: certificateStore,
+		Name:             nodeName,
 	})
 	if err != nil {
 		return nil, fmt.Errorf("failed to initialize server certificate manager: %w", err)
@@ -160,7 +139,6 @@ func NewCertificateRetriever(kubeClient kubernetes.Interface, signer, nodeName s
 
 // newSelfSignedCertificateRetriever creates a new retriever for self-signed certificates.
 func NewSelfSignedCertificateRetriever(nodeName string, nodeIP net.IP) Crtretriever {
-
 	creator := func() (*tls.Certificate, time.Time, error) {
 		expiration := time.Now().AddDate(1, 0, 0) // 1 year
 

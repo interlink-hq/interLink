@@ -18,8 +18,16 @@ openapi:
 clean:
 	rm -rf ./bin
 
+# Code quality checks
+lint:
+	golangci-lint run -v --timeout=30m
+
 unit-test:
 	go test -v -race -coverprofile=coverage.out -covermode=atomic ./pkg/...
+
+# Run all checks before integration tests
+check: lint unit-test
+	@echo "All checks passed!"
 
 test:
 	dagger call -m ./ci \
@@ -34,4 +42,25 @@ test-tls:
     build-images \
     new-interlink-mtls \
     test stdout
+
+# Integration tests with ephemeral K3s cluster (no Dagger required)
+# Runs lint and unit tests first
+test-k3s: check test-k3s-setup test-k3s-run test-k3s-cleanup
+
+test-k3s-setup:
+	@echo "Setting up ephemeral K3s cluster for integration tests..."
+	@./scripts/k3s-test-setup.sh
+
+test-k3s-run:
+	@echo "Running integration tests on K3s..."
+	@./scripts/k3s-test-run.sh
+
+test-k3s-cleanup:
+	@echo "Cleaning up K3s test environment..."
+	@./scripts/k3s-test-cleanup.sh
+
+# Quick local integration test
+test-local: all
+	@echo "Running local integration test..."
+	@./scripts/local-test.sh
 
