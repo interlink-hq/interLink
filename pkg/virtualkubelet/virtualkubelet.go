@@ -5,7 +5,9 @@ import (
 	"context"
 	"crypto/rand"
 	"embed"
+	"encoding/base64"
 	"encoding/hex"
+	"encoding/json"
 	"fmt"
 	"io"
 	mathrand "math/rand"
@@ -39,6 +41,8 @@ import (
 
 	types "github.com/interlink-hq/interlink/pkg/interlink"
 	k8stypes "k8s.io/apimachinery/pkg/types"
+
+	"golang.org/x/crypto/curve25519"
 )
 
 //go:embed templates/wstunnel-template.yaml
@@ -61,21 +65,77 @@ const (
 	xilinxFPGA             = "xilinx.com/fpga"
 	intelFPGA              = "intel.com/fpga"
 	DefaultProtocol        = "TCP"
-	DefaultWstunnelCommand = "curl -L https://github.com/erebe/wstunnel/releases/download/v10.4.4/wstunnel_10.4.4_linux_amd64.tar.gz -o wstunnel.tar.gz && tar -xzvf wstunnel.tar.gz && chmod +x wstunnel\\n\\n./wstunnel client --http-upgrade-path-prefix %s %s ws://%s:80"
+	DefaultWstunnelCommand = "curl  -L -f -k https://github.com/erebe/wstunnel/releases/download/v10.4.4/wstunnel_10.4.4_linux_amd64.tar.gz -o wstunnel.tar.gz && tar -xzvf wstunnel.tar.gz && chmod +x wstunnel && ./wstunnel client --http-upgrade-path-prefix %s %s ws://%s:80 &"
+)
+
+// Annotations for WireGuard and WStunnel configuration
+const (
+	annWGPrivateKey       = "interlink.eu/wg-private-key"       // base64 or plain (your choice)
+	annWGPeerPublicKey    = "interlink.eu/wg-peer-public-key"   // client's public key (server peer)
+	annWGMTU              = "interlink.eu/wg-mtu"               // optional, default 1280
+	annWgKeepaliveSeconds = "interlink.eu/wg-keepalive-seconds" // optional, default 25
+	annWSTunnelClientCmds = "interlink.eu/wstunnel-client-commands"
+	annWGClientSnippet    = "interlink.eu/wireguard-client-snippet"
 )
 
 type WstunnelTemplateData struct {
-	Name           string
-	Namespace      string
-	RandomPassword string
-	ExposedPorts   []PortMapping
-	WildcardDNS    string
+	Name             string
+	Namespace        string
+	RandomPassword   string
+	ExposedPorts     []PortMapping
+	WildcardDNS      string
+	WGPrivateKey     string
+	ClientPublicKey  string
+	WGMTU            int
+	KeepaliveSecs    int
+	ClientPrivateKey string // only if we generated it
 }
 
 type PortMapping struct {
 	Port     int32
 	Name     string
 	Protocol string
+}
+
+func generateWGKeypair() (string, string, error) {
+	// 32 random bytes -> clamp per X25519 rules -> public = X25519(priv, basepoint)
+	privRaw := make([]byte, 32)
+	if _, err := rand.Read(privRaw); err != nil {
+		return "", "", fmt.Errorf("rand: %w", err)
+	}
+	// clamp private (per RFC7748)
+	privRaw[0] &= 248
+	privRaw[31] &= 127
+	privRaw[31] |= 64
+
+	pubRaw, err := curve25519.X25519(privRaw, curve25519.Basepoint)
+	if err != nil {
+		return "", "", fmt.Errorf("x25519: %w", err)
+	}
+	priv := base64.StdEncoding.EncodeToString(privRaw)
+	pub := base64.StdEncoding.EncodeToString(pubRaw)
+	return priv, pub, nil
+}
+
+// deriveWGPublicKey takes a base64 private key and returns base64 public key
+func deriveWGPublicKey(privB64 string) (string, error) {
+	privRaw, err := base64.StdEncoding.DecodeString(strings.TrimSpace(privB64))
+	if err != nil {
+		return "", fmt.Errorf("decode priv: %w", err)
+	}
+	if len(privRaw) != 32 {
+		return "", fmt.Errorf("invalid private key length: %d", len(privRaw))
+	}
+	// Ensure clamping (ok to re-clamp)
+	privRaw[0] &= 248
+	privRaw[31] &= 127
+	privRaw[31] |= 64
+
+	pubRaw, err := curve25519.X25519(privRaw, curve25519.Basepoint)
+	if err != nil {
+		return "", fmt.Errorf("x25519: %w", err)
+	}
+	return base64.StdEncoding.EncodeToString(pubRaw), nil
 }
 
 // Increment the given IP address
@@ -683,22 +743,99 @@ func (p *Provider) createDummyPod(ctx context.Context, originalPod *v1.Pod) (*v1
 		log.G(ctx).Infof("Created wstunnel namespace %s", namespace)
 	}
 
+	// compute names derived from the original pod (used below)
+	wstunnelNS := originalPod.Namespace + "-wstunnel"
+	resourceBaseName := originalPod.Name + "-" + originalPod.Namespace
+
+	// Reuse existing random path prefix if the Deployment already exists, otherwise generate it once
+	pathPrefix := ""
+	if dep, err := p.clientSet.AppsV1().Deployments(wstunnelNS).Get(ctx, resourceBaseName, metav1.GetOptions{}); err == nil {
+		if dep.Spec.Template.Annotations != nil {
+			if v, ok := dep.Spec.Template.Annotations["interlink.eu/wstunnel-path-prefix"]; ok && strings.TrimSpace(v) != "" {
+				pathPrefix = v
+			}
+		}
+	}
+	if pathPrefix == "" {
+		pathPrefix = generateRandomPassword()
+	}
+
+	// log the path prefix
+	log.G(ctx).Infof("Using wstunnel path prefix %s for %s/%s", pathPrefix, originalPod.Namespace, originalPod.Name)
+
 	// Generate template data
 	templateData := WstunnelTemplateData{
-		Name:           originalPod.Name + "-" + originalPod.Namespace,
-		Namespace:      namespace,
-		RandomPassword: generateRandomPassword(),
+		Name:           resourceBaseName,
+		Namespace:      wstunnelNS,
+		RandomPassword: pathPrefix,
 		ExposedPorts:   extractPortMappings(originalPod),
 		WildcardDNS:    p.config.Network.WildcardDNS,
 	}
 
-	// Load and execute template
+	// if full mesh in the configuration is set to true
+	if p.config.Network.FullMesh {
+
+		wgMTU := 1280
+		if v := strings.TrimSpace(originalPod.Annotations[annWGMTU]); v != "" {
+			if n, err := strconv.Atoi(v); err == nil && n > 0 {
+				wgMTU = n
+			}
+		}
+		keepalive := 25
+		if v := strings.TrimSpace(originalPod.Annotations[annWgKeepaliveSeconds]); v != "" {
+			if n, err := strconv.Atoi(v); err == nil && n >= 0 {
+				keepalive = n
+			}
+		}
+
+		serverPriv := strings.TrimSpace(originalPod.Annotations[annWGPrivateKey])
+		if serverPriv == "" {
+			priv, pub, err := generateWGKeypair()
+			if err != nil {
+				return nil, nil, fmt.Errorf("generate server WG keypair: %w", err)
+			}
+			serverPriv = priv
+			log.G(ctx).Infof("[WG] Generated SERVER keypair for %s/%s: public=%s",
+				originalPod.Namespace, originalPod.Name, pub)
+			// (Optionally) you could patch the Pod to persist the generated serverPriv annotation.
+		}
+
+		clientPub := strings.TrimSpace(originalPod.Annotations[annWGPeerPublicKey])
+		var generatedClientPriv string
+		if clientPub == "" {
+			cPriv, cPub, err := generateWGKeypair()
+			if err != nil {
+				return nil, nil, fmt.Errorf("generate client WG keypair: %w", err)
+			}
+			clientPub = cPub
+			generatedClientPriv = cPriv
+			log.G(ctx).Infof("[WG] Generated CLIENT keypair for %s/%s: public=%s private=%s",
+				originalPod.Namespace, originalPod.Name, cPub, cPriv)
+		} else {
+			// sanity check format (optional)
+			if _, err := base64.StdEncoding.DecodeString(clientPub); err != nil {
+				return nil, nil, fmt.Errorf("invalid client public key (base64): %w", err)
+			}
+		}
+
+		templateData.WGPrivateKey = serverPriv
+		templateData.ClientPublicKey = clientPub
+		templateData.WGMTU = wgMTU
+		templateData.KeepaliveSecs = keepalive
+		templateData.ClientPrivateKey = generatedClientPriv // may be empty if not generated
+
+		// Validate critical WG inputs (fail early so the template doesn’t render bogus keys)
+		if templateData.WGPrivateKey == "" || templateData.ClientPublicKey == "" {
+			return nil, nil, fmt.Errorf("wireguard keys missing: set %q and %q annotations on pod %s/%s",
+				annWGPrivateKey, annWGPeerPublicKey, originalPod.Namespace, originalPod.Name)
+		}
+	}
+
 	manifestYAML, err := p.executeWstunnelTemplate(ctx, templateData)
 	if err != nil {
 		return nil, nil, fmt.Errorf("failed to execute wstunnel template: %w", err)
 	}
 
-	// Apply the manifests
 	createdPod, err := p.applyWstunnelManifests(ctx, manifestYAML)
 	if err != nil {
 		return nil, nil, fmt.Errorf("failed to apply wstunnel manifests: %w", err)
@@ -863,6 +1000,60 @@ func (p *Provider) applyWstunnelManifests(ctx context.Context, manifestYAML stri
 			}
 			createdResources = append(createdResources, "ingress:"+ingress.Name)
 
+		case *v1.ConfigMap:
+			cm, err := p.clientSet.CoreV1().ConfigMaps(o.Namespace).Create(ctx, o, metav1.CreateOptions{})
+			if err != nil {
+				if apierrors.IsAlreadyExists(err) {
+					log.G(ctx).Infof("ConfigMap %s/%s already exists, updating", o.Namespace, o.Name)
+					existing, getErr := p.clientSet.CoreV1().ConfigMaps(o.Namespace).Get(ctx, o.Name, metav1.GetOptions{})
+					if getErr != nil {
+						p.cleanupPartialWstunnelResources(ctx, createdResources, o.Namespace)
+						return nil, fmt.Errorf("failed to get existing configmap: %w", getErr)
+					}
+					o.ResourceVersion = existing.ResourceVersion
+					o.UID = existing.UID
+					cm, err = p.clientSet.CoreV1().ConfigMaps(o.Namespace).Update(ctx, o, metav1.UpdateOptions{})
+					if err != nil {
+						p.cleanupPartialWstunnelResources(ctx, createdResources, o.Namespace)
+						return nil, fmt.Errorf("failed to update existing configmap: %w", err)
+					}
+					log.G(ctx).Infof("Updated configmap %s/%s", cm.Namespace, cm.Name)
+				} else {
+					p.cleanupPartialWstunnelResources(ctx, createdResources, o.Namespace)
+					return nil, fmt.Errorf("failed to create configmap: %w", err)
+				}
+			} else {
+				log.G(ctx).Infof("Created configmap %s/%s", cm.Namespace, cm.Name)
+			}
+			createdResources = append(createdResources, "configmap:"+o.Name)
+
+		case *v1.Secret:
+			sec, err := p.clientSet.CoreV1().Secrets(o.Namespace).Create(ctx, o, metav1.CreateOptions{})
+			if err != nil {
+				if apierrors.IsAlreadyExists(err) {
+					log.G(ctx).Infof("Secret %s/%s already exists, updating", o.Namespace, o.Name)
+					existing, getErr := p.clientSet.CoreV1().Secrets(o.Namespace).Get(ctx, o.Name, metav1.GetOptions{})
+					if getErr != nil {
+						p.cleanupPartialWstunnelResources(ctx, createdResources, o.Namespace)
+						return nil, fmt.Errorf("failed to get existing secret: %w", getErr)
+					}
+					o.ResourceVersion = existing.ResourceVersion
+					o.UID = existing.UID
+					sec, err = p.clientSet.CoreV1().Secrets(o.Namespace).Update(ctx, o, metav1.UpdateOptions{})
+					if err != nil {
+						p.cleanupPartialWstunnelResources(ctx, createdResources, o.Namespace)
+						return nil, fmt.Errorf("failed to update existing secret: %w", err)
+					}
+					log.G(ctx).Infof("Updated secret %s/%s", sec.Namespace, sec.Name)
+				} else {
+					p.cleanupPartialWstunnelResources(ctx, createdResources, o.Namespace)
+					return nil, fmt.Errorf("failed to create secret: %w", err)
+				}
+			} else {
+				log.G(ctx).Infof("Created secret %s/%s", sec.Namespace, sec.Name)
+			}
+			createdResources = append(createdResources, "secret:"+o.Name)
+
 		default:
 			log.G(ctx).Warningf("Unsupported resource type: %T", obj)
 		}
@@ -928,6 +1119,14 @@ func (p *Provider) cleanupWstunnelResources(ctx context.Context, wstunnelName, n
 	} else {
 		log.G(ctx).Infof("Successfully deleted wstunnel ingress %s/%s", namespace, wstunnelName)
 	}
+
+	// Delete configmap
+	err = p.clientSet.CoreV1().ConfigMaps(namespace).Delete(ctx, wstunnelName+"-wg-config", metav1.DeleteOptions{})
+	if err != nil {
+		log.G(ctx).Warningf("Failed to delete wstunnel configmap %s/%s: %v", namespace, wstunnelName+"-wg-config", err)
+	} else {
+		log.G(ctx).Infof("Successfully deleted wstunnel configmap %s/%s", namespace, wstunnelName+"-wg-config")
+	}
 }
 
 // cleanupPartialWstunnelResources removes specific resources that were created before a failure
@@ -965,6 +1164,22 @@ func (p *Provider) cleanupPartialWstunnelResources(ctx context.Context, createdR
 			} else {
 				log.G(ctx).Infof("Successfully deleted partial ingress %s/%s", namespace, resourceName)
 			}
+
+		case "configmap":
+			err := p.clientSet.CoreV1().ConfigMaps(namespace).Delete(ctx, resourceName, metav1.DeleteOptions{})
+			if err != nil {
+				log.G(ctx).Warningf("Failed to delete partial configmap %s/%s: %v", namespace, resourceName, err)
+			} else {
+				log.G(ctx).Infof("Successfully deleted partial configmap %s/%s", namespace, resourceName)
+			}
+		case "secret":
+			err := p.clientSet.CoreV1().Secrets(namespace).Delete(ctx, resourceName, metav1.DeleteOptions{})
+			if err != nil {
+				log.G(ctx).Warningf("Failed to delete partial secret %s/%s: %v", namespace, resourceName, err)
+			} else {
+				log.G(ctx).Infof("Successfully deleted partial secret %s/%s", namespace, resourceName)
+			}
+
 		}
 	}
 }
@@ -1137,41 +1352,449 @@ func (p *Provider) handleWstunnelCreation(ctx context.Context, pod *v1.Pod) (str
 }
 
 // addWstunnelClientAnnotation adds the wstunnel client command annotation to the original pod
-func (p *Provider) addWstunnelClientAnnotation(ctx context.Context, pod *v1.Pod, templateData *WstunnelTemplateData) error {
+func (p *Provider) addWstunnelClientAnnotation(ctx context.Context, pod *v1.Pod, td *WstunnelTemplateData) error {
 	if pod.Annotations == nil {
 		pod.Annotations = make(map[string]string)
 	}
 
-	// Generate the ingress endpoint
-	ingressEndpoint := fmt.Sprintf("%s-%s.%s", templateData.Name, templateData.Namespace, templateData.WildcardDNS)
-	if templateData.WildcardDNS == "" {
-		ingressEndpoint = templateData.Name
+	ingressEndpoint := fmt.Sprintf("%s-%s.%s", td.Name, td.Namespace, td.WildcardDNS)
+	if td.WildcardDNS == "" {
+		ingressEndpoint = td.Name
 	}
 
-	// Generate -R options for each exposed port
-	var rOptions []string
-	for _, port := range templateData.ExposedPorts {
-		rOptions = append(rOptions, fmt.Sprintf("-R tcp://0.0.0.0:%d:localhost:%d", port.Port, port.Port))
+	// Check if FullMesh mode is enabled
+	if p.config.Network.FullMesh {
+		log.G(ctx).Infof("FullMesh mode enabled, generating pre-exec script for pod %s/%s", pod.Namespace, pod.Name)
+
+		// Generate full mesh script
+		script, err := p.generateFullMeshScript(ctx, td, ingressEndpoint, string(pod.UID))
+		if err != nil {
+			return fmt.Errorf("failed to generate full mesh script: %w", err)
+		}
+		pod.Annotations["slurm-job.vk.io/pre-exec"] = script + pod.Annotations["slurm-job.vk.io/pre-exec"]
+		log.G(ctx).Infof("Added full mesh pre-exec script to pod %s/%s", pod.Namespace, pod.Name)
+
+		clientPriv := "<CLIENT_PRIVATE_KEY>"
+		if strings.TrimSpace(td.ClientPrivateKey) != "" {
+			clientPriv = td.ClientPrivateKey
+		}
+		serverPub, err := deriveWGPublicKey(td.WGPrivateKey)
+		if err != nil {
+			log.G(ctx).Errorf("Failed to derive server public key: %v", err)
+			serverPub = "<SERVER_PUBLIC_KEY>"
+		}
+
+		wgSnippet := fmt.Sprintf(`
+[Interface]
+Address = 10.7.0.2/32
+PrivateKey = %s
+DNS = 1.1.1.1
+MTU = %d
+
+[Peer]
+PublicKey = %s
+AllowedIPs = 10.7.0.1/32, 10.0.0.0/8
+Endpoint = 127.0.0.1:51821
+PersistentKeepalive = %d
+		`, clientPriv, td.WGMTU, serverPub, td.KeepaliveSecs)
+
+		pod.Annotations["interlink.eu/wireguard-client-snippet"] = wgSnippet
+
+	} else {
+		var rOptions []string
+		for _, port := range td.ExposedPorts {
+			if strings.ToUpper(port.Protocol) == "UDP" {
+				continue
+			}
+			rOptions = append(rOptions, fmt.Sprintf("-R tcp://0.0.0.0:%d:localhost:%d", port.Port, port.Port))
+		}
+
+		wstunnelCommandTemplate := p.config.Network.WstunnelCommand
+		if wstunnelCommandTemplate == "" {
+			wstunnelCommandTemplate = DefaultWstunnelCommand
+		}
+
+		log.G(ctx).Infof("Default ws tunnel command is: %s", wstunnelCommandTemplate)
+
+		mainCmd := fmt.Sprintf(
+			wstunnelCommandTemplate,
+			td.RandomPassword,
+			strings.Join(rOptions, " "),
+			ingressEndpoint,
+		)
+
+		pod.Annotations["interlink.eu/wstunnel-client-commands"] = mainCmd
+
 	}
 
-	// Get the wstunnel command template from config, or use default
-	wstunnelCommandTemplate := p.config.Network.WstunnelCommand
-	if wstunnelCommandTemplate == "" {
-		wstunnelCommandTemplate = DefaultWstunnelCommand
+	// Patch the pod on Kubernetes
+	patchData := map[string]interface{}{
+		"metadata": map[string]interface{}{
+			"annotations": pod.Annotations,
+		},
 	}
 
-	// Create single command with all -R options
-	command := fmt.Sprintf(wstunnelCommandTemplate,
-		templateData.RandomPassword,
-		strings.Join(rOptions, " "),
+	patchBytes, err := json.Marshal(patchData)
+	if err != nil {
+		log.G(ctx).Errorf("Failed to marshal patch data: %v", err)
+		return err
+	}
+
+	_, err = p.clientSet.CoreV1().Pods(pod.Namespace).Patch(
+		ctx,
+		pod.Name,
+		k8stypes.StrategicMergePatchType,
+		patchBytes,
+		metav1.PatchOptions{},
+	)
+	if err != nil {
+		log.G(ctx).Errorf("Failed to patch pod annotations on Kubernetes: %v", err)
+	} else {
+		log.G(ctx).Infof("Successfully patched pod annotations on Kubernetes for %s/%s", pod.Namespace, pod.Name)
+	}
+
+	return nil
+}
+
+func (p *Provider) generateFullMeshScript(ctx context.Context, td *WstunnelTemplateData, ingressEndpoint string, podUID string) (string, error) {
+
+	serverPub, err := deriveWGPublicKey(td.WGPrivateKey)
+	if err != nil {
+		return "", fmt.Errorf("failed to derive server public key: %w", err)
+	}
+
+	clientPriv := td.ClientPrivateKey
+	if clientPriv == "" {
+		return "", fmt.Errorf("client private key not generated")
+	}
+
+	// Generate random interface name
+	wgInterfaceName := fmt.Sprintf("wg%s", podUID[:13])
+
+	// Set default URLs if not configured
+	wstunnelURL := "https://github.com/erebe/wstunnel/releases/download/v10.4.4/wstunnel_10.4.4_linux_amd64.tar.gz"
+	wireguardGoURL := p.config.Network.WireguardGoURL
+	if wireguardGoURL == "" {
+		wireguardGoURL = "https://minio.131.154.98.45.myip.cloud.infn.it/public-data/wireguard-go"
+	}
+	wgToolURL := p.config.Network.WgToolURL
+	if wgToolURL == "" {
+		wgToolURL = "https://git.zx2c4.com/wireguard-tools/snapshot/wireguard-tools-1.0.20210914.tar.xz"
+	}
+	slirp4netnsURL := p.config.Network.Slirp4netnsURL
+	if slirp4netnsURL == "" {
+		slirp4netnsURL = "https://github.com/rootless-containers/slirp4netns/releases/download/v1.2.3/slirp4netns-x86_64"
+	}
+
+	// Get network CIDRs
+	serviceCIDR := p.config.Network.ServiceCIDR
+	if serviceCIDR == "" {
+		serviceCIDR = "10.105.0.0/16" // default
+	}
+	podCIDRCluster := p.config.Network.PodCIDRCluster
+	if podCIDRCluster == "" {
+		podCIDRCluster = "10.244.0.0/16" // default
+	}
+	dnsService := p.config.Network.DNSService
+	if dnsService == "" {
+		dnsService = "10.244.0.99" // default, usually kube-dns
+	}
+
+	// Get unshare mode from config
+	unshareMode := p.config.Network.UnshareMode
+	if unshareMode == "" {
+		unshareMode = "auto" // default to auto-detection
+	}
+
+	// Generate WireGuard config with dynamic interface name
+	wgConfig := fmt.Sprintf(`[Interface]
+PrivateKey = %s
+
+[Peer]
+PublicKey = %s
+AllowedIPs = 10.7.0.1/32,10.0.0.0/8,%s,%s
+Endpoint = 127.0.0.1:51821
+PersistentKeepalive = %d
+`, clientPriv, serverPub, podCIDRCluster, serviceCIDR, td.KeepaliveSecs)
+
+	// Generate the full mesh script
+	script := fmt.Sprintf(`
+cat <<'EOFMESH' > $TMPDIR/mesh.sh
+#!/bin/bash
+set -e
+set -m
+
+export PATH=$PATH:$PWD:/usr/sbin:/sbin
+
+# Prepare the temporary directory
+TMPDIR=${SLIRP_TMPDIR:-/tmp/.slirp.$RANDOM$RANDOM}
+mkdir -p $TMPDIR
+cd $TMPDIR
+
+# Set WireGuard interface name
+WG_IFACE="%s"
+
+echo "=== Downloading binaries (outside namespace) ==="
+
+# Download wstunnel
+echo "Downloading wstunnel..."
+if ! curl -L -f -k %s -o wstunnel.tar.gz; then
+    echo "ERROR: Failed to download wstunnel"
+    exit 1
+fi
+tar -xzf wstunnel.tar.gz
+chmod +x wstunnel
+
+# Download wireguard-go
+echo "Downloading wireguard-go..."
+if ! curl -L -f -k %s -o wireguard-go; then
+    echo "ERROR: Failed to download wireguard-go"
+    exit 1
+fi
+chmod +x wireguard-go
+
+# Download and build wg tool
+echo "Downloading wg tool..."
+if ! curl -L -f -k %s -o wg-tools.tar.xz; then
+    echo "ERROR: Failed to download wg tools"
+    exit 1
+fi
+tar -xJf wg-tools.tar.xz
+cd wireguard-tools-*/src
+if ! make; then
+    echo "ERROR: Failed to build wg tool"
+    exit 1
+fi
+cp wg $TMPDIR/
+cd $TMPDIR
+chmod +x wg
+
+# Download slirp4netns
+echo "Downloading slirp4netns..."
+if ! curl -L -f -k %s -o slirp4netns; then
+    echo "ERROR: Failed to download slirp4netns"
+    exit 1
+fi
+chmod +x slirp4netns
+
+# Check if iproute2 is available
+if ! command -v ip &> /dev/null; then
+    echo "ERROR: 'ip' command not found. Please install iproute2 package"
+    exit 1
+fi
+
+# Copy ip command to tmpdir for use in namespace
+IP_CMD=$(command -v ip)
+cp $IP_CMD $TMPDIR/ || echo "Warning: could not copy ip command"
+
+echo "=== All binaries downloaded successfully ==="
+
+# Create WireGuard config with dynamic interface name
+cat <<'EOFWG' > $WG_IFACE.conf
+%s
+EOFWG
+
+# Generate the execution script that will run inside the namespace
+cat <<'EOFSLIRP' > $TMPDIR/slirp.sh
+#!/bin/bash
+set -e
+
+# Ensure PATH includes tmpdir
+export PATH=$TMPDIR:$PATH:/usr/sbin:/sbin
+
+# Get WireGuard interface name from parent
+WG_IFACE="%s"
+
+echo "=== Inside network namespace ==="
+echo "Using WireGuard interface: $WG_IFACE"
+
+export WG_SOCKET_DIR="$TMPDIR"
+
+# Override /etc/resolv.conf to avoid issues with read-only filesystems
+# Not all environments support this; ignore errors
+set -euo pipefail
+
+{
+  mkdir -p /tmp/etc-override
+  echo "search default.svc.cluster.local svc.cluster.local cluster.local" > /tmp/etc-override/resolv.conf
+  echo "nameserver %s" >> /tmp/etc-override/resolv.conf
+  echo "nameserver 1.1.1.1" >> /tmp/etc-override/resolv.conf
+  mount --bind /tmp/etc-override/resolv.conf /etc/resolv.conf
+} || {
+  rc=$?
+  echo "ERROR: one of the commands failed (exit $rc)" >&2
+  exit $rc
+}
+
+# Make filesystem private to allow bind mounts
+mount --make-rprivate / 2>/dev/null || true
+
+# Create writable /var/run with wireguard subdirectory
+mkdir -p $TMPDIR/var-run/wireguard
+mount --bind $TMPDIR/var-run /var/run
+
+cat > $TMPDIR/resolv.conf <<EOF
+search default.svc.cluster.local svc.cluster.local cluster.local
+nameserver %s
+nameserver 1.1.1.1
+EOF
+export LOCALDOMAIN=$TMPDIR/resolv.conf
+
+
+# Start wstunnel in background
+echo "Starting wstunnel..."
+cd $TMPDIR
+./wstunnel client -L 'udp://127.0.0.1:51821:127.0.0.1:51820?timeout_sec=0' --http-upgrade-path-prefix %s ws://%s:80 &
+WSTUNNEL_PID=$!
+
+# Give wstunnel time to establish connection
+sleep 3
+
+# Start WireGuard
+echo "Starting WireGuard on interface $WG_IFACE..."
+WG_I_PREFER_BUGGY_USERSPACE_TO_POLISHED_KMOD=1 WG_SOCKET_DIR=$TMPDIR  ./wireguard-go $WG_IFACE &
+WG_PID=$!
+
+# Give WireGuard time to create interface
+sleep 2
+
+# Configure WireGuard interface
+echo "Configuring WireGuard interface $WG_IFACE..."
+ip link set $WG_IFACE up
+ip addr add 10.7.0.2/32 dev $WG_IFACE
+./wg setconf $WG_IFACE $WG_IFACE.conf
+ip link set dev $WG_IFACE mtu %d
+
+# Add routes for pod and service CIDRs
+echo "Adding routes..."
+ip route add 10.7.0.0/16 dev $WG_IFACE || true
+ip route add 10.96.0.0/16 dev $WG_IFACE || true
+ip route add %s dev $WG_IFACE || true
+ip route add %s dev $WG_IFACE || true
+
+# Update DNS to use cluster DNS
+# echo "nameserver %s" >> /etc/resolv.conf
+
+echo "=== Full mesh network configured successfully ==="
+echo "Testing connectivity..."
+ping -c 1 -W 2 10.7.0.1 || echo "Warning: Cannot ping WireGuard server"
+
+# Execute the original command passed as arguments
+$@
+EOFSLIRP
+
+chmod +x $TMPDIR/slirp.sh
+
+echo "=== Starting network namespace ==="
+
+# Detect best unshare strategy for this environment
+# Priority: 1) Config file setting, 2) Environment variable, 3) Default (auto)
+# Valid values: auto, map-root, map-user, none
+CONFIG_UNSHARE_MODE="%s"
+UNSHARE_MODE="${SLIRP_USERNS_MODE:-$CONFIG_UNSHARE_MODE}"
+UNSHARE_FLAGS=""
+
+echo "Unshare mode from config: $CONFIG_UNSHARE_MODE"
+echo "Active unshare mode: $UNSHARE_MODE"
+
+case "$UNSHARE_MODE" in
+    "none")
+        echo "User namespace disabled (mode=none)"
+        echo "WARNING: Running without user namespace. Some operations may fail."
+        UNSHARE_FLAGS=""
+        ;;
+    
+    "map-root")
+        echo "Using --map-root-user mode (mode=map-root)"
+        UNSHARE_FLAGS="--user --map-root-user"
+        ;;
+    
+    "map-user")
+        echo "Using --map-user/--map-group mode (mode=map-user)"
+        UNSHARE_FLAGS="--user --map-user=$(id -u) --map-group=$(id -g)"
+        ;;
+    
+    "auto"|*)
+        echo "Auto-detecting user namespace configuration (mode=auto)"
+        
+        # Check if user namespaces are allowed
+        if [ -e /proc/sys/kernel/unprivileged_userns_clone ]; then
+            USERNS_ALLOWED=$(cat /proc/sys/kernel/unprivileged_userns_clone 2>/dev/null || echo "1")
+        else
+            USERNS_ALLOWED="1"  # Assume allowed if file doesn't exist
+        fi
+        
+        if [ "$USERNS_ALLOWED" != "1" ]; then
+            echo "User namespaces are disabled on this system"
+            UNSHARE_FLAGS=""
+        else
+            # Check for newuidmap/newgidmap and subuid/subgid support
+            if command -v newuidmap &> /dev/null && command -v newgidmap &> /dev/null && [ -f /etc/subuid ] && [ -f /etc/subgid ]; then
+                SUBUID_START=$(grep "^$(id -un):" /etc/subuid 2>/dev/null | cut -d: -f2)
+                SUBUID_COUNT=$(grep "^$(id -un):" /etc/subuid 2>/dev/null | cut -d: -f3)
+                
+                if [ -n "$SUBUID_START" ] && [ -n "$SUBUID_COUNT" ] && [ "$SUBUID_COUNT" -gt 0 ]; then
+                    echo "Using user namespace with UID/GID mapping (subuid available)"
+                    UNSHARE_FLAGS="--user --map-user=$(id -u) --map-group=$(id -g)"
+                else
+                    echo "Using user namespace with root mapping (no subuid)"
+                    UNSHARE_FLAGS="--user --map-root-user"
+                fi
+            else
+                echo "Using user namespace with root mapping (no newuidmap/newgidmap)"
+                UNSHARE_FLAGS="--user --map-root-user"
+            fi
+        fi
+        ;;
+esac
+
+echo "Unshare flags: $UNSHARE_FLAGS"
+
+# Execute the script within unshare
+unshare $UNSHARE_FLAGS --net --mount $TMPDIR/slirp.sh "$@" &
+sleep 0.1
+JOBPID=$!
+echo "$JOBPID" > /tmp/slirp_jobpid
+
+# Wait for the job pid to be established
+sleep 1
+
+# Create the tap0 device with slirp4netns
+echo "Starting slirp4netns..."
+./slirp4netns --api-socket /tmp/slirp4netns_$JOBPID.sock --configure --mtu=65520 --disable-host-loopback $JOBPID tap0 &
+SLIRPPID=$!
+
+# Wait a bit for slirp4netns to be ready
+sleep 5
+
+# Bring the main job to foreground and wait for completion
+echo "=== Bringing job to foreground ==="
+fg 1
+
+
+EOFMESH
+
+chmod +x $TMPDIR/mesh.sh
+`,
+		wgInterfaceName,
+		wstunnelURL,
+		wireguardGoURL,
+		wgToolURL,
+		slirp4netnsURL,
+		wgConfig,
+		wgInterfaceName,
+		dnsService,
+		dnsService,
+		td.RandomPassword,
 		ingressEndpoint,
+		td.WGMTU,
+		podCIDRCluster,
+		serviceCIDR,
+		dnsService,
+		unshareMode,
 	)
 
-	// Add annotation with the complete command
-	pod.Annotations["interlink.eu/wstunnel-client-commands"] = command
-
-	log.G(ctx).Infof("Added wstunnel client command annotation to pod %s/%s", pod.Namespace, pod.Name)
-	return nil
+	return script, nil
 }
 
 // waitForWstunnelPodIP waits for wstunnel pod to get an IP
@@ -1232,6 +1855,15 @@ func (p *Provider) CreatePod(ctx context.Context, pod *v1.Pod) error {
 		if err != nil {
 			return err
 		}
+
+		if p.config.Network.FullMesh {
+			if pod.Annotations == nil {
+				pod.Annotations = make(map[string]string)
+			}
+			pod.Annotations["interlink.eu/pod-subnet"] = p.node.Spec.PodCIDR
+		}
+
+		log.G(ctx).Infof("Added pod subnet annotation %s to pod %s/%s", p.node.Spec.PodCIDR, pod.Namespace, pod.Name)
 	}
 
 	if _, ok := pod.Annotations["interlink.eu/pod-vpn"]; ok {

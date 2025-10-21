@@ -104,28 +104,35 @@ func (h *InterLinkHandler) CreateHandler(w http.ResponseWriter, r *http.Request)
 
 		bodyBytes, err = json.Marshal(data)
 		if err != nil {
+			log.G(h.Ctx).Errorf("Failed to marshal job data: %v | data: %+v", err, data)
 			w.WriteHeader(http.StatusInternalServerError)
-			log.G(h.Ctx).Error(err)
 			return
 		}
-		log.G(h.Ctx).Debug(string(bodyBytes))
+		log.G(h.Ctx).Debugf("Marshalled job data: %s", string(bodyBytes))
+		log.G(h.Ctx).Infof("POST payload to JobScriptBuilder: %s", string(bodyBytes))
+
 		reader := bytes.NewReader(bodyBytes)
 		req, err = http.NewRequest(http.MethodPost, pod.JobScriptBuilderURL, reader)
 		if err != nil {
-			log.L.Error(err)
+			log.G(h.Ctx).Errorf("Failed to create POST request to JobScriptBuilder: %v | URL: %s", err, pod.JobScriptBuilderURL)
 			return
 		}
 
 		sessionContext := GetSessionContext(r)
-
 		req.Header.Set("Content-Type", "application/json")
+
+		log.G(h.Ctx).Infof("Sending POST to JobScriptBuilder at %s with session: %+v", pod.JobScriptBuilderURL, sessionContext)
+
 		bodyBytesResp, err := ReqWithError(h.Ctx, req, w, start, span, false, true, sessionContext, http.DefaultClient)
 		if err != nil {
-			log.L.Error(err)
+			log.G(h.Ctx).Errorf("JobScriptBuilder request failed: %v", err)
 			return
 		}
 
+		log.G(h.Ctx).Debugf("Received response from JobScriptBuilder: %s", string(bodyBytesResp))
+
 		data.JobScript = string(bodyBytesResp)
+		log.G(h.Ctx).Infof("Updated JobScript successfully (len=%d)", len(data.JobScript))
 
 	case h.Config.JobScriptTemplate != "":
 

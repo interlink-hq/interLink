@@ -128,4 +128,20 @@ type Network struct {
 	WstunnelTemplatePath string `yaml:"WstunnelTemplatePath,omitempty"`
 	// WstunnelCommand specifies the command template for setting up wstunnel clients
 	WstunnelCommand string `yaml:"WstunnelCommand,omitempty"`
+	// FullMesh enables full mesh networking with slirp4netns and WireGuard
+	FullMesh bool `yaml:"FullMesh" default:"false"`
+	// ServiceCIDR specifies the CIDR range for Kubernetes services
+	ServiceCIDR string `yaml:"ServiceCIDR,omitempty"`
+	// PodCIDRCluster specifies the CIDR range for pods in the main cluster
+	PodCIDRCluster string `yaml:"PodCIDRCluster,omitempty"`
+	// DNSService specifies the IP address of the DNS service (e.g., kube-dns)
+	DNSService string `yaml:"DNSService,omitempty"`
+	// WireguardGoURL specifies the URL to download wireguard-go binary
+	WireguardGoURL string `yaml:"WireguardGoURL,omitempty"`
+	// WgToolURL specifies the URL to download wg tool binary
+	WgToolURL string `yaml:"WgToolURL,omitempty"`
+	// Slirp4netnsURL specifies the URL to download slirp4netns binary
+	Slirp4netnsURL string `yaml:"Slirp4netnsURL,omitempty"`
+	// UnsharedMode is the flag for unshared network mode in slirp4netns
+	UnshareMode string `yaml:"UnshareMode,omitempty"`
 }
