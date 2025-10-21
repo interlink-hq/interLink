@@ -14,12 +14,11 @@ fi
 echo "=== Cleaning up K3s test environment ==="
 echo "Test directory: ${TEST_DIR}"
 
-# Stop background processes
-echo "Stopping background processes..."
-if [ -f "${TEST_DIR}/vk.pid" ]; then
-    kill $(cat "${TEST_DIR}/vk.pid") 2>/dev/null || true
-    echo "Stopped Virtual Kubelet"
-fi
+# Uninstall Helm release
+echo "Uninstalling Virtual Kubelet Helm release..."
+export KUBECONFIG=/etc/rancher/k3s/k3s.yaml
+helm uninstall virtual-node -n interlink 2>/dev/null || true
+echo "Uninstalled Virtual Kubelet Helm release"
 
 # Stop Docker containers
 echo "Stopping Docker containers..."

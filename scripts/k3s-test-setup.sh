@@ -46,115 +46,7 @@ done
 kubectl wait --for=condition=Ready nodes --all --timeout=300s
 kubectl get nodes
 
-# Create Virtual Kubelet service account
-echo "Creating service account and RBAC for Virtual Kubelet..."
-kubectl apply -f - <<EOF
-apiVersion: v1
-kind: ServiceAccount
-metadata:
-  name: virtual-kubelet
-  namespace: default
----
-apiVersion: rbac.authorization.k8s.io/v1
-kind: ClusterRole
-metadata:
-  name: virtual-kubelet
-rules:
-- apiGroups:
-  - "coordination.k8s.io"
-  resources:
-  - leases
-  verbs:
-  - update
-  - create
-  - get
-  - list
-  - watch
-  - patch
-- apiGroups:
-  - ""
-  resources:
-  - configmaps
-  - secrets
-  - services
-  - serviceaccounts
-  - namespaces
-  verbs:
-  - get
-  - list
-  - watch
-- apiGroups: [""]
-  resources: ["serviceaccounts/token"]
-  verbs:
-  - create
-  - get
-  - list
-- apiGroups:
-  - ""
-  resources:
-  - pods
-  verbs:
-  - delete
-  - get
-  - list
-  - watch
-  - patch
-- apiGroups:
-  - ""
-  resources:
-  - nodes
-  verbs:
-  - create
-  - get
-- apiGroups:
-  - ""
-  resources:
-  - nodes/status
-  verbs:
-  - update
-  - patch
-- apiGroups:
-  - ""
-  resources:
-  - pods/status
-  verbs:
-  - update
-  - patch
-- apiGroups:
-  - ""
-  resources:
-  - events
-  verbs:
-  - create
-  - patch
-- apiGroups:
-  - "certificates.k8s.io"
-  resources:
-  - certificatesigningrequests
-  verbs:
-  - create
-  - get
-  - list
-  - watch
-  - delete
----
-apiVersion: rbac.authorization.k8s.io/v1
-kind: ClusterRoleBinding
-metadata:
-  name: virtual-kubelet
-roleRef:
-  apiGroup: rbac.authorization.k8s.io
-  kind: ClusterRole
-  name: virtual-kubelet
-subjects:
-- kind: ServiceAccount
-  name: virtual-kubelet
-  namespace: default
-EOF
-
-echo "Waiting for service account to be ready..."
-sleep 5
-kubectl get sa virtual-kubelet -n default
+# No need to create service account manually - Helm chart will do this
 
 # Build Docker images
 echo "Building interLink API Docker image..."
@@ -169,6 +61,11 @@ docker build -t interlink-slurm-plugin:ci-test "${TEST_DIR}/plugin-src"
 
 echo "Docker images built successfully"
 docker images | grep -E "interlink|slurm"
+
+# Load images into K3s (K3s uses containerd, not Docker)
+echo "Loading images into K3s..."
+docker save interlink:ci-test | sudo k3s ctr images import -
+docker save interlink-slurm-plugin:ci-test | sudo k3s ctr images import -
 
 # Create plugin configuration
 echo "Creating plugin configuration..."
@@ -241,104 +138,83 @@ done
 echo "interLink API container started successfully"
 docker ps | grep interlink-api
 
-# Start Virtual Kubelet on host (following example/debug.sh pattern but with 'go run' instead of 'dlv debug')
-echo "Starting Virtual Kubelet on host..."
-export NODENAME=virtual-kubelet
-export KUBELET_PORT=10250
-export KUBELET_URL=0.0.0.0
+# Install Virtual Kubelet via Helm (following ci/main.go pattern)
+echo "Installing Virtual Kubelet via Helm..."
 
-# Cross-platform IP detection
-if command -v hostname &> /dev/null && hostname -I &> /dev/null 2>&1; then
-    # Linux
-    export POD_IP=$(hostname -I | awk '{print $1}')
-else
-    # macOS or other Unix
-    export POD_IP=$(ifconfig | grep "inet " | grep -v 127.0.0.1 | head -1 | awk '{print $2}')
-fi
-
-export CONFIGPATH="${PROJECT_ROOT}/scripts/virtual-kubelet-config.yaml"
-
-# Create token-based kubeconfig for Virtual Kubelet
-echo "Creating token-based kubeconfig..."
-
-# Get service account token
-VK_TOKEN=$(kubectl create token virtual-kubelet -n default --duration=24h --kubeconfig=/etc/rancher/k3s/k3s.yaml)
-
-# Get cluster info from current kubeconfig
-K8S_SERVER=$(kubectl config view --minify -o jsonpath='{.clusters[0].cluster.server}' --kubeconfig=/etc/rancher/k3s/k3s.yaml)
-
-# Check if certificate-authority-data exists, otherwise use certificate-authority file
-K8S_CA_DATA=$(kubectl config view --minify --raw -o jsonpath='{.clusters[0].cluster.certificate-authority-data}' --kubeconfig=/etc/rancher/k3s/k3s.yaml)
-K8S_CA_FILE=$(kubectl config view --minify --raw -o jsonpath='{.clusters[0].cluster.certificate-authority}' --kubeconfig=/etc/rancher/k3s/k3s.yaml)
-
-if [ -n "$K8S_CA_DATA" ]; then
-    # Use certificate-authority-data if available
-    cat > "${TEST_DIR}/vk-kubeconfig.yaml" <<EOF
-apiVersion: v1
-kind: Config
-clusters:
-- name: default-cluster
-  cluster:
-    server: ${K8S_SERVER}
-    certificate-authority-data: ${K8S_CA_DATA}
-contexts:
-- name: default-context
-  context:
-    cluster: default-cluster
-    user: virtual-kubelet
-    namespace: default
-current-context: default-context
-users:
-- name: virtual-kubelet
-  user:
-    token: ${VK_TOKEN}
-EOF
-elif [ -n "$K8S_CA_FILE" ] && [ -f "$K8S_CA_FILE" ]; then
-    # Use certificate-authority file and encode it (cross-platform base64)
-    if base64 --help 2>&1 | grep -q -- '-w'; then
-        K8S_CA_DATA=$(cat "$K8S_CA_FILE" | base64 -w 0)
-    else
-        K8S_CA_DATA=$(cat "$K8S_CA_FILE" | base64)
-    fi
-    cat > "${TEST_DIR}/vk-kubeconfig.yaml" <<EOF
-apiVersion: v1
-kind: Config
-clusters:
-- name: default-cluster
-  cluster:
-    server: ${K8S_SERVER}
-    certificate-authority-data: ${K8S_CA_DATA}
-contexts:
-- name: default-context
-  context:
-    cluster: default-cluster
-    user: virtual-kubelet
-    namespace: default
-current-context: default-context
-users:
-- name: virtual-kubelet
-  user:
-    token: ${VK_TOKEN}
-EOF
-else
-    echo "ERROR: Could not find CA certificate"
-    exit 1
-fi
-
-export KUBECONFIG="${TEST_DIR}/vk-kubeconfig.yaml"
-
-echo "Virtual Kubelet environment:"
-echo "  NODENAME: ${NODENAME}"
-echo "  KUBELET_PORT: ${KUBELET_PORT}"
-echo "  POD_IP: ${POD_IP}"
-echo "  CONFIGPATH: ${CONFIGPATH}"
-echo "  KUBECONFIG: ${KUBECONFIG} (token-based)"
-
+# Build VK Docker image from source
+echo "Building Virtual Kubelet Docker image from source..."
 cd "${PROJECT_ROOT}"
-go run ./cmd/virtual-kubelet/main.go > "${TEST_DIR}/vk.log" 2>&1 &
-echo $! > "${TEST_DIR}/vk.pid"
 
-echo "Virtual Kubelet started (PID: $(cat ${TEST_DIR}/vk.pid))"
+# Build the VK binary
+CGO_ENABLED=0 GOOS=linux go build -o bin/vk cmd/virtual-kubelet/main.go
+
+# Create a minimal Dockerfile for VK
+cat > "${TEST_DIR}/Dockerfile.vk" <<'DOCKERFILE_EOF'
+FROM alpine:latest
+COPY bin/vk /bin/vk
+ENTRYPOINT ["/bin/vk"]
+DOCKERFILE_EOF
+
+# Build VK image
+docker build -f "${TEST_DIR}/Dockerfile.vk" -t virtual-kubelet:ci-test "${PROJECT_ROOT}"
+
+# Load VK image into K3s
+echo "Loading Virtual Kubelet image into K3s..."
+docker save virtual-kubelet:ci-test | sudo k3s ctr images import -
+
+# Create Helm values file (following ci/main.go pattern)
+echo "Creating Helm values file..."
+cat > "${TEST_DIR}/vk-helm-values.yaml" <<EOF
+nodeName: virtual-kubelet
+
+interlink:
+  enabled: false
+  address: http://localhost
+  port: "3000"
+  disableProjectedVolumes: true
+
+virtualNode:
+  image: "virtual-kubelet:ci-test"
+  resources:
+    CPUs: "100"
+    memGiB: "128"
+    pods: "100"
+  HTTPProxies:
+    HTTP: null
+    HTTPs: null
+  HTTP:
+    insecure: true
+
+OAUTH:
+  enabled: false
+EOF
+
+# Install Helm if not present
+if ! command -v helm &> /dev/null; then
+    echo "Installing Helm..."
+    curl https://raw.githubusercontent.com/helm/helm/main/scripts/get-helm-3 | bash
+fi
+
+# Install Virtual Kubelet using Helm
+echo "Installing Virtual Kubelet via Helm chart..."
+export KUBECONFIG=/etc/rancher/k3s/k3s.yaml
+helm install \
+  --create-namespace \
+  -n interlink \
+  virtual-node \
+  oci://ghcr.io/interlink-hq/interlink-helm-chart/interlink \
+  --version 0.5.3-pre3 \
+  --values "${TEST_DIR}/vk-helm-values.yaml" \
+  --wait \
+  --timeout 5m
+
+# Wait for VK deployment to be ready
+echo "Waiting for Virtual Kubelet deployment to be ready..."
+kubectl wait --for=condition=Available deployment/virtual-kubelet-node -n interlink --timeout=300s || true
+
+# Check pod status
+echo "Virtual Kubelet pod status:"
+kubectl get pods -n interlink -l app=virtual-kubelet
 
 # Wait for VK to register with K8s
 sleep 15
@@ -349,7 +225,7 @@ kubectl get nodes
 if ! kubectl get node virtual-kubelet 2>/dev/null; then
     echo "WARNING: Virtual Kubelet node not found yet"
     echo "Virtual Kubelet logs:"
-    tail -50 "${TEST_DIR}/vk.log"
+    kubectl logs -n interlink -l app=virtual-kubelet --tail=50 || true
 fi
 
 # Approve CSRs
@@ -367,10 +243,10 @@ echo "Component logs available at:"
 echo "  - K3s: ${TEST_DIR}/k3s.log"
 echo "  - SLURM plugin: docker logs interlink-plugin"
 echo "  - interLink API: docker logs interlink-api"
-echo "  - Virtual Kubelet: ${TEST_DIR}/vk.log"
+echo "  - Virtual Kubelet: kubectl logs -n interlink -l app=virtual-kubelet"
 echo ""
 echo "Running components:"
 echo "  - SLURM plugin container: interlink-plugin (port 4000)"
 echo "  - interLink API container: interlink-api (port 3000)"
-echo "  - Virtual Kubelet process: PID $(cat ${TEST_DIR}/vk.pid)"
+echo "  - Virtual Kubelet: Helm deployment in interlink namespace"
 echo ""

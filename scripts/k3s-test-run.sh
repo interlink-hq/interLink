@@ -34,6 +34,10 @@ done
 
 kubectl get node virtual-kubelet || {
     echo "ERROR: virtual-kubelet node not found!"
+    echo "Virtual Kubelet deployment status:"
+    kubectl get deployment -n interlink virtual-kubelet-node || true
+    echo "Virtual Kubelet pod status:"
+    kubectl get pods -n interlink -l app=virtual-kubelet || true
     echo "Virtual Kubelet logs:"
     kubectl logs -n interlink -l app=virtual-kubelet --tail=100 || true
     exit 1
