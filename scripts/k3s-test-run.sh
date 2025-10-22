@@ -47,13 +47,20 @@ kubectl get node virtual-kubelet || {
 echo "Approving CSRs..."
 kubectl get csr -o name | xargs -r kubectl certificate approve || true
 
-# Clone test suite if not already present
-if [ ! -d "${TEST_DIR}/vk-test-set" ]; then
-    echo "Cloning vk-test-set..."
-    git clone https://github.com/interlink-hq/vk-test-set.git "${TEST_DIR}/vk-test-set"
+# Get project root to access submodule
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+PROJECT_ROOT="$(cd "${SCRIPT_DIR}/.." && pwd)"
+
+# Initialize test submodule if not already done
+if [ ! -f "${PROJECT_ROOT}/test/vk-test-set/setup.py" ]; then
+    echo "Initializing test/vk-test-set submodule..."
+    cd "${PROJECT_ROOT}"
+    git submodule update --init test/vk-test-set
 fi
 
-cd "${TEST_DIR}/vk-test-set"
+# Use test suite from submodule
+echo "Using vk-test-set from submodule..."
+cd "${PROJECT_ROOT}/test/vk-test-set"
 
 # Create test configuration
 echo "Creating test configuration..."

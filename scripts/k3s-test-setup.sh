@@ -53,11 +53,17 @@ echo "Building interLink API Docker image..."
 docker build -f "${PROJECT_ROOT}/docker/Dockerfile.interlink" \
     -t interlink:ci-test "${PROJECT_ROOT}"
 
-echo "Cloning SLURM plugin repository..."
-git clone https://github.com/interlink-hq/interlink-slurm-plugin.git "${TEST_DIR}/plugin-src"
+echo "Using local SLURM plugin from submodule..."
+# Initialize submodule if not already done
+if [ ! -f "${PROJECT_ROOT}/plugins/slurm/docker/Dockerfile" ]; then
+    echo "Initializing plugins/slurm submodule..."
+    cd "${PROJECT_ROOT}"
+    git submodule update --init plugins/slurm
+fi
 
-echo "Building SLURM plugin Docker image..."
-docker build -t interlink-slurm-plugin:ci-test "${TEST_DIR}/plugin-src"
+echo "Building SLURM plugin Docker image from submodule..."
+docker build -f "${PROJECT_ROOT}/plugins/slurm/docker/Dockerfile" \
+    -t interlink-slurm-plugin:ci-test "${PROJECT_ROOT}/plugins/slurm"
 
 echo "Docker images built successfully"
 docker images | grep -E "interlink|slurm"
@@ -192,18 +198,24 @@ EOF
 # Install Helm if not present
 if ! command -v helm &> /dev/null; then
     echo "Installing Helm..."
-    curl https://raw.githubusercontent.com/helm/helm/main/scripts/get-helm-3 | bash
+    curl -fsSL https://raw.githubusercontent.com/helm/helm/main/scripts/get-helm-3 | bash
 fi
 
-# Install Virtual Kubelet using Helm
-echo "Installing Virtual Kubelet via Helm chart..."
+# Initialize helm submodule if not already done
+if [ ! -d "${PROJECT_ROOT}/helm/interlink" ]; then
+    echo "Initializing helm submodule..."
+    cd "${PROJECT_ROOT}"
+    git submodule update --init helm
+fi
+
+# Install Virtual Kubelet using local Helm chart from submodule
+echo "Installing Virtual Kubelet via local Helm chart from submodule..."
 export KUBECONFIG=/etc/rancher/k3s/k3s.yaml
 helm install \
   --create-namespace \
   -n interlink \
   virtual-node \
-  oci://ghcr.io/interlink-hq/interlink-helm-chart/interlink \
-  --version 0.5.3-pre3 \
+  "${PROJECT_ROOT}/helm/interlink" \
   --values "${TEST_DIR}/vk-helm-values.yaml" \
   --wait \
   --timeout 5m

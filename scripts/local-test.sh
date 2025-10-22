@@ -29,8 +29,8 @@ kubectl cluster-info
 echo ""
 
 # Use example configs as base
-PLUGIN_CONFIG="${PROJECT_ROOT}/example/plugin-config.yaml"
-INTERLINK_CONFIG="${PROJECT_ROOT}/example/interlink-config.yaml"
+PLUGIN_CONFIG="${PROJECT_ROOT}/scripts/plugin-config.yaml"
+INTERLINK_CONFIG="${PROJECT_ROOT}/scripts/interlink-config.yaml"
 VK_CONFIG="${PROJECT_ROOT}/scripts/virtual-kubelet-config.yaml"
 
 echo "=== Step 1: Build Docker Images ==="
@@ -40,11 +40,15 @@ docker build -f "${PROJECT_ROOT}/docker/Dockerfile.interlink" \
   -t interlink:local "${PROJECT_ROOT}"
 
 echo ""
-echo "Cloning and building SLURM plugin..."
-if [ ! -d /tmp/slurm-plugin ]; then
-  git clone https://github.com/interlink-hq/interlink-slurm-plugin.git /tmp/slurm-plugin
+echo "Building SLURM plugin from submodule..."
+# Initialize submodule if not already done
+if [ ! -f "${PROJECT_ROOT}/plugins/slurm/docker/Dockerfile" ]; then
+  echo "Initializing plugins/slurm submodule..."
+  cd "${PROJECT_ROOT}"
+  git submodule update --init plugins/slurm
 fi
-docker build -t interlink-slurm-plugin:local -f /tmp/slurm-plugin/docker/Dockerfile /tmp/slurm-plugin
+docker build -f "${PROJECT_ROOT}/plugins/slurm/docker/Dockerfile" \
+  -t interlink-slurm-plugin:local "${PROJECT_ROOT}/plugins/slurm"
 
 echo ""
 echo "✓ Docker images built successfully"
