@@ -77,18 +77,10 @@ build_docker_images() {
   IMAGE_TARBALL_DIR="/var/lib/rancher/k3s/agent/images"
   sudo mkdir -p "${IMAGE_TARBALL_DIR}"
   echo "Saving images to ${IMAGE_TARBALL_DIR}..."
-  sudo docker save interlink:ci-test -o "${IMAGE_TARBALL_DIR}/interlink_ci_test.tar"
-  sudo docker save interlink-slurm-plugin:ci-test -o "${IMAGE_TARBALL_DIR}/interlink_slurm_plugin_ci_test.tar"
 
-  # k3s list image to check the images are loaded
-  echo "Verifying images in K3s..."
-  sudo k3s ctr images ls | grep -E "interlink|slurm"
-
-  # Restart K3s to pick up new images
-  #echo "Restarting K3s to pick up new images..."
-  #sudo kill -HUP "$(cat "${TEST_DIR}/k3s.pid")"
-  #sleep 5
-  #echo "K3s restarted"
+  ## No need as long as we deploy components trhough docker run
+  # sudo docker save interlink:ci-test -o "${IMAGE_TARBALL_DIR}/interlink_ci_test.tar"
+  # sudo docker save interlink-slurm-plugin:ci-test -o "${IMAGE_TARBALL_DIR}/interlink_slurm_plugin_ci_test.tar"
 }
 
 # Functions to install components
@@ -190,8 +182,11 @@ DOCKERFILE_EOF
   docker build -f "${TEST_DIR}/Dockerfile.vk" -t virtual-kubelet:ci-test "${PROJECT_ROOT}"
 
   # Load VK image into K3s
-  echo "Loading Virtual Kubelet image into K3s..."
-  docker save virtual-kubelet:ci-test | sudo k3s ctr images import -
+  echo "Loading images into K3s..."
+  IMAGE_TARBALL_DIR="/var/lib/rancher/k3s/agent/images"
+  sudo mkdir -p "${IMAGE_TARBALL_DIR}"
+  echo "Saving images to ${IMAGE_TARBALL_DIR}..."
+  sudo docker save interlink:ci-test -o "${IMAGE_TARBALL_DIR}/interlink_ci_test.tar"
 
   # Create Helm values file (following ci/main.go pattern)
   echo "Creating Helm values file..."
