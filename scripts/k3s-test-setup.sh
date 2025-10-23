@@ -184,6 +184,8 @@ DOCKERFILE_EOF
   # Load VK image into K3s
   echo "Loading images into K3s..."
   sudo docker save virtual-kubelet:ci-test | sudo k3s ctr images import -
+  # List loaded images
+  sudo k3s ctr images ls | grep virtual-kubelet
 
   # Create Helm values file (following ci/main.go pattern)
   echo "Creating Helm values file..."
@@ -238,11 +240,11 @@ EOF
 
   # Wait for VK deployment to be ready
   echo "Waiting for Virtual Kubelet deployment to be ready..."
-  kubectl wait --for=condition=Available deployment/virtual-kubelet-node -n interlink --timeout=300s || kubectl describe deployment virtual-kubelet-node -n interlink
+  kubectl wait --for=condition=Available deployment/virtual-kubelet-node -n interlink --timeout=300s || true
 
   # Check pod status
   echo "Virtual Kubelet pod status:"
-  kubectl get pods -n interlink -l app=virtual-kubelet
+  kubectl describe pod -n interlink -l app=virtual-kubelet
 
   # Wait for VK to register with K8s
   sleep 15
