@@ -238,7 +238,7 @@ EOF
 
   # Wait for VK deployment to be ready
   echo "Waiting for Virtual Kubelet deployment to be ready..."
-  kubectl wait --for=condition=Available deployment/virtual-kubelet-node -n interlink --timeout=300s || true
+  kubectl wait --for=condition=Available deployment/virtual-kubelet-node -n interlink --timeout=300s || kubectl describe deployment virtual-kubelet-node -n interlink
 
   # Check pod status
   echo "Virtual Kubelet pod status:"
