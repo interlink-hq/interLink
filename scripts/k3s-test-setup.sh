@@ -93,9 +93,6 @@ install_components() {
   # Create plugin configuration
   echo "Creating plugin configuration..."
   cat >"${TEST_DIR}/plugin-config.yaml" <<EOF
-# Create plugin configuration
-echo "Creating plugin configuration..."
-cat >"${TEST_DIR}/plugin-config.yaml" <<EOF
 InterlinkURL: "http://localhost"
 InterlinkPort: "3000"
 SidecarURL: "http://0.0.0.0"
