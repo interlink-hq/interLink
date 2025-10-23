@@ -8,14 +8,6 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PROJECT_ROOT="$(cd "${SCRIPT_DIR}/.." && pwd)"
 TEST_DIR="/tmp/interlink-test-$$"
 
-# Download K3s if not already installed
-if ! command -v k3s &>/dev/null; then
-  echo "Downloading K3s..."
-  curl -sfL https://get.k3s.io | INSTALL_K3S_VERSION=v1.31.4+k3s1 sh -
-else
-  echo "K3s already installed: $(k3s --version)"
-fi
-
 setup_k3s_cluster() {
   echo "=== Setting up ephemeral K3s cluster for interLink integration tests ==="
   echo "Test directory: ${TEST_DIR}"
@@ -26,6 +18,14 @@ setup_k3s_cluster() {
 
   # Save test directory for other scripts
   echo "${TEST_DIR}" >/tmp/interlink-test-dir.txt
+
+  # Download K3s if not already installed
+  if ! command -v k3s &>/dev/null; then
+    echo "Downloading K3s..."
+    curl -sfL https://get.k3s.io | INSTALL_K3S_VERSION=v1.31.4+k3s1 sh -
+  else
+    echo "K3s already installed: $(k3s --version)"
+  fi
 
   # Start K3s
   echo "Starting K3s cluster..."

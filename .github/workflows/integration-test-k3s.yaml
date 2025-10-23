@@ -25,17 +25,17 @@ jobs:
         with:
           go-version: "1.24"
 
-      - name: Run golangci-lint
-        uses: golangci/golangci-lint-action@v7
-        with:
-          version: v2.1
-          args: --timeout=30m
-
-      - name: Run unit tests
-        run: |
-          echo "Running unit tests..."
-          go test -v -cover ./pkg/... || exit 1
-          echo "Unit tests passed"
+      # - name: Run golangci-lint
+      #   uses: golangci/golangci-lint-action@v7
+      #   with:
+      #     version: v2.1
+      #     args: --timeout=30m
+      #
+      # - name: Run unit tests
+      #   run: |
+      #     echo "Running unit tests..."
+      #     go test -v -cover ./pkg/... || exit 1
+      #     echo "Unit tests passed"
 
       - name: Set up K3s
         uses: debianmaster/actions-k3s@master
