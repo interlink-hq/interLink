@@ -185,10 +185,7 @@ DOCKERFILE_EOF
 
   # Load VK image into K3s
   echo "Loading images into K3s..."
-  IMAGE_TARBALL_DIR="/var/lib/rancher/k3s/agent/images"
-  sudo mkdir -p "${IMAGE_TARBALL_DIR}"
-  echo "Saving images to ${IMAGE_TARBALL_DIR}..."
-  sudo docker save interlink:ci-test -o "${IMAGE_TARBALL_DIR}/interlink_ci_test.tar"
+  sudo docker save virtual-kubelet:ci-test | k3s ctr images import -
 
   # Create Helm values file (following ci/main.go pattern)
   echo "Creating Helm values file..."
