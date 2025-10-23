@@ -4,8 +4,6 @@
 
 set -e
 
-# Set KUBECONFIG default path if not already set
-export KUBECONFIG=${KUBECONFIG:-/etc/rancher/k3s/k3s.yaml}
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PROJECT_ROOT="$(cd "${SCRIPT_DIR}/.." && pwd)"
 TEST_DIR="/tmp/interlink-test-$$"
@@ -288,6 +286,8 @@ EOF
 ## if k3s is already running, go directly to building images and starting containers.
 if pgrep -x k3s >/dev/null; then
   echo "K3s is already running. Skipping cluster setup."
+  # Set KUBECONFIG default path if not already set
+  export KUBECONFIG=${KUBECONFIG:-/etc/rancher/k3s/k3s.yaml}
   # Download K3s if not already installed
   if ! command -v k3s &>/dev/null; then
     echo "Downloading K3s..."
