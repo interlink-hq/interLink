@@ -5,10 +5,10 @@ set -e
 
 # Get test directory from previous setup
 if [ -f /tmp/interlink-test-dir.txt ]; then
-    TEST_DIR=$(cat /tmp/interlink-test-dir.txt)
+  TEST_DIR=$(cat /tmp/interlink-test-dir.txt)
 else
-    echo "ERROR: Test directory not found. Did you run k3s-test-setup.sh first?"
-    exit 1
+  echo "ERROR: Test directory not found. Did you run k3s-test-setup.sh first?"
+  exit 1
 fi
 
 echo "=== Running interLink integration tests ==="
@@ -24,23 +24,23 @@ kubectl get pods -A
 # Wait for virtual-kubelet node to be ready
 echo "Waiting for virtual-kubelet node..."
 for i in {1..30}; do
-    if kubectl get node virtual-kubelet &>/dev/null; then
-        echo "Virtual-kubelet node found!"
-        break
-    fi
-    echo "Waiting for virtual-kubelet node... ($i/30)"
-    sleep 2
+  if kubectl get node virtual-kubelet &>/dev/null; then
+    echo "Virtual-kubelet node found!"
+    break
+  fi
+  echo "Waiting for virtual-kubelet node... ($i/30)"
+  sleep 2
 done
 
 kubectl get node virtual-kubelet || {
-    echo "ERROR: virtual-kubelet node not found!"
-    echo "Virtual Kubelet deployment status:"
-    kubectl get deployment -n interlink virtual-kubelet-node || true
-    echo "Virtual Kubelet pod status:"
-    kubectl get pods -n interlink -l app=virtual-kubelet || true
-    echo "Virtual Kubelet logs:"
-    kubectl logs -n interlink -l app=virtual-kubelet --tail=100 || true
-    exit 1
+  echo "ERROR: virtual-kubelet node not found!"
+  echo "Virtual Kubelet deployment status:"
+  kubectl get deployment -n interlink virtual-kubelet-node || true
+  echo "Virtual Kubelet pod status:"
+  kubectl get pods -n interlink -l app=virtual-kubelet || true
+  echo "Virtual Kubelet logs:"
+  kubectl logs -n interlink -l app=virtual-kubelet --tail=100 || true
+  exit 1
 }
 
 # Approve any pending CSRs
@@ -53,9 +53,9 @@ PROJECT_ROOT="$(cd "${SCRIPT_DIR}/.." && pwd)"
 
 # Initialize test submodule if not already done
 if [ ! -f "${PROJECT_ROOT}/test/vk-test-set/setup.py" ]; then
-    echo "Initializing test/vk-test-set submodule..."
-    cd "${PROJECT_ROOT}"
-    git submodule update --init test/vk-test-set
+  echo "Initializing test/vk-test-set submodule..."
+  cd "${PROJECT_ROOT}"
+  git submodule update --init test/vk-test-set
 fi
 
 # Use test suite from submodule
@@ -64,7 +64,7 @@ cd "${PROJECT_ROOT}/test/vk-test-set"
 
 # Create test configuration
 echo "Creating test configuration..."
-cat > vktest_config.yaml <<EOF
+cat >vktest_config.yaml <<EOF
 target_nodes:
   - virtual-kubelet
 
@@ -87,8 +87,8 @@ echo "Setting up Python environment..."
 python3 -m venv .venv
 source .venv/bin/activate
 pip3 install -e ./ || {
-    echo "ERROR: Failed to install vk-test-set"
-    exit 1
+  echo "ERROR: Failed to install vk-test-set"
+  exit 1
 }
 
 echo "vk-test-set installed successfully"
@@ -107,15 +107,15 @@ echo "========================================="
 echo ""
 
 if [ ${TEST_EXIT_CODE} -eq 0 ]; then
-    echo "✓ All tests passed!"
+  echo "✓ All tests passed!"
 else
-    echo "✗ Some tests failed (exit code: ${TEST_EXIT_CODE})"
-    echo ""
-    echo "Check logs for details:"
-    echo "  - Test results: ${TEST_DIR}/test-results.log"
-    echo "  - Plugin: ${TEST_DIR}/plugin.log"
-    echo "  - interLink: ${TEST_DIR}/interlink.log"
-    echo "  - Virtual Kubelet: kubectl logs -n interlink -l app=virtual-kubelet"
+  echo "✗ Some tests failed (exit code: ${TEST_EXIT_CODE})"
+  echo ""
+  echo "Check logs for details:"
+  echo "  - Test results: ${TEST_DIR}/test-results.log"
+  echo "  - Plugin: ${TEST_DIR}/plugin.log"
+  echo "  - interLink: ${TEST_DIR}/interlink.log"
+  echo "  - Virtual Kubelet: kubectl logs -n interlink -l app=virtual-kubelet"
 fi
 
 exit ${TEST_EXIT_CODE}
