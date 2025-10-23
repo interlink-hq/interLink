@@ -183,7 +183,7 @@ DOCKERFILE_EOF
 
   # Load VK image into K3s
   echo "Loading images into K3s..."
-  sudo docker save virtual-kubelet:ci-test | k3s ctr images import -
+  sudo docker save virtual-kubelet:ci-test | sudo k3s ctr images import -
 
   # Create Helm values file (following ci/main.go pattern)
   echo "Creating Helm values file..."
