@@ -502,6 +502,8 @@ BashPath: /bin/bash
 		}
 	}
 
+	time.Sleep(30 * time.Second) // wait for interlink to be ready
+
 	K3s := dag.K3S(m.Name).With(func(k *dagger.K3S) *dagger.K3S {
 		return k.WithContainer(
 			k.Container().
