@@ -192,7 +192,7 @@ nodeName: virtual-kubelet
 
 interlink:
   enabled: false
-  address: http://localhost
+  address: http://0.0.0.0
   port: "3000"
   disableProjectedVolumes: true
 
@@ -234,9 +234,7 @@ EOF
     -n interlink \
     virtual-node \
     "${PROJECT_ROOT}/helm/interlink" \
-    --values "${TEST_DIR}/vk-helm-values.yaml" \
-    --wait \
-    --timeout 5m
+    --values "${TEST_DIR}/vk-helm-values.yaml"
 
   # Wait for VK deployment to be ready
   echo "Waiting for Virtual Kubelet deployment to be ready..."
@@ -282,13 +280,10 @@ EOF
   echo ""
 }
 
-## Bootstrap k3s only if not already running.
+## Bootstrap k3s only if not already running OR if KUBECONFIG is present.
 ## if k3s is already running, go directly to building images and starting containers.
-if pgrep -x k3s >/dev/null; then
-  echo "K3s is already running. Skipping cluster setup."
-  # Set KUBECONFIG default path if not already set
-  export KUBECONFIG=${KUBECONFIG:-/etc/rancher/k3s/k3s.yaml}
-  # Download K3s if not already installed
+if [ -f "$KUBECONFIG" ]; then
+  echo "KUBECONFIG is set and file exists. Assuming K3s is already running. Skipping cluster setup."
   if ! command -v k3s &>/dev/null; then
     echo "Downloading K3s..."
     curl -sfL https://get.k3s.io | INSTALL_K3S_SKIP_ENABLE=true INSTALL_K3S_VERSION=v1.31.4+k3s1 sh -
