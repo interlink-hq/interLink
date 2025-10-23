@@ -8,20 +8,6 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PROJECT_ROOT="$(cd "${SCRIPT_DIR}/.." && pwd)"
 TEST_DIR="/tmp/interlink-test-$$"
 
-## Bootstrap k3s only if not already running.
-## if k3s is already running, go directly to building images and starting containers.
-if pgrep -x k3s >/dev/null; then
-  echo "K3s is already running. Skipping cluster setup."
-  export KUBECONFIG=/etc/rancher/k3s/k3s.yaml
-  build_docker_images
-  install_components
-  exit 0
-else
-  setup_k3s_cluster
-  build_docker_images
-  install_components
-fi
-
 setup_k3s_cluster() {
   echo "=== Setting up ephemeral K3s cluster for interLink integration tests ==="
   echo "Test directory: ${TEST_DIR}"
@@ -286,3 +272,17 @@ EOF
   echo "  - Virtual Kubelet: Helm deployment in interlink namespace"
   echo ""
 }
+
+## Bootstrap k3s only if not already running.
+## if k3s is already running, go directly to building images and starting containers.
+if pgrep -x k3s >/dev/null; then
+  echo "K3s is already running. Skipping cluster setup."
+  export KUBECONFIG=/etc/rancher/k3s/k3s.yaml
+  build_docker_images
+  install_components
+  exit 0
+else
+  setup_k3s_cluster
+  build_docker_images
+  install_components
+fi
