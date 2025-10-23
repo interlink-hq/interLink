@@ -37,18 +37,18 @@ jobs:
       #     go test -v -cover ./pkg/... || exit 1
       #     echo "Unit tests passed"
 
-      - name: Set up K3s
-        uses: debianmaster/actions-k3s@master
-        id: k3s
-        with:
-          version: "v1.31.4-k3s1"
-
-      - name: Wait for K3s to be ready
-        run: |
-          echo "Waiting for K3s cluster to be ready..."
-          kubectl wait --for=condition=Ready nodes --all --timeout=300s
-          kubectl get nodes
-          kubectl get pods -A
+      # - name: Set up K3s
+      #   uses: debianmaster/actions-k3s@master
+      #   id: k3s
+      #   with:
+      #     version: "v1.31.4-k3s1"
+      #
+      # - name: Wait for K3s to be ready
+      #   run: |
+      #     echo "Waiting for K3s cluster to be ready..."
+      #     kubectl wait --for=condition=Ready nodes --all --timeout=300s
+      #     kubectl get nodes
+      #     kubectl get pods -A
 
       - name: Install interLink components
         run: |

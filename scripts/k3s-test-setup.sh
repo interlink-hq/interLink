@@ -4,7 +4,8 @@
 
 set -e
 
-export KUBECONFIG=/etc/rancher/k3s/k3s.yaml
+# Set KUBECONFIG default path if not already set
+export KUBECONFIG=${KUBECONFIG:-/etc/rancher/k3s/k3s.yaml}
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PROJECT_ROOT="$(cd "${SCRIPT_DIR}/.." && pwd)"
 TEST_DIR="/tmp/interlink-test-$$"
