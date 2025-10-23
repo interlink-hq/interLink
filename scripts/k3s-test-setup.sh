@@ -278,6 +278,13 @@ EOF
 if pgrep -x k3s >/dev/null; then
   echo "K3s is already running. Skipping cluster setup."
   export KUBECONFIG=/etc/rancher/k3s/k3s.yaml
+  # Download K3s if not already installed
+  if ! command -v k3s &>/dev/null; then
+    echo "Downloading K3s..."
+    curl -sfL https://get.k3s.io | INSTALL_K3S_SKIP_ENABLE=true INSTALL_K3S_VERSION=v1.31.4+k3s1 sh -
+  else
+    echo "K3s already installed: $(k3s --version)"
+  fi
   build_docker_images
   install_components
   exit 0
