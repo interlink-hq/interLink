@@ -80,6 +80,10 @@ build_docker_images() {
   sudo docker save interlink:ci-test -o "${IMAGE_TARBALL_DIR}/interlink_ci_test.tar"
   sudo docker save interlink-slurm-plugin:ci-test -o "${IMAGE_TARBALL_DIR}/interlink_slurm_plugin_ci_test.tar"
 
+  # k3s list image to check the images are loaded
+  echo "Verifying images in K3s..."
+  sudo k3s ctr images ls | grep -E "interlink|slurm"
+
   # Restart K3s to pick up new images
   #echo "Restarting K3s to pick up new images..."
   #sudo kill -HUP "$(cat "${TEST_DIR}/k3s.pid")"
@@ -90,6 +94,10 @@ build_docker_images() {
 # Functions to install components
 
 install_components() {
+  # Create test directory
+  mkdir -p "${TEST_DIR}"
+  export TEST_DIR
+
   # Create plugin configuration
   echo "Creating plugin configuration..."
   cat >"${TEST_DIR}/plugin-config.yaml" <<EOF
