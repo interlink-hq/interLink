@@ -1,9 +1,9 @@
-InterlinkURL: "http://localhost"
+InterlinkURL: "http://0.0.0.0"
 InterlinkPort: "3000" 
 VerboseLogging: true
 ErrorsOnlyLogging: false
 ServiceAccount: "virtual-kubelet"
-Namespace: interlink 
+Namespace: default 
 VKTokenFile: ""
 Resources:
   CPU: "100"
