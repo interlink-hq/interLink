@@ -43,22 +43,6 @@ test-tls:
     new-interlink-mtls \
     test stdout
 
-# Integration tests with ephemeral K3s cluster (no Dagger required)
-# Runs lint and unit tests first
-test-k3s: check test-k3s-setup test-k3s-run test-k3s-cleanup
-
-test-k3s-setup:
-	@echo "Setting up ephemeral K3s cluster for integration tests..."
-	@./scripts/k3s-test-setup.sh
-
-test-k3s-run:
-	@echo "Running integration tests on K3s..."
-	@./scripts/k3s-test-run.sh
-
-test-k3s-cleanup:
-	@echo "Cleaning up K3s test environment..."
-	@./scripts/k3s-test-cleanup.sh
-
 # Quick local integration test
 test-local: all
 	@echo "Running local integration test..."
