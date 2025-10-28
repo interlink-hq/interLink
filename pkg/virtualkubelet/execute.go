@@ -345,12 +345,6 @@ func deleteRequest(ctx context.Context, config Config, pod *v1.Pod, token string
 		return nil, err
 	}
 	log.G(context.Background()).Info(string(returnValue))
-	var response []types.PodStatus
-	err = json.Unmarshal(returnValue, &response)
-	if err != nil {
-		log.G(context.Background()).Error(err)
-		return nil, err
-	}
 
 	return returnValue, nil
 }

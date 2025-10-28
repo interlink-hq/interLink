@@ -18,6 +18,17 @@ openapi:
 clean:
 	rm -rf ./bin
 
+# Code quality checks
+lint:
+	golangci-lint run -v --timeout=30m
+
+unit-test:
+	go test -v -race -coverprofile=coverage.out -covermode=atomic ./pkg/...
+
+# Run all checks before integration tests
+check: lint unit-test
+	@echo "All checks passed!"
+
 test:
 	dagger call -m ./ci \
     --name my-tests \
@@ -31,4 +42,9 @@ test-tls:
     build-images \
     new-interlink-mtls \
     test stdout
+
+# Quick local integration test
+test-local: all
+	@echo "Running local integration test..."
+	@./scripts/local-test.sh
 
