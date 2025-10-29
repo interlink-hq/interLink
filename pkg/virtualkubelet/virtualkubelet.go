@@ -1468,6 +1468,8 @@ func (p *Provider) generateFullMeshScript(ctx context.Context, td *WstunnelTempl
 		return "", fmt.Errorf("client private key not generated")
 	}
 
+	log.G(ctx).Infof("Generating full mesh script for pod UID %s", podUID)
+
 	// Generate random interface name
 	wgInterfaceName := fmt.Sprintf("wg%s", podUID[:13])
 
