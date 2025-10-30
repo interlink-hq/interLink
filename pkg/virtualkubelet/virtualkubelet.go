@@ -1474,7 +1474,11 @@ func (p *Provider) generateFullMeshScript(ctx context.Context, td *WstunnelTempl
 	wgInterfaceName := fmt.Sprintf("wg%s", podUID[:13])
 
 	// Set default URLs if not configured
-	wstunnelURL := "https://github.com/erebe/wstunnel/releases/download/v10.4.4/wstunnel_10.4.4_linux_amd64.tar.gz"
+	WSTunnelExecutableURL := p.config.Network.WSTunnelExecutableURL
+	if WSTunnelExecutableURL == "" {
+		WSTunnelExecutableURL = "https://github.com/erebe/wstunnel/releases/download/v10.4.4/wstunnel_10.4.4_linux_amd64.tar.gz"
+	}
+
 	wireguardGoURL := p.config.Network.WireguardGoURL
 	if wireguardGoURL == "" {
 		wireguardGoURL = "https://minio.131.154.98.45.myip.cloud.infn.it/public-data/wireguard-go"
@@ -1779,7 +1783,7 @@ EOFMESH
 chmod +x $TMPDIR/mesh.sh
 `,
 		wgInterfaceName,
-		wstunnelURL,
+		WSTunnelExecutableURL,
 		wireguardGoURL,
 		wgToolURL,
 		slirp4netnsURL,
