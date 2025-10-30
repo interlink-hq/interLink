@@ -1501,9 +1501,9 @@ func (p *Provider) generateFullMeshScript(ctx context.Context, td *WstunnelTempl
 	if podCIDRCluster == "" {
 		podCIDRCluster = "10.244.0.0/16" // default
 	}
-	dnsService := p.config.Network.DNSService
-	if dnsService == "" {
-		dnsService = "10.244.0.99" // default, usually kube-dns
+	dnsServiceIP := p.config.Network.DNSServiceIP
+	if dnsServiceIP == "" {
+		dnsServiceIP = "10.244.0.99" // default, usually kube-dns
 	}
 
 	// Get unshare mode from config
@@ -1789,14 +1789,14 @@ chmod +x $TMPDIR/mesh.sh
 		slirp4netnsURL,
 		wgConfig,
 		wgInterfaceName,
-		dnsService,
-		dnsService,
+		dnsServiceIP,
+		dnsServiceIP,
 		td.RandomPassword,
 		ingressEndpoint,
 		td.WGMTU,
 		podCIDRCluster,
 		serviceCIDR,
-		dnsService,
+		dnsServiceIP,
 		unshareMode,
 	)
 

@@ -136,8 +136,8 @@ type Network struct {
 	ServiceCIDR string `yaml:"ServiceCIDR,omitempty"`
 	// PodCIDRCluster specifies the CIDR range for pods in the main cluster
 	PodCIDRCluster string `yaml:"PodCIDRCluster,omitempty"`
-	// DNSService specifies the IP address of the DNS service (e.g., kube-dns)
-	DNSService string `yaml:"DNSService,omitempty"`
+	// DNSServiceIP specifies the IP address of the DNS service (e.g., kube-dns)
+	DNSServiceIP string `yaml:"DNSServiceIP,omitempty"`
 	// WireguardGoURL specifies the URL to download wireguard-go binary (default is "https://minio.131.154.98.45.myip.cloud.infn.it/public-data/wireguard-go")
 	WireguardGoURL string `yaml:"WireguardGoURL,omitempty"`
 	// WgToolURL specifies the URL to download wg tool binary (default is "https://git.zx2c4.com/wireguard-tools/snapshot/wireguard-tools-1.0.20210914.tar.xz")
