@@ -858,6 +858,8 @@ func (m *Interlink) Test(
 		return nil, err
 	}
 
+	time.Sleep(60 * time.Second) // wait for cluster to be ready
+
 	// Automate CSR approval for testing - required for mTLS functionality and log access
 	c = c.WithExec([]string{"bash", "-c", "kubectl get csr -o name | xargs -r kubectl certificate approve"})
 
@@ -900,6 +902,9 @@ func (m *Interlink) TestMTLS(
 	if err != nil {
 		return nil, err
 	}
+
+	time.Sleep(60 * time.Second) // wait for cluster to be ready
+	
 	// Automate CSR approval for testing - required for mTLS functionality and log access
 	c = c.WithExec([]string{"bash", "-c", "kubectl get csr -o name | xargs -r kubectl certificate approve"})
 
