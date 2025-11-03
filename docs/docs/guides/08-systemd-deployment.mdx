@@ -4,7 +4,9 @@ sidebar_position: 8
 
 # Systemd Deployment Guide
 
-This guide explains how to deploy InterLink components using systemd services for production environments. Systemd provides automatic startup, restart on failure, proper logging, and robust service management.
+This guide explains how to deploy InterLink components using systemd services
+for production environments. Systemd provides automatic startup, restart on
+failure, proper logging, and robust service management.
 
 ## Overview
 
@@ -43,7 +45,6 @@ Move your InterLink components to the system directories:
 ```bash
 # Copy binaries
 sudo cp $HOME/.interlink/bin/* /opt/interlink/bin/
-sudo cp $HOME/.interlink/manifests/interlink-remote.sh /opt/interlink/bin/
 sudo chmod +x /opt/interlink/bin/*
 
 # Copy configuration files
@@ -383,10 +384,12 @@ sudo systemctl status interlink-api --lines=50
 The systemd configuration includes several security features:
 
 1. **Dedicated user**: Services run as non-privileged `interlink` user
-2. **Filesystem protection**: `ProtectSystem` and `ProtectHome` limit filesystem access
+2. **Filesystem protection**: `ProtectSystem` and `ProtectHome` limit filesystem
+   access
 3. **No new privileges**: `NoNewPrivileges` prevents privilege escalation
 4. **Private temp**: `PrivateTmp` provides isolated temporary directories
-5. **Minimal permissions**: `ReadWritePaths` restricts write access to necessary directories
+5. **Minimal permissions**: `ReadWritePaths` restricts write access to necessary
+   directories
 
 ### Additional Security
 
@@ -448,4 +451,6 @@ NotifyAccess=all
 WatchdogSec=30
 ```
 
-This comprehensive systemd setup provides a robust, secure, and manageable solution for deploying InterLink components in production environments.
+This comprehensive systemd setup provides a robust, secure, and manageable
+solution for deploying InterLink components in production environments.
+

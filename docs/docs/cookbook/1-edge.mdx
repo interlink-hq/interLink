@@ -379,24 +379,28 @@ kubectl logs test-tunnel
 
 :::warning CSR Manual Approval Required
 
-⚠️ **IMPORTANT**: If `kubectl logs` fails, you need to manually approve Certificate Signing Requests (CSRs). Without CSR approval, **log access will not work**.
+⚠️ **IMPORTANT**: If `kubectl logs` fails, you need to manually approve
+Certificate Signing Requests (CSRs). Without CSR approval, **log access will not
+work**.
 
 **Required steps:**
 
 1. **Check for pending CSRs**:
+
    ```bash
    kubectl get csr
    ```
 
 2. **Approve the CSR** (replace `csr-xxxxx` with the actual CSR name):
+
    ```bash
    kubectl certificate approve csr-xxxxx
    ```
 
 3. **Verify logs are now accessible**:
+
    ```bash
    kubectl logs test-tunnel
    ```
 
 :::
-
