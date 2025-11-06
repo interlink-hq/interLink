@@ -858,10 +858,11 @@ func (m *Interlink) Test(
 		return nil, err
 	}
 
-	time.Sleep(60 * time.Second) // wait for cluster to be ready
-
 	// Automate CSR approval for testing - required for mTLS functionality and log access
 	c = c.WithExec([]string{"bash", "-c", "kubectl get csr -o name | xargs -r kubectl certificate approve"})
+
+	// Wait for virtual-kubelet node to be ready before running tests
+	c = c.WithExec([]string{"kubectl", "wait", "--for=condition=Ready", "node/virtual-kubelet", "--timeout=300s"})
 
 	result := c.WithExec([]string{"bash", "-c", "source .venv/bin/activate && export KUBECONFIG=/.kube/config  && pytest -vk 'not rclone and not limits'"})
 	//_ = c.WithExec([]string{"bash", "-c", "source .venv/bin/activate && export KUBECONFIG=/.kube/config  && pytest -vk 'hello'"})
@@ -903,15 +904,14 @@ func (m *Interlink) TestMTLS(
 		return nil, err
 	}
 
-	time.Sleep(60 * time.Second) // wait for cluster to be ready
-	
 	// Automate CSR approval for testing - required for mTLS functionality and log access
 	c = c.WithExec([]string{"bash", "-c", "kubectl get csr -o name | xargs -r kubectl certificate approve"})
 
+	// Wait for virtual-kubelet node to be ready before running tests
+	c = c.WithExec([]string{"kubectl", "wait", "--for=condition=Ready", "node/virtual-kubelet", "--timeout=300s"})
+
 	// First run basic tests to ensure setup works
 	result := c.WithExec([]string{"bash", "-c", "source .venv/bin/activate && export KUBECONFIG=/.kube/config && pytest -v -k 'hello'"}).
-		// Wait for virtual node to be ready
-		WithExec([]string{"bash", "-c", "kubectl wait --for=condition=Ready node/virtual-kubelet --timeout=300s"}).
 		// Automate CSR approval for testing - required for mTLS functionality
 		WithExec([]string{"bash", "-c", "kubectl get csr -o name | xargs -r kubectl certificate approve"}).
 		// Create a test pod for getLogs testing
