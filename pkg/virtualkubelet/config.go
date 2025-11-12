@@ -132,6 +132,8 @@ type Network struct {
 	WstunnelCommand string `yaml:"WstunnelCommand,omitempty"`
 	// FullMesh enables full mesh networking with slirp4netns and WireGuard
 	FullMesh bool `yaml:"FullMesh" default:"false"`
+	// MeshScriptTemplatePath is the path to a custom mesh.sh template file
+	MeshScriptTemplatePath string `yaml:"MeshScriptTemplatePath,omitempty"`
 	// ServiceCIDR specifies the CIDR range for Kubernetes services
 	ServiceCIDR string `yaml:"ServiceCIDR,omitempty"`
 	// PodCIDRCluster specifies the CIDR range for pods in the main cluster
