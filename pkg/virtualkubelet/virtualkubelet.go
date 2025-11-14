@@ -116,13 +116,6 @@ type MeshScriptTemplateData struct {
 	UnshareMode           string
 }
 
-func min(a, b int) int {
-	if a < b {
-		return a
-	}
-	return b
-}
-
 func sanitizeDNSName(name string) string {
 	// Convert to lowercase
 	name = strings.ToLower(name)
@@ -237,14 +230,6 @@ func computeWstunnelResourceNames(podName, podNamespace string) (resourceBaseNam
 		if len(truncatedNs) > maxNsLen {
 			truncatedNs = truncatedNs[:maxNsLen]
 			truncatedNs = strings.TrimRight(truncatedNs, "-")
-		}
-
-		// Reconstruct and verify
-		ingressFirstLabel = fmt.Sprintf("%s-%s", truncatedName, truncatedNs)
-		if len(ingressFirstLabel) > 63 {
-			// Final safety: hard truncate
-			ingressFirstLabel = ingressFirstLabel[:63]
-			ingressFirstLabel = strings.TrimRight(ingressFirstLabel, "-")
 		}
 
 		resourceBaseName = truncatedName

@@ -71,7 +71,7 @@ type RetrievedContainer struct {
 	// Secrets contains all Secrets that this container needs to mount
 	Secrets []v1.Secret `json:"secrets"`
 	// EmptyDirs contains paths to empty directories for this container.
-	// Deprecated: EmptyDirs should be built on the plugin side rather than by interLink.
+	// EmptyDirs should be built on the plugin side rather than by interLink.
 	// Currently, it holds paths like DATA_ROOT_DIR/emptydirs/volumeName, but this should be
 	// a plugin implementation choice, similar to how ConfigMaps, ProjectedVolumeMaps, and Secrets are handled.
 	EmptyDirs []string `json:"emptyDirs"`
