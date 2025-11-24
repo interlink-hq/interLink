@@ -17,7 +17,7 @@ import (
 	"text/template"
 	"time"
 
-	"gopkg.in/yaml.v2"
+	"github.com/goccy/go-yaml"
 
 	"github.com/containerd/containerd/log"
 	"github.com/virtual-kubelet/virtual-kubelet/errdefs"
