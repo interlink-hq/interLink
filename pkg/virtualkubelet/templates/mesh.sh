@@ -17,11 +17,10 @@ echo "=== Downloading binaries (outside namespace) ==="
 
 # Download wstunnel
 echo "Downloading wstunnel..."
-if ! curl -L -f -k {{.WSTunnelExecutableURL}} -o wstunnel.tar.gz; then
+if ! curl -L -f -k {{.WSTunnelExecutableURL}} -o wstunnel; then
     echo "ERROR: Failed to download wstunnel"
     exit 1
 fi
-tar -xzf wstunnel.tar.gz
 chmod +x wstunnel
 
 # Download wireguard-go
@@ -34,18 +33,10 @@ chmod +x wireguard-go
 
 # Download and build wg tool
 echo "Downloading wg tool..."
-if ! curl -L -f -k {{.WgToolURL}} -o wg-tools.tar.xz; then
+if ! curl -L -f -k {{.WgToolURL}} -o wg; then
     echo "ERROR: Failed to download wg tools"
     exit 1
 fi
-tar -xJf wg-tools.tar.xz
-cd wireguard-tools-*/src
-if ! make; then
-    echo "ERROR: Failed to build wg tool"
-    exit 1
-fi
-cp wg $TMPDIR/
-cd $TMPDIR
 chmod +x wg
 
 # Download slirp4netns

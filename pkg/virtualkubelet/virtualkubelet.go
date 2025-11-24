@@ -1652,20 +1652,20 @@ func (p *Provider) generateFullMeshScript(ctx context.Context, td *WstunnelTempl
 	// Set default URLs if not configured
 	WSTunnelExecutableURL := p.config.Network.WSTunnelExecutableURL
 	if WSTunnelExecutableURL == "" {
-		WSTunnelExecutableURL = "https://github.com/erebe/wstunnel/releases/download/v10.4.4/wstunnel_10.4.4_linux_amd64.tar.gz"
+		WSTunnelExecutableURL = "https://github.com/interlink-hq/interlink-artifacts/raw/main/wstunnel/v10.4.4/linux-amd64/wstunnel"
 	}
 
 	wireguardGoURL := p.config.Network.WireguardGoURL
 	if wireguardGoURL == "" {
-		wireguardGoURL = "https://minio.131.154.98.45.myip.cloud.infn.it/public-data/wireguard-go"
+		wireguardGoURL = "https://github.com/interlink-hq/interlink-artifacts/raw/main/wireguard-go/v0.0.20201118/linux-amd64/wireguard-go"
 	}
 	wgToolURL := p.config.Network.WgToolURL
 	if wgToolURL == "" {
-		wgToolURL = "https://git.zx2c4.com/wireguard-tools/snapshot/wireguard-tools-1.0.20210914.tar.xz"
+		wgToolURL = "https://github.com/interlink-hq/interlink-artifacts/raw/main/wgtools/v1.0.20210914/linux-amd64/wg"
 	}
 	slirp4netnsURL := p.config.Network.Slirp4netnsURL
 	if slirp4netnsURL == "" {
-		slirp4netnsURL = "https://github.com/rootless-containers/slirp4netns/releases/download/v1.2.3/slirp4netns-x86_64"
+		slirp4netnsURL = "https://github.com/interlink-hq/interlink-artifacts/raw/main/slirp4netns/v1.2.3/linux-amd64/slirp4netns"
 	}
 
 	// Get network CIDRs

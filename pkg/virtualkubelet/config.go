@@ -124,7 +124,7 @@ type Network struct {
 	EnableTunnel bool `yaml:"EnableTunnel" default:"false"`
 	// WildcardDNS specifies the DNS domain for generating tunnel endpoints
 	WildcardDNS string `yaml:"WildcardDNS,omitempty"`
-	// WSTunnelExecutableURL specifies the URL to download the wstunnel executable (default is "https://github.com/erebe/wstunnel/releases/download/v10.4.4/wstunnel_10.4.4_linux_amd64.tar.gz")
+	// WSTunnelExecutableURL specifies the URL to download the wstunnel executable (default is "https://github.com/interlink-hq/interlink-artifacts/raw/main/wstunnel/v10.4.4/linux-amd64/wstunnel")
 	WSTunnelExecutableURL string `yaml:"WSTunnelExecutable,omitempty"`
 	// WstunnelTemplatePath is the path to a custom wstunnel template file
 	WstunnelTemplatePath string `yaml:"WstunnelTemplatePath,omitempty"`
@@ -140,11 +140,11 @@ type Network struct {
 	PodCIDRCluster string `yaml:"PodCIDRCluster,omitempty"`
 	// DNSServiceIP specifies the IP address of the DNS service (e.g., kube-dns)
 	DNSServiceIP string `yaml:"DNSServiceIP,omitempty"`
-	// WireguardGoURL specifies the URL to download wireguard-go binary (default is "https://minio.131.154.98.45.myip.cloud.infn.it/public-data/wireguard-go")
+	// WireguardGoURL specifies the URL to download wireguard-go binary (default is "https://github.com/interlink-hq/interlink-artifacts/raw/main/wireguard-go/v0.0.20201118/linux-amd64/wireguard-go")
 	WireguardGoURL string `yaml:"WireguardGoURL,omitempty"`
-	// WgToolURL specifies the URL to download wg tool binary (default is "https://git.zx2c4.com/wireguard-tools/snapshot/wireguard-tools-1.0.20210914.tar.xz")
+	// WgToolURL specifies the URL to download wg tool binary (default is "https://github.com/interlink-hq/interlink-artifacts/raw/main/wgtools/v1.0.20210914/linux-amd64/wg")
 	WgToolURL string `yaml:"WgToolURL,omitempty"`
-	// Slirp4netnsURL specifies the URL to download slirp4netns binary (default is "https://github.com/rootless-containers/slirp4netns/releases/download/v1.2.3/slirp4netns-x86_64")
+	// Slirp4netnsURL specifies the URL to download slirp4netns binary (default is "https://github.com/interlink-hq/interlink-artifacts/raw/main/slirp4netns/v1.2.3/linux-amd64/slirp4netns")
 	Slirp4netnsURL string `yaml:"Slirp4netnsURL,omitempty"`
 	// UnsharedMode is the flag for unshared network mode in slirp4netns
 	UnshareMode string `yaml:"UnshareMode,omitempty"`
