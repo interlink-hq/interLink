@@ -358,27 +358,14 @@ EOF`}).
 		WithExec([]string{
 			"helm",
 			"install",
+			"--wait",
+			"--timeout", "600s",
 			"--create-namespace",
 			"-n", "interlink",
 			"virtual-node",
 			"/helm/interlink",
 			"--values", "/manifests/vk_helm_chart.yaml",
 		}).Stdout(ctx)
-	if err != nil {
-		return nil, err
-	}
-
-	_, err = m.Kubectl.WithExec([]string{"bash", "-c", `
-for i in {1..60}; do
-	kubectl describe pod -n interlink
-  if kubectl get node virtual-kubelet &>/dev/null; then
-    echo "Virtual-kubelet node found, waiting for Ready condition..."
-    kubectl wait --for=condition=Ready node/virtual-kubelet --timeout=240s && break
-  fi
-  echo "Waiting for virtual-kubelet node to be created... ($i/60)"
-  sleep 5
-done
-`}).Stdout(ctx)
 	if err != nil {
 		return nil, err
 	}
