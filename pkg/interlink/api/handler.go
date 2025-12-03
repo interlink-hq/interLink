@@ -9,7 +9,6 @@ import (
 	"fmt"
 	"io"
 	"net/http"
-	"strconv"
 
 	"github.com/containerd/containerd/log"
 	"github.com/google/uuid"
@@ -88,123 +87,156 @@ func ReqWithError(
 	sessionContext string,
 	clientHTTP *http.Client,
 ) ([]byte, error) {
+
+	log.G(ctx).Infof("[ReqWithError] Starting request to %s | respondWithValues=%v | respondWithReturn=%v | session=%s",
+		req.URL.String(), respondWithValues, respondWithReturn, sessionContext)
+
 	req.Header.Set("Content-Type", "application/json")
 
 	sessionContextMessage := GetSessionContextMessage(sessionContext)
 	log.G(ctx).Debug(sessionContextMessage, "doing request: ", fmt.Sprintf("%#v", req))
 
-	// Add session number for end-to-end from API to InterLink plugin (eg interlink-slurm-plugin)
+	// Add session number for end-to-end trace
 	AddSessionContext(req, sessionContext)
 
 	resp, err := clientHTTP.Do(req)
 	if err != nil {
 		statusCode := http.StatusInternalServerError
+		log.G(ctx).Errorf("%s HTTP client.Do() failed: %v", sessionContextMessage, err)
 		w.WriteHeader(statusCode)
-		errWithContext := fmt.Errorf(sessionContextMessage+"error doing DoReq() of ReqWithErrorWithSessionNumber error %w", err)
+		errWithContext := fmt.Errorf(sessionContextMessage+
+			"error doing DoReq() of ReqWithErrorWithSessionNumber error %w", err)
 		return nil, errWithContext
 	}
-	defer resp.Body.Close()
+	defer func() {
+		log.G(ctx).Debugf("%s Closing response body", sessionContextMessage)
+		resp.Body.Close()
+	}()
 
+	log.G(ctx).Infof("%s Received response: HTTP %d %s", sessionContextMessage, resp.StatusCode, http.StatusText(resp.StatusCode))
+
+	// Always write the response code to client
+	log.G(ctx).Debugf("%s Writing response header: %d", sessionContextMessage, resp.StatusCode)
 	w.WriteHeader(resp.StatusCode)
-	// Flush headers ASAP so that the client is not blocked in request.
+
+	// Flush headers immediately
 	if f, ok := w.(http.Flusher); ok {
-		log.G(ctx).Debug(sessionContextMessage, "Flushing client...")
+		log.G(ctx).Debug(sessionContextMessage, "Flushing headers to client...")
 		f.Flush()
 	} else {
-		log.G(ctx).Error(sessionContextMessage, "could not flush because server does not support Flusher.")
+		log.G(ctx).Warn(sessionContextMessage, "Server does not support Flusher.")
 	}
 
 	if resp.StatusCode != http.StatusOK {
-		log.G(ctx).Error(sessionContextMessage, "HTTP request in error.")
+		log.G(ctx).Errorf("%s Non-OK status from JobScriptBuilder: %d", sessionContextMessage, resp.StatusCode)
 		statusCode := http.StatusInternalServerError
+
+		// ❗This is likely the cause of “superfluous WriteHeader” (double call)
+		// Add a debug to confirm
+		log.G(ctx).Debugf("%s Writing error header: %d (may trigger 'superfluous WriteHeader')", sessionContextMessage, statusCode)
 		w.WriteHeader(statusCode)
+
 		ret, err := io.ReadAll(resp.Body)
 		if err != nil {
-			return nil, fmt.Errorf(sessionContextMessage+"HTTP request in error and could not read body response error: %w", err)
+			return nil, fmt.Errorf(sessionContextMessage+
+				"HTTP request in error and could not read body response error: %w", err)
 		}
-		errHTTP := fmt.Errorf(sessionContextMessage+"call exit status: %d. Body: %s", statusCode, ret)
+
+		errHTTP := fmt.Errorf("%s call exit status: %d. Body: %s", sessionContextMessage, statusCode, ret)
 		log.G(ctx).Error(errHTTP)
+
 		_, err = w.Write([]byte(errHTTP.Error()))
 		if err != nil {
-			return nil, fmt.Errorf(sessionContextMessage+"HTTP request in error and could not write all body response to InterLink Node error: %w", err)
+			return nil, fmt.Errorf(sessionContextMessage+
+				"HTTP request in error and could not write all body response to InterLink Node error: %w", err)
 		}
+
 		return nil, errHTTP
 	}
 
 	interlink.SetDurationSpan(start, span, interlink.WithHTTPReturnCode(resp.StatusCode))
 
+	// ---------------------------
+	// CASE: respondWithReturn == true
+	// ---------------------------
 	if respondWithReturn {
+		log.G(ctx).Debug(sessionContextMessage, "RespondWithReturn mode: reading full body once")
 
-		log.G(ctx).Debug(sessionContextMessage, "reading all body once for all")
 		returnValue, err := io.ReadAll(resp.Body)
 		if err != nil {
 			w.WriteHeader(http.StatusInternalServerError)
-			return nil, fmt.Errorf(sessionContextMessage+"error doing ReadAll() of ReqWithErrorComplex see error %w", err)
+			log.G(ctx).Errorf("%s Error reading response body: %v", sessionContextMessage, err)
+			return nil, fmt.Errorf(sessionContextMessage+
+				"error doing ReadAll() of ReqWithErrorComplex see error %w", err)
 		}
 
+		log.G(ctx).Debugf("%s Response body (len=%d): %.500s", sessionContextMessage, len(returnValue), string(returnValue))
+
 		if respondWithValues {
+			log.G(ctx).Debug(sessionContextMessage, "Writing returnValue to client")
 			_, err = w.Write(returnValue)
 			if err != nil {
 				w.WriteHeader(http.StatusInternalServerError)
-				return nil, fmt.Errorf(sessionContextMessage+"error doing Write() of ReqWithErrorComplex see error %w", err)
+				log.G(ctx).Errorf("%s Error writing response body to client: %v", sessionContextMessage, err)
+				return nil, fmt.Errorf(sessionContextMessage+
+					"error doing Write() of ReqWithErrorComplex see error %w", err)
 			}
 		}
 
+		log.G(ctx).Infof("%s Completed request successfully (RespondWithReturn=true)", sessionContextMessage)
 		return returnValue, nil
 	}
 
-	// Case no return needed.
-
+	// ---------------------------
+	// CASE: respondWithValues == true
+	// ---------------------------
 	if respondWithValues {
-		// Because no return needed, we can write continuously instead of writing one big block of data.
-		// Useful to get following logs.
-		log.G(ctx).Debug(sessionContextMessage, "in respondWithValues loop, reading body continuously until EOF")
+		log.G(ctx).Debug(sessionContextMessage, "RespondWithValues mode: streaming response")
 
-		// In this case, we return continuously the values in the w, instead of reading it all. This allows for logs to be followed.
 		bodyReader := bufio.NewReader(resp.Body)
-
-		// 4096 is bufio.NewReader default buffer size.
 		bufferBytes := make([]byte, 4096)
 
-		// Looping until we get EOF from sidecar.
 		for {
-			log.G(ctx).Debug(sessionContextMessage, "trying to read some bytes from InterLink sidecar "+req.RequestURI)
 			n, err := bodyReader.Read(bufferBytes)
 			if err != nil {
 				if err == io.EOF {
-					log.G(ctx).Debug(sessionContextMessage, "received EOF and read number of bytes: "+strconv.Itoa(n))
-
-					// EOF but we still have something to read!
-					if n != 0 {
+					log.G(ctx).Debugf("%s EOF reached, read %d bytes", sessionContextMessage, n)
+					if n > 0 {
 						_, err = w.Write(bufferBytes[:n])
 						if err != nil {
 							w.WriteHeader(http.StatusInternalServerError)
-							return nil, fmt.Errorf(sessionContextMessage+"could not write during ReqWithError() error: %w", err)
+							return nil, fmt.Errorf(sessionContextMessage+
+								"could not write during ReqWithError() error: %w", err)
 						}
 					}
+					log.G(ctx).Infof("%s Completed request successfully (stream mode)", sessionContextMessage)
 					return nil, nil
 				}
-				// Error during read.
 				w.WriteHeader(http.StatusInternalServerError)
-				return nil, fmt.Errorf(sessionContextMessage+"could not read HTTP body: see error %w", err)
+				log.G(ctx).Errorf("%s Error reading HTTP body: %v", sessionContextMessage, err)
+				return nil, fmt.Errorf(sessionContextMessage+
+					"could not read HTTP body: see error %w", err)
 			}
-			log.G(ctx).Debug(sessionContextMessage, "received some bytes from InterLink sidecar")
+
+			log.G(ctx).Debugf("%s Read %d bytes from response", sessionContextMessage, n)
 			_, err = w.Write(bufferBytes[:n])
 			if err != nil {
 				w.WriteHeader(http.StatusInternalServerError)
-				return nil, fmt.Errorf(sessionContextMessage+"could not write during ReqWithError() error: %w", err)
+				log.G(ctx).Errorf("%s Error writing response chunk: %v", sessionContextMessage, err)
+				return nil, fmt.Errorf(sessionContextMessage+
+					"could not write during ReqWithError() error: %w", err)
 			}
 
-			// Flush otherwise it will take time to appear in kubectl logs.
 			if f, ok := w.(http.Flusher); ok {
-				log.G(ctx).Debug(sessionContextMessage, "Wrote some logs, now flushing...")
 				f.Flush()
-			} else {
-				log.G(ctx).Error(sessionContextMessage, "could not flush because server does not support Flusher.")
+				log.G(ctx).Debug(sessionContextMessage, "Flushed response chunk to client")
 			}
 		}
 	}
 
-	// Case no respondWithValue no respondWithReturn , it means we are doing a request and not using response.
+	// ---------------------------
+	// CASE: no response needed
+	// ---------------------------
+	log.G(ctx).Infof("%s Completed request (no response mode)", sessionContextMessage)
 	return nil, nil
 }

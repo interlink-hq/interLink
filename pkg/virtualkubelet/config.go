@@ -124,8 +124,28 @@ type Network struct {
 	EnableTunnel bool `yaml:"EnableTunnel" default:"false"`
 	// WildcardDNS specifies the DNS domain for generating tunnel endpoints
 	WildcardDNS string `yaml:"WildcardDNS,omitempty"`
+	// WSTunnelExecutableURL specifies the URL to download the wstunnel executable (default is "https://github.com/interlink-hq/interlink-artifacts/raw/main/wstunnel/v10.4.4/linux-amd64/wstunnel")
+	WSTunnelExecutableURL string `yaml:"WSTunnelExecutable,omitempty"`
 	// WstunnelTemplatePath is the path to a custom wstunnel template file
 	WstunnelTemplatePath string `yaml:"WstunnelTemplatePath,omitempty"`
 	// WstunnelCommand specifies the command template for setting up wstunnel clients
 	WstunnelCommand string `yaml:"WstunnelCommand,omitempty"`
+	// FullMesh enables full mesh networking with slirp4netns and WireGuard
+	FullMesh bool `yaml:"FullMesh" default:"false"`
+	// MeshScriptTemplatePath is the path to a custom mesh.sh template file
+	MeshScriptTemplatePath string `yaml:"MeshScriptTemplatePath,omitempty"`
+	// ServiceCIDR specifies the CIDR range for Kubernetes services
+	ServiceCIDR string `yaml:"ServiceCIDR,omitempty"`
+	// PodCIDRCluster specifies the CIDR range for pods in the main cluster
+	PodCIDRCluster string `yaml:"PodCIDRCluster,omitempty"`
+	// DNSServiceIP specifies the IP address of the DNS service (e.g., kube-dns)
+	DNSServiceIP string `yaml:"DNSServiceIP,omitempty"`
+	// WireguardGoURL specifies the URL to download wireguard-go binary (default is "https://github.com/interlink-hq/interlink-artifacts/raw/main/wireguard-go/v0.0.20201118/linux-amd64/wireguard-go")
+	WireguardGoURL string `yaml:"WireguardGoURL,omitempty"`
+	// WgToolURL specifies the URL to download wg tool binary (default is "https://github.com/interlink-hq/interlink-artifacts/raw/main/wgtools/v1.0.20210914/linux-amd64/wg")
+	WgToolURL string `yaml:"WgToolURL,omitempty"`
+	// Slirp4netnsURL specifies the URL to download slirp4netns binary (default is "https://github.com/interlink-hq/interlink-artifacts/raw/main/slirp4netns/v1.2.3/linux-amd64/slirp4netns")
+	Slirp4netnsURL string `yaml:"Slirp4netnsURL,omitempty"`
+	// UnsharedMode is the flag for unshared network mode in slirp4netns
+	UnshareMode string `yaml:"UnshareMode,omitempty"`
 }

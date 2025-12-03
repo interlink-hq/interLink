@@ -5,6 +5,7 @@ import (
 	"context"
 	"crypto/rand"
 	"embed"
+	"encoding/base64"
 	"encoding/hex"
 	"fmt"
 	"io"
@@ -44,6 +45,9 @@ import (
 //go:embed templates/wstunnel-template.yaml
 var defaultWstunnelTemplate embed.FS
 
+//go:embed all:templates/mesh.sh
+var meshScriptTemplate embed.FS
+
 const (
 	DefaultCPUCapacity     = "100"
 	DefaultMemoryCapacity  = "3000G"
@@ -61,21 +65,69 @@ const (
 	xilinxFPGA             = "xilinx.com/fpga"
 	intelFPGA              = "intel.com/fpga"
 	DefaultProtocol        = "TCP"
-	DefaultWstunnelCommand = "curl -L https://github.com/erebe/wstunnel/releases/download/v10.4.4/wstunnel_10.4.4_linux_amd64.tar.gz -o wstunnel.tar.gz && tar -xzvf wstunnel.tar.gz && chmod +x wstunnel\\n\\n./wstunnel client --http-upgrade-path-prefix %s %s ws://%s:80"
+	DefaultWstunnelCommand = "curl  -L -f -k https://github.com/erebe/wstunnel/releases/download/v10.4.4/wstunnel_10.4.4_linux_amd64.tar.gz -o wstunnel.tar.gz && tar -xzvf wstunnel.tar.gz && chmod +x wstunnel && ./wstunnel client --http-upgrade-path-prefix %s %s ws://%s:80 &"
+)
+
+// Annotations for WireGuard and WStunnel configuration
+const (
+	annWGPrivateKey       = "interlink.eu/wg-private-key"       // base64 or plain (your choice)
+	annWGPeerPublicKey    = "interlink.eu/wg-peer-public-key"   // client's public key (server peer)
+	annWGMTU              = "interlink.eu/wg-mtu"               // optional, default 1280
+	annWgKeepaliveSeconds = "interlink.eu/wg-keepalive-seconds" // optional, default 25
+	annWSTunnelClientCmds = "interlink.eu/wstunnel-client-commands"
+	annWGClientSnippet    = "interlink.eu/wireguard-client-snippet"
 )
 
 type WstunnelTemplateData struct {
-	Name           string
-	Namespace      string
-	RandomPassword string
-	ExposedPorts   []PortMapping
-	WildcardDNS    string
+	Name             string
+	Namespace        string
+	RandomPassword   string
+	ExposedPorts     []PortMapping
+	WildcardDNS      string
+	WGPrivateKey     string
+	ClientPublicKey  string
+	WGMTU            int
+	KeepaliveSecs    int
+	ClientPrivateKey string // only if we generated it
 }
 
 type PortMapping struct {
 	Port     int32
 	Name     string
 	Protocol string
+}
+
+type MeshScriptTemplateData struct {
+	WGInterfaceName       string
+	WSTunnelExecutableURL string
+	WireguardGoURL        string
+	WgToolURL             string
+	Slirp4netnsURL        string
+	WGConfig              string
+	DNSServiceIP          string
+	RandomPassword        string
+	IngressEndpoint       string
+	WGMTU                 int
+	PodCIDRCluster        string
+	ServiceCIDR           string
+	UnshareMode           string
+}
+
+// Provider defines the properties of the virtual kubelet provider
+type Provider struct {
+	nodeName             string
+	node                 *v1.Node
+	operatingSystem      string
+	internalIP           string
+	daemonEndpointPort   int32
+	pods                 map[string]*v1.Pod
+	config               Config
+	startTime            time.Time
+	notifier             func(*v1.Pod)
+	onNodeChangeCallback func(*v1.Node)
+	clientSet            *kubernetes.Clientset
+	clientHTTPTransport  *http.Transport
+	podIPs               []string
 }
 
 // Increment the given IP address
@@ -339,23 +391,6 @@ func SetDefaultResource(config *Config) {
 	if config.Network.WstunnelCommand == "" {
 		config.Network.WstunnelCommand = DefaultWstunnelCommand
 	}
-}
-
-// Provider defines the properties of the virtual kubelet provider
-type Provider struct {
-	nodeName             string
-	node                 *v1.Node
-	operatingSystem      string
-	internalIP           string
-	daemonEndpointPort   int32
-	pods                 map[string]*v1.Pod
-	config               Config
-	startTime            time.Time
-	notifier             func(*v1.Pod)
-	onNodeChangeCallback func(*v1.Node)
-	clientSet            *kubernetes.Clientset
-	clientHTTPTransport  *http.Transport
-	podIPs               []string
 }
 
 // NewProviderConfig takes user-defined configuration and fills the Virtual Kubelet provider struct
@@ -683,22 +718,130 @@ func (p *Provider) createDummyPod(ctx context.Context, originalPod *v1.Pod) (*v1
 		log.G(ctx).Infof("Created wstunnel namespace %s", namespace)
 	}
 
-	// Generate template data
+	resourceBaseName, wstunnelNS := computeWstunnelResourceNames(originalPod.Name, originalPod.Namespace)
+	log.G(ctx).Infof("Computed resource names - base: %s, namespace: %s", resourceBaseName, wstunnelNS)
+
+	// Reuse existing random path prefix if the Deployment already exists, otherwise generate it once
+	pathPrefix := ""
+	if dep, err := p.clientSet.AppsV1().Deployments(wstunnelNS).Get(ctx, resourceBaseName, metav1.GetOptions{}); err == nil {
+		if dep.Spec.Template.Annotations != nil {
+			if v, ok := dep.Spec.Template.Annotations["interlink.eu/wstunnel-path-prefix"]; ok && strings.TrimSpace(v) != "" {
+				pathPrefix = v
+			}
+		}
+	}
+	if pathPrefix == "" {
+		pathPrefix = generateRandomPassword()
+	}
+
+	// log the path prefix
+	log.G(ctx).Infof("Using wstunnel path prefix %s for %s/%s", pathPrefix, originalPod.Namespace, originalPod.Name)
+
+	ingressFirstLabel := fmt.Sprintf("%s-%s", resourceBaseName, wstunnelNS)
+	if len(ingressFirstLabel) > 63 {
+		// If combined length exceeds 63, we need to truncate
+		// Strategy: keep both parts but truncate proportionally
+		maxNameLen := 31
+		maxNsLen := 31
+
+		truncatedName := resourceBaseName
+		if len(truncatedName) > maxNameLen {
+			truncatedName = truncatedName[:maxNameLen]
+			truncatedName = strings.TrimRight(truncatedName, "-")
+		}
+
+		truncatedNs := wstunnelNS
+		if len(truncatedNs) > maxNsLen {
+			truncatedNs = truncatedNs[:maxNsLen]
+			truncatedNs = strings.TrimRight(truncatedNs, "-")
+		}
+
+		// Reconstruct and verify
+		ingressFirstLabel = fmt.Sprintf("%s-%s", truncatedName, truncatedNs)
+		if len(ingressFirstLabel) > 63 {
+			// Final safety: hard truncate
+			ingressFirstLabel = ingressFirstLabel[:63]
+			ingressFirstLabel = strings.TrimRight(ingressFirstLabel, "-")
+		}
+
+		resourceBaseName = truncatedName
+		wstunnelNS = truncatedNs
+
+		log.G(ctx).Infof("Truncated ingress first label to %d chars: %s", len(ingressFirstLabel), ingressFirstLabel)
+	}
+
 	templateData := WstunnelTemplateData{
-		Name:           originalPod.Name + "-" + originalPod.Namespace,
-		Namespace:      namespace,
-		RandomPassword: generateRandomPassword(),
+		Name:           resourceBaseName,
+		Namespace:      wstunnelNS,
+		RandomPassword: pathPrefix,
 		ExposedPorts:   extractPortMappings(originalPod),
 		WildcardDNS:    p.config.Network.WildcardDNS,
 	}
 
-	// Load and execute template
+	// if full mesh in the configuration is set to true
+	if p.config.Network.FullMesh {
+
+		wgMTU := 1280
+		if v := strings.TrimSpace(originalPod.Annotations[annWGMTU]); v != "" {
+			if n, err := strconv.Atoi(v); err == nil && n > 0 {
+				wgMTU = n
+			}
+		}
+		keepalive := 25
+		if v := strings.TrimSpace(originalPod.Annotations[annWgKeepaliveSeconds]); v != "" {
+			if n, err := strconv.Atoi(v); err == nil && n >= 0 {
+				keepalive = n
+			}
+		}
+
+		serverPriv := strings.TrimSpace(originalPod.Annotations[annWGPrivateKey])
+		if serverPriv == "" {
+			priv, pub, err := generateWGKeypair()
+			if err != nil {
+				return nil, nil, fmt.Errorf("generate server WG keypair: %w", err)
+			}
+			serverPriv = priv
+			log.G(ctx).Infof("[WG] Generated SERVER keypair for %s/%s: public=%s",
+				originalPod.Namespace, originalPod.Name, pub)
+			// (Optionally) you could patch the Pod to persist the generated serverPriv annotation.
+		}
+
+		clientPub := strings.TrimSpace(originalPod.Annotations[annWGPeerPublicKey])
+		var generatedClientPriv string
+		if clientPub == "" {
+			cPriv, cPub, err := generateWGKeypair()
+			if err != nil {
+				return nil, nil, fmt.Errorf("generate client WG keypair: %w", err)
+			}
+			clientPub = cPub
+			generatedClientPriv = cPriv
+			log.G(ctx).Infof("[WG] Generated CLIENT keypair for %s/%s: public=%s private=%s",
+				originalPod.Namespace, originalPod.Name, cPub, cPriv)
+		} else {
+			// sanity check format (optional)
+			if _, err := base64.StdEncoding.DecodeString(clientPub); err != nil {
+				return nil, nil, fmt.Errorf("invalid client public key (base64): %w", err)
+			}
+		}
+
+		templateData.WGPrivateKey = serverPriv
+		templateData.ClientPublicKey = clientPub
+		templateData.WGMTU = wgMTU
+		templateData.KeepaliveSecs = keepalive
+		templateData.ClientPrivateKey = generatedClientPriv // may be empty if not generated
+
+		// Validate critical WG inputs (fail early so the template doesn’t render bogus keys)
+		if templateData.WGPrivateKey == "" || templateData.ClientPublicKey == "" {
+			return nil, nil, fmt.Errorf("wireguard keys missing: set %q and %q annotations on pod %s/%s",
+				annWGPrivateKey, annWGPeerPublicKey, originalPod.Namespace, originalPod.Name)
+		}
+	}
+
 	manifestYAML, err := p.executeWstunnelTemplate(ctx, templateData)
 	if err != nil {
 		return nil, nil, fmt.Errorf("failed to execute wstunnel template: %w", err)
 	}
 
-	// Apply the manifests
 	createdPod, err := p.applyWstunnelManifests(ctx, manifestYAML)
 	if err != nil {
 		return nil, nil, fmt.Errorf("failed to apply wstunnel manifests: %w", err)
@@ -863,6 +1006,60 @@ func (p *Provider) applyWstunnelManifests(ctx context.Context, manifestYAML stri
 			}
 			createdResources = append(createdResources, "ingress:"+ingress.Name)
 
+		case *v1.ConfigMap:
+			cm, err := p.clientSet.CoreV1().ConfigMaps(o.Namespace).Create(ctx, o, metav1.CreateOptions{})
+			if err != nil {
+				if apierrors.IsAlreadyExists(err) {
+					log.G(ctx).Infof("ConfigMap %s/%s already exists, updating", o.Namespace, o.Name)
+					existing, getErr := p.clientSet.CoreV1().ConfigMaps(o.Namespace).Get(ctx, o.Name, metav1.GetOptions{})
+					if getErr != nil {
+						p.cleanupPartialWstunnelResources(ctx, createdResources, o.Namespace)
+						return nil, fmt.Errorf("failed to get existing configmap: %w", getErr)
+					}
+					o.ResourceVersion = existing.ResourceVersion
+					o.UID = existing.UID
+					cm, err = p.clientSet.CoreV1().ConfigMaps(o.Namespace).Update(ctx, o, metav1.UpdateOptions{})
+					if err != nil {
+						p.cleanupPartialWstunnelResources(ctx, createdResources, o.Namespace)
+						return nil, fmt.Errorf("failed to update existing configmap: %w", err)
+					}
+					log.G(ctx).Infof("Updated configmap %s/%s", cm.Namespace, cm.Name)
+				} else {
+					p.cleanupPartialWstunnelResources(ctx, createdResources, o.Namespace)
+					return nil, fmt.Errorf("failed to create configmap: %w", err)
+				}
+			} else {
+				log.G(ctx).Infof("Created configmap %s/%s", cm.Namespace, cm.Name)
+			}
+			createdResources = append(createdResources, "configmap:"+o.Name)
+
+		case *v1.Secret:
+			sec, err := p.clientSet.CoreV1().Secrets(o.Namespace).Create(ctx, o, metav1.CreateOptions{})
+			if err != nil {
+				if apierrors.IsAlreadyExists(err) {
+					log.G(ctx).Infof("Secret %s/%s already exists, updating", o.Namespace, o.Name)
+					existing, getErr := p.clientSet.CoreV1().Secrets(o.Namespace).Get(ctx, o.Name, metav1.GetOptions{})
+					if getErr != nil {
+						p.cleanupPartialWstunnelResources(ctx, createdResources, o.Namespace)
+						return nil, fmt.Errorf("failed to get existing secret: %w", getErr)
+					}
+					o.ResourceVersion = existing.ResourceVersion
+					o.UID = existing.UID
+					sec, err = p.clientSet.CoreV1().Secrets(o.Namespace).Update(ctx, o, metav1.UpdateOptions{})
+					if err != nil {
+						p.cleanupPartialWstunnelResources(ctx, createdResources, o.Namespace)
+						return nil, fmt.Errorf("failed to update existing secret: %w", err)
+					}
+					log.G(ctx).Infof("Updated secret %s/%s", sec.Namespace, sec.Name)
+				} else {
+					p.cleanupPartialWstunnelResources(ctx, createdResources, o.Namespace)
+					return nil, fmt.Errorf("failed to create secret: %w", err)
+				}
+			} else {
+				log.G(ctx).Infof("Created secret %s/%s", sec.Namespace, sec.Name)
+			}
+			createdResources = append(createdResources, "secret:"+o.Name)
+
 		default:
 			log.G(ctx).Warningf("Unsupported resource type: %T", obj)
 		}
@@ -928,6 +1125,14 @@ func (p *Provider) cleanupWstunnelResources(ctx context.Context, wstunnelName, n
 	} else {
 		log.G(ctx).Infof("Successfully deleted wstunnel ingress %s/%s", namespace, wstunnelName)
 	}
+
+	// Delete configmap
+	err = p.clientSet.CoreV1().ConfigMaps(namespace).Delete(ctx, wstunnelName+"-wg-config", metav1.DeleteOptions{})
+	if err != nil {
+		log.G(ctx).Warningf("Failed to delete wstunnel configmap %s/%s: %v", namespace, wstunnelName+"-wg-config", err)
+	} else {
+		log.G(ctx).Infof("Successfully deleted wstunnel configmap %s/%s", namespace, wstunnelName+"-wg-config")
+	}
 }
 
 // cleanupPartialWstunnelResources removes specific resources that were created before a failure
@@ -965,6 +1170,22 @@ func (p *Provider) cleanupPartialWstunnelResources(ctx context.Context, createdR
 			} else {
 				log.G(ctx).Infof("Successfully deleted partial ingress %s/%s", namespace, resourceName)
 			}
+
+		case "configmap":
+			err := p.clientSet.CoreV1().ConfigMaps(namespace).Delete(ctx, resourceName, metav1.DeleteOptions{})
+			if err != nil {
+				log.G(ctx).Warningf("Failed to delete partial configmap %s/%s: %v", namespace, resourceName, err)
+			} else {
+				log.G(ctx).Infof("Successfully deleted partial configmap %s/%s", namespace, resourceName)
+			}
+		case "secret":
+			err := p.clientSet.CoreV1().Secrets(namespace).Delete(ctx, resourceName, metav1.DeleteOptions{})
+			if err != nil {
+				log.G(ctx).Warningf("Failed to delete partial secret %s/%s: %v", namespace, resourceName, err)
+			} else {
+				log.G(ctx).Infof("Successfully deleted partial secret %s/%s", namespace, resourceName)
+			}
+
 		}
 	}
 }
@@ -1136,44 +1357,6 @@ func (p *Provider) handleWstunnelCreation(ctx context.Context, pod *v1.Pod) (str
 	return podIP, nil
 }
 
-// addWstunnelClientAnnotation adds the wstunnel client command annotation to the original pod
-func (p *Provider) addWstunnelClientAnnotation(ctx context.Context, pod *v1.Pod, templateData *WstunnelTemplateData) error {
-	if pod.Annotations == nil {
-		pod.Annotations = make(map[string]string)
-	}
-
-	// Generate the ingress endpoint
-	ingressEndpoint := fmt.Sprintf("%s-%s.%s", templateData.Name, templateData.Namespace, templateData.WildcardDNS)
-	if templateData.WildcardDNS == "" {
-		ingressEndpoint = templateData.Name
-	}
-
-	// Generate -R options for each exposed port
-	var rOptions []string
-	for _, port := range templateData.ExposedPorts {
-		rOptions = append(rOptions, fmt.Sprintf("-R tcp://0.0.0.0:%d:localhost:%d", port.Port, port.Port))
-	}
-
-	// Get the wstunnel command template from config, or use default
-	wstunnelCommandTemplate := p.config.Network.WstunnelCommand
-	if wstunnelCommandTemplate == "" {
-		wstunnelCommandTemplate = DefaultWstunnelCommand
-	}
-
-	// Create single command with all -R options
-	command := fmt.Sprintf(wstunnelCommandTemplate,
-		templateData.RandomPassword,
-		strings.Join(rOptions, " "),
-		ingressEndpoint,
-	)
-
-	// Add annotation with the complete command
-	pod.Annotations["interlink.eu/wstunnel-client-commands"] = command
-
-	log.G(ctx).Infof("Added wstunnel client command annotation to pod %s/%s", pod.Namespace, pod.Name)
-	return nil
-}
-
 // waitForWstunnelPodIP waits for wstunnel pod to get an IP
 func (p *Provider) waitForWstunnelPodIP(ctx context.Context, dummyPod *v1.Pod, timeout time.Duration, wstunnelName, namespace string) (string, error) {
 	log.G(ctx).Infof("Waiting up to %v for wstunnel pod %s/%s to get an IP", timeout, dummyPod.Namespace, dummyPod.Name)
@@ -1226,12 +1409,21 @@ func (p *Provider) CreatePod(ctx context.Context, pod *v1.Pod) error {
 	podIP := "127.0.0.1"
 
 	// Handle wstunnel creation if needed
-	if p.shouldCreateWstunnel(pod) {
+	if p.shouldCreateWstunnel(pod) || p.config.Network.FullMesh {
 		var err error
 		podIP, err = p.handleWstunnelCreation(ctx, pod)
 		if err != nil {
 			return err
 		}
+
+		if p.config.Network.FullMesh {
+			if pod.Annotations == nil {
+				pod.Annotations = make(map[string]string)
+			}
+			pod.Annotations["interlink.eu/pod-subnet"] = p.node.Spec.PodCIDR
+		}
+
+		log.G(ctx).Infof("Added pod subnet annotation %s to pod %s/%s", p.node.Spec.PodCIDR, pod.Namespace, pod.Name)
 	}
 
 	if _, ok := pod.Annotations["interlink.eu/pod-vpn"]; ok {
@@ -1391,9 +1583,11 @@ func (p *Provider) DeletePod(ctx context.Context, pod *v1.Pod) (err error) {
 	}
 
 	// Clean up wstunnel resources if tunnel is enabled and they exist and no VPN annotation
-	if p.shouldCreateWstunnel(pod) {
-		wstunnelName := pod.Name + "-" + pod.Namespace
-		p.cleanupWstunnelResources(ctx, wstunnelName, pod.Namespace+"-wstunnel")
+	if p.shouldCreateWstunnel(pod) || p.config.Network.FullMesh {
+		// Use the same helper function to compute resource names
+		resourceBaseName, wstunnelNS := computeWstunnelResourceNames(pod.Name, pod.Namespace)
+		log.G(ctx).Infof("Cleaning up wstunnel resources: name=%s, namespace=%s", resourceBaseName, wstunnelNS)
+		p.cleanupWstunnelResources(ctx, resourceBaseName, wstunnelNS)
 	}
 
 	now := metav1.Now()
