@@ -1527,12 +1527,31 @@ func (p *Provider) CreatePod(ctx context.Context, pod *v1.Pod) error {
 			if err.Error() == "Deleted pod before actual creation" {
 				log.G(ctx).Warn(err)
 			} else {
-				// TODO if node in NotReady put it to Unknown/pending?
 				log.G(ctx).Error(err)
-				pod.Status, err = PodPhase(*p, "Pending", podIP)
+				// Capture the creation error message before reassigning err
+				creationError := err.Error()
+
+				// Set pod to Failed state
+				pod.Status, err = PodPhase(*p, "Failed", podIP)
 				if err != nil {
 					log.G(ctx).Error(err)
 					return
+				}
+
+				// Store the error message in the pod status
+				pod.Status.Reason = "ProviderFailed"
+				pod.Status.Message = creationError
+
+				// Set all container statuses to not ready
+				for i := range pod.Status.ContainerStatuses {
+					pod.Status.ContainerStatuses[i].Ready = false
+					pod.Status.ContainerStatuses[i].State = v1.ContainerState{
+						Terminated: &v1.ContainerStateTerminated{
+							ExitCode: 1,
+							Reason:   "ProviderFailed",
+							Message:  creationError,
+						},
+					}
 				}
 
 				err = p.UpdatePod(ctx, pod)
