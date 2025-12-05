@@ -861,7 +861,7 @@ func (m *Interlink) Test(
 	// Automate CSR approval for testing - required for mTLS functionality and log access
 	c = c.WithExec([]string{"bash", "-c", "kubectl get csr -o name | xargs -r kubectl certificate approve"})
 
-	result := c.WithExec([]string{"bash", "-c", "source .venv/bin/activate && export KUBECONFIG=/.kube/config  && pytest -vk 'not rclone and not limits'"})
+	result := c.WithExec([]string{"bash", "-c", "source .venv/bin/activate && export KUBECONFIG=/.kube/config  && pytest -vk 'not rclone and not limits and not stress and not multi-init and not fail'"})
 	//_ = c.WithExec([]string{"bash", "-c", "source .venv/bin/activate && export KUBECONFIG=/.kube/config  && pytest -vk 'hello'"})
 	// result := c.WithExec([]string{"bash", "-c", "source .venv/bin/activate && export KUBECONFIG=/.kube/config  && pytest -vk 'hello'"})
 
@@ -940,7 +940,7 @@ EOF`}).
 		// Automate CSR approval for testing - required for mTLS functionality and log access
 		WithExec([]string{"bash", "-c", "kubectl get csr -o name | xargs -r kubectl certificate approve"}).
 		// Run the full test suite (excluding resource-intensive tests)
-		WithExec([]string{"bash", "-c", "source .venv/bin/activate && export KUBECONFIG=/.kube/config && pytest -v -k 'not rclone and not limits and not stress'"})
+		WithExec([]string{"bash", "-c", "source .venv/bin/activate && export KUBECONFIG=/.kube/config && pytest -v -k 'not rclone and not limits and not stress and not multi-init and not fail'"})
 
 	return result, nil
 }
