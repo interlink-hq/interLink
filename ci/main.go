@@ -347,7 +347,7 @@ EOF`}).
 
 	m.Kubectl = kubectl
 
-	dag.Container().From("alpine/helm:3.16.1").
+	_, err = dag.Container().From("alpine/helm:3.16.1").
 		WithMountedFile("/.kube/config", m.KubeConfig).
 		WithDirectory("/helm", helmChart).
 		WithEnvVariable("BUST", time.Now().String()).
@@ -358,12 +358,17 @@ EOF`}).
 		WithExec([]string{
 			"helm",
 			"install",
+			"--wait",
+			"--timeout", "600s",
 			"--create-namespace",
 			"-n", "interlink",
 			"virtual-node",
 			"/helm/interlink",
 			"--values", "/manifests/vk_helm_chart.yaml",
 		}).Stdout(ctx)
+	if err != nil {
+		return nil, err
+	}
 
 	return m, nil
 }
@@ -861,6 +866,18 @@ func (m *Interlink) Test(
 	// Automate CSR approval for testing - required for mTLS functionality and log access
 	c = c.WithExec([]string{"bash", "-c", "kubectl get csr -o name | xargs -r kubectl certificate approve"})
 
+	// Wait for virtual-kubelet node to be ready before running tests (robust version that waits for node creation)
+	c = c.WithExec([]string{"bash", "-c", `
+for i in {1..60}; do
+  if kubectl get node virtual-kubelet &>/dev/null; then
+    echo "Virtual-kubelet node found, waiting for Ready condition..."
+    kubectl wait --for=condition=Ready node/virtual-kubelet --timeout=240s && break
+  fi
+  echo "Waiting for virtual-kubelet node to be created... ($i/60)"
+  sleep 5
+done
+`})
+
 	result := c.WithExec([]string{"bash", "-c", "source .venv/bin/activate && export KUBECONFIG=/.kube/config  && pytest -vk 'not rclone and not limits'"})
 	//_ = c.WithExec([]string{"bash", "-c", "source .venv/bin/activate && export KUBECONFIG=/.kube/config  && pytest -vk 'hello'"})
 	// result := c.WithExec([]string{"bash", "-c", "source .venv/bin/activate && export KUBECONFIG=/.kube/config  && pytest -vk 'hello'"})
@@ -900,13 +917,12 @@ func (m *Interlink) TestMTLS(
 	if err != nil {
 		return nil, err
 	}
+
 	// Automate CSR approval for testing - required for mTLS functionality and log access
 	c = c.WithExec([]string{"bash", "-c", "kubectl get csr -o name | xargs -r kubectl certificate approve"})
 
 	// First run basic tests to ensure setup works
 	result := c.WithExec([]string{"bash", "-c", "source .venv/bin/activate && export KUBECONFIG=/.kube/config && pytest -v -k 'hello'"}).
-		// Wait for virtual node to be ready
-		WithExec([]string{"bash", "-c", "kubectl wait --for=condition=Ready node/virtual-kubelet --timeout=300s"}).
 		// Automate CSR approval for testing - required for mTLS functionality
 		WithExec([]string{"bash", "-c", "kubectl get csr -o name | xargs -r kubectl certificate approve"}).
 		// Create a test pod for getLogs testing
@@ -927,8 +943,6 @@ spec:
     args: ["-c", "echo 'mTLS log test started'; sleep 30; echo 'mTLS log test completed'"]
   restartPolicy: Never
 EOF`}).
-		// Wait for pod to start
-		WithExec([]string{"bash", "-c", "kubectl wait --for=condition=PodReadyForStartup pod/mtls-log-test --timeout=120s || true"}).
 		// Ensure CSR approval before testing logs
 		WithExec([]string{"bash", "-c", "kubectl get csr -o name | xargs -r kubectl certificate approve"}).
 		// Test getLogs endpoint specifically - this should work with mTLS now

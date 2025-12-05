@@ -22,7 +22,7 @@ jobs:
           verb: call
           args: -s --name unit-tests unit-test
           cloud-token: ${{ secrets.DAGGER_CLOUD_TOKEN }}
-          version: "0.19.2"
+          version: "0.19.4"
       - name: Integration Test
         uses: dagger/dagger-for-github@v7
         with:
@@ -30,7 +30,7 @@ jobs:
           verb: call
           args: -s --name slurm-test build-images new-interlink test stdout
           cloud-token: ${{ secrets.DAGGER_CLOUD_TOKEN }}
-          version: "0.19.2"
+          version: "0.19.4"
       - name: Integration Test mTLS
         uses: dagger/dagger-for-github@v7
         with:
@@ -38,4 +38,4 @@ jobs:
           verb: call
           args: -s --name slurm-test-mtls build-images new-interlink-mtls test stdout
           cloud-token: ${{ secrets.DAGGER_CLOUD_TOKEN }}
-          version: "0.19.2"
+          version: "0.19.4"
