@@ -258,14 +258,23 @@ func createCertPool(ctx context.Context, interLinkConfig commonIL.Config) *x509.
 func createHTTPServer(ctx context.Context, cfg Config, interLinkConfig commonIL.Config, kubeClient kubernetes.Interface) *http.ServeMux {
 	mux := http.NewServeMux()
 
-	// Use CSR-based certificate retriever for proper certificate management
-	// Standard kubelet serving certificate signer name
-	const kubeletServingSigner = "kubernetes.io/kubelet-serving"
+	var retriever commonIL.Crtretriever
 
-	retriever, err := commonIL.NewCertificateRetriever(kubeClient, kubeletServingSigner, cfg.NodeName, net.ParseIP(cfg.InternalIP))
-	if err != nil {
-		log.G(ctx).Warnf("Failed to create CSR-based certificate retriever, falling back to self-signed: %v", err)
+	// Check if CSR creation is disabled in configuration
+	if interLinkConfig.DisableCSR {
+		log.G(ctx).Info("CSR creation is disabled in configuration, using self-signed certificates")
 		retriever = commonIL.NewSelfSignedCertificateRetriever(cfg.NodeName, net.ParseIP(cfg.InternalIP))
+	} else {
+		// Use CSR-based certificate retriever for proper certificate management
+		// Standard kubelet serving certificate signer name
+		const kubeletServingSigner = "kubernetes.io/kubelet-serving"
+
+		var err error
+		retriever, err = commonIL.NewCertificateRetriever(kubeClient, kubeletServingSigner, cfg.NodeName, net.ParseIP(cfg.InternalIP))
+		if err != nil {
+			log.G(ctx).Warnf("Failed to create CSR-based certificate retriever, falling back to self-signed: %v", err)
+			retriever = commonIL.NewSelfSignedCertificateRetriever(cfg.NodeName, net.ParseIP(cfg.InternalIP))
+		}
 	}
 
 	kubeletURL, _ := getKubeletEndpoint()

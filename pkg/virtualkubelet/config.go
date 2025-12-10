@@ -49,6 +49,8 @@ type Config struct {
 	Network Network `yaml:"Network,omitempty"`
 	// SkipDownwardAPIResolution disables downward API resolution to enable scheduling pods with downward API
 	SkipDownwardAPIResolution bool `yaml:"SkipDownwardAPIResolution,omitempty"`
+	// DisableCSR disables CSR (CertificateSigningRequest) creation and uses self-signed certificates instead
+	DisableCSR bool `yaml:"DisableCSR,omitempty"`
 }
 
 // TLSConfig holds TLS/mTLS configuration for secure communication with interLink API.

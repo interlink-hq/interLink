@@ -14,6 +14,7 @@ func TestConfig_DefaultValues(t *testing.T) {
 	assert.False(t, config.VerboseLogging)
 	assert.False(t, config.ErrorsOnlyLogging)
 	assert.False(t, config.DisableProjectedVolumes)
+	assert.False(t, config.DisableCSR)
 }
 
 func TestTLSConfig_Structure(t *testing.T) {
