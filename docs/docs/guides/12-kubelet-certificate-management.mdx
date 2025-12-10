@@ -218,6 +218,130 @@ kubectl get csr vk-my-node-xxxxx
 
 The Virtual Kubelet will automatically detect the approval and begin using the certificate.
 
+#### With cert-manager as CSR Signer (Experimental)
+
+You can use cert-manager to automatically sign Kubernetes CSR objects. This combines the CSR workflow with cert-manager's powerful issuer ecosystem.
+
+**Prerequisites:**
+- cert-manager installed in your cluster
+- cert-manager experimental feature enabled
+
+**Step 1: Enable cert-manager CSR support**
+
+Enable the experimental feature in cert-manager:
+
+```yaml
+# In cert-manager controller deployment
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: cert-manager
+  namespace: cert-manager
+spec:
+  template:
+    spec:
+      containers:
+      - name: cert-manager
+        args:
+        - --feature-gates=ExperimentalCertificateSigningRequestControllers=true
+```
+
+**Step 2: Create a cert-manager Issuer or ClusterIssuer**
+
+```yaml
+apiVersion: cert-manager.io/v1
+kind: ClusterIssuer
+metadata:
+  name: kubelet-ca-issuer
+spec:
+  ca:
+    secretName: kubelet-ca-key-pair  # Your CA certificate and key
+---
+# Or use other issuer types (ACME, Vault, etc.)
+apiVersion: cert-manager.io/v1
+kind: ClusterIssuer
+metadata:
+  name: vault-issuer
+spec:
+  vault:
+    server: https://vault.example.com
+    path: pki/sign/kubelet
+    auth:
+      kubernetes:
+        role: cert-manager
+        mountPath: /v1/auth/kubernetes
+        secretRef:
+          name: vault-token
+          key: token
+```
+
+**Step 3: Configure Virtual Kubelet to use cert-manager signer**
+
+```yaml
+# Virtual Kubelet configuration
+KubeletCSRSignerName: clusterissuers.cert-manager.io/kubelet-ca-issuer
+
+# Or for namespaced Issuer:
+# KubeletCSRSignerName: issuers.cert-manager.io/interlink.my-issuer
+```
+
+**Step 4: Set up RBAC for cert-manager**
+
+cert-manager needs permission to approve and sign CSRs:
+
+```yaml
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: cert-manager-csr-approver
+rules:
+- apiGroups: ["certificates.k8s.io"]
+  resources: ["certificatesigningrequests"]
+  verbs: ["get", "list", "watch"]
+- apiGroups: ["certificates.k8s.io"]
+  resources: ["certificatesigningrequests/status"]
+  verbs: ["update"]
+- apiGroups: ["certificates.k8s.io"]
+  resources: ["signers"]
+  resourceNames: ["clusterissuers.cert-manager.io/*", "issuers.cert-manager.io/*"]
+  verbs: ["sign"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: cert-manager-csr-approver
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: cert-manager-csr-approver
+subjects:
+- kind: ServiceAccount
+  name: cert-manager
+  namespace: cert-manager
+```
+
+**How it works:**
+
+1. Virtual Kubelet creates a CSR with `signerName: clusterissuers.cert-manager.io/kubelet-ca-issuer`
+2. cert-manager detects the CSR (polls every 10 seconds)
+3. cert-manager validates the request matches its issuer
+4. cert-manager signs the CSR using the configured issuer (CA, Vault, ACME, etc.)
+5. Virtual Kubelet retrieves the signed certificate and uses it
+
+**Benefits:**
+- Automatic CSR approval and signing
+- Leverage cert-manager's issuer ecosystem
+- Centralized certificate management
+- Support for various backends (Vault, ACME, external CAs)
+
+**Important Notes:**
+- ⚠️ This is an **experimental feature** in cert-manager (as of 2024)
+- ⚠️ Manual approval is still required by default - cert-manager doesn't auto-approve
+- You may need additional automation to approve CSRs, or use a separate CSR approver
+- Behavior may change in future cert-manager releases
+
+For production use, consider using **Approach 2** (manual certificates with cert-manager Certificate CRD) which is more mature and stable.
+
 #### Certificate Storage and Reuse
 
 Certificates are stored in `/tmp/certs` with the prefix `virtual-kubelet-`. On restart:
@@ -303,7 +427,24 @@ Standard production setup with Kubernetes CSR workflow:
 
 The Virtual Kubelet will automatically create and manage certificates.
 
-### Scenario 4: Air-Gapped Environment with Manual Certificates
+### Scenario 4: Production with cert-manager CSR Signer (Experimental)
+
+Use cert-manager to sign CSRs automatically, combining CSR workflow with cert-manager's issuer ecosystem:
+
+```yaml
+# Virtual Kubelet configuration
+KubeletCSRSignerName: clusterissuers.cert-manager.io/vault-issuer
+```
+
+This approach:
+- Uses Kubernetes CSR workflow
+- Leverages cert-manager's powerful issuers (Vault, ACME, CA, etc.)
+- Automatic certificate signing (still requires CSR approval)
+- Centralized certificate management
+
+See the [cert-manager as CSR Signer](#with-cert-manager-as-csr-signer-experimental) section for detailed setup.
+
+### Scenario 5: Air-Gapped Environment with Manual Certificates
 
 For environments without internet access or external PKI:
 
@@ -475,9 +616,13 @@ The CSR mode will be automatically disabled.
 |-------|------|---------|-------------|
 | `KubeletCertFile` | string | `""` | Path to kubelet server certificate file (PEM format) |
 | `KubeletKeyFile` | string | `""` | Path to kubelet server private key file (PEM format) |
+| `KubeletCSRSignerName` | string | `"kubernetes.io/kubelet-serving"` | Signer name for CSR-based certificates. Use cert-manager format: `clusterissuers.cert-manager.io/<name>` or `issuers.cert-manager.io/<namespace>.<name>` |
 | `DisableCSR` | bool | `false` | Disable CSR creation and use self-signed certificates |
 
-When both `KubeletCertFile` and `KubeletKeyFile` are set, they take precedence over `DisableCSR`.
+**Priority order:**
+1. When both `KubeletCertFile` and `KubeletKeyFile` are set, manual certificates are used (highest priority)
+2. When `DisableCSR: true`, self-signed certificates are used
+3. Otherwise, CSR-based certificates are used with the specified `KubeletCSRSignerName`
 
 ---
 
@@ -486,4 +631,5 @@ When both `KubeletCertFile` and `KubeletKeyFile` are set, they take precedence o
 - [mTLS Deployment Guide](./07-mtls-deployment.mdx) - For securing InterLink API communication
 - [InterLink Configuration](./11-interlink-configuration.mdx) - Complete configuration reference
 - [Kubernetes CSR Documentation](https://kubernetes.io/docs/reference/access-authn-authz/certificate-signing-requests/)
+- [cert-manager CSR Support](https://cert-manager.io/docs/usage/kube-csr/) - Using cert-manager as a CSR signer
 - [TLS Bootstrapping](https://kubernetes.io/docs/reference/access-authn-authz/kubelet-tls-bootstrapping/)
