@@ -87,8 +87,8 @@ type persistentCSRManager struct {
 	nodeIP     net.IP
 	certStore  certificate.Store
 
-	mu   sync.RWMutex
-	cert *tls.Certificate
+	mu      sync.RWMutex
+	cert    *tls.Certificate
 	csrName string
 }
 
@@ -195,7 +195,9 @@ func (m *persistentCSRManager) monitorCSR(ctx context.Context) {
 				if condition.Type == certificates.CertificateDenied {
 					log.G(ctx).Errorf("CSR %s was denied: %s (will create new CSR)", csrName, condition.Message)
 					// Delete the denied CSR
-					_ = m.kubeClient.CertificatesV1().CertificateSigningRequests().Delete(ctx, csrName, metav1.DeleteOptions{})
+					if err := m.kubeClient.CertificatesV1().CertificateSigningRequests().Delete(ctx, csrName, metav1.DeleteOptions{}); err != nil {
+						log.G(ctx).Warningf("Failed to delete denied CSR %s: %v", csrName, err)
+					}
 					csrName = "" // Reset to create new CSR
 					keyPEM = nil
 					break
@@ -217,11 +219,9 @@ func (m *persistentCSRManager) monitorCSR(ctx context.Context) {
 				storedCert, err := m.certStore.Update(csr.Status.Certificate, keyPEM)
 				if err != nil {
 					log.G(ctx).Warningf("Failed to store certificate: %v", err)
-				} else {
+				} else if storedCert != nil {
 					// Use the stored certificate if available
-					if storedCert != nil {
-						cert = *storedCert
-					}
+					cert = *storedCert
 				}
 
 				m.mu.Lock()
@@ -249,14 +249,18 @@ func (m *persistentCSRManager) monitorCSR(ctx context.Context) {
 						case <-timer.C:
 							log.G(ctx).Info("Certificate approaching expiration, creating new CSR")
 							// Delete old CSR and reset to create new one
-							_ = m.kubeClient.CertificatesV1().CertificateSigningRequests().Delete(ctx, csrName, metav1.DeleteOptions{})
+							if err := m.kubeClient.CertificatesV1().CertificateSigningRequests().Delete(ctx, csrName, metav1.DeleteOptions{}); err != nil {
+								log.G(ctx).Warningf("Failed to delete old CSR %s: %v", csrName, err)
+							}
 							csrName = ""
 							keyPEM = nil
 						}
 					} else {
 						// Certificate already near expiration, create new CSR immediately
 						log.G(ctx).Warning("Certificate already near expiration, creating new CSR")
-						_ = m.kubeClient.CertificatesV1().CertificateSigningRequests().Delete(ctx, csrName, metav1.DeleteOptions{})
+						if err := m.kubeClient.CertificatesV1().CertificateSigningRequests().Delete(ctx, csrName, metav1.DeleteOptions{}); err != nil {
+							log.G(ctx).Warningf("Failed to delete expired CSR %s: %v", csrName, err)
+						}
 						csrName = ""
 						keyPEM = nil
 					}
