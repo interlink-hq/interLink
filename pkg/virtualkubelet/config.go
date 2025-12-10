@@ -41,6 +41,9 @@ type Config struct {
 	KubeletCertFile string `yaml:"KubeletCertFile,omitempty"`
 	// KubeletKeyFile is the path to the kubelet server key file (optional, for manual certificate management)
 	KubeletKeyFile string `yaml:"KubeletKeyFile,omitempty"`
+	// KubeletCSRSignerName specifies the signer name for CSR-based certificates (default: kubernetes.io/kubelet-serving)
+	// Can be used with cert-manager: clusterissuers.cert-manager.io/<issuer-name>
+	KubeletCSRSignerName string `yaml:"KubeletCSRSignerName,omitempty"`
 	// Resources specifies compute resources available to the virtual node
 	Resources Resources `yaml:"Resources"`
 	// NodeLabels allows setting custom labels on the virtual node

@@ -276,8 +276,12 @@ func createHTTPServer(ctx context.Context, cfg Config, interLinkConfig commonIL.
 		retriever = commonIL.NewSelfSignedCertificateRetriever(cfg.NodeName, net.ParseIP(cfg.InternalIP))
 	} else {
 		// Priority 3: Use CSR-based certificate retriever (default)
-		// Standard kubelet serving certificate signer name
-		const kubeletServingSigner = "kubernetes.io/kubelet-serving"
+		// Use configured signer name, or default to standard kubelet serving signer
+		kubeletServingSigner := interLinkConfig.KubeletCSRSignerName
+		if kubeletServingSigner == "" {
+			kubeletServingSigner = "kubernetes.io/kubelet-serving"
+		}
+		log.G(ctx).Infof("Using CSR signer: %s", kubeletServingSigner)
 
 		var err error
 		retriever, err = commonIL.NewCertificateRetriever(kubeClient, kubeletServingSigner, cfg.NodeName, net.ParseIP(cfg.InternalIP))
