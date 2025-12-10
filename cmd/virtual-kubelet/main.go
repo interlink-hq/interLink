@@ -260,12 +260,22 @@ func createHTTPServer(ctx context.Context, cfg Config, interLinkConfig commonIL.
 
 	var retriever commonIL.Crtretriever
 
-	// Check if CSR creation is disabled in configuration
-	if interLinkConfig.DisableCSR {
+	// Priority 1: Use manually provided certificate files if specified
+	if interLinkConfig.KubeletCertFile != "" && interLinkConfig.KubeletKeyFile != "" {
+		log.G(ctx).Infof("Using manually provided certificate from %s", interLinkConfig.KubeletCertFile)
+		retriever = func(*tls.ClientHelloInfo) (*tls.Certificate, error) {
+			cert, err := tls.LoadX509KeyPair(interLinkConfig.KubeletCertFile, interLinkConfig.KubeletKeyFile)
+			if err != nil {
+				return nil, fmt.Errorf("failed to load kubelet certificate: %w", err)
+			}
+			return &cert, nil
+		}
+	} else if interLinkConfig.DisableCSR {
+		// Priority 2: Use self-signed certificates if CSR is disabled
 		log.G(ctx).Info("CSR creation is disabled in configuration, using self-signed certificates")
 		retriever = commonIL.NewSelfSignedCertificateRetriever(cfg.NodeName, net.ParseIP(cfg.InternalIP))
 	} else {
-		// Use CSR-based certificate retriever for proper certificate management
+		// Priority 3: Use CSR-based certificate retriever (default)
 		// Standard kubelet serving certificate signer name
 		const kubeletServingSigner = "kubernetes.io/kubelet-serving"
 

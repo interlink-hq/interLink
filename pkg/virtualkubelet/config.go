@@ -37,6 +37,10 @@ type Config struct {
 	HTTP HTTP `yaml:"HTTP"`
 	// KubeletHTTP configures HTTP settings specific to Kubelet communication
 	KubeletHTTP HTTP `yaml:"KubeletHTTP"`
+	// KubeletCertFile is the path to the kubelet server certificate file (optional, for manual certificate management)
+	KubeletCertFile string `yaml:"KubeletCertFile,omitempty"`
+	// KubeletKeyFile is the path to the kubelet server key file (optional, for manual certificate management)
+	KubeletKeyFile string `yaml:"KubeletKeyFile,omitempty"`
 	// Resources specifies compute resources available to the virtual node
 	Resources Resources `yaml:"Resources"`
 	// NodeLabels allows setting custom labels on the virtual node
