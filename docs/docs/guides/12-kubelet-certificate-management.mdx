@@ -1,0 +1,489 @@
+---
+sidebar_position: 12
+---
+
+# Virtual Kubelet Certificate Management
+
+This guide explains how to manage TLS certificates for the Virtual Kubelet HTTPS server. The Virtual Kubelet provides three flexible certificate management options to accommodate different security requirements and operational workflows.
+
+## Overview
+
+The Virtual Kubelet exposes an HTTPS API that the Kubernetes control plane uses to interact with the virtual node. This API requires TLS certificates for secure communication. InterLink provides three certificate management modes with a clear priority order:
+
+1. **Manually Provided Certificates** (highest priority) - Use your own certificate files
+2. **Self-Signed Certificates** - Automatically generated certificates for testing/development
+3. **CSR-Based Certificates** (default) - Kubernetes CertificateSigningRequest workflow
+
+## Certificate Management Modes
+
+### Mode 1: Manually Provided Certificates (Recommended for Production)
+
+Use this mode when you want full control over certificate management, such as using certificates from your organization's PKI, cert-manager, or external certificate authorities.
+
+#### Configuration
+
+Add these fields to your Virtual Kubelet configuration:
+
+```yaml
+KubeletCertFile: /etc/kubernetes/pki/kubelet-server.crt
+KubeletKeyFile: /etc/kubernetes/pki/kubelet-server.key
+```
+
+#### Use Cases
+
+- Production environments with existing PKI infrastructure
+- Certificates managed by cert-manager or external tools
+- Compliance requirements for certificate authorities
+- Custom certificate rotation workflows
+
+#### Certificate Requirements
+
+The certificate must include:
+- **Common Name (CN)**: `system:node:<node-name>`
+- **Organization (O)**: `system:nodes`
+- **Subject Alternative Name (SAN)**: IP address of the virtual node
+- **Key Usage**: Digital Signature, Key Encipherment
+- **Extended Key Usage**: Server Authentication
+
+#### Example: Creating Certificates with Custom CA
+
+```bash
+# Generate private key
+openssl genrsa -out kubelet-server.key 2048
+
+# Create certificate signing request
+openssl req -new -key kubelet-server.key \
+  -out kubelet-server.csr \
+  -subj "/CN=system:node:my-vk-node/O=system:nodes" \
+  -addext "subjectAltName=IP:10.0.0.100"
+
+# Sign with your CA
+openssl x509 -req -in kubelet-server.csr \
+  -CA ca.crt -CAkey ca.key -CAcreateserial \
+  -out kubelet-server.crt -days 365 \
+  -extfile <(echo "subjectAltName=IP:10.0.0.100")
+```
+
+#### Example: Using Kubernetes Secrets
+
+Mount certificates from a Kubernetes secret:
+
+```yaml
+apiVersion: v1
+kind: Secret
+metadata:
+  name: vk-kubelet-certs
+  namespace: interlink
+type: kubernetes.io/tls
+data:
+  tls.crt: <base64-encoded-certificate>
+  tls.key: <base64-encoded-key>
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: virtual-kubelet
+  namespace: interlink
+spec:
+  template:
+    spec:
+      containers:
+      - name: virtual-kubelet
+        volumeMounts:
+        - name: kubelet-certs
+          mountPath: /etc/vk/certs
+          readOnly: true
+      volumes:
+      - name: kubelet-certs
+        secret:
+          secretName: vk-kubelet-certs
+```
+
+Update your Virtual Kubelet configuration:
+
+```yaml
+KubeletCertFile: /etc/vk/certs/tls.crt
+KubeletKeyFile: /etc/vk/certs/tls.key
+```
+
+#### Hot Reload Support
+
+Certificates are loaded on each TLS handshake, enabling hot reload:
+- Update the certificate files on disk
+- No Virtual Kubelet restart required
+- New connections will use the updated certificate
+
+This is particularly useful with cert-manager or external rotation systems.
+
+---
+
+### Mode 2: Self-Signed Certificates
+
+Use this mode for development, testing, or environments without PKI infrastructure. The Virtual Kubelet automatically generates and manages self-signed certificates.
+
+#### Configuration
+
+```yaml
+DisableCSR: true
+```
+
+#### Behavior
+
+- Generates a new self-signed certificate on startup
+- Certificate valid for 1 year
+- Automatically regenerates when within 1 day of expiration
+- No CSR created in Kubernetes
+
+#### Use Cases
+
+- Development and testing environments
+- Quick prototypes and demos
+- Environments without CSR approval infrastructure
+- Isolated deployments not requiring CA trust
+
+#### Limitations
+
+- Certificates are not trusted by default
+- Not recommended for production
+- May trigger TLS verification warnings
+
+---
+
+### Mode 3: CSR-Based Certificates (Default)
+
+Use this mode for production environments with Kubernetes CSR workflows. This is the recommended approach for production when CSR auto-approval is configured.
+
+#### Configuration
+
+```yaml
+# Default behavior - no configuration needed
+# Or explicitly:
+DisableCSR: false
+```
+
+#### Improved CSR Behavior (New)
+
+Previous versions of InterLink used the standard Kubernetes certificate manager, which had a hardcoded 15-minute timeout. This caused repeated CSR creation when approval was delayed.
+
+**The new implementation eliminates this issue:**
+
+- **Creates ONE CSR** on startup
+- **Waits indefinitely** for approval (no 15-minute timeout)
+- **Polls every 10 seconds** to check if the CSR has been approved
+- **Only creates new CSRs** when the certificate reaches 80% of its lifetime
+- **Reuses existing certificates** from previous runs if still valid
+- **Handles denied CSRs** by creating a new one
+
+This eliminates unnecessary CSR accumulation in clusters without auto-approval.
+
+#### CSR Workflow
+
+1. Virtual Kubelet starts and cleans up any old pending CSRs
+2. Creates a new CSR with the signer `kubernetes.io/kubelet-serving`
+3. Waits patiently for the CSR to be approved (manual or automatic)
+4. Once approved, retrieves and uses the certificate
+5. Stores certificate in `/tmp/certs` for reuse on restart
+6. Creates a new CSR only when the certificate is near expiration (80% of lifetime)
+
+#### With Auto-Approval (Recommended)
+
+Enable automatic CSR approval for the kubelet-serving signer:
+
+```bash
+# Check if auto-approval is configured
+kubectl get clusterrolebinding system:certificates.k8s.io:certificatesigningrequests:kubelet-serving
+
+# If not present, you may need to configure a CSR approver controller
+# This depends on your Kubernetes distribution
+```
+
+Many Kubernetes distributions include auto-approval by default. Check your distribution's documentation.
+
+#### With Manual Approval
+
+If CSR auto-approval is not configured, you'll need to manually approve CSRs:
+
+```bash
+# List pending CSRs
+kubectl get csr
+
+# You should see a CSR like: vk-my-node-xxxxx (Pending)
+
+# Approve the CSR
+kubectl certificate approve vk-my-node-xxxxx
+
+# Verify it's approved
+kubectl get csr vk-my-node-xxxxx
+```
+
+The Virtual Kubelet will automatically detect the approval and begin using the certificate.
+
+#### Certificate Storage and Reuse
+
+Certificates are stored in `/tmp/certs` with the prefix `virtual-kubelet-`. On restart:
+- The Virtual Kubelet checks for an existing valid certificate
+- If found and not expired, reuses it immediately
+- If expired or not found, creates a new CSR
+
+This prevents creating new CSRs on every restart.
+
+---
+
+## Certificate Priority Matrix
+
+| Configuration | Mode Used | CSR Created? | Certificate Source |
+|---------------|-----------|--------------|-------------------|
+| `KubeletCertFile` + `KubeletKeyFile` set | Manual | No | User-provided files |
+| `DisableCSR: true` | Self-Signed | No | Auto-generated |
+| Default / `DisableCSR: false` | CSR-Based | Yes | Kubernetes CSR approval |
+
+---
+
+## Common Scenarios
+
+### Scenario 1: Production with cert-manager
+
+Use cert-manager to issue and rotate certificates automatically:
+
+```yaml
+apiVersion: cert-manager.io/v1
+kind: Certificate
+metadata:
+  name: vk-kubelet-cert
+  namespace: interlink
+spec:
+  secretName: vk-kubelet-certs
+  duration: 2160h # 90 days
+  renewBefore: 360h # 15 days
+  subject:
+    organizations:
+    - system:nodes
+  commonName: system:node:my-vk-node
+  isCA: false
+  privateKey:
+    algorithm: RSA
+    size: 2048
+  usages:
+  - digital signature
+  - key encipherment
+  - server auth
+  ipAddresses:
+  - "10.0.0.100"
+  issuerRef:
+    name: ca-issuer
+    kind: Issuer
+```
+
+Virtual Kubelet configuration:
+
+```yaml
+KubeletCertFile: /etc/vk/certs/tls.crt
+KubeletKeyFile: /etc/vk/certs/tls.key
+```
+
+### Scenario 2: Development Environment
+
+Quick setup for testing:
+
+```yaml
+DisableCSR: true
+VerboseLogging: true
+```
+
+No additional certificate management needed.
+
+### Scenario 3: Production with CSR Auto-Approval
+
+Standard production setup with Kubernetes CSR workflow:
+
+```yaml
+# No special configuration needed - uses defaults
+# Ensure CSR auto-approval is configured in your cluster
+```
+
+The Virtual Kubelet will automatically create and manage certificates.
+
+### Scenario 4: Air-Gapped Environment with Manual Certificates
+
+For environments without internet access or external PKI:
+
+1. Generate certificates offline with your CA
+2. Mount them as secrets in the Virtual Kubelet pod
+3. Configure the paths:
+
+```yaml
+KubeletCertFile: /etc/vk/certs/tls.crt
+KubeletKeyFile: /etc/vk/certs/tls.key
+```
+
+---
+
+## Troubleshooting
+
+### CSR Not Being Approved
+
+**Symptoms:**
+- Virtual Kubelet logs show "no certificate available yet - CSR pending approval"
+- CSR remains in Pending state
+
+**Solutions:**
+
+1. Check if CSR exists:
+   ```bash
+   kubectl get csr | grep vk-
+   ```
+
+2. Manually approve:
+   ```bash
+   kubectl certificate approve <csr-name>
+   ```
+
+3. Check for auto-approval configuration:
+   ```bash
+   kubectl get clusterrolebinding | grep certificate
+   ```
+
+4. Or switch to manual certificates:
+   ```yaml
+   KubeletCertFile: /path/to/cert.crt
+   KubeletKeyFile: /path/to/key.key
+   ```
+
+### Certificate Load Failures
+
+**Symptoms:**
+- Error: "failed to load kubelet certificate"
+
+**Solutions:**
+
+1. Verify file paths are correct and accessible
+2. Check file permissions:
+   ```bash
+   ls -la /path/to/cert.crt
+   chmod 644 /path/to/cert.crt
+   chmod 600 /path/to/key.key
+   ```
+
+3. Verify certificate format (PEM):
+   ```bash
+   openssl x509 -in /path/to/cert.crt -text -noout
+   ```
+
+### Certificate Expiration
+
+**Symptoms:**
+- TLS handshake errors
+- Kubelet API becomes unreachable
+
+**Solutions:**
+
+For manual certificates:
+- Rotate certificates before expiration
+- The Virtual Kubelet will automatically reload them
+
+For CSR-based:
+- New CSR is automatically created at 80% of certificate lifetime
+- Approve the new CSR before the old certificate expires
+
+For self-signed:
+- Automatically regenerated at 1 day before expiration
+- No action required
+
+### CSR Accumulation (Legacy Issue - Fixed)
+
+**Symptoms:**
+- Many pending CSRs with the same node name
+
+**This issue is fixed** in the current version. The new implementation:
+- Creates only ONE CSR and waits indefinitely
+- Only creates new CSRs for certificate renewal
+- Cleans up old CSRs on startup
+
+If you still see accumulation, ensure you're using the latest version.
+
+---
+
+## Security Best Practices
+
+1. **Use Manual Certificates in Production**: Provides the most control and integrates with existing PKI workflows
+
+2. **Enable Certificate Rotation**: Ensure certificates are rotated regularly (e.g., every 90 days)
+
+3. **Protect Private Keys**:
+   - Use appropriate file permissions (600)
+   - Store in Kubernetes secrets with restricted RBAC
+   - Never commit private keys to version control
+
+4. **Monitor Certificate Expiration**: Set up alerts for certificates approaching expiration
+
+5. **Verify Certificate Trust Chain**: Ensure the Kubernetes API server trusts your certificate authority
+
+6. **Use Strong Key Sizes**: Minimum 2048-bit RSA or equivalent
+
+7. **Restrict Certificate Usage**: Use proper key usage and extended key usage extensions
+
+---
+
+## Migration Guide
+
+### Migrating from Old CSR Behavior
+
+If you previously experienced CSR accumulation due to the 15-minute timeout:
+
+1. **Clean up old CSRs**:
+   ```bash
+   kubectl delete csr $(kubectl get csr -o name | grep vk-)
+   ```
+
+2. **Update to latest version**: The new version automatically handles this
+
+3. **Restart Virtual Kubelet**: It will create a single CSR and wait for approval
+
+No configuration changes required - the improvement is automatic.
+
+### Migrating to Manual Certificates
+
+If you want to switch from CSR to manual certificate management:
+
+1. Generate or obtain certificates using your preferred method
+
+2. Create a Kubernetes secret:
+   ```bash
+   kubectl create secret tls vk-kubelet-certs \
+     --cert=kubelet-server.crt \
+     --key=kubelet-server.key \
+     -n interlink
+   ```
+
+3. Update Virtual Kubelet deployment to mount the secret
+
+4. Update configuration:
+   ```yaml
+   KubeletCertFile: /etc/vk/certs/tls.crt
+   KubeletKeyFile: /etc/vk/certs/tls.key
+   ```
+
+5. Restart Virtual Kubelet
+
+The CSR mode will be automatically disabled.
+
+---
+
+## Configuration Reference
+
+| Field | Type | Default | Description |
+|-------|------|---------|-------------|
+| `KubeletCertFile` | string | `""` | Path to kubelet server certificate file (PEM format) |
+| `KubeletKeyFile` | string | `""` | Path to kubelet server private key file (PEM format) |
+| `DisableCSR` | bool | `false` | Disable CSR creation and use self-signed certificates |
+
+When both `KubeletCertFile` and `KubeletKeyFile` are set, they take precedence over `DisableCSR`.
+
+---
+
+## Related Documentation
+
+- [mTLS Deployment Guide](./07-mtls-deployment.mdx) - For securing InterLink API communication
+- [InterLink Configuration](./11-interlink-configuration.mdx) - Complete configuration reference
+- [Kubernetes CSR Documentation](https://kubernetes.io/docs/reference/access-authn-authz/certificate-signing-requests/)
+- [TLS Bootstrapping](https://kubernetes.io/docs/reference/access-authn-authz/kubelet-tls-bootstrapping/)
