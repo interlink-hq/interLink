@@ -42,7 +42,7 @@ jobs:
           cache-source: go-build-cache
 
       - name: Build container base image vk
-        uses: docker/build-push-action@v5
+        uses: docker/build-push-action@v6
         with:
           context: ./
           outputs: "type=registry,push=true"
@@ -54,7 +54,7 @@ jobs:
           build-args: |
             VERSION=${{ env.RELEASE_VERSION }} 
       - name: Build container base image interlink
-        uses: docker/build-push-action@v5
+        uses: docker/build-push-action@v6
         with:
           context: ./
           outputs: "type=registry,push=true"
@@ -87,7 +87,7 @@ jobs:
         id: get_repo_owner
         run: echo ::set-output name=repo_owner::$(echo ${{ github.repository_owner }} | tr '[:upper:]' '[:lower:]')
       - name: Build container base image
-        uses: docker/build-push-action@v5
+        uses: docker/build-push-action@v6
         with:
           context: ./
           outputs: "type=registry,push=true"
