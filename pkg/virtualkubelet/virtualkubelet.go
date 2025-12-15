@@ -1393,18 +1393,12 @@ func (p *Provider) CreatePod(ctx context.Context, pod *v1.Pod) error {
 
 	key := pod.UID
 
-	now := metav1.NewTime(time.Now())
-	runningState := v1.ContainerState{
-		Running: &v1.ContainerStateRunning{
-			StartedAt: now,
-		},
-	}
-	waitingState := v1.ContainerState{
+	state = v1.ContainerState{
 		Waiting: &v1.ContainerStateWaiting{
-			Reason: "Waiting for InitContainers",
+			Reason:  "Remote pod submitted",
+			Message: "The pod has been submitted to the remote plugin for creation",
 		},
 	}
-	state = runningState
 
 	podIP := "127.0.0.1"
 
@@ -1489,7 +1483,6 @@ func (p *Provider) CreatePod(ctx context.Context, pod *v1.Pod) error {
 
 	// in case we have initContainers we need to stop main containers from executing for now ...
 	if len(pod.Spec.InitContainers) > 0 {
-		state = waitingState
 		hasInitContainers = true
 
 		// we put the phase in running but initialization phase to false
