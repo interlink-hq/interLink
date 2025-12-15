@@ -1485,11 +1485,18 @@ func (p *Provider) CreatePod(ctx context.Context, pod *v1.Pod) error {
 	if len(pod.Spec.InitContainers) > 0 {
 		hasInitContainers = true
 
-		// we put the phase in running but initialization phase to false
-		status, err := PodPhase(*p, "Running", podIP)
+		// Pods with init containers should be Pending until init containers complete
+		status, err := PodPhase(*p, "Pending", podIP)
 		if err != nil {
 			log.G(ctx).Error(err)
 			return err
+		}
+		// Set PodInitialized to False since init containers haven't completed yet
+		for i := range status.Conditions {
+			if status.Conditions[i].Type == v1.PodInitialized {
+				status.Conditions[i].Status = v1.ConditionFalse
+				break
+			}
 		}
 		pod.Status = status
 		err = p.UpdatePod(ctx, pod)
