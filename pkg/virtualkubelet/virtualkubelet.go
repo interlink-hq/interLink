@@ -1388,7 +1388,6 @@ func (p *Provider) waitForWstunnelPodIP(ctx context.Context, dummyPod *v1.Pod, t
 func (p *Provider) CreatePod(ctx context.Context, pod *v1.Pod) error {
 	TracerUpdate(&ctx, "CreatePodVK", pod)
 
-	hasInitContainers := false
 	var state v1.ContainerState
 
 	key := pod.UID
@@ -1483,8 +1482,6 @@ func (p *Provider) CreatePod(ctx context.Context, pod *v1.Pod) error {
 
 	// in case we have initContainers we need to stop main containers from executing for now ...
 	if len(pod.Spec.InitContainers) > 0 {
-		hasInitContainers = true
-
 		// Pods with init containers should be Pending until init containers complete
 		status, err := PodPhase(*p, "Pending", podIP)
 		if err != nil {
