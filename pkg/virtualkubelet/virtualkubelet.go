@@ -1564,12 +1564,12 @@ func (p *Provider) CreatePod(ctx context.Context, pod *v1.Pod) error {
 		}
 	}()
 
-	// set pod containers status to notReady and waiting if there is an initContainer to be executed first
+	// set pod containers status to notReady and waiting since they haven't started yet
 	for _, container := range pod.Spec.Containers {
 		pod.Status.ContainerStatuses = append(pod.Status.ContainerStatuses, v1.ContainerStatus{
 			Name:         container.Name,
 			Image:        container.Image,
-			Ready:        !hasInitContainers,
+			Ready:        false,
 			RestartCount: 0,
 			State:        state,
 		})
