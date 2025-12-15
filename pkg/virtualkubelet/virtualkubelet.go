@@ -1388,7 +1388,6 @@ func (p *Provider) waitForWstunnelPodIP(ctx context.Context, dummyPod *v1.Pod, t
 func (p *Provider) CreatePod(ctx context.Context, pod *v1.Pod) error {
 	TracerUpdate(&ctx, "CreatePodVK", pod)
 
-	hasInitContainers := false
 	var state v1.ContainerState
 
 	key := pod.UID
@@ -1483,13 +1482,18 @@ func (p *Provider) CreatePod(ctx context.Context, pod *v1.Pod) error {
 
 	// in case we have initContainers we need to stop main containers from executing for now ...
 	if len(pod.Spec.InitContainers) > 0 {
-		hasInitContainers = true
-
-		// we put the phase in running but initialization phase to false
-		status, err := PodPhase(*p, "Running", podIP)
+		// Pods with init containers should be Pending until init containers complete
+		status, err := PodPhase(*p, "Pending", podIP)
 		if err != nil {
 			log.G(ctx).Error(err)
 			return err
+		}
+		// Set PodInitialized to False since init containers haven't completed yet
+		for i := range status.Conditions {
+			if status.Conditions[i].Type == v1.PodInitialized {
+				status.Conditions[i].Status = v1.ConditionFalse
+				break
+			}
 		}
 		pod.Status = status
 		err = p.UpdatePod(ctx, pod)
@@ -1557,12 +1561,12 @@ func (p *Provider) CreatePod(ctx context.Context, pod *v1.Pod) error {
 		}
 	}()
 
-	// set pod containers status to notReady and waiting if there is an initContainer to be executed first
+	// set pod containers status to notReady and waiting since they haven't started yet
 	for _, container := range pod.Spec.Containers {
 		pod.Status.ContainerStatuses = append(pod.Status.ContainerStatuses, v1.ContainerStatus{
 			Name:         container.Name,
 			Image:        container.Image,
-			Ready:        !hasInitContainers,
+			Ready:        false,
 			RestartCount: 0,
 			State:        state,
 		})
