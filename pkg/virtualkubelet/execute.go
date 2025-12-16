@@ -35,6 +35,142 @@ const (
 	PodPhaseCompleted  = "Completed"
 )
 
+func parseDisableOffloadContainers(pod *v1.Pod) map[string]bool {
+	disabledContainers := make(map[string]bool)
+
+	if pod.Annotations == nil {
+		return disabledContainers
+	}
+
+	annotation, exists := pod.Annotations[annDisableOffloadContainers]
+	if !exists || strings.TrimSpace(annotation) == "" {
+		return disabledContainers
+	}
+
+	// Parse comma-separated list
+	containerNames := strings.Split(annotation, ",")
+	for _, name := range containerNames {
+		name = strings.TrimSpace(name)
+		if name != "" {
+			disabledContainers[name] = true
+		}
+	}
+
+	return disabledContainers
+}
+
+func parseDisableOffloadInitContainers(pod *v1.Pod) map[string]bool {
+	disabledContainers := make(map[string]bool)
+
+	if pod.Annotations == nil {
+		return disabledContainers
+	}
+
+	annotation, exists := pod.Annotations[annDisableOffloadInitContainers]
+	if !exists || strings.TrimSpace(annotation) == "" {
+		return disabledContainers
+	}
+
+	// Parse comma-separated list
+	containerNames := strings.Split(annotation, ",")
+	for _, name := range containerNames {
+		name = strings.TrimSpace(name)
+		if name != "" {
+			disabledContainers[name] = true
+		}
+	}
+
+	return disabledContainers
+}
+
+func getOffloadContainers(pod *v1.Pod) []v1.Container {
+	disabledContainers := parseDisableOffloadContainers(pod)
+
+	var offloadContainers []v1.Container
+	for _, container := range pod.Spec.Containers {
+		if !disabledContainers[container.Name] {
+			offloadContainers = append(offloadContainers, container)
+		}
+	}
+
+	return offloadContainers
+}
+
+func getLocalContainers(pod *v1.Pod) []v1.Container {
+	disabledContainers := parseDisableOffloadContainers(pod)
+
+	var localContainers []v1.Container
+	for _, container := range pod.Spec.Containers {
+		if disabledContainers[container.Name] {
+			localContainers = append(localContainers, container)
+		}
+	}
+
+	return localContainers
+}
+
+func getOffloadInitContainers(pod *v1.Pod) []v1.Container {
+	disabledContainers := parseDisableOffloadInitContainers(pod)
+
+	var offloadContainers []v1.Container
+	for _, container := range pod.Spec.InitContainers {
+		if !disabledContainers[container.Name] {
+			offloadContainers = append(offloadContainers, container)
+		}
+	}
+
+	return offloadContainers
+}
+
+func getLocalInitContainers(pod *v1.Pod) []v1.Container {
+	disabledContainers := parseDisableOffloadInitContainers(pod)
+
+	var localContainers []v1.Container
+	for _, container := range pod.Spec.InitContainers {
+		if disabledContainers[container.Name] {
+			localContainers = append(localContainers, container)
+		}
+	}
+
+	return localContainers
+}
+
+func hasLocalContainers(pod *v1.Pod) bool {
+	return len(getLocalContainers(pod)) > 0 || len(getLocalInitContainers(pod)) > 0
+}
+
+func extractVolumesForLocalContainers(pod *v1.Pod) []v1.Volume {
+	localContainers := getLocalContainers(pod)
+	localInitContainers := getLocalInitContainers(pod)
+
+	if len(localContainers) == 0 && len(localInitContainers) == 0 {
+		return nil
+	}
+
+	volumeNames := make(map[string]bool)
+
+	for _, container := range localContainers {
+		for _, vm := range container.VolumeMounts {
+			volumeNames[vm.Name] = true
+		}
+	}
+
+	for _, container := range localInitContainers {
+		for _, vm := range container.VolumeMounts {
+			volumeNames[vm.Name] = true
+		}
+	}
+
+	var volumes []v1.Volume
+	for _, vol := range pod.Spec.Volumes {
+		if volumeNames[vol.Name] {
+			volumes = append(volumes, vol)
+		}
+	}
+
+	return volumes
+}
+
 func failedMount(ctx context.Context, failedAndWait *bool, name string, pod *v1.Pod, p *Provider, err error) error {
 	*failedAndWait = true
 	log.G(ctx).Warningf("Unable to find ConfigMap %s for pod %s. Waiting for it to be initialized. Error was: %v. Current phase: %s", name, pod.Name, err, pod.Status.Phase)
@@ -914,49 +1050,68 @@ func RemoteExecution(ctx context.Context, config Config, p *Provider, pod *v1.Po
 		}
 		token = string(b)
 	}
+
+	podToOffload := pod.DeepCopy()
+	podToOffload.Spec.Containers = getOffloadContainers(pod)
+	podToOffload.Spec.InitContainers = getOffloadInitContainers(pod)
+
+	if len(podToOffload.Spec.Containers) > 0 {
+		var offloadNames []string
+		for _, c := range podToOffload.Spec.Containers {
+			offloadNames = append(offloadNames, c.Name)
+		}
+		log.G(ctx).Infof("RemoteExecution: Offloading containers: %v", offloadNames)
+	}
+	if len(podToOffload.Spec.InitContainers) > 0 {
+		var offloadInitNames []string
+		for _, c := range podToOffload.Spec.InitContainers {
+			offloadInitNames = append(offloadInitNames, c.Name)
+		}
+		log.G(ctx).Infof("RemoteExecution: Offloading init containers: %v", offloadInitNames)
+	}
+
 	switch mode {
 	case CREATE:
 		var req types.PodCreateRequests
 		var resp types.CreateStruct
 
-		req.Pod = *pod
+		req.Pod = *podToOffload
 
-		err := remoteExecutionHandleVolumes(ctx, p, pod, &req)
+		err := remoteExecutionHandleVolumes(ctx, p, podToOffload, &req)
 		if err != nil {
 			return err
 		}
 
-		// Adds special Kubernetes env var. Note: the pod provided by VK is "immutable", well it is a copy. In InterLink, we can modify it.
-		addKubernetesServicesEnvVars(ctx, config, pod)
+		addKubernetesServicesEnvVars(ctx, config, podToOffload)
 
 		if config.SkipDownwardAPIResolution {
 			log.G(ctx).Info("SkipDownwardAPIResolution is set to true")
-			for i := range pod.Spec.InitContainers {
-				resolveEnvRefs(ctx, p, pod, &pod.Spec.InitContainers[i])
+			for i := range podToOffload.Spec.InitContainers {
+				resolveEnvRefs(ctx, p, podToOffload, &podToOffload.Spec.InitContainers[i])
 			}
-			for i := range pod.Spec.Containers {
-				resolveEnvRefs(ctx, p, pod, &pod.Spec.Containers[i])
+			for i := range podToOffload.Spec.Containers {
+				resolveEnvRefs(ctx, p, podToOffload, &podToOffload.Spec.Containers[i])
 			}
 		}
 
 		// For debugging purpose only.
-		for _, container := range pod.Spec.InitContainers {
+		for _, container := range podToOffload.Spec.InitContainers {
 			for _, envVar := range container.Env {
-				log.G(ctx).Debug("InterLink VK environment variable to pod ", pod.Name, " container: ", container.Name, " env: ", envVar.Name, " value: ", envVar.Value)
+				log.G(ctx).Debug("InterLink VK environment variable to pod ", podToOffload.Name, " container: ", container.Name, " env: ", envVar.Name, " value: ", envVar.Value)
 			}
 		}
-		for _, container := range pod.Spec.Containers {
+		for _, container := range podToOffload.Spec.Containers {
 			for _, envVar := range container.Env {
-				log.G(ctx).Debug("InterLink VK environment variable to pod ", pod.Name, " container: ", container.Name, " env: ", envVar.Name, " value: ", envVar.Value)
+				log.G(ctx).Debug("InterLink VK environment variable to pod ", podToOffload.Name, " container: ", container.Name, " env: ", envVar.Name, " value: ", envVar.Value)
 			}
 		}
+
 		returnVal, err := createRequest(ctx, config, req, token)
 		if err != nil {
 			return fmt.Errorf("error doing createRequest() in RemoteExecution() return value %s error detail %s error: %w", returnVal, fmt.Sprintf("%#v", err), err)
 		}
 
 		log.G(ctx).Debug("Pod ", pod.Name, " with Job ID ", resp.PodJID, " before json.Unmarshal()")
-		// get remote job ID and annotate it into the pod
 		err = json.Unmarshal(returnVal, &resp)
 		if err != nil {
 			return fmt.Errorf("error doing Unmarshal() in RemoteExecution() return value %s error detail %s error: %w", returnVal, fmt.Sprintf("%#v", err), err)
@@ -989,7 +1144,6 @@ func RemoteExecution(ctx context.Context, config Config, p *Provider, pod *v1.Po
 	}
 	return nil
 }
-
 func handleInitContainersUpdate(ctx context.Context, podRemoteStatus types.PodStatus, podRefInCluster *v1.Pod, nInitContainersInPod int) (bool, bool, bool, string, int) {
 	log.G(ctx).Debug("Init containers detected, going to check them first")
 

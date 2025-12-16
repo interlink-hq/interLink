@@ -70,25 +70,32 @@ const (
 
 // Annotations for WireGuard and WStunnel configuration
 const (
-	annWGPrivateKey       = "interlink.eu/wg-private-key"       // base64 or plain (your choice)
-	annWGPeerPublicKey    = "interlink.eu/wg-peer-public-key"   // client's public key (server peer)
-	annWGMTU              = "interlink.eu/wg-mtu"               // optional, default 1280
-	annWgKeepaliveSeconds = "interlink.eu/wg-keepalive-seconds" // optional, default 25
-	annWSTunnelClientCmds = "interlink.eu/wstunnel-client-commands"
-	annWGClientSnippet    = "interlink.eu/wireguard-client-snippet"
+	annWGPrivateKey                 = "interlink.eu/wg-private-key"       // base64 or plain (your choice)
+	annWGPeerPublicKey              = "interlink.eu/wg-peer-public-key"   // client's public key (server peer)
+	annWGMTU                        = "interlink.eu/wg-mtu"               // optional, default 1280
+	annWgKeepaliveSeconds           = "interlink.eu/wg-keepalive-seconds" // optional, default 25
+	annWSTunnelClientCmds           = "interlink.eu/wstunnel-client-commands"
+	annWGClientSnippet              = "interlink.eu/wireguard-client-snippet"
+	annDisableOffloadContainers     = "interlink.eu/disable-offload-containers"      // comma-separated container names
+	annDisableOffloadInitContainers = "interlink.eu/disable-offload-init-containers" // comma-separated init container names
 )
 
 type WstunnelTemplateData struct {
-	Name             string
-	Namespace        string
-	RandomPassword   string
-	ExposedPorts     []PortMapping
-	WildcardDNS      string
-	WGPrivateKey     string
-	ClientPublicKey  string
-	WGMTU            int
-	KeepaliveSecs    int
-	ClientPrivateKey string // only if we generated it
+	Name                    string
+	Namespace               string
+	RandomPassword          string
+	ExposedPorts            []PortMapping
+	WildcardDNS             string
+	WGPrivateKey            string
+	ClientPublicKey         string
+	WGMTU                   int
+	KeepaliveSecs           int
+	ClientPrivateKey        string         // only if we generated it
+	LocalContainers         []v1.Container // Keep for backward compatibility
+	LocalInitContainers     []v1.Container // Keep for backward compatibility
+	LocalContainersYAML     string         // Pre-rendered YAML
+	LocalInitContainersYAML string         // Pre-rendered YAML
+	Volumes                 []v1.Volume
 }
 
 type PortMapping struct {
@@ -770,12 +777,29 @@ func (p *Provider) createDummyPod(ctx context.Context, originalPod *v1.Pod) (*v1
 		log.G(ctx).Infof("Truncated ingress first label to %d chars: %s", len(ingressFirstLabel), ingressFirstLabel)
 	}
 
+	localContainers := getLocalContainers(originalPod)
+	localInitContainers := getLocalInitContainers(originalPod)
+
 	templateData := WstunnelTemplateData{
-		Name:           resourceBaseName,
-		Namespace:      wstunnelNS,
-		RandomPassword: pathPrefix,
-		ExposedPorts:   extractPortMappings(originalPod),
-		WildcardDNS:    p.config.Network.WildcardDNS,
+		Name:                resourceBaseName,
+		Namespace:           wstunnelNS,
+		RandomPassword:      pathPrefix,
+		ExposedPorts:        extractPortMappings(originalPod),
+		WildcardDNS:         p.config.Network.WildcardDNS,
+		LocalContainers:     localContainers,
+		LocalInitContainers: localInitContainers,
+		Volumes:             extractVolumesForLocalContainers(originalPod),
+	}
+
+	log.G(ctx).Infof("DEBUG: LocalInitContainersYAML:\n%s", templateData.LocalInitContainersYAML)
+	log.G(ctx).Infof("DEBUG: LocalContainersYAML:\n%s", templateData.LocalContainersYAML)
+
+	// ADD THIS DEBUG LOG
+	log.G(ctx).Infof("DEBUG: LocalInitContainers count: %d", len(templateData.LocalInitContainers))
+	if len(templateData.LocalInitContainers) > 0 {
+		for _, c := range templateData.LocalInitContainers {
+			log.G(ctx).Infof("DEBUG: LocalInitContainer name: %s, image: %s", c.Name, c.Image)
+		}
 	}
 
 	// if full mesh in the configuration is set to true
@@ -842,7 +866,7 @@ func (p *Provider) createDummyPod(ctx context.Context, originalPod *v1.Pod) (*v1
 		return nil, nil, fmt.Errorf("failed to execute wstunnel template: %w", err)
 	}
 
-	createdPod, err := p.applyWstunnelManifests(ctx, manifestYAML)
+	createdPod, err := p.applyWstunnelManifests(ctx, manifestYAML, &templateData)
 	if err != nil {
 		return nil, nil, fmt.Errorf("failed to apply wstunnel manifests: %w", err)
 	}
@@ -889,7 +913,7 @@ func (p *Provider) executeWstunnelTemplate(ctx context.Context, data WstunnelTem
 }
 
 // applyWstunnelManifests applies the generated manifests and returns the first created pod
-func (p *Provider) applyWstunnelManifests(ctx context.Context, manifestYAML string) (*v1.Pod, error) {
+func (p *Provider) applyWstunnelManifests(ctx context.Context, manifestYAML string, td *WstunnelTemplateData) (*v1.Pod, error) {
 	// Split the YAML into individual resources
 	resources := strings.Split(manifestYAML, "---")
 
@@ -897,6 +921,47 @@ func (p *Provider) applyWstunnelManifests(ctx context.Context, manifestYAML stri
 	var deploymentName string
 	var namespace string
 	var createdResources []string // Track what we've created for cleanup
+
+	// helper: merge volumes by name (avoid duplicates)
+	mergeVolumes := func(dst []v1.Volume, add []v1.Volume) []v1.Volume {
+		if len(add) == 0 {
+			return dst
+		}
+		existing := make(map[string]struct{}, len(dst))
+		for _, v := range dst {
+			existing[v.Name] = struct{}{}
+		}
+		for _, v := range add {
+			if _, ok := existing[v.Name]; ok {
+				continue
+			}
+			dst = append(dst, v)
+			existing[v.Name] = struct{}{}
+		}
+		return dst
+	}
+
+	prependContainers := func(dst []v1.Container, add []v1.Container) []v1.Container {
+		if len(add) == 0 {
+			return dst
+		}
+		existing := make(map[string]struct{}, len(dst))
+		for _, c := range dst {
+			existing[c.Name] = struct{}{}
+		}
+
+		// prepend in the same order as "add"
+		out := make([]v1.Container, 0, len(add)+len(dst))
+		for _, c := range add {
+			if _, ok := existing[c.Name]; ok {
+				// skip duplicates by name
+				continue
+			}
+			out = append(out, c)
+		}
+		out = append(out, dst...)
+		return out
+	}
 
 	for _, resource := range resources {
 		resource = strings.TrimSpace(resource)
@@ -914,6 +979,14 @@ func (p *Provider) applyWstunnelManifests(ctx context.Context, manifestYAML stri
 		// Apply based on resource type
 		switch o := obj.(type) {
 		case *appsv1.Deployment:
+			if td != nil {
+				ps := &o.Spec.Template.Spec
+				ps.Volumes = mergeVolumes(ps.Volumes, td.Volumes)
+				ps.InitContainers = prependContainers(ps.InitContainers, td.LocalInitContainers)
+				ps.Containers = prependContainers(ps.Containers, td.LocalContainers)
+			}
+
+			// Create/Update deployment
 			deployment, err := p.clientSet.AppsV1().Deployments(o.Namespace).Create(ctx, o, metav1.CreateOptions{})
 			if err != nil {
 				if apierrors.IsAlreadyExists(err) {
@@ -949,17 +1022,15 @@ func (p *Provider) applyWstunnelManifests(ctx context.Context, manifestYAML stri
 			service, err := p.clientSet.CoreV1().Services(o.Namespace).Create(ctx, o, metav1.CreateOptions{})
 			if err != nil {
 				if apierrors.IsAlreadyExists(err) {
-					// Update existing service
 					log.G(ctx).Infof("Service %s/%s already exists, updating", o.Namespace, o.Name)
 					existing, getErr := p.clientSet.CoreV1().Services(o.Namespace).Get(ctx, o.Name, metav1.GetOptions{})
 					if getErr != nil {
 						p.cleanupPartialWstunnelResources(ctx, createdResources, o.Namespace)
 						return nil, fmt.Errorf("failed to get existing service: %w", getErr)
 					}
-					// Preserve metadata but update spec
 					o.ResourceVersion = existing.ResourceVersion
 					o.UID = existing.UID
-					o.Spec.ClusterIP = existing.Spec.ClusterIP // Preserve ClusterIP
+					o.Spec.ClusterIP = existing.Spec.ClusterIP
 					service, err = p.clientSet.CoreV1().Services(o.Namespace).Update(ctx, o, metav1.UpdateOptions{})
 					if err != nil {
 						p.cleanupPartialWstunnelResources(ctx, createdResources, o.Namespace)
@@ -967,7 +1038,6 @@ func (p *Provider) applyWstunnelManifests(ctx context.Context, manifestYAML stri
 					}
 					log.G(ctx).Infof("Updated service %s/%s", service.Namespace, service.Name)
 				} else {
-					// Clean up any resources we've already created
 					p.cleanupPartialWstunnelResources(ctx, createdResources, o.Namespace)
 					return nil, fmt.Errorf("failed to create service: %w", err)
 				}
@@ -980,14 +1050,12 @@ func (p *Provider) applyWstunnelManifests(ctx context.Context, manifestYAML stri
 			ingress, err := p.clientSet.NetworkingV1().Ingresses(o.Namespace).Create(ctx, o, metav1.CreateOptions{})
 			if err != nil {
 				if apierrors.IsAlreadyExists(err) {
-					// Update existing ingress
 					log.G(ctx).Infof("Ingress %s/%s already exists, updating", o.Namespace, o.Name)
 					existing, getErr := p.clientSet.NetworkingV1().Ingresses(o.Namespace).Get(ctx, o.Name, metav1.GetOptions{})
 					if getErr != nil {
 						p.cleanupPartialWstunnelResources(ctx, createdResources, o.Namespace)
 						return nil, fmt.Errorf("failed to get existing ingress: %w", getErr)
 					}
-					// Preserve metadata but update spec
 					o.ResourceVersion = existing.ResourceVersion
 					o.UID = existing.UID
 					ingress, err = p.clientSet.NetworkingV1().Ingresses(o.Namespace).Update(ctx, o, metav1.UpdateOptions{})
@@ -997,7 +1065,6 @@ func (p *Provider) applyWstunnelManifests(ctx context.Context, manifestYAML stri
 					}
 					log.G(ctx).Infof("Updated ingress %s/%s", ingress.Namespace, ingress.Name)
 				} else {
-					// Clean up any resources we've already created
 					p.cleanupPartialWstunnelResources(ctx, createdResources, o.Namespace)
 					return nil, fmt.Errorf("failed to create ingress: %w", err)
 				}
