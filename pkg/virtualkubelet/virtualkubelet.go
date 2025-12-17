@@ -13,6 +13,7 @@ import (
 	"net"
 	"net/http"
 	"os"
+	"os/exec"
 	"strconv"
 	"strings"
 	"text/template"
@@ -32,7 +33,9 @@ import (
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/api/resource"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/apimachinery/pkg/runtime/serializer"
+	k8syaml "k8s.io/apimachinery/pkg/runtime/serializer/yaml"
 	"k8s.io/client-go/kubernetes"
 	"k8s.io/client-go/kubernetes/scheme"
 	"k8s.io/client-go/tools/clientcmd"
@@ -907,7 +910,33 @@ func (p *Provider) applyWstunnelManifests(ctx context.Context, manifestYAML stri
 		// Decode the resource
 		obj, _, err := decoder.Decode([]byte(resource), nil, nil)
 		if err != nil {
-			log.G(ctx).Warningf("Failed to decode resource: %v", err)
+			// if decode fais, create the resource anyway
+			// This allow for custom CRDs to be created
+			log.G(ctx).Warningf("Failed to decode resource: %v, going ahead trying to create it anyway", err)
+			// This decoder doesn't need pre-registered types
+			dec := k8syaml.NewDecodingSerializer(unstructured.UnstructuredJSONScheme)
+			crd := &unstructured.Unstructured{}
+			_, _, err := dec.Decode([]byte(resource), nil, crd)
+			if err != nil {
+				return nil, fmt.Errorf("failed to decode custom resource: %w", err)
+			}
+
+			// apply the yaml manifest directly
+			res := p.clientSet.RESTClient().Post().
+				AbsPath("/apis", crd.GetObjectKind().GroupVersionKind().Group, crd.GetObjectKind().GroupVersionKind().Version, "namespaces", crd.GetNamespace(), strings.ToLower(crd.GetObjectKind().GroupVersionKind().Kind)+"s").
+				Body([]byte(resource)).
+				Do(ctx)
+
+			if res.Error() != nil {
+				log.G(ctx).Errorf("Failed to create custom resource: %v", res.Error())
+				// cleanupPartialWstunnelResources
+				p.cleanupPartialWstunnelResources(ctx, createdResources, crd.GetNamespace())
+				return nil, fmt.Errorf("failed to create custom resource: %w", err)
+			}
+			deploymentName = crd.GetName()
+			namespace = crd.GetNamespace()
+			createdResources = append(createdResources, crd.GetKind()+":"+deploymentName)
+
 			continue
 		}
 
@@ -1184,6 +1213,18 @@ func (p *Provider) cleanupPartialWstunnelResources(ctx context.Context, createdR
 				log.G(ctx).Warningf("Failed to delete partial secret %s/%s: %v", namespace, resourceName, err)
 			} else {
 				log.G(ctx).Infof("Successfully deleted partial secret %s/%s", namespace, resourceName)
+			}
+
+		default:
+			log.G(ctx).Warningf("Unknown resource type for cleanup: %s", resourceType)
+			// use kubectl to delete the resource
+			// kubectl delete <resourceType> <resourceName> -n <namespace>
+			cmd := exec.Command("kubectl", "delete", resourceType, resourceName, "-n", namespace)
+			output, err := cmd.CombinedOutput()
+			if err != nil {
+				log.G(ctx).Warningf("Failed to delete partial resource %s/%s using kubectl: %v, output: %s", namespace, resourceName, err, string(output))
+			} else {
+				log.G(ctx).Infof("Successfully deleted partial resource %s/%s using kubectl", namespace, resourceName)
 			}
 
 		}
