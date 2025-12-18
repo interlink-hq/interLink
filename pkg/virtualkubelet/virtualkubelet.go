@@ -20,6 +20,7 @@ import (
 	"time"
 
 	"gopkg.in/yaml.v2"
+	sigyaml "sigs.k8s.io/yaml"
 
 	"github.com/containerd/containerd/log"
 	"github.com/virtual-kubelet/virtual-kubelet/errdefs"
@@ -921,10 +922,18 @@ func (p *Provider) applyWstunnelManifests(ctx context.Context, manifestYAML stri
 				return nil, fmt.Errorf("failed to decode custom resource: %w", err)
 			}
 
+			// transform resource yaml to json
+			// because the RESTClient().Post().Body() needs json format
+			// so we convert yaml to json first
+			resourceJSON, err := sigyaml.YAMLToJSON([]byte(resource))
+			if err != nil {
+				return nil, fmt.Errorf("failed to convert yaml to json: %w", err)
+			}
+
 			// apply the yaml manifest directly
 			res := p.clientSet.RESTClient().Post().
 				AbsPath("/apis", crd.GetObjectKind().GroupVersionKind().Group, crd.GetObjectKind().GroupVersionKind().Version, "namespaces", crd.GetNamespace(), strings.ToLower(crd.GetObjectKind().GroupVersionKind().Kind)+"s").
-				Body([]byte(resource)).
+				Body([]byte(resourceJSON)).
 				Do(ctx)
 
 			if res.Error() != nil {
