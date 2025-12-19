@@ -939,11 +939,13 @@ func (p *Provider) applyWstunnelManifests(ctx context.Context, manifestYAML stri
 			if res.Error() != nil {
 				log.G(ctx).Errorf("Failed to create custom resource: %v", res.Error())
 				// cleanupPartialWstunnelResources
+				log.G(ctx).Debugf("createdResources before cleanup: %v", createdResources)
 				p.cleanupPartialWstunnelResources(ctx, createdResources, crd.GetNamespace())
 				return nil, fmt.Errorf("failed to create custom resource: %w", err)
 			}
 			deploymentName = crd.GetName()
 			namespace = crd.GetNamespace()
+			log.G(ctx).Debugf("Tracking CRD for cleanup: kind=%s, name=%s", crd.GetKind(), deploymentName)
 			createdResources = append(createdResources, crd.GetKind()+":"+deploymentName)
 
 			continue
@@ -1178,7 +1180,12 @@ func (p *Provider) cleanupPartialWstunnelResources(ctx context.Context, createdR
 	log.G(ctx).Infof("Cleaning up partial wstunnel resources in namespace %s", namespace)
 
 	for _, resource := range createdResources {
+		log.G(ctx).Debugf("Cleaning up resource entry: %q", resource)
 		parts := strings.Split(resource, ":")
+		if len(parts) == 2 {
+			log.G(ctx).Debugf("Parsed resourceType: %q, resourceName: %q", parts[0], parts[1])
+		}
+		parts = strings.Split(resource, ":")
 		if len(parts) != 2 {
 			continue
 		}
