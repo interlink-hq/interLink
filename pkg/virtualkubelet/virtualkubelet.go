@@ -804,6 +804,12 @@ func (p *Provider) createDummyPod(ctx context.Context, originalPod *v1.Pod) (*v1
 	localContainers := getLocalContainers(originalPod)
 	localInitContainers := getLocalInitContainers(originalPod)
 
+	// Inject POD_NAMESPACE environment variable to match the original pod's namespace
+	localContainers = injectPodNamespaceEnv(localContainers, originalPod.Namespace)
+	localInitContainers = injectPodNamespaceEnv(localInitContainers, originalPod.Namespace)
+	log.G(ctx).Infof("Injected POD_NAMESPACE=%s into %d local containers and %d local init containers for shadow pod",
+		originalPod.Namespace, len(localContainers), len(localInitContainers))
+
 	podLabels, podAnnotations := copyPodLabelsAndAnnotations(originalPod)
 	log.G(ctx).Infof("Copied %d labels and %d annotations from original pod to shadow pod", len(podLabels), len(podAnnotations))
 
