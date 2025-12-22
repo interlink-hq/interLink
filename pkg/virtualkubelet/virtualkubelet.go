@@ -96,6 +96,8 @@ type WstunnelTemplateData struct {
 	LocalContainersYAML     string         // Pre-rendered YAML
 	LocalInitContainersYAML string         // Pre-rendered YAML
 	Volumes                 []v1.Volume
+	PodLabels               map[string]string // Labels from original pod
+	PodAnnotations          map[string]string // Annotations from original pod
 }
 
 type PortMapping struct {
@@ -698,6 +700,28 @@ func generateRandomPassword() string {
 	return hex.EncodeToString(bytes)
 }
 
+func copyPodLabelsAndAnnotations(pod *v1.Pod) (map[string]string, map[string]string) {
+	// Copy labels
+	labels := make(map[string]string)
+	if pod.Labels != nil {
+		for k, v := range pod.Labels {
+			labels[k] = v
+		}
+	}
+
+	annotations := make(map[string]string)
+	if pod.Annotations != nil {
+		for k, v := range pod.Annotations {
+			if strings.HasPrefix(k, "slurm-job.vk.io/") {
+				continue
+			}
+			annotations[k] = v
+		}
+	}
+
+	return labels, annotations
+}
+
 // createDummyPod creates wstunnel infrastructure from template for containers with exposed ports
 func (p *Provider) createDummyPod(ctx context.Context, originalPod *v1.Pod) (*v1.Pod, *WstunnelTemplateData, error) {
 	log.G(ctx).Infof("Creating wstunnel infrastructure for %s/%s with exposed ports", originalPod.Namespace, originalPod.Name)
@@ -780,6 +804,9 @@ func (p *Provider) createDummyPod(ctx context.Context, originalPod *v1.Pod) (*v1
 	localContainers := getLocalContainers(originalPod)
 	localInitContainers := getLocalInitContainers(originalPod)
 
+	podLabels, podAnnotations := copyPodLabelsAndAnnotations(originalPod)
+	log.G(ctx).Infof("Copied %d labels and %d annotations from original pod to shadow pod", len(podLabels), len(podAnnotations))
+
 	templateData := WstunnelTemplateData{
 		Name:                resourceBaseName,
 		Namespace:           wstunnelNS,
@@ -789,6 +816,8 @@ func (p *Provider) createDummyPod(ctx context.Context, originalPod *v1.Pod) (*v1
 		LocalContainers:     localContainers,
 		LocalInitContainers: localInitContainers,
 		Volumes:             extractVolumesForLocalContainers(originalPod),
+		PodLabels:           podLabels,
+		PodAnnotations:      podAnnotations,
 	}
 
 	log.G(ctx).Infof("DEBUG: LocalInitContainersYAML:\n%s", templateData.LocalInitContainersYAML)
@@ -873,6 +902,20 @@ func (p *Provider) createDummyPod(ctx context.Context, originalPod *v1.Pod) (*v1
 
 	log.G(ctx).Infof("Created wstunnel infrastructure for %s/%s", originalPod.Namespace, originalPod.Name)
 	return createdPod, &templateData, nil
+}
+
+// mergeMaps merges source map into destination map, with destination values taking precedence
+func mergeMaps(dst, src map[string]string) map[string]string {
+	if dst == nil {
+		dst = make(map[string]string)
+	}
+	for k, v := range src {
+		// Only add if key doesn't exist in destination
+		if _, exists := dst[k]; !exists {
+			dst[k] = v
+		}
+	}
+	return dst
 }
 
 // executeWstunnelTemplate loads and executes the wstunnel template
@@ -984,6 +1027,22 @@ func (p *Provider) applyWstunnelManifests(ctx context.Context, manifestYAML stri
 				ps.Volumes = mergeVolumes(ps.Volumes, td.Volumes)
 				ps.InitContainers = prependContainers(ps.InitContainers, td.LocalInitContainers)
 				ps.Containers = prependContainers(ps.Containers, td.LocalContainers)
+
+				if o.Spec.Template.Labels == nil {
+					o.Spec.Template.Labels = make(map[string]string)
+				}
+				if o.Spec.Template.Annotations == nil {
+					o.Spec.Template.Annotations = make(map[string]string)
+				}
+
+				// Merge labels from original pod (template labels take precedence to avoid conflicts)
+				o.Spec.Template.Labels = mergeMaps(o.Spec.Template.Labels, td.PodLabels)
+
+				// Merge annotations from original pod (template annotations take precedence)
+				o.Spec.Template.Annotations = mergeMaps(o.Spec.Template.Annotations, td.PodAnnotations)
+
+				log.G(ctx).Infof("Shadow pod will inherit %d labels and %d annotations from original pod",
+					len(td.PodLabels), len(td.PodAnnotations))
 			}
 
 			// Create/Update deployment

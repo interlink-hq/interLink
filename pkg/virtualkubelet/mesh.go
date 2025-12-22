@@ -187,7 +187,6 @@ func (p *Provider) addWstunnelClientAnnotation(ctx context.Context, pod *v1.Pod,
 	if pod.Annotations == nil {
 		pod.Annotations = make(map[string]string)
 	}
-
 	// Construct and sanitize the full ingress endpoint
 	ingressEndpoint := fmt.Sprintf("%s-%s.%s", td.Name, td.Namespace, td.WildcardDNS)
 	ingressEndpoint = sanitizeFullDNSName(ingressEndpoint)
