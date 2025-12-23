@@ -715,7 +715,17 @@ func copyPodLabelsAndAnnotations(pod *v1.Pod) (map[string]string, map[string]str
 			if strings.HasPrefix(k, "slurm-job.vk.io/") {
 				continue
 			}
+
+			if k == "sidecar.istio.io/rewriteAppHTTPProbers" {
+				continue
+			}
+
+			if k == "sidecar.istio.io/status" {
+				continue
+			}
+
 			annotations[k] = v
+
 		}
 	}
 
@@ -730,7 +740,22 @@ func (p *Provider) createDummyPod(ctx context.Context, originalPod *v1.Pod) (*v1
 	if originalPod.Namespace == "" {
 		return nil, nil, fmt.Errorf("pod namespace is empty")
 	}
-	namespace := originalPod.Namespace + "-wstunnel"
+
+	isSameNamespace := false
+	if originalPod.Annotations != nil {
+		if val, ok := originalPod.Annotations["interlink.eu/shadow-same-ns"]; ok && val == "true" {
+			isSameNamespace = true
+		}
+	}
+
+	var namespace string
+	if isSameNamespace {
+		namespace = originalPod.Namespace
+		log.G(ctx).Infof("Request from outside configuration detected. Using original pod namespace: %s", namespace)
+	} else {
+		namespace = originalPod.Namespace + "-wstunnel"
+	}
+
 	_, err := p.clientSet.CoreV1().Namespaces().Get(ctx, namespace, metav1.GetOptions{})
 	if err != nil {
 		if !apierrors.IsNotFound(err) {
@@ -749,7 +774,12 @@ func (p *Provider) createDummyPod(ctx context.Context, originalPod *v1.Pod) (*v1
 		log.G(ctx).Infof("Created wstunnel namespace %s", namespace)
 	}
 
-	resourceBaseName, wstunnelNS := computeWstunnelResourceNames(originalPod.Name, originalPod.Namespace)
+	var resourceBaseName, wstunnelNS string
+	if isSameNamespace {
+		resourceBaseName, wstunnelNS = computeWstunnelResourceNamesForSameNamespace(originalPod.Name, originalPod.Namespace)
+	} else {
+		resourceBaseName, wstunnelNS = computeWstunnelResourceNames(originalPod.Name, originalPod.Namespace)
+	}
 	log.G(ctx).Infof("Computed resource names - base: %s, namespace: %s", resourceBaseName, wstunnelNS)
 
 	// Reuse existing random path prefix if the Deployment already exists, otherwise generate it once
@@ -803,12 +833,6 @@ func (p *Provider) createDummyPod(ctx context.Context, originalPod *v1.Pod) (*v1
 
 	localContainers := getLocalContainers(originalPod)
 	localInitContainers := getLocalInitContainers(originalPod)
-
-	// Inject POD_NAMESPACE environment variable to match the original pod's namespace
-	localContainers = injectPodNamespaceEnv(localContainers, originalPod.Namespace)
-	localInitContainers = injectPodNamespaceEnv(localInitContainers, originalPod.Namespace)
-	log.G(ctx).Infof("Injected POD_NAMESPACE=%s into %d local containers and %d local init containers for shadow pod",
-		originalPod.Namespace, len(localContainers), len(localInitContainers))
 
 	podLabels, podAnnotations := copyPodLabelsAndAnnotations(originalPod)
 	log.G(ctx).Infof("Copied %d labels and %d annotations from original pod to shadow pod", len(podLabels), len(podAnnotations))
@@ -1730,11 +1754,22 @@ func (p *Provider) DeletePod(ctx context.Context, pod *v1.Pod) (err error) {
 		return errdefs.NotFound("pod not found")
 	}
 
+	isSameNamespace := false
+	if pod.Annotations != nil {
+		if val, ok := pod.Annotations["interlink.eu/shadow-same-ns"]; ok && val == "true" {
+			isSameNamespace = true
+		}
+	}
+
 	// Clean up wstunnel resources if tunnel is enabled and they exist and no VPN annotation
 	if p.shouldCreateWstunnel(pod) || p.config.Network.FullMesh {
 		// Use the same helper function to compute resource names
-		resourceBaseName, wstunnelNS := computeWstunnelResourceNames(pod.Name, pod.Namespace)
-		log.G(ctx).Infof("Cleaning up wstunnel resources: name=%s, namespace=%s", resourceBaseName, wstunnelNS)
+		var resourceBaseName, wstunnelNS string
+		if isSameNamespace {
+			resourceBaseName, wstunnelNS = computeWstunnelResourceNamesForSameNamespace(pod.Name, pod.Namespace)
+		} else {
+			resourceBaseName, wstunnelNS = computeWstunnelResourceNames(pod.Name, pod.Namespace)
+		}
 		p.cleanupWstunnelResources(ctx, resourceBaseName, wstunnelNS)
 	}
 

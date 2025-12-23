@@ -171,36 +171,6 @@ func extractVolumesForLocalContainers(pod *v1.Pod) []v1.Volume {
 	return volumes
 }
 
-// injectPodNamespaceEnv adds or overrides the POD_NAMESPACE environment variable
-// in the given containers to match the original pod's namespace
-func injectPodNamespaceEnv(containers []v1.Container, namespace string) []v1.Container {
-	result := make([]v1.Container, len(containers))
-	for i, container := range containers {
-		result[i] = container
-
-		// Check if POD_NAMESPACE already exists
-		found := false
-		for j, env := range result[i].Env {
-			if env.Name == "POD_NAMESPACE" {
-				// Override the value
-				result[i].Env[j].Value = namespace
-				result[i].Env[j].ValueFrom = nil
-				found = true
-				break
-			}
-		}
-
-		// If not found, add it
-		if !found {
-			result[i].Env = append(result[i].Env, v1.EnvVar{
-				Name:  "POD_NAMESPACE",
-				Value: namespace,
-			})
-		}
-	}
-	return result
-}
-
 func failedMount(ctx context.Context, failedAndWait *bool, name string, pod *v1.Pod, p *Provider, err error) error {
 	*failedAndWait = true
 	log.G(ctx).Warningf("Unable to find ConfigMap %s for pod %s. Waiting for it to be initialized. Error was: %v. Current phase: %s", name, pod.Name, err, pod.Status.Phase)

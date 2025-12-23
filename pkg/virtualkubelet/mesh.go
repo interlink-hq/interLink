@@ -88,6 +88,59 @@ func sanitizeFullDNSName(fullName string) string {
 	return result
 }
 
+func computeWstunnelResourceNamesForSameNamespace(podName, podNamespace string) (resourceBaseName, namespace string) {
+	// Sanitize namespace and pod name for DNS compliance
+	sanitizedNamespace := sanitizeDNSName(podNamespace)
+	sanitizedPodName := sanitizeDNSName(podName)
+
+	// Use the original namespace
+	namespace = sanitizedNamespace
+
+	// Create a unique resource name to avoid conflicts in the same namespace
+	// Add "wstunnel-" prefix to distinguish shadow pod resources
+	resourceBaseName = "wstunnel-" + sanitizedPodName + "-" + sanitizedNamespace
+
+	// Ensure resourceBaseName doesn't exceed 63 characters
+	if len(resourceBaseName) > 63 {
+		// Truncate while keeping some of both names
+		maxPodNameLen := 28
+		maxNsLen := 28
+		if len(sanitizedPodName) > maxPodNameLen {
+			sanitizedPodName = sanitizedPodName[:maxPodNameLen]
+		}
+		if len(sanitizedNamespace) > maxNsLen {
+			sanitizedNamespace = sanitizedNamespace[:maxNsLen]
+		}
+		resourceBaseName = "wstunnel-" + sanitizedPodName + "-" + sanitizedNamespace
+		resourceBaseName = strings.TrimRight(resourceBaseName, "-")
+	}
+
+	// Additional check for total length after combining with namespace
+	ingressFirstLabel := fmt.Sprintf("%s-%s", resourceBaseName, namespace)
+	if len(ingressFirstLabel) > 63 {
+		// If combined length exceeds 63, we need to truncate
+		maxNameLen := 31
+		maxNsLen := 31
+
+		truncatedName := resourceBaseName
+		if len(truncatedName) > maxNameLen {
+			truncatedName = truncatedName[:maxNameLen]
+			truncatedName = strings.TrimRight(truncatedName, "-")
+		}
+
+		truncatedNs := namespace
+		if len(truncatedNs) > maxNsLen {
+			truncatedNs = truncatedNs[:maxNsLen]
+			truncatedNs = strings.TrimRight(truncatedNs, "-")
+		}
+
+		resourceBaseName = truncatedName
+		namespace = truncatedNs
+	}
+
+	return resourceBaseName, namespace
+}
+
 func computeWstunnelResourceNames(podName, podNamespace string) (resourceBaseName, wstunnelNamespace string) {
 	// Sanitize namespace and pod name for DNS compliance
 	sanitizedNamespace := sanitizeDNSName(podNamespace)
