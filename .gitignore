@@ -8,6 +8,8 @@ report/*
 __pycache__/*
 vendor/*
 bin
+virtual-kubelet
+interlink
 sidecars/slurm/.*
 cmd/sidecars/slurm/.*
 sidecars/docker/.*

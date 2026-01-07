@@ -14,6 +14,10 @@ func TestConfig_DefaultValues(t *testing.T) {
 	assert.False(t, config.VerboseLogging)
 	assert.False(t, config.ErrorsOnlyLogging)
 	assert.False(t, config.DisableProjectedVolumes)
+	assert.False(t, config.DisableCSR)
+	assert.Empty(t, config.KubeletCertFile)
+	assert.Empty(t, config.KubeletKeyFile)
+	assert.Empty(t, config.KubeletCSRSignerName)
 }
 
 func TestTLSConfig_Structure(t *testing.T) {

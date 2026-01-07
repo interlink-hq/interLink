@@ -37,6 +37,13 @@ type Config struct {
 	HTTP HTTP `yaml:"HTTP"`
 	// KubeletHTTP configures HTTP settings specific to Kubelet communication
 	KubeletHTTP HTTP `yaml:"KubeletHTTP"`
+	// KubeletCertFile is the path to the kubelet server certificate file (optional, for manual certificate management)
+	KubeletCertFile string `yaml:"KubeletCertFile,omitempty"`
+	// KubeletKeyFile is the path to the kubelet server key file (optional, for manual certificate management)
+	KubeletKeyFile string `yaml:"KubeletKeyFile,omitempty"`
+	// KubeletCSRSignerName specifies the signer name for CSR-based certificates (default: kubernetes.io/kubelet-serving)
+	// Can be used with cert-manager: clusterissuers.cert-manager.io/<issuer-name>
+	KubeletCSRSignerName string `yaml:"KubeletCSRSignerName,omitempty"`
 	// Resources specifies compute resources available to the virtual node
 	Resources Resources `yaml:"Resources"`
 	// NodeLabels allows setting custom labels on the virtual node
@@ -49,6 +56,8 @@ type Config struct {
 	Network Network `yaml:"Network,omitempty"`
 	// SkipDownwardAPIResolution disables downward API resolution to enable scheduling pods with downward API
 	SkipDownwardAPIResolution bool `yaml:"SkipDownwardAPIResolution,omitempty"`
+	// DisableCSR disables CSR (CertificateSigningRequest) creation and uses self-signed certificates instead
+	DisableCSR bool `yaml:"DisableCSR,omitempty"`
 }
 
 // TLSConfig holds TLS/mTLS configuration for secure communication with interLink API.
