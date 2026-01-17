@@ -4,7 +4,7 @@ interlink:
   
   address: https://{{.InterLinkIP}}
   port: {{.InterLinkPort}}
-  disableProjectedVolumes: true
+  disableProjectedVolumes: false
 
 virtualNode:
   resources:
