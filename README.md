@@ -5,7 +5,9 @@
 
 ![GitHub Release](https://img.shields.io/github/v/release/interlink-hq/interlink)
 ![Tested with Dagger](https://img.shields.io/badge/tested_with_dagger-v0.13.3-green)
+[![FOSSA Status](https://app.fossa.com/api/projects/git%2Bgithub.com%2Finterlink-hq%2FinterLink.svg?type=shield&issueType=license)](https://app.fossa.com/projects/git%2Bgithub.com%2Finterlink-hq%2FinterLink?ref=badge_shield&issueType=license)
 [![Go Report Card](https://goreportcard.com/badge/github.com/interlink-hq/interlink)](https://goreportcard.com/report/github.com/interlink-hq/interlink)
+[![OpenSSF Best Practices](https://www.bestpractices.dev/projects/10839/badge)](https://www.bestpractices.dev/projects/10839)
 
 [![Slack server](https://img.shields.io/badge/slack_server-8A2BE2?link=https%3A%2F%2Fjoin.slack.com%2Ft%2Fintertwin%2Fshared_invite%2Fzt-2cs67h9wz-2DFQ6EiSQGS1vlbbbJHctA)](https://join.slack.com/t/intertwin/shared_invite/zt-2cs67h9wz-2DFQ6EiSQGS1vlbbbJHctA)
 
@@ -77,12 +79,14 @@ interLink supports a wide range of remote execution environments through its plu
 ## Use Cases
 
 ### In Scope
+
 - **HPC Workloads**: AI training, ML inference, scientific simulations requiring specialized hardware
 - **GPU-intensive Tasks**: Remote execution on powerful GPU resources for ML training, data analysis, rendering
 - **Batch Processing**: On-demand container execution with specific compute requirements
 - **Hybrid Cloud**: Workload distribution across multiple infrastructure providers
 
 ### Out of Scope  
+
 - **Long-running Services**: Persistent services with continuous availability requirements
 - **Kubernetes Federation**: Multi-cluster resource management and federation
 
