@@ -7,6 +7,8 @@ import (
 	"flag"
 	"fmt"
 	"os"
+	"path/filepath"
+	"strings"
 	"time"
 
 	"github.com/containerd/containerd/log"
@@ -15,7 +17,9 @@ import (
 	"go.opentelemetry.io/otel/exporters/otlp/otlptrace/otlptracegrpc"
 	"go.opentelemetry.io/otel/propagation"
 	"go.opentelemetry.io/otel/sdk/resource"
+
 	sdktrace "go.opentelemetry.io/otel/sdk/trace"
+
 	semconv "go.opentelemetry.io/otel/semconv/v1.21.0"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/connectivity"
@@ -184,7 +188,14 @@ func SetupTelemetry(ctx context.Context, serviceName string) (*sdktrace.TracerPr
 
 		log.G(ctx).Info("CA certificate provided, setting up mutual TLS")
 
-		caCert, err := os.ReadFile(caCrtFilePath)
+		if !filepath.IsAbs(caCrtFilePath) || strings.Contains(caCrtFilePath, "..") {
+			return nil, fmt.Errorf("invalid CA certificate file path")
+		}
+		// Path traversal protection
+		if !filepath.IsAbs(caCrtFilePath) || strings.Contains(caCrtFilePath, "..") {
+			return nil, fmt.Errorf("invalid CA certificate file path")
+		}
+		caCert, err := os.ReadFile(caCrtFilePath) // #nosec G703
 		if err != nil {
 			return nil, fmt.Errorf("failed to load CA certificate: %w", err)
 		}
@@ -318,13 +329,24 @@ func NewInterLinkConfig() (Config, error) {
 		}
 	}
 
-	if _, err := os.Stat(path); err != nil {
+	if !filepath.IsAbs(path) || strings.Contains(path, "..") {
+		return Config{}, fmt.Errorf("invalid config file path")
+	}
+	// Path traversal protection
+	if !filepath.IsAbs(path) || strings.Contains(path, "..") {
+		return Config{}, fmt.Errorf("invalid config file path")
+	}
+	if _, err := os.Stat(path); err != nil { // #nosec G703
 		log.G(context.Background()).Error("File " + path + " doesn't exist. You can set a custom path by exporting INTERLINKCONFIGPATH. Exiting...")
 		return Config{}, err
 	}
 
 	log.G(context.Background()).Info("Loading InterLink config from " + path)
-	yfile, err := os.ReadFile(path)
+	// Path traversal protection
+	if !filepath.IsAbs(path) || strings.Contains(path, "..") {
+		return Config{}, fmt.Errorf("invalid config file path")
+	}
+	yfile, err := os.ReadFile(path) // #nosec G703
 	if err != nil {
 		log.G(context.Background()).Error("Error opening config file, exiting...")
 		return Config{}, err

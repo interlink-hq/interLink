@@ -80,7 +80,7 @@ const config: Config = {
       announcementBar: {
       id: 'support_us',
       content:
-        'We are onboarding for our contribution to CNCF Sandbox! Please let us know for any broken or missing information as we move to the new home.',
+        'We will be at KubeCon EU 2026! Come visit us at booth P-24AS Wednesday 10:00 - 13:30 to learn more about interLink!',
       backgroundColor: '#fafbfc',
       textColor: '#091E42',
       isCloseable: false,
@@ -126,10 +126,10 @@ const config: Config = {
           ],
         },
         {
-          title: 'Community',
+          title: 'Contact Us',
           items: [
             {
-              label: 'interTwin project Slack',
+              label: 'Join us on Slack!',
               href: 'https://join.slack.com/t/intertwin/shared_invite/zt-2cs67h9wz-2DFQ6EiSQGS1vlbbbJHctA',
             }
           ],
