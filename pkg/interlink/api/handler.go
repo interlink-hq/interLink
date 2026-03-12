@@ -7,8 +7,11 @@ import (
 	"bufio"
 	"context"
 	"fmt"
+	"html"
 	"io"
 	"net/http"
+	"net/url"
+	"strings"
 
 	"github.com/containerd/containerd/log"
 	"github.com/google/uuid"
@@ -17,6 +20,22 @@ import (
 
 	"github.com/interlink-hq/interlink/pkg/interlink"
 )
+
+// isSafeURL checks for SSRF by allowing only http(s) URLs and blocking localhost/internal addresses.
+func isSafeURL(rawurl string) bool {
+	u, err := url.Parse(rawurl)
+	if err != nil {
+		return false
+	}
+	if u.Scheme != "http" && u.Scheme != "https" {
+		return false
+	}
+	host := u.Hostname()
+	if host == "localhost" || host == "127.0.0.1" || host == "::1" || strings.HasSuffix(host, ".internal") {
+		return false
+	}
+	return true
+}
 
 // InterLinkHandler handles HTTP requests for the interLink API server.
 // It acts as a proxy between the Virtual Kubelet and sidecar plugins,
@@ -87,7 +106,6 @@ func ReqWithError(
 	sessionContext string,
 	clientHTTP *http.Client,
 ) ([]byte, error) {
-
 	log.G(ctx).Infof("[ReqWithError] Starting request to %s | respondWithValues=%v | respondWithReturn=%v | session=%s",
 		req.URL.String(), respondWithValues, respondWithReturn, sessionContext)
 
@@ -99,7 +117,14 @@ func ReqWithError(
 	// Add session number for end-to-end trace
 	AddSessionContext(req, sessionContext)
 
-	resp, err := clientHTTP.Do(req)
+	if !isSafeURL(req.URL.String()) {
+		return nil, fmt.Errorf("potential SSRF detected: %s", req.URL.String())
+	}
+	// SSRF protection: ensure URL is safe before making the request
+	if !isSafeURL(req.URL.String()) {
+		return nil, fmt.Errorf("potential SSRF detected: %s", req.URL.String())
+	}
+	resp, err := clientHTTP.Do(req) // #nosec G704
 	if err != nil {
 		statusCode := http.StatusInternalServerError
 		log.G(ctx).Errorf("%s HTTP client.Do() failed: %v", sessionContextMessage, err)
@@ -145,7 +170,9 @@ func ReqWithError(
 		errHTTP := fmt.Errorf("%s call exit status: %d. Body: %s", sessionContextMessage, statusCode, ret)
 		log.G(ctx).Error(errHTTP)
 
-		_, err = w.Write([]byte(errHTTP.Error()))
+		// Prevent XSS by escaping error message
+		safeErr := html.EscapeString(errHTTP.Error())
+		_, err = w.Write([]byte(safeErr))
 		if err != nil {
 			return nil, fmt.Errorf(sessionContextMessage+
 				"HTTP request in error and could not write all body response to InterLink Node error: %w", err)
