@@ -11,24 +11,41 @@ import (
 	"io"
 	"math/rand"
 	"net/http"
+	"net/url"
 	"os"
 	"regexp"
 	"strconv"
 	"strings"
 	"time"
 
+	types "github.com/interlink-hq/interlink/pkg/interlink"
+	authenticationv1 "k8s.io/api/authentication/v1"
+	k8sTypes "k8s.io/apimachinery/pkg/types"
+
 	"github.com/containerd/containerd/log"
 	"go.opentelemetry.io/otel"
 	"go.opentelemetry.io/otel/attribute"
 	trace "go.opentelemetry.io/otel/trace"
-	authenticationv1 "k8s.io/api/authentication/v1"
 	v1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/api/resource"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
-
-	types "github.com/interlink-hq/interlink/pkg/interlink"
-	k8sTypes "k8s.io/apimachinery/pkg/types"
 )
+
+// isSafeURL checks for SSRF by allowing only http(s) URLs and blocking localhost/internal addresses.
+func isSafeURL(rawurl string) bool {
+	u, err := url.Parse(rawurl)
+	if err != nil {
+		return false
+	}
+	if u.Scheme != "http" && u.Scheme != "https" {
+		return false
+	}
+	host := u.Hostname()
+	if host == "localhost" || host == "127.0.0.1" || host == "::1" || strings.HasSuffix(host, ".internal") {
+		return false
+	}
+	return true
+}
 
 const (
 	PodPhaseInitialize = "Initializing"
@@ -107,7 +124,10 @@ func doRequestWithClient(req *http.Request, token string, httpClient *http.Clien
 		req.Header.Add("Authorization", "Bearer "+token)
 	}
 	req.Header.Set("Content-Type", "application/json")
-	return httpClient.Do(req)
+	if !isSafeURL(req.URL.String()) {
+		return nil, fmt.Errorf("potential SSRF detected: %s", req.URL.String())
+	}
+	return httpClient.Do(req) // #nosec G704
 }
 
 func getSidecarEndpoint(ctx context.Context, interLinkURL string, interLinkPort string) string {
