@@ -60,7 +60,7 @@ function HomepageHeader() {
             onClick={() => window.open('https://github.com/interlink-hq/interLink', '_blank')}
           />
           <img 
-            alt="Go Report Card" 
+            alt="FOSSA license scan" 
             src="https://app.fossa.com/api/projects/git%2Bgithub.com%2Finterlink-hq%2FinterLink.svg?type=shield&issueType=license" 
             className={styles.badge}
             onClick={() => window.open('https://app.fossa.com/projects/git%2Bgithub.com%2Finterlink-hq%2FinterLink?ref=badge_shield&issueType=license', '_blank')}
@@ -74,7 +74,7 @@ function HomepageHeader() {
         </div>
         <div className={styles.badges}>
           <img 
-            alt="Join un on Slack!" 
+            alt="Join us on Slack!" 
             src="https://img.shields.io/badge/Join_Slack-4A154B?style=for-the-badge&logo=slack&logoColor=white" 
             className={styles.badge}
             onClick={() => window.open('https://join.slack.com/t/intertwin/shared_invite/zt-2cs67h9wz-2DFQ6EiSQGS1vlbbbJHctA', '_blank')}
