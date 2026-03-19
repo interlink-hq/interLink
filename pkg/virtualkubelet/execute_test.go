@@ -8,6 +8,9 @@ import (
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+	v1 "k8s.io/api/core/v1"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/client-go/kubernetes/fake"
 )
 
 func TestGetSidecarEndpoint(t *testing.T) {
@@ -194,4 +197,59 @@ func TestGetSessionContextMessage(t *testing.T) {
 			assert.Equal(t, tt.expected, got)
 		})
 	}
+}
+
+func TestResolvePersistentVolume(t *testing.T) {
+	t.Run("returns pvc and bound pv", func(t *testing.T) {
+		client := fake.NewSimpleClientset(
+			&v1.PersistentVolumeClaim{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      "shared-data",
+					Namespace: "default",
+				},
+				Spec: v1.PersistentVolumeClaimSpec{
+					VolumeName: "shared-data-pv",
+				},
+			},
+			&v1.PersistentVolume{
+				ObjectMeta: metav1.ObjectMeta{
+					Name: "shared-data-pv",
+				},
+				Spec: v1.PersistentVolumeSpec{
+					PersistentVolumeSource: v1.PersistentVolumeSource{
+						NFS: &v1.NFSVolumeSource{
+							Server: "10.0.0.15",
+							Path:   "/exports/shared-data",
+						},
+					},
+				},
+			},
+		)
+
+		pvc, pv, err := resolvePersistentVolume(context.Background(), client, "default", "shared-data")
+		require.NoError(t, err)
+		require.NotNil(t, pvc)
+		require.NotNil(t, pv)
+		assert.Equal(t, "shared-data", pvc.Name)
+		require.NotNil(t, pv.Spec.NFS)
+		assert.Equal(t, "10.0.0.15", pv.Spec.NFS.Server)
+		assert.Equal(t, "/exports/shared-data", pv.Spec.NFS.Path)
+	})
+
+	t.Run("returns error when pvc is not yet bound", func(t *testing.T) {
+		client := fake.NewSimpleClientset(
+			&v1.PersistentVolumeClaim{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      "pending-claim",
+					Namespace: "default",
+				},
+			},
+		)
+
+		pvc, pv, err := resolvePersistentVolume(context.Background(), client, "default", "pending-claim")
+		require.Error(t, err)
+		assert.Nil(t, pvc)
+		assert.Nil(t, pv)
+		assert.Contains(t, err.Error(), "is not bound yet")
+	})
 }

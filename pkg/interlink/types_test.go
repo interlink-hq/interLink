@@ -48,12 +48,38 @@ func TestPodCreateRequests_JSONSerialization(t *testing.T) {
 		},
 	}
 
+	pvc := v1.PersistentVolumeClaim{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      "test-pvc",
+			Namespace: "default",
+		},
+		Spec: v1.PersistentVolumeClaimSpec{
+			VolumeName: "test-pv",
+		},
+	}
+
+	pv := v1.PersistentVolume{
+		ObjectMeta: metav1.ObjectMeta{
+			Name: "test-pv",
+		},
+		Spec: v1.PersistentVolumeSpec{
+			PersistentVolumeSource: v1.PersistentVolumeSource{
+				NFS: &v1.NFSVolumeSource{
+					Server: "nfs.example.internal",
+					Path:   "/exports/test",
+				},
+			},
+		},
+	}
+
 	request := PodCreateRequests{
-		Pod:                 pod,
-		ConfigMaps:          []v1.ConfigMap{configMap},
-		Secrets:             []v1.Secret{secret},
-		ProjectedVolumeMaps: []v1.ConfigMap{},
-		JobScriptBuilderURL: "http://builder.example.com",
+		Pod:                    pod,
+		ConfigMaps:             []v1.ConfigMap{configMap},
+		Secrets:                []v1.Secret{secret},
+		PersistentVolumeClaims: []v1.PersistentVolumeClaim{pvc},
+		PersistentVolumes:      []v1.PersistentVolume{pv},
+		ProjectedVolumeMaps:    []v1.ConfigMap{},
+		JobScriptBuilderURL:    "http://builder.example.com",
 	}
 
 	// Serialize to JSON
@@ -72,6 +98,11 @@ func TestPodCreateRequests_JSONSerialization(t *testing.T) {
 	assert.Equal(t, "test-config", decoded.ConfigMaps[0].Name)
 	assert.Len(t, decoded.Secrets, 1)
 	assert.Equal(t, "test-secret", decoded.Secrets[0].Name)
+	assert.Len(t, decoded.PersistentVolumeClaims, 1)
+	assert.Equal(t, "test-pvc", decoded.PersistentVolumeClaims[0].Name)
+	assert.Len(t, decoded.PersistentVolumes, 1)
+	require.NotNil(t, decoded.PersistentVolumes[0].Spec.NFS)
+	assert.Equal(t, "nfs.example.internal", decoded.PersistentVolumes[0].Spec.NFS.Server)
 	assert.Equal(t, request.JobScriptBuilderURL, decoded.JobScriptBuilderURL)
 }
 
@@ -154,6 +185,25 @@ func TestRetrievedPodData_JSONSerialization(t *testing.T) {
 				Data:       map[string][]byte{"password": []byte("secret")},
 			},
 		},
+		PersistentVolumeClaims: []v1.PersistentVolumeClaim{
+			{
+				ObjectMeta: metav1.ObjectMeta{Name: "pvc1"},
+				Spec:       v1.PersistentVolumeClaimSpec{VolumeName: "pv1"},
+			},
+		},
+		PersistentVolumes: []v1.PersistentVolume{
+			{
+				ObjectMeta: metav1.ObjectMeta{Name: "pv1"},
+				Spec: v1.PersistentVolumeSpec{
+					PersistentVolumeSource: v1.PersistentVolumeSource{
+						NFS: &v1.NFSVolumeSource{
+							Server: "nfs.example.internal",
+							Path:   "/exports/app",
+						},
+					},
+				},
+			},
+		},
 		EmptyDirs: []string{"/tmp/empty1", "/tmp/empty2"},
 	}
 
@@ -190,6 +240,10 @@ func TestRetrievedPodData_JSONSerialization(t *testing.T) {
 	assert.Equal(t, "main-container", decoded.Containers[0].Name)
 	assert.Len(t, decoded.Containers[0].ConfigMaps, 1)
 	assert.Len(t, decoded.Containers[0].Secrets, 1)
+	assert.Len(t, decoded.Containers[0].PersistentVolumeClaims, 1)
+	assert.Len(t, decoded.Containers[0].PersistentVolumes, 1)
+	require.NotNil(t, decoded.Containers[0].PersistentVolumes[0].Spec.NFS)
+	assert.Equal(t, "/exports/app", decoded.Containers[0].PersistentVolumes[0].Spec.NFS.Path)
 	assert.Len(t, decoded.Containers[0].EmptyDirs, 2)
 	assert.Equal(t, retrievedPod.JobScript, decoded.JobScript)
 }

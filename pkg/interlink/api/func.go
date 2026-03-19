@@ -147,6 +147,19 @@ func retrieveData(ctx context.Context, _ types.Config, pod types.PodCreateReques
 						if pvc.Name == vol.PersistentVolumeClaim.ClaimName {
 							log.G(ctx).Debug("PersistentVolumeClaim found! Name: ", pvc.Name)
 							retrievedData.PersistentVolumeClaims = append(retrievedData.PersistentVolumeClaims, pvc)
+
+							foundPV := false
+							for _, pv := range pod.PersistentVolumes {
+								if pv.Name == pvc.Spec.VolumeName {
+									log.G(ctx).Debug("PersistentVolume found! Name: ", pv.Name)
+									retrievedData.PersistentVolumes = append(retrievedData.PersistentVolumes, pv)
+									foundPV = true
+									break
+								}
+							}
+							if pvc.Spec.VolumeName != "" && !foundPV {
+								log.G(ctx).Warningf("could not find a matching PersistentVolume %q for claim %s/%s", pvc.Spec.VolumeName, pod.Pod.Namespace, pvc.Name)
+							}
 							break loopVolumes
 						}
 					}

@@ -85,6 +85,8 @@ types:
     "pod": {...},           // Standard Kubernetes Pod spec
     "configmaps": [...],    // Associated ConfigMaps
     "secrets": [...],       // Associated Secrets
+    "persistentvolumes": [...],      // Transported PVC objects
+    "persistentVolumeSources": [...], // Bound PV objects with backend details
     "projectedvolumesmaps": [...],  // ServiceAccount projected volumes
     "jobscriptURL": ""      // Optional job script builder endpoint
 }
@@ -405,8 +407,14 @@ def handle_persistent_volumes(self, pod_spec):
     for volume in pod_spec.volumes:
         if volume.persistent_volume_claim:
             pvc_name = volume.persistent_volume_claim.claim_name
-            # Mount the PVC to your remote system
-            self.mount_pvc(pvc_name, volume.name)
+            pvc = self.find_pvc(pvc_name)
+            pv = self.find_pv(pvc.spec.volume_name)
+            if pv.spec.nfs:
+                self.mount_nfs(
+                    server=pv.spec.nfs.server,
+                    export_path=pv.spec.nfs.path,
+                    mount_name=volume.name,
+                )
 
 def handle_projected_volumes(self, projected_volumes):
     """Handle ServiceAccount tokens and projected volumes"""

@@ -29,6 +29,7 @@ import (
 	v1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/api/resource"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/client-go/kubernetes"
 )
 
 // isSafeURL checks for SSRF by allowing only http(s) URLs and blocking localhost/internal addresses.
@@ -769,7 +770,7 @@ func remoteExecutionHandleVolumes(ctx context.Context, p *Provider, pod *v1.Pod,
 					log.G(ctx).Debugf("empty dir found, nothing to do for volume %s for Pod %s", volume.Name, pod.Name)
 
 				case volume.PersistentVolumeClaim != nil:
-					pvc, err := p.clientSet.CoreV1().PersistentVolumeClaims(pod.Namespace).Get(ctx, volume.PersistentVolumeClaim.ClaimName, metav1.GetOptions{})
+					pvc, pv, err := resolvePersistentVolume(ctx, p.clientSet, pod.Namespace, volume.PersistentVolumeClaim.ClaimName)
 					if err != nil {
 						err = failedMount(ctx, &failedAndWait, volume.PersistentVolumeClaim.ClaimName, pod, p, err)
 						if err != nil {
@@ -777,6 +778,7 @@ func remoteExecutionHandleVolumes(ctx context.Context, p *Provider, pod *v1.Pod,
 						}
 					} else {
 						req.PersistentVolumeClaims = append(req.PersistentVolumeClaims, *pvc)
+						req.PersistentVolumes = append(req.PersistentVolumes, *pv)
 					}
 
 				default:
@@ -797,7 +799,7 @@ func remoteExecutionHandleVolumes(ctx context.Context, p *Provider, pod *v1.Pod,
 			}
 
 			pod.Status.Phase = v1.PodFailed
-			pod.Status.Reason = "CFGMaps/Secrets not found"
+			pod.Status.Reason = "Volume dependencies not ready"
 			for i := range pod.Status.ContainerStatuses {
 				pod.Status.ContainerStatuses[i].Ready = false
 			}
@@ -805,10 +807,33 @@ func remoteExecutionHandleVolumes(ctx context.Context, p *Provider, pod *v1.Pod,
 			if err != nil {
 				return err
 			}
-			return errors.New("unable to retrieve ConfigMaps or Secrets after 5m. Check logs")
+			return errors.New("unable to retrieve volume dependencies after 5m. Check logs")
 		}
 	}
 	return nil
+}
+
+func resolvePersistentVolume(
+	ctx context.Context,
+	client kubernetes.Interface,
+	namespace,
+	claimName string,
+) (*v1.PersistentVolumeClaim, *v1.PersistentVolume, error) {
+	pvc, err := client.CoreV1().PersistentVolumeClaims(namespace).Get(ctx, claimName, metav1.GetOptions{})
+	if err != nil {
+		return nil, nil, err
+	}
+
+	if pvc.Spec.VolumeName == "" {
+		return nil, nil, fmt.Errorf("persistentvolumeclaim %s/%s is not bound yet", namespace, claimName)
+	}
+
+	pv, err := client.CoreV1().PersistentVolumes().Get(ctx, pvc.Spec.VolumeName, metav1.GetOptions{})
+	if err != nil {
+		return nil, nil, err
+	}
+
+	return pvc, pv, nil
 }
 
 func resolveEnvRefs(

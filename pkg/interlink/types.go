@@ -19,6 +19,9 @@ type PodCreateRequests struct {
 	ConfigMaps             []v1.ConfigMap             `json:"configmaps"`
 	Secrets                []v1.Secret                `json:"secrets"`
 	PersistentVolumeClaims []v1.PersistentVolumeClaim `json:"persistentvolumes"`
+	// PersistentVolumes contains the bound PVs for any transported PVCs.
+	// This lets plugins inspect backend-specific details such as NFS server/path.
+	PersistentVolumes []v1.PersistentVolume `json:"persistentVolumeSources"`
 	// The projected volumes are those created by ServiceAccounts (in K8S >= 1.24). They are automatically added in the pod from kubelet code.
 	// Here the configmap will hold the files name (as key) and content (as value).
 	ProjectedVolumeMaps []v1.ConfigMap `json:"projectedvolumesmaps"`
@@ -73,6 +76,9 @@ type RetrievedContainer struct {
 	// like it currently is for ConfigMaps, ProjectedVolumeMaps, Secrets.
 	EmptyDirs              []string                   `json:"emptyDirs"`
 	PersistentVolumeClaims []v1.PersistentVolumeClaim `json:"persistentVolumeClaims"`
+	// PersistentVolumes contains the bound PVs that back PersistentVolumeClaims.
+	// Plugins can use this to resolve portable backends such as NFS.
+	PersistentVolumes []v1.PersistentVolume `json:"persistentVolumes"`
 }
 
 // RetrievedPodData represents a complete pod with all its associated data.
