@@ -1,7 +1,0 @@
-README.md
-setup.py
-src/interlink/interlink.egg-info/PKG-INFO
-src/interlink/interlink.egg-info/SOURCES.txt
-src/interlink/interlink.egg-info/dependency_links.txt
-src/interlink/interlink.egg-info/requires.txt
-src/interlink/interlink.egg-info/top_level.txt

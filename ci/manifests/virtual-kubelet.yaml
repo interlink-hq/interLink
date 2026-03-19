@@ -20,7 +20,7 @@ spec:
       serviceAccountName: virtual-kubelet 
       containers:
       # - name: interlink
-      #   image: "ghcr.io/intertwin-eu/interlink/interlink"
+      #   image: "ghcr.io/interlink-hq/interlink/interlink"
       #   imagePullPolicy: Always
       #   env:
       #     - name: INTERLINKCONFIGPATH
@@ -32,7 +32,7 @@ spec:
       #     - name: sockets
       #       mountPath: /var/run/
       - name: inttw-vk
-        image: "ghcr.io/intertwin-eu/interlink/virtual-kubelet-inttw" 
+        image: "ghcr.io/interlink-hq/interlink/virtual-kubelet-inttw" 
         imagePullPolicy: Always
         env:
         - name: NODENAME

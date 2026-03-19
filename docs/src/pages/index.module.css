@@ -4,27 +4,283 @@
  */
 
 .heroBanner {
-  padding: 4rem 0;
+  padding: 4rem 0 2rem 0;
   text-align: center;
   position: relative;
   overflow: hidden;
+  background: linear-gradient(135deg, var(--ifm-color-primary) 0%, var(--ifm-color-primary-dark) 100%);
 }
 
-.logo {
-  padding: 1rem 0;
-  text-align: center;
-  position: relative;
-  overflow: hidden;
+.heroContent {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 3rem;
+  margin-bottom: 2rem;
+  max-width: 1200px;
+  margin-left: auto;
+  margin-right: auto;
 }
 
-@media screen and (max-width: 996px) {
-  .heroBanner {
-    padding: 2rem;
-  }
+.logoContainer {
+  flex-shrink: 0;
+}
+
+.heroText {
+  flex: 1;
+  text-align: left;
+  max-width: 600px;
+}
+
+.heroTitle {
+  font-size: 3.5rem;
+  font-weight: 800;
+  margin-bottom: 1rem;
+  color: white;
+}
+
+.heroSubtitle {
+  font-size: 1.5rem;
+  font-weight: 400;
+  margin-bottom: 1.5rem;
+  color: rgba(255, 255, 255, 0.9);
+  line-height: 1.4;
+}
+
+.heroDescription {
+  font-size: 1.1rem;
+  line-height: 1.6;
+  margin-bottom: 2rem;
+  color: rgba(255, 255, 255, 0.8);
+}
+
+[data-theme='dark'] .heroTitle {
+  color: #000000;
+}
+
+[data-theme='dark'] .heroSubtitle {
+  color: rgba(0, 0, 0, 0.9);
+}
+
+[data-theme='dark'] .heroDescription {
+  color: rgba(0, 0, 0, 0.8);
 }
 
 .buttons {
   display: flex;
   align-items: center;
+  gap: 1rem;
+  flex-wrap: wrap;
+}
+
+.secondaryButton {
+  border-color: rgba(255, 255, 255, 0.3);
+  color: white;
+}
+
+.secondaryButton:hover {
+  border-color: white;
+  background-color: rgba(255, 255, 255, 0.1);
+  color: white;
+}
+
+.badges {
+  display: flex;
   justify-content: center;
+  gap: 1rem;
+  flex-wrap: wrap;
+  margin-top: 2rem;
+}
+
+.badge {
+  cursor: pointer;
+  transition: transform 0.2s ease;
+  border-radius: 4px;
+}
+
+.badge:hover {
+  transform: translateY(-2px);
+}
+
+/* New section styles */
+.videoSection {
+  padding: 4rem 0;
+  background-color: var(--ifm-background-color);
+}
+
+.cncfSection {
+  padding: 4rem 0;
+  text-align: center;
+  background-color: var(--ifm-background-surface-color);
+}
+
+.sectionTitle {
+  text-align: center;
+  margin-bottom: 3rem;
+  color: var(--ifm-heading-color);
+  font-size: 2.5rem;
+  font-weight: 700;
+}
+
+.cncfTitle {
+  font-size: 2.5rem;
+  font-weight: 700;
+  margin-bottom: 1.5rem;
+  color: var(--ifm-heading-color);
+}
+
+.cncfDescription {
+  font-size: 1.2rem;
+  margin-bottom: 2rem;
+  color: var(--ifm-font-color-base);
+  max-width: 600px;
+  margin-left: auto;
+  margin-right: auto;
+}
+
+.cncfDescription a {
+  color: var(--ifm-color-primary);
+  text-decoration: none;
+  font-weight: 600;
+}
+
+.cncfDescription a:hover {
+  text-decoration: underline;
+  color: var(--ifm-color-primary-dark);
+}
+
+.cncfLogoContainer {
+  margin: 2rem 0;
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  padding: 1rem;
+  background: var(--ifm-color-emphasis-0);
+  border-radius: 12px;
+  border: 1px solid var(--ifm-color-emphasis-200);
+}
+
+.cncfLogo {
+  max-width: 300px;
+  width: 100%;
+  height: auto;
+  transition: transform 0.3s ease;
+  filter: brightness(1);
+}
+
+.cncfLogo:hover {
+  transform: scale(1.05);
+}
+
+[data-theme='dark'] .cncfLogoContainer {
+  background: var(--ifm-color-emphasis-100);
+  border-color: var(--ifm-color-emphasis-300);
+}
+
+[data-theme='dark'] .cncfLogo {
+  filter: brightness(1.2) contrast(1.1);
+}
+
+.cncfFooter {
+  font-size: 0.9rem;
+  color: var(--ifm-font-color-base);
+  opacity: 0.8;
+  margin-top: 2rem;
+  max-width: 800px;
+  margin-left: auto;
+  margin-right: auto;
+}
+
+.cncfFooter a {
+  color: var(--ifm-color-primary);
+  text-decoration: none;
+}
+
+.cncfFooter a:hover {
+  text-decoration: underline;
+  color: var(--ifm-color-primary-dark);
+}
+
+/* Responsive Design */
+@media screen and (max-width: 996px) {
+  .heroBanner {
+    padding: 3rem 1rem 2rem 1rem;
+  }
+  
+  .heroContent {
+    flex-direction: column;
+    text-align: center;
+    gap: 2rem;
+  }
+  
+  .heroText {
+    text-align: center;
+  }
+  
+  .heroTitle {
+    font-size: 2.5rem;
+  }
+  
+  .heroSubtitle {
+    font-size: 1.2rem;
+  }
+  
+  .buttons {
+    justify-content: center;
+  }
+  
+  .badges {
+    margin-top: 1.5rem;
+  }
+  
+  .sectionTitle {
+    font-size: 2rem;
+  }
+  
+  .cncfTitle {
+    font-size: 2rem;
+  }
+}
+
+@media screen and (max-width: 768px) {
+  .heroBanner {
+    padding: 2rem 1rem 1.5rem 1rem;
+  }
+  
+  .heroTitle {
+    font-size: 2rem;
+  }
+  
+  .heroSubtitle {
+    font-size: 1.1rem;
+  }
+  
+  .heroDescription {
+    font-size: 1rem;
+  }
+  
+  .buttons {
+    flex-direction: column;
+    align-items: stretch;
+  }
+  
+  .badges {
+    flex-direction: column;
+    align-items: center;
+  }
+  
+  .videoSection,
+  .cncfSection {
+    padding: 3rem 0;
+  }
+  
+  .sectionTitle,
+  .cncfTitle {
+    font-size: 1.8rem;
+  }
+  
+  .cncfDescription {
+    font-size: 1rem;
+    padding: 0 1rem;
+  }
 }

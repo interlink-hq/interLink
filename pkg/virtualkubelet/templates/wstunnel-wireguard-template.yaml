@@ -1,0 +1,238 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{.Name}}
+  namespace: {{.Namespace}}
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app.kubernetes.io/component: {{.Name}}
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/component: {{.Name}}
+      annotations:
+        interlink.eu/wstunnel-path-prefix: {{.RandomPassword}}
+    spec:
+      containers:
+      - name: port-forwarder
+        image: nicolaka/netshoot
+        command: ["bash", "-c"]
+        args:
+          - |
+            set -e
+            echo "Starting iptables-based port forwarder (ALL TRAFFIC)..."
+            
+            # Wait for WireGuard to be ready
+            echo "Waiting for WireGuard..."
+            until ip addr show wg0 | grep -q "10.7.0.1"; do
+              sleep 2
+            done
+            echo "WireGuard is ready!"
+            
+            # Test connectivity
+            if ping -c 3 -W 5 10.7.0.2; then
+              echo "WireGuard peer (10.7.0.2) is reachable!"
+            else
+              echo "WARNING: Cannot reach 10.7.0.2"
+            fi
+            
+            # Enable IP forwarding
+            echo "Enabling IP forwarding..."
+            sysctl -w net.ipv4.ip_forward=1
+            sysctl -w net.ipv4.conf.all.forwarding=1
+            
+            # Get the main interface (usually eth0)
+            MAIN_IFACE=$(ip route | grep default | awk '{print $5}' | head -n1)
+            POD_IP=$(ip addr show $MAIN_IFACE | grep 'inet ' | awk '{print $2}' | cut -d/ -f1)
+            echo "Main interface: $MAIN_IFACE"
+            echo "Pod IP: $POD_IP"
+            
+            # Forward ALL incoming traffic (except to localhost and WireGuard port) to 10.7.0.2
+            echo "Setting up iptables rules to forward ALL traffic to 10.7.0.2..."
+            
+            # PREROUTING: Forward all incoming TCP/UDP traffic to 10.7.0.2
+            # Exclude wstunnel port (28080) and WireGuard port (51820)
+            iptables -t nat -A PREROUTING -i $MAIN_IFACE -p tcp ! --dport 28080 -j DNAT --to-destination 10.7.0.2
+            iptables -t nat -A PREROUTING -i $MAIN_IFACE -p udp ! --dport 51820 -j DNAT --to-destination 10.7.0.2
+            
+            # POSTROUTING: Masquerade traffic going to 10.7.0.2 so replies come back
+            iptables -t nat -A POSTROUTING -d 10.7.0.2 -j MASQUERADE
+            
+            # FORWARD: Allow all forwarding through WireGuard interface
+            iptables -A FORWARD -i $MAIN_IFACE -o wg0 -j ACCEPT
+            iptables -A FORWARD -i wg0 -o $MAIN_IFACE -j ACCEPT
+            iptables -A FORWARD -o wg0 -j ACCEPT
+            iptables -A FORWARD -i wg0 -j ACCEPT
+            
+            echo "iptables rules configured successfully!"
+            echo "NAT table:"
+            iptables -t nat -L -n -v
+            echo ""
+            echo "Filter table (FORWARD chain):"
+            iptables -L FORWARD -n -v
+            
+            echo "Port forwarder ready - ALL traffic forwarded to 10.7.0.2"
+            
+            # Keep container alive
+            tail -f /dev/null
+        securityContext:
+          privileged: true
+          capabilities:
+            add: ["NET_ADMIN", "NET_RAW", "SYS_ADMIN"]
+
+      # ===== WSTunnel Container =====
+      - name: wstunnel
+        image: ghcr.io/erebe/wstunnel:latest
+        imagePullPolicy: IfNotPresent
+        command: ["bash","-c"]
+        args:
+          - >
+            ./wstunnel server
+            --log-lvl DEBUG
+            --dns-resolver-prefer-ipv4
+            --restrict-http-upgrade-path-prefix {{.RandomPassword}}
+            --restrict-to 127.0.0.1:51820
+            ws://0.0.0.0:28080
+        ports:
+        - containerPort: 28080
+          name: ws
+          protocol: TCP
+        - containerPort: 51820
+          name: vpn
+          protocol: UDP
+        {{- range .ExposedPorts}}
+        - containerPort: {{.Port}}
+          name: {{if .Name}}{{.Name}}{{else}}port-{{.Port}}{{end}}
+          protocol: {{.Protocol}}
+        {{- end}}
+        resources:
+          requests:
+            cpu: 100m
+            memory: 90Mi
+        readinessProbe:
+          tcpSocket:
+            port: 28080
+          initialDelaySeconds: 2
+          periodSeconds: 2
+          failureThreshold: 10
+        livenessProbe:
+          tcpSocket:
+            port: 28080
+          initialDelaySeconds: 10
+          periodSeconds: 10
+
+      # ===== WireGuard Container =====
+      - name: wireguard
+        image: ghcr.io/linuxserver/wireguard:latest
+        securityContext:
+          privileged: true
+          capabilities:
+            add: ["NET_ADMIN","NET_RAW"]
+        volumeMounts:
+          - name: dev-net-tun
+            mountPath: /dev/net/tun
+          - name: wg-config
+            mountPath: /etc/wireguard
+            readOnly: true
+        env:
+          - name: PUID
+            value: "0"
+          - name: PGID
+            value: "0"
+        command: ["bash","-c"]
+        args:
+          - |
+            until nc -z localhost 28080; do
+              echo "Waiting for wstunnel on :28080..."
+              sleep 1
+            done
+            wg-quick up wg0
+            tail -f /dev/null
+
+      nodeSelector:
+        kubernetes.io/os: linux
+      volumes:
+        - name: dev-net-tun
+          hostPath:
+            path: /dev/net/tun
+            type: CharDevice
+        - name: wg-config
+          configMap:
+            name: {{.Name}}-wg-config
+
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{.Name}}-wg-config
+  namespace: {{.Namespace}}
+data:
+  # Server-side WireGuard; bound to localhost because wstunnel delivers traffic to 127.0.0.1:51820
+  wg0.conf: |
+    [Interface]
+    Address = 10.7.0.1/32
+    ListenPort = 51820
+    PrivateKey = {{.WGPrivateKey}}
+    MTU = 1280
+    # Only accept traffic that arrived via localhost (wstunnel)
+    PreUp = iptables -I INPUT -p udp --dport 51820 ! -s 127.0.0.1 -j DROP
+    PostDown = iptables -D INPUT -p udp --dport 51820 ! -s 127.0.0.1 -j DROP
+    # NAT for your overlay (optional; adjust to your needs)
+    PreUp = sysctl -w net.ipv4.ip_forward=1
+    PostUp = iptables -t nat -A POSTROUTING -s 10.7.0.0/24 -j MASQUERADE
+    PostDown = iptables -t nat -D POSTROUTING -s 10.7.0.0/24 -j MASQUERADE
+
+    # Example peer; replace keys/IPs with your client side (which will connect via its own wstunnel client)
+    [Peer]
+    PublicKey = {{.ClientPublicKey}}
+    AllowedIPs = 10.7.0.2/32
+    # No Endpoint here; we're the "server" side. Client will point to its local wstunnel forwarder.
+
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{.Name}}
+  namespace: {{.Namespace}}
+spec:
+  type: ClusterIP
+  selector:
+    app.kubernetes.io/component: {{.Name}}
+  ports:
+    - port: 28080
+      targetPort: 28080
+      name: ws
+    {{- range .ExposedPorts}}
+    - port: {{.Port}}
+      targetPort: {{.Port}}
+      name: {{.Name}}
+      {{- if .Protocol}}
+      protocol: {{.Protocol}}
+      {{- end}}
+    {{- end}}
+---
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: {{.Name}}
+  namespace: {{.Namespace}}
+  annotations:
+    nginx.ingress.kubernetes.io/proxy-read-timeout: "3600"
+    nginx.ingress.kubernetes.io/proxy-send-timeout: "3600"
+    nginx.org/websocket-services: {{.Name}}
+    kubernetes.io/ingress.class: "nginx"
+spec:
+  ingressClassName: nginx
+  rules:
+  - host: {{.Name}}-{{.Namespace}}.{{.WildcardDNS}}
+    http:
+      paths:
+      - path: /
+        pathType: Prefix
+        backend:
+          service:
+            name: {{.Name}}
+            port:
+              number: 28080

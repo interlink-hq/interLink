@@ -14,7 +14,6 @@ const FeatureList: FeatureItem[] = [
     Svg: require('@site/static/img/INFN_logo_sito.svg').default,
     description: (
       <>
-        ...
       </>
     ),
   },
@@ -23,7 +22,6 @@ const FeatureList: FeatureItem[] = [
     Svg: require('@site/static/img/egi-logo.svg').default,
     description: (
       <>
-        ...
       </>
     ),
   },
@@ -36,8 +34,40 @@ const FeatureList: FeatureItem[] = [
     ),
   },
   {
-    title: 'UPV',
-    Svg: require('@site/static/img/cern-logo.svg').default,
+    title: 'Universitat Politècnica de València',
+    Svg: require('@site/static/img/logo-upv.svg').default,
+    description: (
+      <>
+      </>
+    ),
+  },
+  {
+    title: 'CNES',
+    Svg: require('@site/static/img/logo-cnes.svg').default,
+    description: (
+      <>
+      </>
+    ),
+  },
+  {
+    title: 'IJS',
+    Svg: require('@site/static/img/logo-ijs.svg').default,
+    description: (
+      <>
+      </>
+    ),
+  },
+  {
+    title: 'IZUM',
+    Svg: require('@site/static/img/logo-izum.svg').default,
+    description: (
+      <>
+      </>
+    ),
+  },
+  {
+    title: 'JSC',
+    Svg: require('@site/static/img/logo-jsc.svg').default,
     description: (
       <>
       </>
@@ -45,15 +75,15 @@ const FeatureList: FeatureItem[] = [
   },
   {
     title: 'NuNet',
-    Svg: require('@site/static/img/cern-logo.svg').default,
+    Svg: require('@site/static/img/logo-nunet.svg').default,
     description: (
       <>
       </>
     ),
   },
   {
-    title: 'HELIX',
-    Svg: require('@site/static/img/cern-logo.svg').default,
+    title: 'HelixML',
+    Svg: require('@site/static/img/logo-helix.svg').default,
     description: (
       <>
       </>
@@ -63,15 +93,12 @@ const FeatureList: FeatureItem[] = [
 
 function Feature({title, Svg, description}: FeatureItem) {
   return (
-    <div className={clsx('col col--4')}>
-      <div className="text--left padding-horiz--md">
-         <div style={{ backgroundColor: 'darksalmon', display: 'flex', padding: '20px', borderRadius: '10%', width: '220px', height: '220px', justifyContent: 'center', alignItems: 'center', boxShadow: '0 0 2px 1px grey' }}>
-           <Svg className={styles.featureSvg} role="img" height="200" />
+    <div className={clsx('col col--3')}>
+         <div style={{ backgroundColor: 'darkgrey', display: 'flex', padding: '20px', borderRadius: '10%', width: '220px', height: '220px', justifyContent: 'center', alignItems: 'center', boxShadow: '0 0 2px 1px grey' }}>
+           <Svg className={styles.featureSvg} role="img" height="100" width="100" />
          </div>
-        <Heading as="h3">{title}</Heading>
-        <p>{description}</p>
-      </div>
-    </div>
+        <p></p>
+   </div>
   );
 }
 
@@ -81,6 +108,7 @@ export default function AdoptersFeatures(): JSX.Element {
       <div className="container">
           <Heading as="h1">
          Evaluators and contributors 
+        <p>Find out more in the ADOPTERS.md document! </p>
         </Heading>
         <div className="row">
           {FeatureList.map((props, idx) => (

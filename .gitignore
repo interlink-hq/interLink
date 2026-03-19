@@ -1,10 +1,15 @@
 interlink-install
+QWEN.md
+coverage.out
 vendor
 dist/*
+docs/yarn.lock
 report/*
 __pycache__/*
 vendor/*
 bin
+virtual-kubelet
+interlink
 sidecars/slurm/.*
 cmd/sidecars/slurm/.*
 sidecars/docker/.*
@@ -29,3 +34,5 @@ examples/sidecar/templates/python/__pycache__/*
 # Eclipse IDE
 .project
 .settings
+CLAUDE.md
+.dagger

@@ -24,7 +24,6 @@ func (h *InterLinkHandler) UpdateCacheHandler(w http.ResponseWriter, r *http.Req
 	w.WriteHeader(statusCode)
 	_, err = w.Write([]byte("Updated cache"))
 	if err != nil {
-		log.G(h.Ctx).Error(errors.New("Failed to write to http buffer"))
+		log.G(h.Ctx).Error(errors.New("failed to write to http buffer"))
 	}
-
 }

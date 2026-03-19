@@ -1,0 +1,451 @@
+---
+sidebar_position: 8
+---
+
+# Systemd Deployment Guide
+
+This guide explains how to deploy InterLink components using systemd services for production environments. Systemd provides automatic startup, restart on failure, proper logging, and robust service management.
+
+## Overview
+
+Using systemd to manage InterLink components offers several advantages:
+
+- **Automatic startup**: Services start automatically on boot
+- **Automatic restart**: Failed services are automatically restarted
+- **Centralized logging**: Logs are managed through journald
+- **Process supervision**: Systemd monitors service health
+- **Security isolation**: Services run with limited privileges
+- **Dependency management**: Services start in the correct order
+
+## Prerequisites
+
+- SystemD-enabled Linux distribution (most modern distributions)
+- Root access to create system services
+- InterLink binaries and configuration files
+- Basic understanding of systemd service files
+
+## System Setup
+
+### Create System User
+
+First, create a dedicated system user for running InterLink services:
+
+```bash
+sudo useradd --system --create-home --home-dir /opt/interlink --shell /bin/bash interlink
+sudo mkdir -p /opt/interlink/{bin,config,logs}
+sudo chown -R interlink:interlink /opt/interlink
+```
+
+### Copy Binaries and Configuration
+
+Move your InterLink components to the system directories:
+
+```bash
+# Copy binaries
+sudo cp $HOME/.interlink/bin/* /opt/interlink/bin/
+sudo cp $HOME/.interlink/manifests/interlink-remote.sh /opt/interlink/bin/
+sudo chmod +x /opt/interlink/bin/*
+
+# Copy configuration files
+sudo cp $HOME/.interlink/config/* /opt/interlink/config/
+sudo cp $HOME/.interlink/manifests/*.yaml /opt/interlink/config/
+
+# Set ownership
+sudo chown -R interlink:interlink /opt/interlink
+```
+
+## Service Configuration
+
+### OAuth2 Proxy Service
+
+Create the OAuth2 proxy systemd service:
+
+```ini title="/etc/systemd/system/interlink-oauth2-proxy.service"
+[Unit]
+Description=OAuth2 Proxy for InterLink
+After=network.target
+Wants=network.target
+
+[Service]
+Type=simple
+User=interlink
+Group=interlink
+WorkingDirectory=/opt/interlink
+Environment=OAUTH2_PROXY_CONFIG=/opt/interlink/config/oauth2-proxy.cfg
+ExecStart=/opt/interlink/bin/oauth2-proxy --config=/opt/interlink/config/oauth2-proxy.cfg
+ExecReload=/bin/kill -HUP $MAINPID
+Restart=always
+RestartSec=10
+StandardOutput=append:/opt/interlink/logs/oauth2-proxy.log
+StandardError=append:/opt/interlink/logs/oauth2-proxy.log
+
+# Security settings
+NoNewPrivileges=true
+ProtectSystem=strict
+ProtectHome=true
+ReadWritePaths=/opt/interlink/logs /tmp
+PrivateTmp=true
+
+[Install]
+WantedBy=multi-user.target
+```
+
+### InterLink API Server Service
+
+Create the InterLink API server systemd service:
+
+```ini title="/etc/systemd/system/interlink-api.service"
+[Unit]
+Description=InterLink API Server
+After=network.target interlink-oauth2-proxy.service
+Wants=network.target
+Requires=interlink-oauth2-proxy.service
+
+[Service]
+Type=simple
+User=interlink
+Group=interlink
+WorkingDirectory=/opt/interlink
+Environment=INTERLINKCONFIGPATH=/opt/interlink/config/InterLinkConfig.yaml
+ExecStart=/opt/interlink/bin/interlink
+ExecReload=/bin/kill -HUP $MAINPID
+Restart=always
+RestartSec=10
+StandardOutput=append:/opt/interlink/logs/interlink-api.log
+StandardError=append:/opt/interlink/logs/interlink-api.log
+
+# Security settings
+NoNewPrivileges=true
+ProtectSystem=strict
+ProtectHome=true
+ReadWritePaths=/opt/interlink/logs /opt/interlink/jobs /tmp
+PrivateTmp=true
+
+[Install]
+WantedBy=multi-user.target
+```
+
+### Plugin Service
+
+Create the plugin systemd service (example for Docker plugin):
+
+```ini title="/etc/systemd/system/interlink-docker-plugin.service"
+[Unit]
+Description=InterLink Docker Plugin
+After=network.target docker.service interlink-api.service
+Wants=network.target
+Requires=docker.service interlink-api.service
+
+[Service]
+Type=simple
+User=interlink
+Group=interlink
+WorkingDirectory=/opt/interlink
+Environment=INTERLINKCONFIGPATH=/opt/interlink/config/plugin-config.yaml
+ExecStart=/opt/interlink/bin/plugin
+ExecReload=/bin/kill -HUP $MAINPID
+Restart=always
+RestartSec=10
+StandardOutput=append:/opt/interlink/logs/plugin.log
+StandardError=append:/opt/interlink/logs/plugin.log
+
+# Security settings
+NoNewPrivileges=true
+ProtectSystem=strict
+ProtectHome=true
+ReadWritePaths=/opt/interlink/logs /opt/interlink/jobs /tmp /var/run/docker.sock
+PrivateTmp=true
+
+# Docker access
+SupplementaryGroups=docker
+
+[Install]
+WantedBy=multi-user.target
+```
+
+### SLURM Plugin Service
+
+For SLURM plugin environments:
+
+```ini title="/etc/systemd/system/interlink-slurm-plugin.service"
+[Unit]
+Description=InterLink SLURM Plugin
+After=network.target interlink-api.service
+Wants=network.target
+Requires=interlink-api.service
+
+[Service]
+Type=simple
+User=interlink
+Group=interlink
+WorkingDirectory=/opt/interlink
+Environment=SLURMCONFIGPATH=/opt/interlink/config/plugin-config.yaml
+ExecStart=/opt/interlink/bin/plugin
+ExecReload=/bin/kill -HUP $MAINPID
+Restart=always
+RestartSec=10
+StandardOutput=append:/opt/interlink/logs/plugin.log
+StandardError=append:/opt/interlink/logs/plugin.log
+
+# Security settings
+NoNewPrivileges=true
+ProtectSystem=strict
+ProtectHome=true
+ReadWritePaths=/opt/interlink/logs /opt/interlink/jobs /tmp
+PrivateTmp=true
+
+[Install]
+WantedBy=multi-user.target
+```
+
+## Log Management
+
+### Log Rotation Configuration
+
+Create log rotation configuration to prevent log files from growing too large:
+
+```bash title="/etc/logrotate.d/interlink"
+/opt/interlink/logs/*.log {
+    daily
+    rotate 30
+    compress
+    delaycompress
+    missingok
+    notifempty
+    postrotate
+        systemctl reload interlink-oauth2-proxy interlink-api interlink-*-plugin 2>/dev/null || true
+    endscript
+}
+```
+
+## Service Management
+
+### Enable and Start Services
+
+Enable services to start on boot and start them in the correct order:
+
+```bash
+# Enable services to start on boot
+sudo systemctl daemon-reload
+sudo systemctl enable interlink-oauth2-proxy interlink-api interlink-docker-plugin
+
+# Start services in order
+sudo systemctl start interlink-oauth2-proxy
+sudo systemctl start interlink-api
+sudo systemctl start interlink-docker-plugin
+
+# Check service status
+sudo systemctl status interlink-oauth2-proxy
+sudo systemctl status interlink-api
+sudo systemctl status interlink-docker-plugin
+```
+
+### Common Operations
+
+Common systemd operations for managing InterLink services:
+
+```bash
+# View service logs
+sudo journalctl -u interlink-api -f
+sudo journalctl -u interlink-oauth2-proxy -f
+sudo journalctl -u interlink-docker-plugin -f
+
+# Restart a service
+sudo systemctl restart interlink-api
+
+# Stop all InterLink services
+sudo systemctl stop interlink-docker-plugin interlink-api interlink-oauth2-proxy
+
+# Start all InterLink services
+sudo systemctl start interlink-oauth2-proxy interlink-api interlink-docker-plugin
+
+# View service configuration
+sudo systemctl cat interlink-api
+
+# Check service dependencies
+sudo systemctl list-dependencies interlink-api
+```
+
+## Monitoring and Health Checks
+
+### Create Health Check Script
+
+Create a simple health check script:
+
+```bash title="/opt/interlink/bin/health-check.sh"
+#!/bin/bash
+
+# Health check script for InterLink services
+SOCKET_PATH="/opt/interlink/.interlink.sock"
+LOG_FILE="/opt/interlink/logs/health-check.log"
+
+echo "$(date): Starting health check" >> "$LOG_FILE"
+
+# Check if socket exists and is responding
+if [ -S "$SOCKET_PATH" ]; then
+    response=$(curl -s --unix-socket "$SOCKET_PATH" http://unix/pinglink)
+    if [ $? -eq 0 ]; then
+        echo "$(date): Health check passed - $response" >> "$LOG_FILE"
+        exit 0
+    else
+        echo "$(date): Health check failed - no response from socket" >> "$LOG_FILE"
+        exit 1
+    fi
+else
+    echo "$(date): Health check failed - socket not found" >> "$LOG_FILE"
+    exit 1
+fi
+```
+
+```bash
+# Make executable
+sudo chmod +x /opt/interlink/bin/health-check.sh
+sudo chown interlink:interlink /opt/interlink/bin/health-check.sh
+```
+
+### Systemd Timer for Health Checks
+
+Add a systemd timer for regular health checks:
+
+```ini title="/etc/systemd/system/interlink-health-check.service"
+[Unit]
+Description=InterLink Health Check
+After=interlink-api.service
+Requires=interlink-api.service
+
+[Service]
+Type=oneshot
+User=interlink
+Group=interlink
+ExecStart=/opt/interlink/bin/health-check.sh
+```
+
+```ini title="/etc/systemd/system/interlink-health-check.timer"
+[Unit]
+Description=Run InterLink Health Check every 5 minutes
+Requires=interlink-health-check.service
+
+[Timer]
+OnCalendar=*:0/5
+Persistent=true
+
+[Install]
+WantedBy=timers.target
+```
+
+Enable the health check timer:
+
+```bash
+sudo systemctl daemon-reload
+sudo systemctl enable interlink-health-check.timer
+sudo systemctl start interlink-health-check.timer
+```
+
+## Troubleshooting
+
+### Common Issues
+
+```bash
+# Check service status
+sudo systemctl status interlink-api --no-pager -l
+
+# View recent logs
+sudo journalctl -u interlink-api --since "1 hour ago"
+
+# Check configuration syntax
+sudo systemd-analyze verify /etc/systemd/system/interlink-api.service
+
+# View service dependencies
+sudo systemctl list-dependencies interlink-api
+
+# Reset failed state
+sudo systemctl reset-failed interlink-api
+```
+
+### Service Debugging
+
+```bash
+# Run service manually for debugging
+sudo -u interlink /opt/interlink/bin/interlink
+
+# Check environment variables
+sudo systemctl show interlink-api --property=Environment
+
+# View service logs with priority
+sudo journalctl -u interlink-api -p err
+
+# Monitor service activity
+sudo systemctl status interlink-api --lines=50
+```
+
+## Security Considerations
+
+The systemd configuration includes several security features:
+
+1. **Dedicated user**: Services run as non-privileged `interlink` user
+2. **Filesystem protection**: `ProtectSystem` and `ProtectHome` limit filesystem access
+3. **No new privileges**: `NoNewPrivileges` prevents privilege escalation
+4. **Private temp**: `PrivateTmp` provides isolated temporary directories
+5. **Minimal permissions**: `ReadWritePaths` restricts write access to necessary directories
+
+### Additional Security
+
+For additional security, consider:
+
+```bash
+# Set up firewall rules
+sudo ufw allow 30443/tcp comment "OAuth2 Proxy"
+sudo ufw allow from <kubernetes-cluster-cidr> to any port 3000 comment "InterLink API"
+
+# Secure configuration files
+sudo chmod 640 /opt/interlink/config/*
+sudo chown root:interlink /opt/interlink/config/*
+
+# Secure log directory
+sudo chmod 750 /opt/interlink/logs
+sudo chown interlink:interlink /opt/interlink/logs
+```
+
+## Advanced Configuration
+
+### Resource Limits
+
+Add resource limits to service files:
+
+```ini
+[Service]
+# Memory limits
+MemoryMax=2G
+MemoryHigh=1.5G
+
+# CPU limits
+CPUQuota=200%
+
+# Process limits
+LimitNOFILE=65536
+LimitNPROC=4096
+```
+
+### Custom Environment
+
+Set custom environment variables:
+
+```ini
+[Service]
+Environment=LOG_LEVEL=debug
+Environment=CUSTOM_CONFIG=/opt/interlink/custom.yaml
+EnvironmentFile=/opt/interlink/config/env.conf
+```
+
+### Notifications
+
+Configure systemd notifications:
+
+```ini
+[Service]
+Type=notify
+NotifyAccess=all
+WatchdogSec=30
+```
+
+This comprehensive systemd setup provides a robust, secure, and manageable solution for deploying InterLink components in production environments.

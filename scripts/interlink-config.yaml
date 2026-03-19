@@ -1,0 +1,8 @@
+InterlinkAddress: "http://0.0.0.0"
+InterlinkPort: "3000"
+#sidecarURL: "http://plugin"
+SidecarURL: "http://172.17.0.1"
+SidecarPort: "4000"
+VerboseLogging: true
+ErrorsOnlyLogging: false
+DataRootFolder: "~/.interlink"

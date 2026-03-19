@@ -18,23 +18,23 @@ jobs:
       with:
         python-version: '3.x'  # specify the Python version you need
 
-    - name: Install dependencies
-      run: |
-        python -m pip install --upgrade pip
-        pip install -r example/requirements.txt  # if you have a requirements file
-
-    - name: Run script to generate OpenAPI JSON
-      run: python example/create_openapi.py
-
-    - name: Upload json to release
-      uses: svenstaro/upload-release-action@v2
-      with:
-        repo_token: ${{ secrets.GITHUB_TOKEN }}
-        file: ./docs/openapi/openapi.json
-        asset_name: openAPISpec
-        tag: ${{ github.ref }}
-        overwrite: true
-        body: "OpenAPI spec for plugin REST" 
+    # - name: Install dependencies
+    #   run: |
+    #     python -m pip install --upgrade pip
+    #     pip install -r example/requirements.txt  # if you have a requirements file
+    #
+    # - name: Run script to generate OpenAPI JSON
+    #   run: python example/create_openapi.py
+    #
+    # - name: Upload json to release
+    #   uses: svenstaro/upload-release-action@v2
+    #   with:
+    #     repo_token: ${{ secrets.GITHUB_TOKEN }}
+    #     file: ./docs/openapi/openapi.json
+    #     asset_name: openAPISpec
+    #     tag: ${{ github.ref }}
+    #     overwrite: true
+    #     body: "OpenAPI spec for plugin REST" 
     
   Trigger-Docusaurus-Update:
     uses: ./.github/workflows/build_docusaurus.yaml

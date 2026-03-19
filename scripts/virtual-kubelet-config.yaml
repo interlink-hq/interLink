@@ -1,0 +1,16 @@
+InterlinkURL: "http://0.0.0.0"
+InterlinkPort: "3000" 
+VerboseLogging: true
+ErrorsOnlyLogging: false
+ServiceAccount: "virtual-kubelet"
+Namespace: default 
+VKTokenFile: ""
+Resources:
+  CPU: "100"
+  Memory: "128Gi"
+  Pods: "100"
+HTTP:
+  Insecure: true
+KubeletHTTP:
+  Insecure: true
+

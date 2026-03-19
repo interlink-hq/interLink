@@ -1,12 +1,14 @@
 {
   "name": "interlink",
-  "sdk": "go",
+  "engineVersion": "v0.19.2",
+  "sdk": {
+    "source": "go"
+  },
   "dependencies": [
     {
       "name": "k3s",
-      "source": "github.com/marcosnils/daggerverse/k3s@ce8fe35d309bdb29f9983f7d90ea518e724534fe"
+      "source": "github.com/marcosnils/daggerverse/k3s@k3s/v0.1.10",
+      "pin": "28eea1fcf3b6ecb38a628186107760acd717442f"
     }
-  ],
-  "source": ".",
-  "engineVersion": "v0.13.0"
+  ]
 }
