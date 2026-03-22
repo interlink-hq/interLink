@@ -207,6 +207,17 @@ func (p *Provider) addWstunnelClientAnnotation(ctx context.Context, pod *v1.Pod,
 		}
 		pod.Annotations["slurm-job.vk.io/pre-exec"] = script + pod.Annotations["slurm-job.vk.io/pre-exec"]
 		log.G(ctx).Infof("Added full mesh pre-exec script to pod %s/%s", pod.Namespace, pod.Name)
+		if td.PVCBridgePath != "" &&
+			td.FuseNFSURL != "" &&
+			td.SSHPublicKeyURL != "" &&
+			p.config.Network.SSHFSURL != "" &&
+			p.config.Network.SSHPrivateKeyURL != "" {
+			if _, ok := pod.Annotations["slurm-job.vk.io/nfs-mode"]; !ok {
+				pod.Annotations["slurm-job.vk.io/nfs-mode"] = "bridge"
+			}
+			pod.Annotations["slurm-job.vk.io/nfs-bridge-path"] = td.PVCBridgePath
+			pod.Annotations["slurm-job.vk.io/nfs-bridge-pvc"] = td.PVCNFSClaimName
+		}
 
 		clientPriv := "<CLIENT_PRIVATE_KEY>"
 		if strings.TrimSpace(td.ClientPrivateKey) != "" {
@@ -325,6 +336,8 @@ func (p *Provider) generateFullMeshScript(ctx context.Context, td *WstunnelTempl
 	if slirp4netnsURL == "" {
 		slirp4netnsURL = "https://github.com/interlink-hq/interlink-artifacts/raw/main/slirp4netns/v1.2.3/linux-amd64/slirp4netns"
 	}
+	sshfsURL := p.config.Network.SSHFSURL
+	sshPrivateKeyURL := p.config.Network.SSHPrivateKeyURL
 
 	// Get network CIDRs
 	serviceCIDR := p.config.Network.ServiceCIDR
@@ -394,6 +407,8 @@ PersistentKeepalive = %d
 		WireguardGoURL:        wireguardGoURL,
 		WgToolURL:             wgToolURL,
 		Slirp4netnsURL:        slirp4netnsURL,
+		SSHFSURL:              sshfsURL,
+		SSHPrivateKeyURL:      sshPrivateKeyURL,
 		WGConfig:              wgConfig,
 		DNSServiceIP:          dnsServiceIP,
 		RandomPassword:        td.RandomPassword,
@@ -402,6 +417,10 @@ PersistentKeepalive = %d
 		PodCIDRCluster:        podCIDRCluster,
 		ServiceCIDR:           serviceCIDR,
 		UnshareMode:           unshareMode,
+		PVCNFSClaimName:       td.PVCNFSClaimName,
+		PVCNFSServer:          td.PVCNFSServer,
+		PVCNFSPath:            td.PVCNFSPath,
+		PVCBridgePath:         td.PVCBridgePath,
 	}
 
 	// Execute the template

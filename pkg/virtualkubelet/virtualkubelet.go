@@ -7,6 +7,7 @@ import (
 	"embed"
 	"encoding/base64"
 	"encoding/hex"
+	"encoding/json"
 	"fmt"
 	"io"
 	mathrand "math/rand"
@@ -42,7 +43,7 @@ import (
 	k8stypes "k8s.io/apimachinery/pkg/types"
 )
 
-//go:embed templates/wstunnel-template.yaml
+//go:embed all:templates
 var defaultWstunnelTemplate embed.FS
 
 //go:embed all:templates/mesh.sh
@@ -89,6 +90,12 @@ type WstunnelTemplateData struct {
 	WGMTU            int
 	KeepaliveSecs    int
 	ClientPrivateKey string // only if we generated it
+	PVCNFSClaimName  string
+	PVCNFSServer     string
+	PVCNFSPath       string
+	PVCBridgePath    string
+	FuseNFSURL       string
+	SSHPublicKeyURL  string
 }
 
 type PortMapping struct {
@@ -103,6 +110,8 @@ type MeshScriptTemplateData struct {
 	WireguardGoURL        string
 	WgToolURL             string
 	Slirp4netnsURL        string
+	SSHFSURL              string
+	SSHPrivateKeyURL      string
 	WGConfig              string
 	DNSServiceIP          string
 	RandomPassword        string
@@ -111,6 +120,10 @@ type MeshScriptTemplateData struct {
 	PodCIDRCluster        string
 	ServiceCIDR           string
 	UnshareMode           string
+	PVCNFSClaimName       string
+	PVCNFSServer          string
+	PVCNFSPath            string
+	PVCBridgePath         string
 }
 
 // Provider defines the properties of the virtual kubelet provider
@@ -125,7 +138,7 @@ type Provider struct {
 	startTime            time.Time
 	notifier             func(*v1.Pod)
 	onNodeChangeCallback func(*v1.Node)
-	clientSet            *kubernetes.Clientset
+	clientSet            kubernetes.Interface
 	clientHTTPTransport  *http.Transport
 	podIPs               []string
 }
@@ -172,6 +185,42 @@ func findFirstFreeIP(ipList, usedIPs []string, minIP, maxIP int) string {
 	}
 
 	return ""
+}
+
+func (p *Provider) persistPodAnnotations(ctx context.Context, pod *v1.Pod, annotations map[string]string) error {
+	if len(annotations) == 0 {
+		return nil
+	}
+
+	if pod.Annotations == nil {
+		pod.Annotations = make(map[string]string, len(annotations))
+	}
+	for key, value := range annotations {
+		pod.Annotations[key] = value
+	}
+
+	patchData := map[string]interface{}{
+		"metadata": map[string]interface{}{
+			"annotations": annotations,
+		},
+	}
+
+	patchBytes, err := json.Marshal(patchData)
+	if err != nil {
+		return fmt.Errorf("marshal pod annotation patch: %w", err)
+	}
+
+	if _, err := p.clientSet.CoreV1().Pods(pod.Namespace).Patch(
+		ctx,
+		pod.Name,
+		k8stypes.StrategicMergePatchType,
+		patchBytes,
+		metav1.PatchOptions{},
+	); err != nil {
+		return fmt.Errorf("patch pod annotations: %w", err)
+	}
+
+	return nil
 }
 
 func TracerUpdate(ctx *context.Context, name string, pod *v1.Pod) {
@@ -778,8 +827,24 @@ func (p *Provider) createDummyPod(ctx context.Context, originalPod *v1.Pod) (*v1
 		WildcardDNS:    p.config.Network.WildcardDNS,
 	}
 
+	if p.config.Network.FullMesh {
+		nfsMount, err := resolveFirstNFSPersistentVolumeSource(ctx, p.clientSet, originalPod)
+		if err != nil {
+			return nil, nil, fmt.Errorf("resolve NFS-backed PVC for shadow pod: %w", err)
+		}
+		if nfsMount != nil {
+			templateData.PVCNFSClaimName = nfsMount.ClaimName
+			templateData.PVCNFSServer = nfsMount.Server
+			templateData.PVCNFSPath = nfsMount.Path
+			templateData.PVCBridgePath = buildPVCBridgeMountPath(string(originalPod.UID), nfsMount.ClaimName)
+			templateData.FuseNFSURL = p.config.Network.FuseNFSURL
+			templateData.SSHPublicKeyURL = p.config.Network.SSHPublicKeyURL
+		}
+	}
+
 	// if full mesh in the configuration is set to true
 	if p.config.Network.FullMesh {
+		generatedWGAnnotations := make(map[string]string, 2)
 
 		wgMTU := 1280
 		if v := strings.TrimSpace(originalPod.Annotations[annWGMTU]); v != "" {
@@ -801,9 +866,9 @@ func (p *Provider) createDummyPod(ctx context.Context, originalPod *v1.Pod) (*v1
 				return nil, nil, fmt.Errorf("generate server WG keypair: %w", err)
 			}
 			serverPriv = priv
+			generatedWGAnnotations[annWGPrivateKey] = serverPriv
 			log.G(ctx).Infof("[WG] Generated SERVER keypair for %s/%s: public=%s",
 				originalPod.Namespace, originalPod.Name, pub)
-			// (Optionally) you could patch the Pod to persist the generated serverPriv annotation.
 		}
 
 		clientPub := strings.TrimSpace(originalPod.Annotations[annWGPeerPublicKey])
@@ -815,6 +880,7 @@ func (p *Provider) createDummyPod(ctx context.Context, originalPod *v1.Pod) (*v1
 			}
 			clientPub = cPub
 			generatedClientPriv = cPriv
+			generatedWGAnnotations[annWGPeerPublicKey] = clientPub
 			log.G(ctx).Infof("[WG] Generated CLIENT keypair for %s/%s: public=%s private=%s",
 				originalPod.Namespace, originalPod.Name, cPub, cPriv)
 		} else {
@@ -834,6 +900,10 @@ func (p *Provider) createDummyPod(ctx context.Context, originalPod *v1.Pod) (*v1
 		if templateData.WGPrivateKey == "" || templateData.ClientPublicKey == "" {
 			return nil, nil, fmt.Errorf("wireguard keys missing: set %q and %q annotations on pod %s/%s",
 				annWGPrivateKey, annWGPeerPublicKey, originalPod.Namespace, originalPod.Name)
+		}
+
+		if err := p.persistPodAnnotations(ctx, originalPod, generatedWGAnnotations); err != nil {
+			return nil, nil, fmt.Errorf("persist generated WireGuard annotations: %w", err)
 		}
 	}
 
@@ -867,7 +937,11 @@ func (p *Provider) executeWstunnelTemplate(ctx context.Context, data WstunnelTem
 
 	// Fall back to embedded template
 	if templateContent == "" {
-		content, err := defaultWstunnelTemplate.ReadFile("templates/wstunnel-template.yaml")
+		templateName := "templates/wstunnel-template.yaml"
+		if p.config.Network.FullMesh {
+			templateName = "templates/wstunnel-wireguard-template.yaml"
+		}
+		content, err := defaultWstunnelTemplate.ReadFile(templateName)
 		if err != nil {
 			return "", fmt.Errorf("failed to read embedded template: %w", err)
 		}

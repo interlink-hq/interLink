@@ -253,3 +253,147 @@ func TestResolvePersistentVolume(t *testing.T) {
 		assert.Contains(t, err.Error(), "is not bound yet")
 	})
 }
+
+func TestResolveFirstNFSPersistentVolumeSource(t *testing.T) {
+	t.Run("returns first NFS-backed PVC source from pod volumes", func(t *testing.T) {
+		client := fake.NewSimpleClientset(
+			&v1.PersistentVolumeClaim{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      "shared-data",
+					Namespace: "default",
+				},
+				Spec: v1.PersistentVolumeClaimSpec{
+					VolumeName: "shared-data-pv",
+				},
+			},
+			&v1.PersistentVolume{
+				ObjectMeta: metav1.ObjectMeta{
+					Name: "shared-data-pv",
+				},
+				Spec: v1.PersistentVolumeSpec{
+					PersistentVolumeSource: v1.PersistentVolumeSource{
+						NFS: &v1.NFSVolumeSource{
+							Server: "10.0.0.15",
+							Path:   "/exports/shared-data",
+						},
+					},
+				},
+			},
+		)
+
+		pod := &v1.Pod{
+			ObjectMeta: metav1.ObjectMeta{
+				Name:      "test-pod",
+				Namespace: "default",
+			},
+			Spec: v1.PodSpec{
+				Volumes: []v1.Volume{
+					{
+						Name: "data",
+						VolumeSource: v1.VolumeSource{
+							PersistentVolumeClaim: &v1.PersistentVolumeClaimVolumeSource{
+								ClaimName: "shared-data",
+							},
+						},
+					},
+				},
+			},
+		}
+
+		src, err := resolveFirstNFSPersistentVolumeSource(context.Background(), client, pod)
+		require.NoError(t, err)
+		require.NotNil(t, src)
+		assert.Equal(t, "shared-data", src.ClaimName)
+		assert.Equal(t, "10.0.0.15", src.Server)
+		assert.Equal(t, "/exports/shared-data", src.Path)
+	})
+
+	t.Run("ignores PVCs backed by non-NFS volumes", func(t *testing.T) {
+		client := fake.NewSimpleClientset(
+			&v1.PersistentVolumeClaim{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      "block-data",
+					Namespace: "default",
+				},
+				Spec: v1.PersistentVolumeClaimSpec{
+					VolumeName: "block-data-pv",
+				},
+			},
+			&v1.PersistentVolume{
+				ObjectMeta: metav1.ObjectMeta{
+					Name: "block-data-pv",
+				},
+				Spec: v1.PersistentVolumeSpec{
+					PersistentVolumeSource: v1.PersistentVolumeSource{
+						HostPath: &v1.HostPathVolumeSource{
+							Path: "/tmp/block-data",
+						},
+					},
+				},
+			},
+		)
+
+		pod := &v1.Pod{
+			ObjectMeta: metav1.ObjectMeta{
+				Name:      "test-pod",
+				Namespace: "default",
+			},
+			Spec: v1.PodSpec{
+				Volumes: []v1.Volume{
+					{
+						Name: "data",
+						VolumeSource: v1.VolumeSource{
+							PersistentVolumeClaim: &v1.PersistentVolumeClaimVolumeSource{
+								ClaimName: "block-data",
+							},
+						},
+					},
+				},
+			},
+		}
+
+		src, err := resolveFirstNFSPersistentVolumeSource(context.Background(), client, pod)
+		require.NoError(t, err)
+		assert.Nil(t, src)
+	})
+}
+
+func TestBuildPVCBridgeMountPath(t *testing.T) {
+	assert.Equal(t,
+		"/tmp/interlink-pvc-bridge/pod-uid-123/shared-data",
+		buildPVCBridgeMountPath("pod-uid-123", "shared-data"),
+	)
+	assert.Equal(t,
+		"/tmp/interlink-pvc-bridge/unknown-pod/unknown-pvc",
+		buildPVCBridgeMountPath("", ""),
+	)
+}
+
+func TestPersistPodAnnotations(t *testing.T) {
+	pod := &v1.Pod{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      "offloaded-pod",
+			Namespace: "default",
+		},
+	}
+
+	client := fake.NewSimpleClientset(pod.DeepCopy())
+	provider := Provider{
+		clientSet: client,
+	}
+
+	annotations := map[string]string{
+		annWGPrivateKey:    "server-private",
+		annWGPeerPublicKey: "client-public",
+	}
+
+	err := provider.persistPodAnnotations(context.Background(), pod, annotations)
+	require.NoError(t, err)
+	assert.Equal(t, annotations[annWGPrivateKey], pod.Annotations[annWGPrivateKey])
+	assert.Equal(t, annotations[annWGPeerPublicKey], pod.Annotations[annWGPeerPublicKey])
+
+	persisted, err := client.CoreV1().Pods("default").Get(context.Background(), "offloaded-pod", metav1.GetOptions{})
+	require.NoError(t, err)
+	assert.Equal(t, annotations[annWGPrivateKey], persisted.Annotations[annWGPrivateKey])
+	assert.Equal(t, annotations[annWGPeerPublicKey], persisted.Annotations[annWGPeerPublicKey])
+}

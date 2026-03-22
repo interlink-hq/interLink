@@ -116,9 +116,17 @@ func TestNetwork_Configuration(t *testing.T) {
 		WildcardDNS:          "*.example.com",
 		WstunnelTemplatePath: "/path/to/template",
 		WstunnelCommand:      "wstunnel client --remote-addr %s",
+		FuseNFSURL:           "https://example.com/fuse-nfs",
+		SSHFSURL:             "https://example.com/sshfs-bin",
+		SSHPublicKeyURL:      "https://example.com/id_ed25519.pub",
+		SSHPrivateKeyURL:     "https://example.com/id_ed25519",
 	}
 
 	assert.True(t, network.EnableTunnel)
 	assert.Equal(t, "*.example.com", network.WildcardDNS)
 	assert.NotEmpty(t, network.WstunnelCommand)
+	assert.Equal(t, "https://example.com/fuse-nfs", network.FuseNFSURL)
+	assert.Equal(t, "https://example.com/sshfs-bin", network.SSHFSURL)
+	assert.Equal(t, "https://example.com/id_ed25519.pub", network.SSHPublicKeyURL)
+	assert.Equal(t, "https://example.com/id_ed25519", network.SSHPrivateKeyURL)
 }

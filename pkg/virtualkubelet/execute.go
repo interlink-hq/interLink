@@ -13,6 +13,7 @@ import (
 	"net/http"
 	"net/url"
 	"os"
+	"path/filepath"
 	"regexp"
 	"strconv"
 	"strings"
@@ -834,6 +835,54 @@ func resolvePersistentVolume(
 	}
 
 	return pvc, pv, nil
+}
+
+type nfsPersistentVolumeSource struct {
+	ClaimName string
+	Server    string
+	Path      string
+}
+
+func buildPVCBridgeMountPath(podUID, claimName string) string {
+	if podUID == "" {
+		podUID = "unknown-pod"
+	}
+	if claimName == "" {
+		claimName = "unknown-pvc"
+	}
+
+	return filepath.Join("/tmp", "interlink-pvc-bridge", podUID, claimName)
+}
+
+func resolveFirstNFSPersistentVolumeSource(
+	ctx context.Context,
+	client kubernetes.Interface,
+	pod *v1.Pod,
+) (*nfsPersistentVolumeSource, error) {
+	for _, volume := range pod.Spec.Volumes {
+		if volume.PersistentVolumeClaim == nil {
+			continue
+		}
+
+		pvc, pv, err := resolvePersistentVolume(ctx, client, pod.Namespace, volume.PersistentVolumeClaim.ClaimName)
+		if err != nil {
+			return nil, err
+		}
+		if pv.Spec.NFS == nil {
+			continue
+		}
+		if pv.Spec.NFS.Server == "" || pv.Spec.NFS.Path == "" {
+			return nil, fmt.Errorf("persistentvolume %s backing %s/%s is missing NFS server/path", pv.Name, pod.Namespace, pvc.Name)
+		}
+
+		return &nfsPersistentVolumeSource{
+			ClaimName: pvc.Name,
+			Server:    pv.Spec.NFS.Server,
+			Path:      pv.Spec.NFS.Path,
+		}, nil
+	}
+
+	return nil, nil
 }
 
 func resolveEnvRefs(

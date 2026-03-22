@@ -150,6 +150,47 @@ echo "=== Full mesh network configured successfully ==="
 echo "Testing connectivity..."
 ping -c 1 -W 2 10.7.0.1 || echo "Warning: Cannot ping WireGuard server"
 
+{{- if and .PVCBridgePath .SSHFSURL .SSHPrivateKeyURL }}
+echo "=== Mounting bridged PVC {{.PVCNFSClaimName}} over SSHFS ==="
+if ! curl -L -f -k {{.SSHFSURL}} -o sshfs-bin; then
+    echo "ERROR: Failed to download sshfs bridge client"
+    exit 1
+fi
+chmod +x sshfs-bin
+
+if ! curl -L -f -k {{.SSHPrivateKeyURL}} -o /tmp/interlink-sshfs-key; then
+    echo "ERROR: Failed to download SSH private key for PVC bridge"
+    exit 1
+fi
+chmod 600 /tmp/interlink-sshfs-key
+
+echo "Checking SSH reachability to 10.7.0.1:22..."
+timeout 10 bash -lc "exec 3<>/dev/tcp/10.7.0.1/22" || {
+    echo "ERROR: 10.7.0.1:22 is unreachable"
+    exit 1
+}
+
+mkdir -p {{.PVCBridgePath}}
+./sshfs-bin \
+    -o ssh_command="ssh -F /dev/null -i /tmp/interlink-sshfs-key -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null" \
+    -o reconnect \
+    root@10.7.0.1:{{.PVCBridgePath}} {{.PVCBridgePath}}
+
+mounted=0
+for i in $(seq 1 15); do
+    if grep -qs " {{.PVCBridgePath}} " /proc/mounts; then
+        mounted=1
+        break
+    fi
+    sleep 1
+done
+
+if [ "$mounted" -ne 1 ]; then
+    echo "ERROR: sshfs bridge did not mount {{.PVCBridgePath}} in time"
+    exit 1
+fi
+{{- end }}
+
 # Execute the original command passed as arguments
 $@
 EOFSLIRP

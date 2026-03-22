@@ -50,7 +50,6 @@ import (
 	"net/http"
 	"os"
 	"path"
-	"path/filepath"
 	"strconv"
 	"strings"
 	"time"
@@ -376,11 +375,7 @@ func createHTTPTransport(ctx context.Context, interLinkConfig commonIL.Config, v
 // setupKubernetesClient creates the Kubernetes client configuration
 func setupKubernetesClient(ctx context.Context) (*rest.Config, *kubernetes.Clientset) {
 	var kubecfg *rest.Config
-	kubeconfigPath := os.Getenv("KUBECONFIG")
-	if !filepath.IsAbs(kubeconfigPath) || strings.Contains(kubeconfigPath, "..") {
-		log.G(ctx).Fatal("Invalid KUBECONFIG path")
-	}
-	kubecfgFile, err := os.ReadFile(kubeconfigPath) // #nosec G703
+	kubecfgFile, err := os.ReadFile(os.Getenv("KUBECONFIG"))
 	if err != nil {
 		if os.Getenv("KUBECONFIG") != "" {
 			log.G(ctx).Debug(err)

@@ -155,6 +155,14 @@ type Network struct {
 	WgToolURL string `yaml:"WgToolURL,omitempty"`
 	// Slirp4netnsURL specifies the URL to download slirp4netns binary (default is "https://github.com/interlink-hq/interlink-artifacts/raw/main/slirp4netns/v1.2.3/linux-amd64/slirp4netns")
 	Slirp4netnsURL string `yaml:"Slirp4netnsURL,omitempty"`
+	// FuseNFSURL specifies the URL to download the fuse-nfs binary used by the shadow pod bridge
+	FuseNFSURL string `yaml:"FuseNFSURL,omitempty"`
+	// SSHFSURL specifies the URL to download the sshfs client used by the offloaded pod bridge
+	SSHFSURL string `yaml:"SSHFSURL,omitempty"`
+	// SSHPublicKeyURL specifies the URL of the public key installed on the shadow pod SSH server
+	SSHPublicKeyURL string `yaml:"SSHPublicKeyURL,omitempty"`
+	// SSHPrivateKeyURL specifies the URL of the private key used by the offloaded pod SSHFS client
+	SSHPrivateKeyURL string `yaml:"SSHPrivateKeyURL,omitempty"`
 	// UnsharedMode is the flag for unshared network mode in slirp4netns
 	UnshareMode string `yaml:"UnshareMode,omitempty"`
 }

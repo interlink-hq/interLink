@@ -5,6 +5,7 @@ import (
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"net/url"
 	"testing"
 	"time"
 
@@ -14,6 +15,33 @@ import (
 	"go.opentelemetry.io/otel/sdk/trace"
 	"go.opentelemetry.io/otel/sdk/trace/tracetest"
 )
+
+type roundTripperFunc func(*http.Request) (*http.Response, error)
+
+func (f roundTripperFunc) RoundTrip(req *http.Request) (*http.Response, error) {
+	return f(req)
+}
+
+func newSafeExternalURLClient(t *testing.T, server *httptest.Server) (*http.Client, string) {
+	t.Helper()
+
+	targetURL, err := url.Parse(server.URL)
+	require.NoError(t, err)
+
+	baseTransport, ok := server.Client().Transport.(*http.Transport)
+	require.True(t, ok)
+
+	client := &http.Client{
+		Transport: roundTripperFunc(func(req *http.Request) (*http.Response, error) {
+			req = req.Clone(req.Context())
+			req.URL.Scheme = targetURL.Scheme
+			req.URL.Host = targetURL.Host
+			return baseTransport.RoundTrip(req)
+		}),
+	}
+
+	return client, "http://example.com"
+}
 
 func TestGetSessionContext(t *testing.T) {
 	tests := []struct {
@@ -88,6 +116,46 @@ func TestGetSessionContextMessage(t *testing.T) {
 	}
 }
 
+func TestIsSafeURL(t *testing.T) {
+	tests := []struct {
+		name string
+		raw  string
+		want bool
+	}{
+		{
+			name: "allow https url",
+			raw:  "https://example.com/status",
+			want: true,
+		},
+		{
+			name: "allow http+unix sidecar endpoint",
+			raw:  "http+unix:///status",
+			want: true,
+		},
+		{
+			name: "block localhost http",
+			raw:  "http://localhost:8080/status",
+			want: false,
+		},
+		{
+			name: "block internal host",
+			raw:  "https://api.internal/status",
+			want: false,
+		},
+		{
+			name: "block unsupported scheme",
+			raw:  "file:///tmp/socket",
+			want: false,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			assert.Equal(t, tt.want, isSafeURL(tt.raw))
+		})
+	}
+}
+
 func setupTestTracer() (*trace.TracerProvider, func()) {
 	exporter := tracetest.NewInMemoryExporter()
 	tp := trace.NewTracerProvider(
@@ -126,15 +194,15 @@ func TestReqWithError_HeadersSet(t *testing.T) {
 	defer testServer.Close()
 
 	// Create request to test server
-	req, err := http.NewRequest(http.MethodGet, testServer.URL, nil)
+	client, safeURL := newSafeExternalURLClient(t, testServer)
+
+	req, err := http.NewRequest(http.MethodGet, safeURL, nil)
 	require.NoError(t, err)
 
 	// Create response recorder
 	w := httptest.NewRecorder()
 
 	// Create HTTP client
-	client := testServer.Client()
-
 	// Call ReqWithError
 	sessionContext := "Request-test-123"
 	startTime := time.Now().UnixMicro()
@@ -198,11 +266,12 @@ func TestReqWithError_ErrorHandling(t *testing.T) {
 			}))
 			defer testServer.Close()
 
-			req, err := http.NewRequest(http.MethodGet, testServer.URL, nil)
+			client, safeURL := newSafeExternalURLClient(t, testServer)
+
+			req, err := http.NewRequest(http.MethodGet, safeURL, nil)
 			require.NoError(t, err)
 
 			w := httptest.NewRecorder()
-			client := testServer.Client()
 			startTime := time.Now().UnixMicro()
 
 			_, err = ReqWithError(
@@ -283,11 +352,12 @@ func TestReqWithError_ResponseModes(t *testing.T) {
 			}))
 			defer testServer.Close()
 
-			req, err := http.NewRequest(http.MethodGet, testServer.URL, nil)
+			client, safeURL := newSafeExternalURLClient(t, testServer)
+
+			req, err := http.NewRequest(http.MethodGet, safeURL, nil)
 			require.NoError(t, err)
 
 			w := httptest.NewRecorder()
-			client := testServer.Client()
 			startTime := time.Now().UnixMicro()
 
 			returnedData, err := ReqWithError(

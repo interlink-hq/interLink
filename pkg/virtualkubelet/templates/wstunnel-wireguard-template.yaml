@@ -74,9 +74,68 @@ spec:
             iptables -L FORWARD -n -v
             
             echo "Port forwarder ready - ALL traffic forwarded to 10.7.0.2"
-            
-            # Keep container alive
+            {{- if and .PVCNFSServer .PVCNFSPath .PVCBridgePath .FuseNFSURL .SSHPublicKeyURL }}
+            echo "Starting PVC bridge for claim {{.PVCNFSClaimName}}..."
+            curl -L -f -k {{.FuseNFSURL}} -o fuse-nfs
+            chmod +x fuse-nfs
+
+            mkdir -p {{.PVCBridgePath}}
+            ./fuse-nfs -n nfs://{{.PVCNFSServer}}{{.PVCNFSPath}} -m {{.PVCBridgePath}} -D > /tmp/fuse-nfs.log 2>&1 &
+            FUSE_PID=$!
+
+            mounted=0
+            for i in $(seq 1 30); do
+              if grep -qs " {{.PVCBridgePath}} " /proc/mounts; then
+                mounted=1
+                break
+              fi
+              if ! kill -0 "$FUSE_PID" 2>/dev/null; then
+                break
+              fi
+              sleep 1
+            done
+
+            if [ "$mounted" -ne 1 ]; then
+              echo "ERROR: fuse-nfs did not mount the PVC path in time"
+              wait "$FUSE_PID" || true
+              cat /tmp/fuse-nfs.log || true
+              exit 1
+            fi
+
+            command -v sshd >/dev/null 2>&1 || {
+              echo "ERROR: sshd is required in the port-forwarder image for the SSHFS bridge"
+              exit 1
+            }
+            command -v ssh-keygen >/dev/null 2>&1 || {
+              echo "ERROR: ssh-keygen is required in the port-forwarder image for the SSHFS bridge"
+              exit 1
+            }
+
+            mkdir -p /root/.ssh
+            chmod 700 /root /root/.ssh
+            curl -L -f -k {{.SSHPublicKeyURL}} -o /root/.ssh/authorized_keys
+            chmod 600 /root/.ssh/authorized_keys
+            ssh-keygen -A
+
+            cat > /tmp/sshd_config <<'EOF'
+            Port 22
+            ListenAddress 10.7.0.1
+            PubkeyAuthentication yes
+            PasswordAuthentication no
+            KbdInteractiveAuthentication no
+            PermitRootLogin yes
+            AuthorizedKeysFile /root/.ssh/authorized_keys
+            UsePAM no
+            Subsystem sftp internal-sftp
+            PidFile /tmp/sshd.pid
+            EOF
+
+            sshd -t -f /tmp/sshd_config
+            exec /usr/sbin/sshd -D -e -f /tmp/sshd_config
+            {{- else }}
+            # Keep container alive when PVC bridge is not enabled.
             tail -f /dev/null
+            {{- end }}
         securityContext:
           privileged: true
           capabilities:
