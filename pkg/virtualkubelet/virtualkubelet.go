@@ -317,15 +317,20 @@ func NodeConditionWithInterlink(ready bool, interlinkStatus v1.ConditionStatus, 
 }
 
 func GetResources(config Config) v1.ResourceList {
-	gpuCount := map[string]int{}
-	fpgaCount := map[string]int{}
+	gpuCount := map[string]resource.Quantity{}
+	fpgaCount := map[string]resource.Quantity{}
 
 	for _, accelerator := range config.Resources.Accelerators {
+		q := resource.MustParse(accelerator.Available)
 		switch accelerator.ResourceType {
 		case nvidiaGPU, amdGPU, intelGPU:
-			gpuCount[accelerator.ResourceType] += accelerator.Available
+			existing := gpuCount[accelerator.ResourceType]
+			existing.Add(q)
+			gpuCount[accelerator.ResourceType] = existing
 		case xilinxFPGA, intelFPGA:
-			fpgaCount[accelerator.ResourceType] += accelerator.Available
+			existing := fpgaCount[accelerator.ResourceType]
+			existing.Add(q)
+			fpgaCount[accelerator.ResourceType] = existing
 		}
 	}
 
@@ -335,15 +340,15 @@ func GetResources(config Config) v1.ResourceList {
 		"pods":   resource.MustParse(config.Resources.Pods),
 	}
 
-	for resourceType, count := range gpuCount {
-		if count > 0 {
-			resourceList[v1.ResourceName(resourceType)] = *resource.NewQuantity(int64(count), resource.DecimalSI)
+	for resourceType, q := range gpuCount {
+		if !q.IsZero() {
+			resourceList[v1.ResourceName(resourceType)] = q
 		}
 	}
 
-	for resourceType, count := range fpgaCount {
-		if count > 0 {
-			resourceList[v1.ResourceName(resourceType)] = *resource.NewQuantity(int64(count), resource.DecimalSI)
+	for resourceType, q := range fpgaCount {
+		if !q.IsZero() {
+			resourceList[v1.ResourceName(resourceType)] = q
 		}
 	}
 
@@ -367,22 +372,12 @@ func SetDefaultResource(config *Config) {
 	}
 
 	for i, accelerator := range config.Resources.Accelerators {
-		if accelerator.Available == 0 {
+		if accelerator.Available == "" {
 			switch accelerator.ResourceType {
 			case nvidiaGPU, amdGPU, intelGPU:
-				defaultGPUCapacity, err := strconv.Atoi(DefaultGPUCapacity)
-				if err != nil {
-					log.G(context.Background()).Errorf("Invalid default GPU capacity: %v", err)
-					defaultGPUCapacity = 0
-				}
-				config.Resources.Accelerators[i].Available = defaultGPUCapacity
+				config.Resources.Accelerators[i].Available = DefaultGPUCapacity
 			case xilinxFPGA, intelFPGA:
-				defaultFPGACapacity, err := strconv.Atoi(DefaultFPGACapacity)
-				if err != nil {
-					log.G(context.Background()).Errorf("Invalid default FPGA capacity: %v", err)
-					defaultFPGACapacity = 0
-				}
-				config.Resources.Accelerators[i].Available = defaultFPGACapacity
+				config.Resources.Accelerators[i].Available = DefaultFPGACapacity
 			}
 		}
 	}
@@ -573,8 +568,7 @@ func LoadConfig(ctx context.Context, providerConfig string) (config Config, err 
 		return config, fmt.Errorf("invalid pods value %v", config.Resources.Pods)
 	}
 	for _, accelerator := range config.Resources.Accelerators {
-		quantity := resource.NewQuantity(int64(accelerator.Available), resource.DecimalSI)
-		if _, err = resource.ParseQuantity(quantity.String()); err != nil {
+		if _, err = resource.ParseQuantity(accelerator.Available); err != nil {
 			return config, fmt.Errorf("invalid value for accelerator %v (model: %v): %v", accelerator.ResourceType, accelerator.Model, err)
 		}
 	}
