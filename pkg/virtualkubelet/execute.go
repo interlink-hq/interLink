@@ -1178,9 +1178,17 @@ func checkPodsStatus(ctx context.Context, p *Provider, pod *v1.Pod, token string
 		// if the PodUID match with the one in etcd we are talking of the same thing. GOOD
 		if podRemoteStatus.PodUID == string(podRefInCluster.UID) {
 			// check if the pod is already in a terminal state (Failed or Succeeded)
-			if p.pods[podRemoteStatus.PodUID].Status.Phase == v1.PodFailed || p.pods[podRemoteStatus.PodUID].Status.Phase == v1.PodSucceeded {
-				if podRefInCluster.Status.Phase == p.pods[podRemoteStatus.PodUID].Status.Phase {
-					log.G(ctx).Debug("Pod " + podRemoteStatus.PodName + " is already in phase " + string(p.pods[podRemoteStatus.PodUID].Status.Phase))
+			p.podsMu.RLock()
+			existingPod, podExists := p.pods[podRemoteStatus.PodUID]
+			var currentPhase v1.PodPhase
+			if podExists {
+				currentPhase = existingPod.Status.Phase
+			}
+			p.podsMu.RUnlock()
+
+			if podExists && (currentPhase == v1.PodFailed || currentPhase == v1.PodSucceeded) {
+				if podRefInCluster.Status.Phase == currentPhase {
+					log.G(ctx).Debug("Pod " + podRemoteStatus.PodName + " is already in phase " + string(currentPhase))
 					return nil, err
 				}
 			}

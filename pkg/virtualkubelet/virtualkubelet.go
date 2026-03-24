@@ -15,6 +15,7 @@ import (
 	"os"
 	"strconv"
 	"strings"
+	"sync"
 	"text/template"
 	"time"
 
@@ -121,6 +122,7 @@ type Provider struct {
 	internalIP           string
 	daemonEndpointPort   int32
 	pods                 map[string]*v1.Pod
+	podsMu               sync.RWMutex
 	config               Config
 	startTime            time.Time
 	notifier             func(*v1.Pod)
@@ -195,7 +197,7 @@ func TracerUpdate(ctx *context.Context, name string, pod *v1.Pod) {
 	defer types.SetDurationSpan(start, span)
 }
 
-func PodPhase(_ Provider, phase string, podIP string) (v1.PodStatus, error) {
+func PodPhase(_ *Provider, phase string, podIP string) (v1.PodStatus, error) {
 	now := metav1.NewTime(time.Now())
 
 	var podPhase v1.PodPhase
@@ -1483,7 +1485,7 @@ func (p *Provider) CreatePod(ctx context.Context, pod *v1.Pod) error {
 	// in case we have initContainers we need to stop main containers from executing for now ...
 	if len(pod.Spec.InitContainers) > 0 {
 		// Pods with init containers should be Pending until init containers complete
-		status, err := PodPhase(*p, "Pending", podIP)
+		status, err := PodPhase(p, "Pending", podIP)
 		if err != nil {
 			log.G(ctx).Error(err)
 			return err
@@ -1503,7 +1505,7 @@ func (p *Provider) CreatePod(ctx context.Context, pod *v1.Pod) error {
 	} else {
 
 		// if no init containers are there, go head and set phase to initialized
-		status, err := PodPhase(*p, "Pending", podIP)
+		status, err := PodPhase(p, "Pending", podIP)
 		if err != nil {
 			log.G(ctx).Error(err)
 			return err
@@ -1529,7 +1531,7 @@ func (p *Provider) CreatePod(ctx context.Context, pod *v1.Pod) error {
 				creationError := err.Error()
 
 				// Set pod to Failed state
-				pod.Status, err = PodPhase(*p, "Failed", podIP)
+				pod.Status, err = PodPhase(p, "Failed", podIP)
 				if err != nil {
 					log.G(ctx).Error(err)
 					return
@@ -1572,7 +1574,9 @@ func (p *Provider) CreatePod(ctx context.Context, pod *v1.Pod) error {
 		})
 	}
 
+	p.podsMu.Lock()
 	p.pods[string(key)] = pod
+	p.podsMu.Unlock()
 
 	return nil
 }
@@ -1594,7 +1598,10 @@ func (p *Provider) DeletePod(ctx context.Context, pod *v1.Pod) (err error) {
 
 	key := pod.UID
 
-	if _, exists := p.pods[string(key)]; !exists {
+	p.podsMu.RLock()
+	_, exists := p.pods[string(key)]
+	p.podsMu.RUnlock()
+	if !exists {
 		return errdefs.NotFound("pod not found")
 	}
 
@@ -1645,7 +1652,9 @@ func (p *Provider) DeletePod(ctx context.Context, pod *v1.Pod) (err error) {
 	}
 
 	// delete from p.pods
+	p.podsMu.Lock()
 	delete(p.pods, string(key))
+	p.podsMu.Unlock()
 
 	return nil
 }
@@ -1672,7 +1681,10 @@ func (p *Provider) GetPodByUID(ctx context.Context, namespace, name string, uid 
 
 	log.G(ctx).Infof("receive GetPod %q", name)
 
-	if pod, ok := p.pods[string(uid)]; ok {
+	p.podsMu.RLock()
+	pod, ok := p.pods[string(uid)]
+	p.podsMu.RUnlock()
+	if ok {
 		return pod, nil
 	}
 
@@ -1715,9 +1727,11 @@ func (p *Provider) GetPods(ctx context.Context) ([]*v1.Pod, error) {
 
 	var pods []*v1.Pod
 
+	p.podsMu.RLock()
 	for _, pod := range p.pods {
 		pods = append(pods, pod)
 	}
+	p.podsMu.RUnlock()
 
 	go p.statusLoop(ctx)
 	return pods, nil
@@ -1768,23 +1782,26 @@ func (p *Provider) statusLoop(ctx context.Context) {
 			token = string(b)
 		}
 
+		// Take a snapshot of the pods map under a read lock so that concurrent
+		// CreatePod/DeletePod calls do not race with the iteration.
+		p.podsMu.RLock()
+		podsCopy := make([]*v1.Pod, 0, len(p.pods))
 		for _, pod := range p.pods {
+			podsCopy = append(podsCopy, pod)
+		}
+		p.podsMu.RUnlock()
+
+		for _, pod := range podsCopy {
 			if pod.Status.Phase != "Initializing" {
+				// Skip re-querying remote for pods already in a terminal state.
 				if pod.Status.Phase == v1.PodFailed || pod.Status.Phase == v1.PodSucceeded {
-					if p.pods[string(pod.UID)].Status.Phase != pod.Status.Phase {
-						_, err := checkPodsStatus(ctx, p, pod, token, p.config)
-						if err != nil {
-							log.G(ctx).Error(err)
-						}
-						p.asyncUpdate(ctx, pod)
-					}
-				} else {
-					_, err := checkPodsStatus(ctx, p, pod, token, p.config)
-					if err != nil {
-						log.G(ctx).Error(err)
-					}
-					p.asyncUpdate(ctx, pod)
+					continue
 				}
+				_, err := checkPodsStatus(ctx, p, pod, token, p.config)
+				if err != nil {
+					log.G(ctx).Error(err)
+				}
+				p.asyncUpdate(ctx, pod)
 			}
 		}
 
@@ -1863,7 +1880,14 @@ func (p *Provider) GetStatsSummary(ctx context.Context) (*stats.Summary, error) 
 	}
 
 	// Populate the Summary object with dummy stats for each pod known by this provider.
+	p.podsMu.RLock()
+	podsCopy := make([]*v1.Pod, 0, len(p.pods))
 	for _, pod := range p.pods {
+		podsCopy = append(podsCopy, pod)
+	}
+	p.podsMu.RUnlock()
+
+	for _, pod := range podsCopy {
 		var (
 			// totalUsageNanoCores will be populated with the sum of the values of UsageNanoCores computes across all containers in the pod.
 			totalUsageNanoCores uint64
@@ -1948,7 +1972,9 @@ func (p *Provider) RetrievePodsFromCluster(ctx context.Context) error {
 		}
 		for _, pod := range podsList.Items {
 			if CheckIfAnnotationExists(&pod, "JobID") && p.nodeName == pod.Spec.NodeName {
+				p.podsMu.Lock()
 				p.pods[string(pod.UID)] = &pod
+				p.podsMu.Unlock()
 				p.notifier(&pod)
 			}
 		}
