@@ -70,12 +70,13 @@ const (
 
 // Annotations for WireGuard and WStunnel configuration
 const (
-	annWGPrivateKey       = "interlink.eu/wg-private-key"       // base64 or plain (your choice)
-	annWGPeerPublicKey    = "interlink.eu/wg-peer-public-key"   // client's public key (server peer)
-	annWGMTU              = "interlink.eu/wg-mtu"               // optional, default 1280
-	annWgKeepaliveSeconds = "interlink.eu/wg-keepalive-seconds" // optional, default 25
-	annWSTunnelClientCmds = "interlink.eu/wstunnel-client-commands"
-	annWGClientSnippet    = "interlink.eu/wireguard-client-snippet"
+	annWGPrivateKey        = "interlink.eu/wg-private-key"       // base64 or plain (your choice)
+	annWGPeerPublicKey     = "interlink.eu/wg-peer-public-key"   // client's public key (server peer)
+	annWGMTU               = "interlink.eu/wg-mtu"               // optional, default 1280
+	annWgKeepaliveSeconds  = "interlink.eu/wg-keepalive-seconds" // optional, default 25
+	annWSTunnelClientCmds  = "interlink.eu/wstunnel-client-commands"
+	annWGClientSnippet     = "interlink.eu/wireguard-client-snippet"
+	annMeshNetworkDisabled = "interlink.eu/mesh-network" // set to "disabled" to opt out of mesh networking
 )
 
 type WstunnelTemplateData struct {
@@ -778,8 +779,8 @@ func (p *Provider) createDummyPod(ctx context.Context, originalPod *v1.Pod) (*v1
 		WildcardDNS:    p.config.Network.WildcardDNS,
 	}
 
-	// if full mesh in the configuration is set to true
-	if p.config.Network.FullMesh {
+	// if full mesh in the configuration is set to true and not disabled per-pod
+	if p.config.Network.FullMesh && !isMeshNetworkingDisabled(originalPod) {
 
 		wgMTU := 1280
 		if v := strings.TrimSpace(originalPod.Annotations[annWGMTU]); v != "" {
@@ -1318,6 +1319,12 @@ func (p *Provider) shouldCreateWstunnel(pod *v1.Pod) bool {
 		pod.Annotations["interlink.eu/pod-vpn"] == ""
 }
 
+// isMeshNetworkingDisabled returns true when the pod has opted out of mesh networking
+// via the "interlink.eu/mesh-network: disabled" annotation.
+func isMeshNetworkingDisabled(pod *v1.Pod) bool {
+	return strings.EqualFold(strings.TrimSpace(pod.Annotations[annMeshNetworkDisabled]), "disabled")
+}
+
 // handleWstunnelCreation creates wstunnel infrastructure and returns the pod IP
 func (p *Provider) handleWstunnelCreation(ctx context.Context, pod *v1.Pod) (string, error) {
 	wstunnelName := pod.Name + "-wstunnel"
@@ -1402,14 +1409,14 @@ func (p *Provider) CreatePod(ctx context.Context, pod *v1.Pod) error {
 	podIP := "127.0.0.1"
 
 	// Handle wstunnel creation if needed
-	if p.shouldCreateWstunnel(pod) || p.config.Network.FullMesh {
+	if p.shouldCreateWstunnel(pod) || (p.config.Network.FullMesh && !isMeshNetworkingDisabled(pod)) {
 		var err error
 		podIP, err = p.handleWstunnelCreation(ctx, pod)
 		if err != nil {
 			return err
 		}
 
-		if p.config.Network.FullMesh {
+		if p.config.Network.FullMesh && !isMeshNetworkingDisabled(pod) {
 			if pod.Annotations == nil {
 				pod.Annotations = make(map[string]string)
 			}
@@ -1599,7 +1606,7 @@ func (p *Provider) DeletePod(ctx context.Context, pod *v1.Pod) (err error) {
 	}
 
 	// Clean up wstunnel resources if tunnel is enabled and they exist and no VPN annotation
-	if p.shouldCreateWstunnel(pod) || p.config.Network.FullMesh {
+	if p.shouldCreateWstunnel(pod) || (p.config.Network.FullMesh && !isMeshNetworkingDisabled(pod)) {
 		// Use the same helper function to compute resource names
 		resourceBaseName, wstunnelNS := computeWstunnelResourceNames(pod.Name, pod.Namespace)
 		log.G(ctx).Infof("Cleaning up wstunnel resources: name=%s, namespace=%s", resourceBaseName, wstunnelNS)

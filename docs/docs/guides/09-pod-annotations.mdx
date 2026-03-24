@@ -13,6 +13,7 @@ This document provides a comprehensive reference for all pod annotations availab
 InterLink supports several categories of annotations:
 
 - **[VPN & Networking](#vpn--networking)**: Configure pod IP allocation and VPN connectivity
+- **[Mesh Networking](#mesh-networking)**: Control bidirectional mesh networking for offloaded pods
 - **[Wstunnel Integration](#wstunnel-integration)**: Control websocket tunneling for exposed ports
 - **[Job Management](#job-management)**: Handle remote job execution and tracking
 - **[System Annotations](#system-annotations)**: Internal annotations used by interLink components
@@ -74,6 +75,36 @@ spec:
 - IP must be within the configured CIDR range
 
 **Default:** Automatically assigned when VPN is enabled
+
+---
+
+## Mesh Networking
+
+### `interlink.eu/mesh-network`
+
+Disables mesh networking for a specific offloaded pod when set to `"disabled"`.
+
+**Usage:**
+```yaml
+apiVersion: v1
+kind: Pod
+metadata:
+  name: my-pod
+  annotations:
+    interlink.eu/mesh-network: "disabled"
+spec:
+  containers:
+  - name: app
+    image: nginx:latest
+```
+
+**Behavior:**
+- When set to `"disabled"`, the pod is offloaded **without** mesh networking even if the global `FullMesh` configuration is enabled
+- Disables the WireGuard/wstunnel bidirectional communication setup for this pod
+- All other pods without this annotation continue to use mesh networking as configured
+- Value matching is case-insensitive (e.g., `"Disabled"`, `"DISABLED"` also work)
+
+**Default:** Not set (mesh networking follows global `FullMesh` configuration)
 
 ---
 
@@ -385,6 +416,7 @@ kubectl get deployment,service,ingress -l interlink.virtual-kubelet.io/type=wstu
 | `JobID` | v0.1.0+ | Remote job management |
 | `interlink.virtual-kubelet.io/wstunnel-timeout` | v0.6.0+ | Wstunnel integration |
 | `interlink.virtual-kubelet.io/ping-response` | v0.2.0+ | Health check responses |
+| `interlink.eu/mesh-network` | v0.6.x+ | Per-pod mesh networking opt-out |
 
 ---
 
