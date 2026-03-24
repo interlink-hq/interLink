@@ -1131,6 +1131,21 @@ func handleContainersUpdate(ctx context.Context, podRemoteStatus types.PodStatus
 	return counterOfTerminatedContainers, podErrored, failedReason, podRunning
 }
 
+// podTerminalPhase returns the current phase of a pod from the local cache if
+// it is already in a terminal state (Failed or Succeeded), plus a bool indicating
+// whether it is terminal. Reads are protected by podsMu.
+func (p *Provider) podTerminalPhase(podUID string) (v1.PodPhase, bool) {
+	p.podsMu.RLock()
+	defer p.podsMu.RUnlock()
+	if pod, ok := p.pods[podUID]; ok {
+		ph := pod.Status.Phase
+		if ph == v1.PodFailed || ph == v1.PodSucceeded {
+			return ph, true
+		}
+	}
+	return "", false
+}
+
 // checkPodsStatus is regularly called by the VK itself at regular intervals of time to query InterLink for Pods' status.
 // It basically append all available pods registered to the VK to a slice and passes this slice to the statusRequest function.
 // After the statusRequest returns a response, this function uses that response to update every Pod and Container status.
@@ -1178,15 +1193,7 @@ func checkPodsStatus(ctx context.Context, p *Provider, pod *v1.Pod, token string
 		// if the PodUID match with the one in etcd we are talking of the same thing. GOOD
 		if podRemoteStatus.PodUID == string(podRefInCluster.UID) {
 			// check if the pod is already in a terminal state (Failed or Succeeded)
-			p.podsMu.RLock()
-			existingPod, podExists := p.pods[podRemoteStatus.PodUID]
-			var currentPhase v1.PodPhase
-			if podExists {
-				currentPhase = existingPod.Status.Phase
-			}
-			p.podsMu.RUnlock()
-
-			if podExists && (currentPhase == v1.PodFailed || currentPhase == v1.PodSucceeded) {
+			if currentPhase, terminal := p.podTerminalPhase(podRemoteStatus.PodUID); terminal {
 				if podRefInCluster.Status.Phase == currentPhase {
 					log.G(ctx).Debug("Pod " + podRemoteStatus.PodName + " is already in phase " + string(currentPhase))
 					return nil, err

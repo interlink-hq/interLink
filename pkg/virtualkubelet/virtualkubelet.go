@@ -1784,10 +1784,12 @@ func (p *Provider) statusLoop(ctx context.Context) {
 
 		// Take a snapshot of the pods map under a read lock so that concurrent
 		// CreatePod/DeletePod calls do not race with the iteration.
+		// Deep-copy each pod so that reads of pod fields below do not race with
+		// concurrent status mutations in CreatePod's goroutine or checkPodsStatus.
 		p.podsMu.RLock()
 		podsCopy := make([]*v1.Pod, 0, len(p.pods))
 		for _, pod := range p.pods {
-			podsCopy = append(podsCopy, pod)
+			podsCopy = append(podsCopy, pod.DeepCopy())
 		}
 		p.podsMu.RUnlock()
 
@@ -1883,7 +1885,7 @@ func (p *Provider) GetStatsSummary(ctx context.Context) (*stats.Summary, error) 
 	p.podsMu.RLock()
 	podsCopy := make([]*v1.Pod, 0, len(p.pods))
 	for _, pod := range p.pods {
-		podsCopy = append(podsCopy, pod)
+		podsCopy = append(podsCopy, pod.DeepCopy())
 	}
 	p.podsMu.RUnlock()
 
