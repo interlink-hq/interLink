@@ -1970,12 +1970,13 @@ func (p *Provider) RetrievePodsFromCluster(ctx context.Context) error {
 		if err != nil {
 			log.G(ctx).Warning("Unable to retrieve pods from the namespace " + ns.Name)
 		}
-		for _, pod := range podsList.Items {
-			if CheckIfAnnotationExists(&pod, "JobID") && p.nodeName == pod.Spec.NodeName {
+		for i := range podsList.Items {
+			pod := &podsList.Items[i]
+			if CheckIfAnnotationExists(pod, "JobID") && p.nodeName == pod.Spec.NodeName {
 				p.podsMu.Lock()
-				p.pods[string(pod.UID)] = &pod
+				p.pods[string(pod.UID)] = pod
 				p.podsMu.Unlock()
-				p.notifier(&pod)
+				p.notifier(pod)
 			}
 		}
 
