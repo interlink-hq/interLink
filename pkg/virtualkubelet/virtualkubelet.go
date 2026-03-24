@@ -7,7 +7,6 @@ import (
 	"embed"
 	"encoding/base64"
 	"encoding/hex"
-	"encoding/json"
 	"fmt"
 	"io"
 	mathrand "math/rand"
@@ -185,42 +184,6 @@ func findFirstFreeIP(ipList, usedIPs []string, minIP, maxIP int) string {
 	}
 
 	return ""
-}
-
-func (p *Provider) persistPodAnnotations(ctx context.Context, pod *v1.Pod, annotations map[string]string) error {
-	if len(annotations) == 0 {
-		return nil
-	}
-
-	if pod.Annotations == nil {
-		pod.Annotations = make(map[string]string, len(annotations))
-	}
-	for key, value := range annotations {
-		pod.Annotations[key] = value
-	}
-
-	patchData := map[string]interface{}{
-		"metadata": map[string]interface{}{
-			"annotations": annotations,
-		},
-	}
-
-	patchBytes, err := json.Marshal(patchData)
-	if err != nil {
-		return fmt.Errorf("marshal pod annotation patch: %w", err)
-	}
-
-	if _, err := p.clientSet.CoreV1().Pods(pod.Namespace).Patch(
-		ctx,
-		pod.Name,
-		k8stypes.StrategicMergePatchType,
-		patchBytes,
-		metav1.PatchOptions{},
-	); err != nil {
-		return fmt.Errorf("patch pod annotations: %w", err)
-	}
-
-	return nil
 }
 
 func TracerUpdate(ctx *context.Context, name string, pod *v1.Pod) {
@@ -844,8 +807,6 @@ func (p *Provider) createDummyPod(ctx context.Context, originalPod *v1.Pod) (*v1
 
 	// if full mesh in the configuration is set to true
 	if p.config.Network.FullMesh {
-		generatedWGAnnotations := make(map[string]string, 2)
-
 		wgMTU := 1280
 		if v := strings.TrimSpace(originalPod.Annotations[annWGMTU]); v != "" {
 			if n, err := strconv.Atoi(v); err == nil && n > 0 {
@@ -866,7 +827,6 @@ func (p *Provider) createDummyPod(ctx context.Context, originalPod *v1.Pod) (*v1
 				return nil, nil, fmt.Errorf("generate server WG keypair: %w", err)
 			}
 			serverPriv = priv
-			generatedWGAnnotations[annWGPrivateKey] = serverPriv
 			log.G(ctx).Infof("[WG] Generated SERVER keypair for %s/%s: public=%s",
 				originalPod.Namespace, originalPod.Name, pub)
 		}
@@ -880,7 +840,6 @@ func (p *Provider) createDummyPod(ctx context.Context, originalPod *v1.Pod) (*v1
 			}
 			clientPub = cPub
 			generatedClientPriv = cPriv
-			generatedWGAnnotations[annWGPeerPublicKey] = clientPub
 			log.G(ctx).Infof("[WG] Generated CLIENT keypair for %s/%s: public=%s private=%s",
 				originalPod.Namespace, originalPod.Name, cPub, cPriv)
 		} else {
@@ -900,10 +859,6 @@ func (p *Provider) createDummyPod(ctx context.Context, originalPod *v1.Pod) (*v1
 		if templateData.WGPrivateKey == "" || templateData.ClientPublicKey == "" {
 			return nil, nil, fmt.Errorf("wireguard keys missing: set %q and %q annotations on pod %s/%s",
 				annWGPrivateKey, annWGPeerPublicKey, originalPod.Namespace, originalPod.Name)
-		}
-
-		if err := p.persistPodAnnotations(ctx, originalPod, generatedWGAnnotations); err != nil {
-			return nil, nil, fmt.Errorf("persist generated WireGuard annotations: %w", err)
 		}
 	}
 

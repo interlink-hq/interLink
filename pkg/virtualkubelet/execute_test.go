@@ -368,32 +368,3 @@ func TestBuildPVCBridgeMountPath(t *testing.T) {
 		buildPVCBridgeMountPath("", ""),
 	)
 }
-
-func TestPersistPodAnnotations(t *testing.T) {
-	pod := &v1.Pod{
-		ObjectMeta: metav1.ObjectMeta{
-			Name:      "offloaded-pod",
-			Namespace: "default",
-		},
-	}
-
-	client := fake.NewSimpleClientset(pod.DeepCopy())
-	provider := Provider{
-		clientSet: client,
-	}
-
-	annotations := map[string]string{
-		annWGPrivateKey:    "server-private",
-		annWGPeerPublicKey: "client-public",
-	}
-
-	err := provider.persistPodAnnotations(context.Background(), pod, annotations)
-	require.NoError(t, err)
-	assert.Equal(t, annotations[annWGPrivateKey], pod.Annotations[annWGPrivateKey])
-	assert.Equal(t, annotations[annWGPeerPublicKey], pod.Annotations[annWGPeerPublicKey])
-
-	persisted, err := client.CoreV1().Pods("default").Get(context.Background(), "offloaded-pod", metav1.GetOptions{})
-	require.NoError(t, err)
-	assert.Equal(t, annotations[annWGPrivateKey], persisted.Annotations[annWGPrivateKey])
-	assert.Equal(t, annotations[annWGPeerPublicKey], persisted.Annotations[annWGPeerPublicKey])
-}
