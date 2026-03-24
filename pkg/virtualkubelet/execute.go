@@ -1224,6 +1224,11 @@ func checkPodsStatus(ctx context.Context, p *Provider, pod *v1.Pod, token string
 			log.G(ctx).Debug("Number of containers in POD:      " + strconv.Itoa(nContainersInPod))
 			log.G(ctx).Debug("Number of init containers in POD: " + strconv.Itoa(nInitContainersInPod))
 
+			// Protect all writes to podRefInCluster.Status (= p.pods[uid]) with the
+			// write lock so that concurrent goroutines (e.g. CreatePod's async error
+			// path) do not observe a partially-updated pod status.
+			p.podsMu.Lock()
+
 			// if there are init containers, we need to check them first
 			if nInitContainersInPod > 0 {
 				podWaitingForInitContainers, podInit, podInitErrored, failedReasonInit, counterOfTerminatedInitContainers = handleInitContainersUpdate(ctx, podRemoteStatus, podRefInCluster, nInitContainersInPod)
@@ -1277,6 +1282,8 @@ func checkPodsStatus(ctx context.Context, p *Provider, pod *v1.Pod, token string
 					podRefInCluster.Status.Reason = "Running"
 				}
 			}
+
+			p.podsMu.Unlock()
 		} else {
 			list, err := p.clientSet.CoreV1().Pods(podRemoteStatus.PodNamespace).List(ctx, metav1.ListOptions{})
 			if err != nil {

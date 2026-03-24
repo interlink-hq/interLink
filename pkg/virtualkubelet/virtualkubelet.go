@@ -1803,7 +1803,19 @@ func (p *Provider) statusLoop(ctx context.Context) {
 				if err != nil {
 					log.G(ctx).Error(err)
 				}
-				p.asyncUpdate(ctx, pod)
+				// Use a fresh snapshot of the canonical pod (updated by checkPodsStatus
+				// under podsMu.Lock) rather than the pre-snapshot deep copy, so the
+				// notifier sees the latest status.
+				p.podsMu.RLock()
+				canonical, exists := p.pods[string(pod.UID)]
+				var notifyPod *v1.Pod
+				if exists {
+					notifyPod = canonical.DeepCopy()
+				}
+				p.podsMu.RUnlock()
+				if notifyPod != nil {
+					p.asyncUpdate(ctx, notifyPod)
+				}
 			}
 		}
 
