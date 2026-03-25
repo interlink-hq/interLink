@@ -133,12 +133,15 @@ func generatePluginSpec(version string) {
 	}
 
 	// Logs
-	logsOp, err := reflector.NewOperationContext(http.MethodPost, "/getLogs")
+	logsOp, err := reflector.NewOperationContext(http.MethodGet, "/getLogs")
 	if err != nil {
 		panic(err)
 	}
 	logsOp.AddReqStructure(new(interlink.LogStruct))
-	logsOp.AddRespStructure(new(string), func(cu *openapi.ContentUnit) { cu.HTTPStatus = http.StatusOK })
+	logsOp.AddRespStructure(nil, func(cu *openapi.ContentUnit) {
+		cu.HTTPStatus = http.StatusOK
+		cu.ContentType = "text/plain"
+	})
 	if err = reflector.AddOperation(logsOp); err != nil {
 		panic(err)
 	}
