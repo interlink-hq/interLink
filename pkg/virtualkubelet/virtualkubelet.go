@@ -1421,9 +1421,8 @@ func (p *Provider) CreatePod(ctx context.Context, pod *v1.Pod) error {
 				pod.Annotations = make(map[string]string)
 			}
 			pod.Annotations["interlink.eu/pod-subnet"] = p.node.Spec.PodCIDR
+			log.G(ctx).Infof("Added pod subnet annotation %s to pod %s/%s", p.node.Spec.PodCIDR, pod.Namespace, pod.Name)
 		}
-
-		log.G(ctx).Infof("Added pod subnet annotation %s to pod %s/%s", p.node.Spec.PodCIDR, pod.Namespace, pod.Name)
 	}
 
 	if _, ok := pod.Annotations["interlink.eu/pod-vpn"]; ok {
