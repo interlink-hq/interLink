@@ -32,7 +32,7 @@ jobs:
 
       # See https://docs.docker.com/build/ci/github-actions/cache/ for cache to speed go build
       - name: Go Build Cache for Docker
-        uses: actions/cache@v4
+        uses: actions/cache@v5
         with:
           path: go-build-cache
           key: ${{ runner.os }}-go-build-cache-${{ hashFiles('**/go.sum') }}
