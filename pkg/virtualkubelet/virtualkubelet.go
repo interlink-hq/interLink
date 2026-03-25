@@ -81,23 +81,21 @@ const (
 )
 
 type WstunnelTemplateData struct {
-	Name                    string
-	Namespace               string
-	RandomPassword          string
-	ExposedPorts            []PortMapping
-	WildcardDNS             string
-	WGPrivateKey            string
-	ClientPublicKey         string
-	WGMTU                   int
-	KeepaliveSecs           int
-	ClientPrivateKey        string         // only if we generated it
-	LocalContainers         []v1.Container // Keep for backward compatibility
-	LocalInitContainers     []v1.Container // Keep for backward compatibility
-	LocalContainersYAML     string         // Pre-rendered YAML
-	LocalInitContainersYAML string         // Pre-rendered YAML
-	Volumes                 []v1.Volume
-	PodLabels               map[string]string // Labels from original pod
-	PodAnnotations          map[string]string // Annotations from original pod
+	Name                string
+	Namespace           string
+	RandomPassword      string
+	ExposedPorts        []PortMapping
+	WildcardDNS         string
+	WGPrivateKey        string
+	ClientPublicKey     string
+	WGMTU               int
+	KeepaliveSecs       int
+	ClientPrivateKey    string         // only if we generated it
+	LocalContainers     []v1.Container // Keep for backward compatibility
+	LocalInitContainers []v1.Container // Keep for backward compatibility
+	Volumes             []v1.Volume
+	PodLabels           map[string]string // Labels from original pod
+	PodAnnotations      map[string]string // Annotations from original pod
 }
 
 type PortMapping struct {
