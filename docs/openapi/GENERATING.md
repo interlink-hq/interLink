@@ -44,10 +44,10 @@ Describes how the Virtual Kubelet talks to the interLink API server:
 | Endpoint | Method | Request type | Response type |
 |---|---|---|---|
 | `/create` | POST | `PodCreateRequests` | `CreateStruct` |
-| `/delete` | POST | `v1.Pod` | — |
+| `/delete` | DELETE | `v1.Pod` | — |
 | `/pinglink` | POST | — | — |
-| `/status` | POST | `[]v1.Pod` | `[]PodStatus` |
-| `/getLogs` | POST | `LogStruct` | `string` |
+| `/status` | GET | `[]v1.Pod` | `[]PodStatus` |
+| `/getLogs` | GET | `LogStruct` | plain text |
 
 ### Plugin API (`plugin-openapi.json`)
 
@@ -57,8 +57,8 @@ Describes how the interLink API server talks to a sidecar plugin:
 |---|---|---|---|
 | `/create` | POST | `RetrievedPodData` | `CreateStruct` |
 | `/delete` | POST | `v1.Pod` | — |
-| `/status` | POST | `[]v1.Pod` | `[]PodStatus` |
-| `/getLogs` | POST | `LogStruct` | `string` |
+| `/status` | GET | `[]v1.Pod` | `[]PodStatus` |
+| `/getLogs` | GET | `LogStruct` | plain text |
 
 `RetrievedPodData` includes the `jobConfig` (`ScriptBuildConfig`) and `jobScript`
 fields that allow interLink to pass a pre-built job script to the plugin.
@@ -75,5 +75,5 @@ The Makefile target is:
 
 ```makefile
 openapi:
-    go run cmd/openapi-gen/main.go
+	go run cmd/openapi-gen/main.go
 ```

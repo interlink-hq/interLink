@@ -42,8 +42,8 @@ func generateInterlinkSpec(version string) {
 		panic(err)
 	}
 
-	// DELETE
-	deleteOp, err := reflector.NewOperationContext(http.MethodPost, "/delete")
+	// DELETE: VK sends DELETE to interLink.
+	deleteOp, err := reflector.NewOperationContext(http.MethodDelete, "/delete")
 	if err != nil {
 		panic(err)
 	}
@@ -64,8 +64,8 @@ func generateInterlinkSpec(version string) {
 		panic(err)
 	}
 
-	// Status
-	statusOp, err := reflector.NewOperationContext(http.MethodPost, "/status")
+	// Status: VK uses GET with a JSON body.
+	statusOp, err := reflector.NewOperationContext(http.MethodGet, "/status")
 	if err != nil {
 		panic(err)
 	}
@@ -75,13 +75,16 @@ func generateInterlinkSpec(version string) {
 		panic(err)
 	}
 
-	// Logs
-	logsOp, err := reflector.NewOperationContext(http.MethodPost, "/getLogs")
+	// Logs: VK uses GET with a JSON body; response is streamed plain text.
+	logsOp, err := reflector.NewOperationContext(http.MethodGet, "/getLogs")
 	if err != nil {
 		panic(err)
 	}
 	logsOp.AddReqStructure(new(interlink.LogStruct))
-	logsOp.AddRespStructure(new(string), func(cu *openapi.ContentUnit) { cu.HTTPStatus = http.StatusOK })
+	logsOp.AddRespStructure(nil, func(cu *openapi.ContentUnit) {
+		cu.HTTPStatus = http.StatusOK
+		cu.ContentType = "text/plain"
+	})
 	if err = reflector.AddOperation(logsOp); err != nil {
 		panic(err)
 	}
@@ -121,8 +124,8 @@ func generatePluginSpec(version string) {
 		panic(err)
 	}
 
-	// Status
-	statusOp, err := reflector.NewOperationContext(http.MethodPost, "/status")
+	// Status: interLink calls the plugin with GET and a JSON body.
+	statusOp, err := reflector.NewOperationContext(http.MethodGet, "/status")
 	if err != nil {
 		panic(err)
 	}
@@ -132,13 +135,16 @@ func generatePluginSpec(version string) {
 		panic(err)
 	}
 
-	// Logs
-	logsOp, err := reflector.NewOperationContext(http.MethodPost, "/getLogs")
+	// Logs: interLink calls the plugin with GET; response is streamed plain text.
+	logsOp, err := reflector.NewOperationContext(http.MethodGet, "/getLogs")
 	if err != nil {
 		panic(err)
 	}
 	logsOp.AddReqStructure(new(interlink.LogStruct))
-	logsOp.AddRespStructure(new(string), func(cu *openapi.ContentUnit) { cu.HTTPStatus = http.StatusOK })
+	logsOp.AddRespStructure(nil, func(cu *openapi.ContentUnit) {
+		cu.HTTPStatus = http.StatusOK
+		cu.ContentType = "text/plain"
+	})
 	if err = reflector.AddOperation(logsOp); err != nil {
 		panic(err)
 	}
