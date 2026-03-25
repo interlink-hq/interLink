@@ -75,5 +75,5 @@ The Makefile target is:
 
 ```makefile
 openapi:
-    go run cmd/openapi-gen/main.go
+	go run cmd/openapi-gen/main.go
 ```
