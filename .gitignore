@@ -36,3 +36,4 @@ examples/sidecar/templates/python/__pycache__/*
 .settings
 CLAUDE.md
 .dagger
+openapi-gen
