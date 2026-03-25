@@ -848,14 +848,13 @@ func (p *Provider) createDummyPod(ctx context.Context, originalPod *v1.Pod) (*v1
 		PodAnnotations:      podAnnotations,
 	}
 
-	log.G(ctx).Infof("DEBUG: LocalInitContainersYAML:\n%s", templateData.LocalInitContainersYAML)
-	log.G(ctx).Infof("DEBUG: LocalContainersYAML:\n%s", templateData.LocalContainersYAML)
+	log.G(ctx).Debugf("LocalInitContainersYAML:\n%s", templateData.LocalInitContainersYAML)
+	log.G(ctx).Debugf("LocalContainersYAML:\n%s", templateData.LocalContainersYAML)
 
-	// ADD THIS DEBUG LOG
-	log.G(ctx).Infof("DEBUG: LocalInitContainers count: %d", len(templateData.LocalInitContainers))
+	log.G(ctx).Debugf("LocalInitContainers count: %d", len(templateData.LocalInitContainers))
 	if len(templateData.LocalInitContainers) > 0 {
 		for _, c := range templateData.LocalInitContainers {
-			log.G(ctx).Infof("DEBUG: LocalInitContainer name: %s, image: %s", c.Name, c.Image)
+			log.G(ctx).Debugf("LocalInitContainer name: %s, image: %s", c.Name, c.Image)
 		}
 	}
 
