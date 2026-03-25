@@ -321,13 +321,14 @@ func GetResources(config Config) v1.ResourceList {
 	fpgaCount := map[string]resource.Quantity{}
 
 	for _, accelerator := range config.Resources.Accelerators {
-		q := resource.MustParse(accelerator.Available)
 		switch accelerator.ResourceType {
 		case nvidiaGPU, amdGPU, intelGPU:
+			q := resource.MustParse(accelerator.Available)
 			existing := gpuCount[accelerator.ResourceType]
 			existing.Add(q)
 			gpuCount[accelerator.ResourceType] = existing
 		case xilinxFPGA, intelFPGA:
+			q := resource.MustParse(accelerator.Available)
 			existing := fpgaCount[accelerator.ResourceType]
 			existing.Add(q)
 			fpgaCount[accelerator.ResourceType] = existing
