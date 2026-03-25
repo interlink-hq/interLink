@@ -795,6 +795,9 @@ func (p *Provider) createDummyPod(ctx context.Context, originalPod *v1.Pod) (*v1
 		}
 
 		serverPriv := strings.TrimSpace(originalPod.Annotations[annWGPrivateKey])
+		clientPub := strings.TrimSpace(originalPod.Annotations[annWGPeerPublicKey])
+		var generatedClientPriv string
+
 		if serverPriv == "" {
 			priv, pub, err := generateWGKeypair()
 			if err != nil {
@@ -803,11 +806,8 @@ func (p *Provider) createDummyPod(ctx context.Context, originalPod *v1.Pod) (*v1
 			serverPriv = priv
 			log.G(ctx).Infof("[WG] Generated SERVER keypair for %s/%s: public=%s",
 				originalPod.Namespace, originalPod.Name, pub)
-			// (Optionally) you could patch the Pod to persist the generated serverPriv annotation.
 		}
 
-		clientPub := strings.TrimSpace(originalPod.Annotations[annWGPeerPublicKey])
-		var generatedClientPriv string
 		if clientPub == "" {
 			cPriv, cPub, err := generateWGKeypair()
 			if err != nil {
@@ -815,8 +815,8 @@ func (p *Provider) createDummyPod(ctx context.Context, originalPod *v1.Pod) (*v1
 			}
 			clientPub = cPub
 			generatedClientPriv = cPriv
-			log.G(ctx).Infof("[WG] Generated CLIENT keypair for %s/%s: public=%s private=%s",
-				originalPod.Namespace, originalPod.Name, cPub, cPriv)
+			log.G(ctx).Infof("[WG] Generated CLIENT keypair for %s/%s: public=%s",
+				originalPod.Namespace, originalPod.Name, cPub)
 		} else {
 			// sanity check format (optional)
 			if _, err := base64.StdEncoding.DecodeString(clientPub); err != nil {
@@ -824,11 +824,23 @@ func (p *Provider) createDummyPod(ctx context.Context, originalPod *v1.Pod) (*v1
 			}
 		}
 
+		// Persist the key material to a Secret so that retries reuse the same keypairs
+		// and avoid shadow/client WireGuard config drift. If the Secret already exists
+		// the function returns the previously stored keys, overriding any freshly
+		// generated ones above.
+		serverPriv, generatedClientPriv, clientPub, err = p.ensureWGKeysSecret(
+			ctx, wstunnelNS, resourceBaseName,
+			serverPriv, generatedClientPriv, clientPub,
+		)
+		if err != nil {
+			return nil, nil, fmt.Errorf("failed to persist WG keys: %w", err)
+		}
+
 		templateData.WGPrivateKey = serverPriv
 		templateData.ClientPublicKey = clientPub
 		templateData.WGMTU = wgMTU
 		templateData.KeepaliveSecs = keepalive
-		templateData.ClientPrivateKey = generatedClientPriv // may be empty if not generated
+		templateData.ClientPrivateKey = generatedClientPriv
 
 		// Validate critical WG inputs (fail early so the template doesn’t render bogus keys)
 		if templateData.WGPrivateKey == "" || templateData.ClientPublicKey == "" {
@@ -1132,6 +1144,15 @@ func (p *Provider) cleanupWstunnelResources(ctx context.Context, wstunnelName, n
 		log.G(ctx).Warningf("Failed to delete wstunnel configmap %s/%s: %v", namespace, wstunnelName+"-wg-config", err)
 	} else {
 		log.G(ctx).Infof("Successfully deleted wstunnel configmap %s/%s", namespace, wstunnelName+"-wg-config")
+	}
+
+	// Delete WireGuard keys Secret (created for full-mesh pods to persist key material)
+	wgSecretName := wgKeysSecretName(wstunnelName)
+	err = p.clientSet.CoreV1().Secrets(namespace).Delete(ctx, wgSecretName, metav1.DeleteOptions{})
+	if err != nil && !apierrors.IsNotFound(err) {
+		log.G(ctx).Warningf("Failed to delete WG keys Secret %s/%s: %v", namespace, wgSecretName, err)
+	} else if err == nil {
+		log.G(ctx).Infof("Successfully deleted WG keys Secret %s/%s", namespace, wgSecretName)
 	}
 }
 

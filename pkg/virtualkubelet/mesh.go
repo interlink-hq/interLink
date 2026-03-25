@@ -14,6 +14,7 @@ import (
 	"github.com/containerd/containerd/log"
 	"golang.org/x/crypto/curve25519"
 	v1 "k8s.io/api/core/v1"
+	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	k8stypes "k8s.io/apimachinery/pkg/types"
 )
@@ -159,6 +160,81 @@ func generateWGKeypair() (string, string, error) {
 	priv := base64.StdEncoding.EncodeToString(privRaw)
 	pub := base64.StdEncoding.EncodeToString(pubRaw)
 	return priv, pub, nil
+}
+
+// wgKeysSecretName returns the name of the Secret used to persist WireGuard key
+// material for a given wstunnel resource base name.
+func wgKeysSecretName(baseName string) string {
+	return baseName + "-wg-keys"
+}
+
+// ensureWGKeysSecret gets or creates a Kubernetes Secret that stores the WireGuard
+// key material for the pod's full-mesh setup. If the Secret already exists the
+// stored values are returned unchanged, ensuring that key material is stable across
+// reconcile retries. If it does not exist it is created with the supplied values.
+//
+// serverPriv, clientPriv and clientPub are the values that will be stored when the
+// Secret is first created. On subsequent calls the function ignores those arguments
+// and returns whatever is already in the Secret.
+func (p *Provider) ensureWGKeysSecret(
+	ctx context.Context,
+	namespace, baseName string,
+	serverPriv, clientPriv, clientPub string,
+) (retServerPriv, retClientPriv, retClientPub string, err error) {
+	secretName := wgKeysSecretName(baseName)
+
+	existing, getErr := p.clientSet.CoreV1().Secrets(namespace).Get(ctx, secretName, metav1.GetOptions{})
+	if getErr == nil {
+		// Secret already exists – reuse stored keys to guarantee stability across retries.
+		retServerPriv = strings.TrimSpace(string(existing.Data["server-private-key"]))
+		retClientPriv = strings.TrimSpace(string(existing.Data["client-private-key"]))
+		retClientPub = strings.TrimSpace(string(existing.Data["client-public-key"]))
+		if retServerPriv == "" || retClientPub == "" {
+			return "", "", "", fmt.Errorf("WG keys Secret %s/%s exists but contains missing or empty key fields", namespace, secretName)
+		}
+		log.G(ctx).Infof("[WG] Reusing persisted WG keys from Secret %s/%s", namespace, secretName)
+		return retServerPriv, retClientPriv, retClientPub, nil
+	}
+	if !apierrors.IsNotFound(getErr) {
+		return "", "", "", fmt.Errorf("failed to get WG keys Secret %s/%s: %w", namespace, secretName, getErr)
+	}
+
+	// Secret does not exist – create it with the provided keys.
+	secret := &v1.Secret{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      secretName,
+			Namespace: namespace,
+		},
+		Type: v1.SecretTypeOpaque,
+		Data: map[string][]byte{
+			"server-private-key": []byte(serverPriv),
+			"client-private-key": []byte(clientPriv),
+			"client-public-key":  []byte(clientPub),
+		},
+	}
+
+	_, createErr := p.clientSet.CoreV1().Secrets(namespace).Create(ctx, secret, metav1.CreateOptions{})
+	if createErr != nil {
+		if apierrors.IsAlreadyExists(createErr) {
+			// Race condition: another goroutine created it concurrently – re-fetch.
+			existing, getErr = p.clientSet.CoreV1().Secrets(namespace).Get(ctx, secretName, metav1.GetOptions{})
+			if getErr != nil {
+				return "", "", "", fmt.Errorf("failed to re-get WG keys Secret %s/%s after race: %w", namespace, secretName, getErr)
+			}
+			retServerPriv = strings.TrimSpace(string(existing.Data["server-private-key"]))
+			retClientPriv = strings.TrimSpace(string(existing.Data["client-private-key"]))
+			retClientPub = strings.TrimSpace(string(existing.Data["client-public-key"]))
+			if retServerPriv == "" || retClientPub == "" {
+				return "", "", "", fmt.Errorf("WG keys Secret %s/%s (concurrent) contains missing or empty key fields", namespace, secretName)
+			}
+			log.G(ctx).Infof("[WG] Reusing concurrently created WG keys from Secret %s/%s", namespace, secretName)
+			return retServerPriv, retClientPriv, retClientPub, nil
+		}
+		return "", "", "", fmt.Errorf("failed to create WG keys Secret %s/%s: %w", namespace, secretName, createErr)
+	}
+
+	log.G(ctx).Infof("[WG] Persisted WG keys to new Secret %s/%s", namespace, secretName)
+	return serverPriv, clientPriv, clientPub, nil
 }
 
 // deriveWGPublicKey takes a base64 private key and returns base64 public key
