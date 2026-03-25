@@ -100,7 +100,7 @@ type Accelerator struct {
 	ResourceType string `yaml:"ResourceType"`
 	// Model specifies the specific model or variant of the accelerator
 	Model string `yaml:"Model"`
-	// Available indicates how many units of this accelerator are available (as a Kubernetes quantity, e.g., "8", "16")
+	// Available indicates how many units of this accelerator are available (as a Kubernetes quantity, e.g., "8", "16", "500m", "16Gi")
 	Available string `yaml:"Available"`
 }
 
