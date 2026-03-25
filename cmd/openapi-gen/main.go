@@ -36,7 +36,7 @@ func generateInterlinkSpec(version string) {
 	if err != nil {
 		panic(err)
 	}
-	createOp.AddReqStructure(new(interlink.PodCreateRequests))
+	createOp.AddReqStructure(new(interlink.PodCreateRequests), withRequiredBody)
 	createOp.AddRespStructure(new(interlink.CreateStruct), func(cu *openapi.ContentUnit) { cu.HTTPStatus = http.StatusOK })
 	if err = reflector.AddOperation(createOp); err != nil {
 		panic(err)
@@ -107,7 +107,7 @@ func generatePluginSpec(version string) {
 	if err != nil {
 		panic(err)
 	}
-	createOp.AddReqStructure(new(interlink.RetrievedPodData))
+	createOp.AddReqStructure(new(interlink.RetrievedPodData), withRequiredBody)
 	createOp.AddRespStructure(new(interlink.CreateStruct), func(cu *openapi.ContentUnit) { cu.HTTPStatus = http.StatusOK })
 	if err = reflector.AddOperation(createOp); err != nil {
 		panic(err)
@@ -118,7 +118,7 @@ func generatePluginSpec(version string) {
 	if err != nil {
 		panic(err)
 	}
-	deleteOp.AddReqStructure(new(corev1.Pod))
+	deleteOp.AddReqStructure(new(corev1.Pod), withRequiredBody)
 	deleteOp.AddRespStructure(nil, func(cu *openapi.ContentUnit) { cu.HTTPStatus = http.StatusOK })
 	if err = reflector.AddOperation(deleteOp); err != nil {
 		panic(err)
@@ -150,6 +150,17 @@ func generatePluginSpec(version string) {
 	}
 
 	writeSpec(reflector, "./docs/openapi/plugin-openapi.json")
+}
+
+// withRequiredBody is a ContentOption that marks a request body as required in the OpenAPI spec.
+// Handlers that unmarshal from the request body will fail on empty bodies, so the spec should
+// reflect that the body is mandatory.
+func withRequiredBody(cu *openapi.ContentUnit) {
+	cu.Customize = func(cor openapi.ContentOrReference) {
+		if rbr, ok := cor.(*openapi3.RequestBodyOrRef); ok {
+			rbr.RequestBodyEns().WithRequired(true)
+		}
+	}
 }
 
 // writeSpec marshals the reflector's spec to JSON and writes it to the given file path.
