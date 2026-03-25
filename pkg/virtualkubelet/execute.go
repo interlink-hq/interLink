@@ -152,10 +152,6 @@ func getLocalInitContainers(pod *v1.Pod) []v1.Container {
 	return localContainers
 }
 
-func hasLocalContainers(pod *v1.Pod) bool {
-	return len(getLocalContainers(pod)) > 0 || len(getLocalInitContainers(pod)) > 0
-}
-
 func extractVolumesForLocalContainers(pod *v1.Pod) []v1.Volume {
 	localContainers := getLocalContainers(pod)
 	localInitContainers := getLocalInitContainers(pod)
