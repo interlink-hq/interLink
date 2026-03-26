@@ -1541,9 +1541,24 @@ func (p *Provider) CreatePod(ctx context.Context, pod *v1.Pod) error {
 
 				// Set all container statuses to terminated with the error message.
 				// PodPhase resets ContainerStatuses, so rebuild from pod.Spec here.
-				allContainers := append(pod.Spec.InitContainers, pod.Spec.Containers...)
-				pod.Status.ContainerStatuses = make([]v1.ContainerStatus, 0, len(allContainers))
-				for _, container := range allContainers {
+				// InitContainers go into InitContainerStatuses; regular Containers into ContainerStatuses.
+				pod.Status.InitContainerStatuses = make([]v1.ContainerStatus, 0, len(pod.Spec.InitContainers))
+				for _, container := range pod.Spec.InitContainers {
+					pod.Status.InitContainerStatuses = append(pod.Status.InitContainerStatuses, v1.ContainerStatus{
+						Name:  container.Name,
+						Image: container.Image,
+						Ready: false,
+						State: v1.ContainerState{
+							Terminated: &v1.ContainerStateTerminated{
+								ExitCode: 1,
+								Reason:   "ProviderFailed",
+								Message:  creationError,
+							},
+						},
+					})
+				}
+				pod.Status.ContainerStatuses = make([]v1.ContainerStatus, 0, len(pod.Spec.Containers))
+				for _, container := range pod.Spec.Containers {
 					pod.Status.ContainerStatuses = append(pod.Status.ContainerStatuses, v1.ContainerStatus{
 						Name:  container.Name,
 						Image: container.Image,
