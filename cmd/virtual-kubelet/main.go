@@ -375,8 +375,12 @@ func createHTTPTransport(ctx context.Context, interLinkConfig commonIL.Config, v
 func setupKubernetesClient(ctx context.Context) (*rest.Config, *kubernetes.Clientset) {
 	var kubecfg *rest.Config
 	kubeconfigPath := os.Getenv("KUBECONFIG")
-	if !filepath.IsAbs(kubeconfigPath) || strings.Contains(kubeconfigPath, "..") {
-		log.G(ctx).Fatal("Invalid KUBECONFIG path")
+	if kubeconfigPath == "" {
+		log.G(ctx).Info("KUBECONFIG not set, trying InCluster configuration")
+	} else {
+		if !filepath.IsAbs(kubeconfigPath) || strings.Contains(kubeconfigPath, "..") {
+			log.G(ctx).Fatal("Invalid KUBECONFIG path")
+		}
 	}
 	kubecfgFile, err := os.ReadFile(kubeconfigPath) // #nosec G703
 	if err != nil {
