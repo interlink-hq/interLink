@@ -304,12 +304,13 @@ func createRequest(ctx context.Context, config Config, pod types.PodCreateReques
 
 	types.SetDurationSpan(startHTTPCall, spanHTTP, types.WithHTTPReturnCode(resp.StatusCode))
 
-	if resp.StatusCode != http.StatusOK {
-		return nil, errors.New("Unexpected error occured while creating Pods. Status code: " + strconv.Itoa(resp.StatusCode) + ". Check InterLink's logs for further informations")
-	}
 	returnValue, err := io.ReadAll(resp.Body)
 	if err != nil {
 		return nil, fmt.Errorf("error doing ReadAll() in createRequest() log request: %s error: %w", fmt.Sprintf("%#v", req), err)
+	}
+
+	if resp.StatusCode != http.StatusOK {
+		return nil, fmt.Errorf("error creating pod (HTTP %d): %s", resp.StatusCode, string(returnValue))
 	}
 
 	return returnValue, nil
