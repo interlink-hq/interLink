@@ -857,60 +857,8 @@ func (p *Provider) createDummyPod(ctx context.Context, originalPod *v1.Pod) (*v1
 
 	// if full mesh in the configuration is set to true
 	if p.config.Network.FullMesh {
-
-		wgMTU := 1280
-		if v := strings.TrimSpace(originalPod.Annotations[annWGMTU]); v != "" {
-			if n, err := strconv.Atoi(v); err == nil && n > 0 {
-				wgMTU = n
-			}
-		}
-		keepalive := 25
-		if v := strings.TrimSpace(originalPod.Annotations[annWgKeepaliveSeconds]); v != "" {
-			if n, err := strconv.Atoi(v); err == nil && n >= 0 {
-				keepalive = n
-			}
-		}
-
-		serverPriv := strings.TrimSpace(originalPod.Annotations[annWGPrivateKey])
-		if serverPriv == "" {
-			priv, pub, err := generateWGKeypair()
-			if err != nil {
-				return nil, nil, fmt.Errorf("generate server WG keypair: %w", err)
-			}
-			serverPriv = priv
-			log.G(ctx).Infof("[WG] Generated SERVER keypair for %s/%s: public=%s",
-				originalPod.Namespace, originalPod.Name, pub)
-			// (Optionally) you could patch the Pod to persist the generated serverPriv annotation.
-		}
-
-		clientPub := strings.TrimSpace(originalPod.Annotations[annWGPeerPublicKey])
-		var generatedClientPriv string
-		if clientPub == "" {
-			cPriv, cPub, err := generateWGKeypair()
-			if err != nil {
-				return nil, nil, fmt.Errorf("generate client WG keypair: %w", err)
-			}
-			clientPub = cPub
-			generatedClientPriv = cPriv
-			log.G(ctx).Infof("[WG] Generated CLIENT keypair for %s/%s: public=%s private=%s",
-				originalPod.Namespace, originalPod.Name, cPub, cPriv)
-		} else {
-			// sanity check format (optional)
-			if _, err := base64.StdEncoding.DecodeString(clientPub); err != nil {
-				return nil, nil, fmt.Errorf("invalid client public key (base64): %w", err)
-			}
-		}
-
-		templateData.WGPrivateKey = serverPriv
-		templateData.ClientPublicKey = clientPub
-		templateData.WGMTU = wgMTU
-		templateData.KeepaliveSecs = keepalive
-		templateData.ClientPrivateKey = generatedClientPriv // may be empty if not generated
-
-		// Validate critical WG inputs (fail early so the template doesn’t render bogus keys)
-		if templateData.WGPrivateKey == "" || templateData.ClientPublicKey == "" {
-			return nil, nil, fmt.Errorf("wireguard keys missing: set %q and %q annotations on pod %s/%s",
-				annWGPrivateKey, annWGPeerPublicKey, originalPod.Namespace, originalPod.Name)
+		if err := p.setupWireGuardConfig(ctx, originalPod, &templateData); err != nil {
+			return nil, nil, err
 		}
 	}
 
@@ -926,6 +874,62 @@ func (p *Provider) createDummyPod(ctx context.Context, originalPod *v1.Pod) (*v1
 
 	log.G(ctx).Infof("Created wstunnel infrastructure for %s/%s", originalPod.Namespace, originalPod.Name)
 	return createdPod, &templateData, nil
+}
+
+// setupWireGuardConfig populates WireGuard-related fields on templateData using annotations from the original pod.
+func (p *Provider) setupWireGuardConfig(ctx context.Context, originalPod *v1.Pod, templateData *WstunnelTemplateData) error {
+	wgMTU := 1280
+	if v := strings.TrimSpace(originalPod.Annotations[annWGMTU]); v != "" {
+		if n, err := strconv.Atoi(v); err == nil && n > 0 {
+			wgMTU = n
+		}
+	}
+	keepalive := 25
+	if v := strings.TrimSpace(originalPod.Annotations[annWgKeepaliveSeconds]); v != "" {
+		if n, err := strconv.Atoi(v); err == nil && n >= 0 {
+			keepalive = n
+		}
+	}
+
+	serverPriv := strings.TrimSpace(originalPod.Annotations[annWGPrivateKey])
+	if serverPriv == "" {
+		priv, pub, err := generateWGKeypair()
+		if err != nil {
+			return fmt.Errorf("generate server WG keypair: %w", err)
+		}
+		serverPriv = priv
+		log.G(ctx).Infof("[WG] Generated SERVER keypair for %s/%s: public=%s",
+			originalPod.Namespace, originalPod.Name, pub)
+	}
+
+	clientPub := strings.TrimSpace(originalPod.Annotations[annWGPeerPublicKey])
+	var generatedClientPriv string
+	if clientPub == "" {
+		cPriv, cPub, err := generateWGKeypair()
+		if err != nil {
+			return fmt.Errorf("generate client WG keypair: %w", err)
+		}
+		clientPub = cPub
+		generatedClientPriv = cPriv
+		log.G(ctx).Infof("[WG] Generated CLIENT keypair for %s/%s: public=%s private=%s",
+			originalPod.Namespace, originalPod.Name, cPub, cPriv)
+	} else {
+		if _, err := base64.StdEncoding.DecodeString(clientPub); err != nil {
+			return fmt.Errorf("invalid client public key (base64): %w", err)
+		}
+	}
+
+	templateData.WGPrivateKey = serverPriv
+	templateData.ClientPublicKey = clientPub
+	templateData.WGMTU = wgMTU
+	templateData.KeepaliveSecs = keepalive
+	templateData.ClientPrivateKey = generatedClientPriv
+
+	if templateData.WGPrivateKey == "" || templateData.ClientPublicKey == "" {
+		return fmt.Errorf("wireguard keys missing: set %q and %q annotations on pod %s/%s",
+			annWGPrivateKey, annWGPeerPublicKey, originalPod.Namespace, originalPod.Name)
+	}
+	return nil
 }
 
 // mergeMaps merges source map into destination map, with destination values taking precedence
@@ -979,56 +983,189 @@ func (p *Provider) executeWstunnelTemplate(ctx context.Context, data WstunnelTem
 	return buf.String(), nil
 }
 
+// mergeVolumes merges volumes by name, avoiding duplicates.
+func mergeVolumes(dst []v1.Volume, add []v1.Volume) []v1.Volume {
+	if len(add) == 0 {
+		return dst
+	}
+	existing := make(map[string]struct{}, len(dst))
+	for _, v := range dst {
+		existing[v.Name] = struct{}{}
+	}
+	for _, v := range add {
+		if _, ok := existing[v.Name]; ok {
+			continue
+		}
+		dst = append(dst, v)
+		existing[v.Name] = struct{}{}
+	}
+	return dst
+}
+
+// prependContainers prepends containers to dst, skipping duplicates by name.
+func prependContainers(dst []v1.Container, add []v1.Container) []v1.Container {
+	if len(add) == 0 {
+		return dst
+	}
+	existing := make(map[string]struct{}, len(dst))
+	for _, c := range dst {
+		existing[c.Name] = struct{}{}
+	}
+	out := make([]v1.Container, 0, len(add)+len(dst))
+	for _, c := range add {
+		if _, ok := existing[c.Name]; ok {
+			continue
+		}
+		out = append(out, c)
+	}
+	return append(out, dst...)
+}
+
+// applyOrUpdateDeployment creates or updates a Deployment, returning its name and namespace.
+func (p *Provider) applyOrUpdateDeployment(ctx context.Context, o *appsv1.Deployment, td *WstunnelTemplateData) (string, string, error) {
+	if td != nil {
+		ps := &o.Spec.Template.Spec
+		ps.Volumes = mergeVolumes(ps.Volumes, td.Volumes)
+		ps.InitContainers = prependContainers(ps.InitContainers, td.LocalInitContainers)
+		ps.Containers = prependContainers(ps.Containers, td.LocalContainers)
+		if o.Spec.Template.Labels == nil {
+			o.Spec.Template.Labels = make(map[string]string)
+		}
+		if o.Spec.Template.Annotations == nil {
+			o.Spec.Template.Annotations = make(map[string]string)
+		}
+		o.Spec.Template.Labels = mergeMaps(o.Spec.Template.Labels, td.PodLabels)
+		o.Spec.Template.Annotations = mergeMaps(o.Spec.Template.Annotations, td.PodAnnotations)
+		log.G(ctx).Infof("Shadow pod will inherit %d labels and %d annotations from original pod",
+			len(td.PodLabels), len(td.PodAnnotations))
+	}
+	deployment, err := p.clientSet.AppsV1().Deployments(o.Namespace).Create(ctx, o, metav1.CreateOptions{})
+	if err != nil {
+		if !apierrors.IsAlreadyExists(err) {
+			return "", o.Namespace, fmt.Errorf("failed to create deployment: %w", err)
+		}
+		log.G(ctx).Infof("Deployment %s/%s already exists, updating", o.Namespace, o.Name)
+		existing, getErr := p.clientSet.AppsV1().Deployments(o.Namespace).Get(ctx, o.Name, metav1.GetOptions{})
+		if getErr != nil {
+			return "", o.Namespace, fmt.Errorf("failed to get existing deployment: %w", getErr)
+		}
+		o.ResourceVersion = existing.ResourceVersion
+		o.UID = existing.UID
+		deployment, err = p.clientSet.AppsV1().Deployments(o.Namespace).Update(ctx, o, metav1.UpdateOptions{})
+		if err != nil {
+			return "", o.Namespace, fmt.Errorf("failed to update existing deployment: %w", err)
+		}
+		log.G(ctx).Infof("Updated deployment %s/%s", deployment.Namespace, deployment.Name)
+	} else {
+		log.G(ctx).Infof("Created deployment %s/%s", deployment.Namespace, deployment.Name)
+	}
+	return deployment.Name, deployment.Namespace, nil
+}
+
+// applyOrUpdateService creates or updates a Service.
+func (p *Provider) applyOrUpdateService(ctx context.Context, o *v1.Service) error {
+	_, err := p.clientSet.CoreV1().Services(o.Namespace).Create(ctx, o, metav1.CreateOptions{})
+	if err != nil {
+		if !apierrors.IsAlreadyExists(err) {
+			return fmt.Errorf("failed to create service: %w", err)
+		}
+		log.G(ctx).Infof("Service %s/%s already exists, updating", o.Namespace, o.Name)
+		existing, getErr := p.clientSet.CoreV1().Services(o.Namespace).Get(ctx, o.Name, metav1.GetOptions{})
+		if getErr != nil {
+			return fmt.Errorf("failed to get existing service: %w", getErr)
+		}
+		o.ResourceVersion = existing.ResourceVersion
+		o.UID = existing.UID
+		o.Spec.ClusterIP = existing.Spec.ClusterIP
+		if _, err = p.clientSet.CoreV1().Services(o.Namespace).Update(ctx, o, metav1.UpdateOptions{}); err != nil {
+			return fmt.Errorf("failed to update existing service: %w", err)
+		}
+		log.G(ctx).Infof("Updated service %s/%s", o.Namespace, o.Name)
+	} else {
+		log.G(ctx).Infof("Created service %s/%s", o.Namespace, o.Name)
+	}
+	return nil
+}
+
+// applyOrUpdateIngress creates or updates an Ingress.
+func (p *Provider) applyOrUpdateIngress(ctx context.Context, o *networkingv1.Ingress) error {
+	_, err := p.clientSet.NetworkingV1().Ingresses(o.Namespace).Create(ctx, o, metav1.CreateOptions{})
+	if err != nil {
+		if !apierrors.IsAlreadyExists(err) {
+			return fmt.Errorf("failed to create ingress: %w", err)
+		}
+		log.G(ctx).Infof("Ingress %s/%s already exists, updating", o.Namespace, o.Name)
+		existing, getErr := p.clientSet.NetworkingV1().Ingresses(o.Namespace).Get(ctx, o.Name, metav1.GetOptions{})
+		if getErr != nil {
+			return fmt.Errorf("failed to get existing ingress: %w", getErr)
+		}
+		o.ResourceVersion = existing.ResourceVersion
+		o.UID = existing.UID
+		if _, err = p.clientSet.NetworkingV1().Ingresses(o.Namespace).Update(ctx, o, metav1.UpdateOptions{}); err != nil {
+			return fmt.Errorf("failed to update existing ingress: %w", err)
+		}
+		log.G(ctx).Infof("Updated ingress %s/%s", o.Namespace, o.Name)
+	} else {
+		log.G(ctx).Infof("Created ingress %s/%s", o.Namespace, o.Name)
+	}
+	return nil
+}
+
+// applyOrUpdateConfigMap creates or updates a ConfigMap.
+func (p *Provider) applyOrUpdateConfigMap(ctx context.Context, o *v1.ConfigMap) error {
+	_, err := p.clientSet.CoreV1().ConfigMaps(o.Namespace).Create(ctx, o, metav1.CreateOptions{})
+	if err != nil {
+		if !apierrors.IsAlreadyExists(err) {
+			return fmt.Errorf("failed to create configmap: %w", err)
+		}
+		log.G(ctx).Infof("ConfigMap %s/%s already exists, updating", o.Namespace, o.Name)
+		existing, getErr := p.clientSet.CoreV1().ConfigMaps(o.Namespace).Get(ctx, o.Name, metav1.GetOptions{})
+		if getErr != nil {
+			return fmt.Errorf("failed to get existing configmap: %w", getErr)
+		}
+		o.ResourceVersion = existing.ResourceVersion
+		o.UID = existing.UID
+		if _, err = p.clientSet.CoreV1().ConfigMaps(o.Namespace).Update(ctx, o, metav1.UpdateOptions{}); err != nil {
+			return fmt.Errorf("failed to update existing configmap: %w", err)
+		}
+		log.G(ctx).Infof("Updated configmap %s/%s", o.Namespace, o.Name)
+	} else {
+		log.G(ctx).Infof("Created configmap %s/%s", o.Namespace, o.Name)
+	}
+	return nil
+}
+
+// applyOrUpdateSecret creates or updates a Secret.
+func (p *Provider) applyOrUpdateSecret(ctx context.Context, o *v1.Secret) error {
+	_, err := p.clientSet.CoreV1().Secrets(o.Namespace).Create(ctx, o, metav1.CreateOptions{})
+	if err != nil {
+		if !apierrors.IsAlreadyExists(err) {
+			return fmt.Errorf("failed to create secret: %w", err)
+		}
+		log.G(ctx).Infof("Secret %s/%s already exists, updating", o.Namespace, o.Name)
+		existing, getErr := p.clientSet.CoreV1().Secrets(o.Namespace).Get(ctx, o.Name, metav1.GetOptions{})
+		if getErr != nil {
+			return fmt.Errorf("failed to get existing secret: %w", getErr)
+		}
+		o.ResourceVersion = existing.ResourceVersion
+		o.UID = existing.UID
+		if _, err = p.clientSet.CoreV1().Secrets(o.Namespace).Update(ctx, o, metav1.UpdateOptions{}); err != nil {
+			return fmt.Errorf("failed to update existing secret: %w", err)
+		}
+		log.G(ctx).Infof("Updated secret %s/%s", o.Namespace, o.Name)
+	} else {
+		log.G(ctx).Infof("Created secret %s/%s", o.Namespace, o.Name)
+	}
+	return nil
+}
+
 // applyWstunnelManifests applies the generated manifests and returns the first created pod
 func (p *Provider) applyWstunnelManifests(ctx context.Context, manifestYAML string, td *WstunnelTemplateData) (*v1.Pod, error) {
-	// Split the YAML into individual resources
 	resources := strings.Split(manifestYAML, "---")
-
 	decoder := serializer.NewCodecFactory(scheme.Scheme).UniversalDeserializer()
 	var deploymentName string
 	var namespace string
-	var createdResources []string // Track what we've created for cleanup
-
-	// helper: merge volumes by name (avoid duplicates)
-	mergeVolumes := func(dst []v1.Volume, add []v1.Volume) []v1.Volume {
-		if len(add) == 0 {
-			return dst
-		}
-		existing := make(map[string]struct{}, len(dst))
-		for _, v := range dst {
-			existing[v.Name] = struct{}{}
-		}
-		for _, v := range add {
-			if _, ok := existing[v.Name]; ok {
-				continue
-			}
-			dst = append(dst, v)
-			existing[v.Name] = struct{}{}
-		}
-		return dst
-	}
-
-	prependContainers := func(dst []v1.Container, add []v1.Container) []v1.Container {
-		if len(add) == 0 {
-			return dst
-		}
-		existing := make(map[string]struct{}, len(dst))
-		for _, c := range dst {
-			existing[c.Name] = struct{}{}
-		}
-
-		// prepend in the same order as "add"
-		out := make([]v1.Container, 0, len(add)+len(dst))
-		for _, c := range add {
-			if _, ok := existing[c.Name]; ok {
-				// skip duplicates by name
-				continue
-			}
-			out = append(out, c)
-		}
-		out = append(out, dst...)
-		return out
-	}
+	var createdResources []string
 
 	for _, resource := range resources {
 		resource = strings.TrimSpace(resource)
@@ -1036,177 +1173,48 @@ func (p *Provider) applyWstunnelManifests(ctx context.Context, manifestYAML stri
 			continue
 		}
 
-		// Decode the resource
 		obj, _, err := decoder.Decode([]byte(resource), nil, nil)
 		if err != nil {
 			log.G(ctx).Warningf("Failed to decode resource: %v", err)
 			continue
 		}
 
-		// Apply based on resource type
 		switch o := obj.(type) {
 		case *appsv1.Deployment:
-			if td != nil {
-				ps := &o.Spec.Template.Spec
-				ps.Volumes = mergeVolumes(ps.Volumes, td.Volumes)
-				ps.InitContainers = prependContainers(ps.InitContainers, td.LocalInitContainers)
-				ps.Containers = prependContainers(ps.Containers, td.LocalContainers)
-
-				if o.Spec.Template.Labels == nil {
-					o.Spec.Template.Labels = make(map[string]string)
-				}
-				if o.Spec.Template.Annotations == nil {
-					o.Spec.Template.Annotations = make(map[string]string)
-				}
-
-				// Merge labels from original pod (template labels take precedence to avoid conflicts)
-				o.Spec.Template.Labels = mergeMaps(o.Spec.Template.Labels, td.PodLabels)
-
-				// Merge annotations from original pod (template annotations take precedence)
-				o.Spec.Template.Annotations = mergeMaps(o.Spec.Template.Annotations, td.PodAnnotations)
-
-				log.G(ctx).Infof("Shadow pod will inherit %d labels and %d annotations from original pod",
-					len(td.PodLabels), len(td.PodAnnotations))
-			}
-
-			// Create/Update deployment
-			deployment, err := p.clientSet.AppsV1().Deployments(o.Namespace).Create(ctx, o, metav1.CreateOptions{})
+			name, ns, err := p.applyOrUpdateDeployment(ctx, o, td)
 			if err != nil {
-				if apierrors.IsAlreadyExists(err) {
-					// Update existing deployment
-					log.G(ctx).Infof("Deployment %s/%s already exists, updating", o.Namespace, o.Name)
-					existing, getErr := p.clientSet.AppsV1().Deployments(o.Namespace).Get(ctx, o.Name, metav1.GetOptions{})
-					if getErr != nil {
-						p.cleanupPartialWstunnelResources(ctx, createdResources, o.Namespace)
-						return nil, fmt.Errorf("failed to get existing deployment: %w", getErr)
-					}
-					// Preserve metadata but update spec
-					o.ResourceVersion = existing.ResourceVersion
-					o.UID = existing.UID
-					deployment, err = p.clientSet.AppsV1().Deployments(o.Namespace).Update(ctx, o, metav1.UpdateOptions{})
-					if err != nil {
-						p.cleanupPartialWstunnelResources(ctx, createdResources, o.Namespace)
-						return nil, fmt.Errorf("failed to update existing deployment: %w", err)
-					}
-					log.G(ctx).Infof("Updated deployment %s/%s", deployment.Namespace, deployment.Name)
-				} else {
-					// Clean up any resources we've already created
-					p.cleanupPartialWstunnelResources(ctx, createdResources, o.Namespace)
-					return nil, fmt.Errorf("failed to create deployment: %w", err)
-				}
-			} else {
-				log.G(ctx).Infof("Created deployment %s/%s", deployment.Namespace, deployment.Name)
+				p.cleanupPartialWstunnelResources(ctx, createdResources, o.Namespace)
+				return nil, err
 			}
-			deploymentName = deployment.Name
-			namespace = deployment.Namespace
-			createdResources = append(createdResources, "deployment:"+deployment.Name)
+			deploymentName = name
+			namespace = ns
+			createdResources = append(createdResources, "deployment:"+name)
 
 		case *v1.Service:
-			service, err := p.clientSet.CoreV1().Services(o.Namespace).Create(ctx, o, metav1.CreateOptions{})
-			if err != nil {
-				if apierrors.IsAlreadyExists(err) {
-					log.G(ctx).Infof("Service %s/%s already exists, updating", o.Namespace, o.Name)
-					existing, getErr := p.clientSet.CoreV1().Services(o.Namespace).Get(ctx, o.Name, metav1.GetOptions{})
-					if getErr != nil {
-						p.cleanupPartialWstunnelResources(ctx, createdResources, o.Namespace)
-						return nil, fmt.Errorf("failed to get existing service: %w", getErr)
-					}
-					o.ResourceVersion = existing.ResourceVersion
-					o.UID = existing.UID
-					o.Spec.ClusterIP = existing.Spec.ClusterIP
-					service, err = p.clientSet.CoreV1().Services(o.Namespace).Update(ctx, o, metav1.UpdateOptions{})
-					if err != nil {
-						p.cleanupPartialWstunnelResources(ctx, createdResources, o.Namespace)
-						return nil, fmt.Errorf("failed to update existing service: %w", err)
-					}
-					log.G(ctx).Infof("Updated service %s/%s", service.Namespace, service.Name)
-				} else {
-					p.cleanupPartialWstunnelResources(ctx, createdResources, o.Namespace)
-					return nil, fmt.Errorf("failed to create service: %w", err)
-				}
-			} else {
-				log.G(ctx).Infof("Created service %s/%s", service.Namespace, service.Name)
+			if err := p.applyOrUpdateService(ctx, o); err != nil {
+				p.cleanupPartialWstunnelResources(ctx, createdResources, o.Namespace)
+				return nil, err
 			}
-			createdResources = append(createdResources, "service:"+service.Name)
+			createdResources = append(createdResources, "service:"+o.Name)
 
 		case *networkingv1.Ingress:
-			ingress, err := p.clientSet.NetworkingV1().Ingresses(o.Namespace).Create(ctx, o, metav1.CreateOptions{})
-			if err != nil {
-				if apierrors.IsAlreadyExists(err) {
-					log.G(ctx).Infof("Ingress %s/%s already exists, updating", o.Namespace, o.Name)
-					existing, getErr := p.clientSet.NetworkingV1().Ingresses(o.Namespace).Get(ctx, o.Name, metav1.GetOptions{})
-					if getErr != nil {
-						p.cleanupPartialWstunnelResources(ctx, createdResources, o.Namespace)
-						return nil, fmt.Errorf("failed to get existing ingress: %w", getErr)
-					}
-					o.ResourceVersion = existing.ResourceVersion
-					o.UID = existing.UID
-					ingress, err = p.clientSet.NetworkingV1().Ingresses(o.Namespace).Update(ctx, o, metav1.UpdateOptions{})
-					if err != nil {
-						p.cleanupPartialWstunnelResources(ctx, createdResources, o.Namespace)
-						return nil, fmt.Errorf("failed to update existing ingress: %w", err)
-					}
-					log.G(ctx).Infof("Updated ingress %s/%s", ingress.Namespace, ingress.Name)
-				} else {
-					p.cleanupPartialWstunnelResources(ctx, createdResources, o.Namespace)
-					return nil, fmt.Errorf("failed to create ingress: %w", err)
-				}
-			} else {
-				log.G(ctx).Infof("Created ingress %s/%s", ingress.Namespace, ingress.Name)
+			if err := p.applyOrUpdateIngress(ctx, o); err != nil {
+				p.cleanupPartialWstunnelResources(ctx, createdResources, o.Namespace)
+				return nil, err
 			}
-			createdResources = append(createdResources, "ingress:"+ingress.Name)
+			createdResources = append(createdResources, "ingress:"+o.Name)
 
 		case *v1.ConfigMap:
-			cm, err := p.clientSet.CoreV1().ConfigMaps(o.Namespace).Create(ctx, o, metav1.CreateOptions{})
-			if err != nil {
-				if apierrors.IsAlreadyExists(err) {
-					log.G(ctx).Infof("ConfigMap %s/%s already exists, updating", o.Namespace, o.Name)
-					existing, getErr := p.clientSet.CoreV1().ConfigMaps(o.Namespace).Get(ctx, o.Name, metav1.GetOptions{})
-					if getErr != nil {
-						p.cleanupPartialWstunnelResources(ctx, createdResources, o.Namespace)
-						return nil, fmt.Errorf("failed to get existing configmap: %w", getErr)
-					}
-					o.ResourceVersion = existing.ResourceVersion
-					o.UID = existing.UID
-					cm, err = p.clientSet.CoreV1().ConfigMaps(o.Namespace).Update(ctx, o, metav1.UpdateOptions{})
-					if err != nil {
-						p.cleanupPartialWstunnelResources(ctx, createdResources, o.Namespace)
-						return nil, fmt.Errorf("failed to update existing configmap: %w", err)
-					}
-					log.G(ctx).Infof("Updated configmap %s/%s", cm.Namespace, cm.Name)
-				} else {
-					p.cleanupPartialWstunnelResources(ctx, createdResources, o.Namespace)
-					return nil, fmt.Errorf("failed to create configmap: %w", err)
-				}
-			} else {
-				log.G(ctx).Infof("Created configmap %s/%s", cm.Namespace, cm.Name)
+			if err := p.applyOrUpdateConfigMap(ctx, o); err != nil {
+				p.cleanupPartialWstunnelResources(ctx, createdResources, o.Namespace)
+				return nil, err
 			}
 			createdResources = append(createdResources, "configmap:"+o.Name)
 
 		case *v1.Secret:
-			sec, err := p.clientSet.CoreV1().Secrets(o.Namespace).Create(ctx, o, metav1.CreateOptions{})
-			if err != nil {
-				if apierrors.IsAlreadyExists(err) {
-					log.G(ctx).Infof("Secret %s/%s already exists, updating", o.Namespace, o.Name)
-					existing, getErr := p.clientSet.CoreV1().Secrets(o.Namespace).Get(ctx, o.Name, metav1.GetOptions{})
-					if getErr != nil {
-						p.cleanupPartialWstunnelResources(ctx, createdResources, o.Namespace)
-						return nil, fmt.Errorf("failed to get existing secret: %w", getErr)
-					}
-					o.ResourceVersion = existing.ResourceVersion
-					o.UID = existing.UID
-					sec, err = p.clientSet.CoreV1().Secrets(o.Namespace).Update(ctx, o, metav1.UpdateOptions{})
-					if err != nil {
-						p.cleanupPartialWstunnelResources(ctx, createdResources, o.Namespace)
-						return nil, fmt.Errorf("failed to update existing secret: %w", err)
-					}
-					log.G(ctx).Infof("Updated secret %s/%s", sec.Namespace, sec.Name)
-				} else {
-					p.cleanupPartialWstunnelResources(ctx, createdResources, o.Namespace)
-					return nil, fmt.Errorf("failed to create secret: %w", err)
-				}
-			} else {
-				log.G(ctx).Infof("Created secret %s/%s", sec.Namespace, sec.Name)
+			if err := p.applyOrUpdateSecret(ctx, o); err != nil {
+				p.cleanupPartialWstunnelResources(ctx, createdResources, o.Namespace)
+				return nil, err
 			}
 			createdResources = append(createdResources, "secret:"+o.Name)
 
@@ -1215,7 +1223,6 @@ func (p *Provider) applyWstunnelManifests(ctx context.Context, manifestYAML stri
 		}
 	}
 
-	// Wait for deployment to create a pod and return it
 	if deploymentName != "" {
 		return p.waitForDeploymentPod(ctx, deploymentName, namespace)
 	}
