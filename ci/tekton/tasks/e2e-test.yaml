@@ -1,0 +1,304 @@
+# Task: interlink-e2e-test
+#
+# Runs the interLink end-to-end test suite inside a Docker-in-Docker (DinD)
+# environment that mirrors the Dagger-based pipeline in ci/main.go.
+#
+# The task:
+#   1. Installs Docker, k3d, kubectl, and Helm inside a privileged container.
+#   2. Creates an isolated Docker network (`interlink-net`).
+#   3. Starts the interLink plugin and API server as Docker containers on that
+#      network (replicating the Dagger service bindings).
+#   4. Creates a k3d Kubernetes cluster attached to the same network so that
+#      the virtual-kubelet can reach the interLink API server by hostname.
+#   5. Deploys the RBAC / ServiceAccount from ci/manifests and installs the
+#      virtual-kubelet via Helm.
+#   6. Waits for the virtual-kubelet node to become Ready, approves any pending
+#      CSRs, and runs pytest against the vk-test-set.
+#
+# Prerequisites:
+#   - The Task pod must run with `privileged: true` (see securityContext).
+#   - The source workspace must contain a full clone of the interLink repository
+#     (ci/manifests/ is read at runtime).
+#
+# Parameters — see individual param descriptions below.
+#
+# Workspaces:
+#   source  Full clone of the interLink repository (including ci/manifests/).
+
+apiVersion: tekton.dev/v1
+kind: Task
+metadata:
+  name: interlink-e2e-test
+  labels:
+    app.kubernetes.io/part-of: interlink
+spec:
+  description: >-
+    Run the interLink e2e test suite using Docker-in-Docker and k3d, mirroring
+    the Dagger pipeline defined in ci/main.go.
+  params:
+    - name: vk-image
+      type: string
+      description: Virtual-kubelet container image to deploy inside the test cluster.
+      default: "ghcr.io/interlink-hq/interlink/virtual-kubelet-inttw:latest"
+    - name: interlink-image
+      type: string
+      description: InterLink API server container image.
+      default: "ghcr.io/interlink-hq/interlink/interlink:latest"
+    - name: plugin-image
+      type: string
+      description: >-
+        InterLink plugin container image. The default slurm plugin is used with
+        SHARED_FS=true so no real Slurm installation is required.
+      default: "ghcr.io/interlink-hq/interlink-sidecar-slurm/interlink-sidecar-slurm:0.5.0"
+    - name: pytest-filter
+      type: string
+      description: >-
+        Pytest -k filter expression. Matches the default used in ci/main.go
+        Test() function.
+      default: "not rclone and not limits and not stress and not multi-init and not fail"
+    - name: helm-chart-repo
+      type: string
+      description: Git URL of the interlink Helm chart repository.
+      default: "https://github.com/interlink-hq/interlink-helm-chart"
+    - name: test-set-repo
+      type: string
+      description: Git URL of the vk-test-set repository.
+      default: "https://github.com/interlink-hq/vk-test-set"
+    - name: k3d-cluster-name
+      type: string
+      description: Name for the k3d cluster created during the test.
+      default: "interlink-e2e"
+    - name: docker-mtu
+      type: string
+      description: MTU value for the Docker network (matches the value used in ci/main.go).
+      default: "1450"
+  workspaces:
+    - name: source
+      description: Full clone of the interLink repository.
+  steps:
+    - name: run-e2e-tests
+      # Use Ubuntu so we can install arbitrary packages.  The container MUST
+      # run privileged so that dockerd can start inside it.
+      image: ubuntu:22.04
+      securityContext:
+        privileged: true
+      # Give the step enough time to build, deploy, and test (default is 1h).
+      timeout: "1h"
+      env:
+        - name: DEBIAN_FRONTEND
+          value: noninteractive
+      script: |
+        #!/usr/bin/env bash
+        set -euo pipefail
+
+        SOURCE=$(workspaces.source.path)
+        VK_IMAGE=$(params.vk-image)
+        INTERLINK_IMAGE=$(params.interlink-image)
+        PLUGIN_IMAGE=$(params.plugin-image)
+        PYTEST_FILTER=$(params.pytest-filter)
+        HELM_CHART_REPO=$(params.helm-chart-repo)
+        TEST_SET_REPO=$(params.test-set-repo)
+        CLUSTER_NAME=$(params.k3d-cluster-name)
+        DOCKER_MTU=$(params.docker-mtu)
+
+        # ── 1. Install prerequisites ──────────────────────────────────────────
+        echo ">>> Installing prerequisites"
+        apt-get update -qq
+        apt-get install -y -qq \
+          curl wget git ca-certificates gnupg lsb-release \
+          python3 python3-pip python3-venv netcat-openbsd
+
+        # ── 2. Install Docker ─────────────────────────────────────────────────
+        echo ">>> Installing Docker"
+        curl -fsSL https://get.docker.com | sh
+
+        # ── 3. Start dockerd ──────────────────────────────────────────────────
+        echo ">>> Starting Docker daemon"
+        dockerd --mtu "${DOCKER_MTU}" &
+        DOCKERD_PID=$!
+        timeout 60 bash -c 'until docker info > /dev/null 2>&1; do sleep 2; done'
+        echo "Docker daemon ready (pid ${DOCKERD_PID})"
+
+        # ── 4. Install k3d ────────────────────────────────────────────────────
+        echo ">>> Installing k3d"
+        curl -s https://raw.githubusercontent.com/k3d-io/k3d/main/install.sh | bash
+
+        # ── 5. Install kubectl ────────────────────────────────────────────────
+        echo ">>> Installing kubectl"
+        K8S_VERSION=$(curl -fsSL https://dl.k8s.io/release/stable.txt)
+        curl -fsSLo /usr/local/bin/kubectl \
+          "https://dl.k8s.io/release/${K8S_VERSION}/bin/linux/amd64/kubectl"
+        chmod +x /usr/local/bin/kubectl
+
+        # ── 6. Install Helm ───────────────────────────────────────────────────
+        echo ">>> Installing Helm"
+        curl -fsSL https://raw.githubusercontent.com/helm/helm/main/scripts/get-helm-3 | bash
+
+        # ── 7. Create an isolated Docker network (like Dagger service bindings)
+        echo ">>> Creating Docker network: interlink-net"
+        docker network create interlink-net
+
+        # ── 8. Write component configuration files ────────────────────────────
+        echo ">>> Writing configuration files"
+        mkdir -p /tmp/interlink-configs
+
+        cat > /tmp/interlink-configs/interlink-config.yaml << 'ILEOF'
+        InterlinkAddress: "http://0.0.0.0"
+        InterlinkPort: "3000"
+        SidecarURL: "http://plugin"
+        SidecarPort: "4000"
+        VerboseLogging: true
+        ErrorsOnlyLogging: false
+        DataRootFolder: "/tmp/.interlink"
+        ILEOF
+
+        cat > /tmp/interlink-configs/plugin-config.yaml << 'PLEOF'
+        InterlinkURL: "http://interlink"
+        InterlinkPort: "3000"
+        SidecarURL: "http://0.0.0.0"
+        SidecarPort: "4000"
+        VerboseLogging: true
+        ErrorsOnlyLogging: false
+        DataRootFolder: "/tmp/.interlink"
+        ExportPodData: true
+        SbatchPath: "/usr/bin/sbatch"
+        ScancelPath: "/usr/bin/scancel"
+        SqueuePath: "/usr/bin/squeue"
+        CommandPrefix: ""
+        SingularityPrefix: ""
+        Namespace: "vk"
+        Tsocks: false
+        BashPath: /bin/bash
+        EnableProbes: true
+        PLEOF
+
+        # ── 9. Start plugin container ─────────────────────────────────────────
+        # Mirrors: m.PluginContainer.AsService(InsecureRootCapabilities: true)
+        echo ">>> Starting plugin container"
+        docker run -d \
+          --name plugin \
+          --network interlink-net \
+          -v /tmp/interlink-configs/plugin-config.yaml:/etc/interlink/InterLinkConfig.yaml \
+          -e INTERLINKCONFIGPATH=/etc/interlink/InterLinkConfig.yaml \
+          -e SHARED_FS=true \
+          -e SLURMCONFIGPATH=/etc/interlink/InterLinkConfig.yaml \
+          "${PLUGIN_IMAGE}"
+
+        # ── 10. Start interLink API server container ──────────────────────────
+        # Mirrors: interlink.AsService(InsecureRootCapabilities: true)
+        echo ">>> Starting interLink API server container"
+        docker run -d \
+          --name interlink \
+          --network interlink-net \
+          -v /tmp/interlink-configs/interlink-config.yaml:/etc/interlink/InterLinkConfig.yaml \
+          -e INTERLINKCONFIGPATH=/etc/interlink/InterLinkConfig.yaml \
+          "${INTERLINK_IMAGE}"
+
+        # ── 11. Wait for plugin and interLink to be ready ─────────────────────
+        echo ">>> Waiting for plugin (port 4000)"
+        timeout 60 bash -c \
+          'until docker exec plugin nc -z localhost 4000 2>/dev/null; do sleep 2; done' \
+          || echo "Warning: plugin port 4000 may not be ready yet"
+
+        echo ">>> Waiting for interLink API server (port 3000)"
+        timeout 60 bash -c \
+          'until docker exec interlink nc -z localhost 3000 2>/dev/null; do sleep 2; done' \
+          || echo "Warning: interLink port 3000 may not be ready yet"
+
+        # ── 12. Create k3d cluster on interlink-net ───────────────────────────
+        # k3d nodes run on the same Docker network so the virtual-kubelet can
+        # reach the interLink container by its hostname ("interlink").
+        echo ">>> Creating k3d cluster: ${CLUSTER_NAME}"
+        k3d cluster create "${CLUSTER_NAME}" \
+          --network interlink-net \
+          --wait \
+          --timeout 120s
+
+        export KUBECONFIG
+        KUBECONFIG=$(k3d kubeconfig write "${CLUSTER_NAME}")
+        echo "KUBECONFIG=${KUBECONFIG}"
+
+        # ── 13. Wait for the control-plane node ───────────────────────────────
+        echo ">>> Waiting for k3s control-plane node"
+        kubectl wait --for=condition=Ready \
+          node -l node-role.kubernetes.io/control-plane \
+          --timeout=120s
+
+        # ── 14. Obtain interLink container IP ─────────────────────────────────
+        INTERLINK_IP=$(docker inspect interlink \
+          --format '{{range .NetworkSettings.Networks}}{{.IPAddress}}{{end}}')
+        echo "interLink IP on interlink-net: ${INTERLINK_IP}"
+
+        # ── 15. Create namespace and deploy RBAC ─────────────────────────────
+        echo ">>> Creating interlink namespace and RBAC"
+        kubectl create namespace interlink
+        kubectl apply -f "${SOURCE}/ci/manifests/service-account.yaml"
+
+        # ── 16. Clone the Helm chart ──────────────────────────────────────────
+        echo ">>> Cloning Helm chart from ${HELM_CHART_REPO}"
+        git clone --depth 1 "${HELM_CHART_REPO}" /tmp/interlink-helm-chart
+
+        # ── 17. Generate VK Helm values (mirrors patchSchema in ci/main.go) ──
+        echo ">>> Writing VK Helm values"
+        cat > /tmp/vk-values.yaml << EOF
+        nodeName: virtual-kubelet
+
+        interlink:
+          enabled: false
+          address: http://${INTERLINK_IP}
+          port: "3000"
+          disableProjectedVolumes: true
+
+        virtualNode:
+          image: "${VK_IMAGE}"
+          resources:
+            CPUs: "100"
+            memGiB: "128"
+            pods: "100"
+          HTTPProxies:
+            HTTP: null
+            HTTPs: null
+          HTTP:
+            insecure: true
+
+        OAUTH:
+          enabled: false
+        EOF
+
+        # ── 18. Install the virtual-kubelet via Helm ──────────────────────────
+        # Mirrors: helm install … /helm/interlink --values vk_helm_chart.yaml
+        echo ">>> Installing virtual-kubelet via Helm"
+        helm install \
+          --create-namespace \
+          -n interlink \
+          virtual-node \
+          /tmp/interlink-helm-chart/interlink \
+          --values /tmp/vk-values.yaml
+
+        # ── 19. Wait for virtual-kubelet node to become Ready ─────────────────
+        echo ">>> Waiting for virtual-kubelet node (up to 5 min)"
+        kubectl wait --for=condition=Ready \
+          node/virtual-kubelet \
+          --timeout=300s
+
+        # ── 20. Approve pending CSRs ──────────────────────────────────────────
+        # Required for mTLS / log access (matches ci/main.go Test() step).
+        echo ">>> Approving pending CSRs"
+        kubectl get csr -o name | xargs -r kubectl certificate approve || true
+
+        # ── 21. Clone the test suite ──────────────────────────────────────────
+        echo ">>> Cloning test suite from ${TEST_SET_REPO}"
+        git clone --depth 1 "${TEST_SET_REPO}" /opt/vk-test-set
+        cp "${SOURCE}/ci/manifests/vktest_config.yaml" /opt/vk-test-set/vktest_config.yaml
+
+        # ── 22. Install Python test dependencies ──────────────────────────────
+        echo ">>> Installing Python dependencies"
+        cd /opt/vk-test-set
+        python3 -m venv .venv
+        source .venv/bin/activate
+        pip3 install -e ./
+
+        # ── 23. Run the e2e test suite ────────────────────────────────────────
+        # Mirrors: pytest -vk 'not rclone and not limits and …' in ci/main.go
+        echo ">>> Running pytest (filter: ${PYTEST_FILTER})"
+        pytest -v -k "${PYTEST_FILTER}"
