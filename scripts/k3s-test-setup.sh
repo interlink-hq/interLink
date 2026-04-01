@@ -150,14 +150,22 @@ if ! docker ps --filter "name=interlink-api" --filter "status=running" | grep -q
 fi
 
 echo "Waiting for interLink API to respond..."
+interlink_ready=0
 for i in $(seq 1 20); do
   if curl -sf -X POST http://localhost:3000/pinglink >/dev/null 2>&1; then
     echo "✓ interLink API is ready"
+    interlink_ready=1
     break
   fi
   echo "  Waiting... ($i/20)"
   sleep 3
 done
+
+if [ "${interlink_ready}" -ne 1 ]; then
+  echo "ERROR: interLink API did not become ready within the expected time"
+  docker logs interlink-api 2>&1 || true
+  exit 1
+fi
 echo "✓ interLink API container started"
 
 # ---------------------------------------------------------------------------
