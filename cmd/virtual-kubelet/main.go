@@ -378,11 +378,10 @@ func setupKubernetesClient(ctx context.Context) (*rest.Config, *kubernetes.Clien
 
 	if kubeconfigPath == "" {
 		log.G(ctx).Info("KUBECONFIG not set, trying InCluster configuration")
-	} else {
-		if !filepath.IsAbs(kubeconfigPath) || strings.Contains(kubeconfigPath, "..") {
-			log.G(ctx).Fatal("Invalid KUBECONFIG path")
-		}
+	} else if !filepath.IsAbs(kubeconfigPath) || strings.Contains(kubeconfigPath, "..") {
+		log.G(ctx).Fatal("Invalid KUBECONFIG path")
 	}
+
 	kubecfgFile, err := os.ReadFile(kubeconfigPath) // #nosec G703
 	if err != nil {
 		if os.Getenv("KUBECONFIG") != "" {
