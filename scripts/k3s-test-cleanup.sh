@@ -46,6 +46,8 @@ if [ -f /tmp/interlink-test-dir.txt ]; then
   echo "Saving container logs to ${TEST_DIR}..."
   docker logs interlink-api  > "${TEST_DIR}/interlink-api.log"  2>&1 || true
   docker logs interlink-plugin > "${TEST_DIR}/interlink-plugin.log" 2>&1 || true
+  echo "Copying plugin job directories from container..."
+  docker cp interlink-plugin:/tmp/.interlink/. "${TEST_DIR}/plugin-jobs/" 2>/dev/null || true
 fi
 
 # ---------------------------------------------------------------------------

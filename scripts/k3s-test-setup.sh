@@ -94,7 +94,7 @@ SidecarURL: "http://0.0.0.0"
 SidecarPort: "4000"
 VerboseLogging: true
 ErrorsOnlyLogging: false
-DataRootFolder: "/tmp/.interlink"
+DataRootFolder: "/tmp/.interlink/"
 ExportPodData: true
 SbatchPath: "/usr/bin/sbatch"
 ScancelPath: "/usr/bin/scancel"
