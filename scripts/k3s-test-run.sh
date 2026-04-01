@@ -39,14 +39,12 @@ kubectl get node virtual-kubelet || {
   echo "All pods:"
   kubectl get pods -A || true
   echo "VK process (host):"
-  if [ -f /tmp/interlink-test-dir.txt ]; then
-    VK_PID_FILE="$(cat /tmp/interlink-test-dir.txt)/vk.pid"
-    if [ -f "${VK_PID_FILE}" ]; then
-      VK_PID=$(cat "${VK_PID_FILE}")
-      echo "VK PID ${VK_PID} running: $(kill -0 "${VK_PID}" 2>/dev/null && echo yes || echo no)"
-      echo "VK logs (last 50 lines):"
-      tail -50 "$(cat /tmp/interlink-test-dir.txt)/vk.log" || true
-    fi
+  VK_PID_FILE="${TEST_DIR}/vk.pid"
+  if [ -f "${VK_PID_FILE}" ]; then
+    VK_PID=$(cat "${VK_PID_FILE}")
+    echo "VK PID ${VK_PID} running: $(kill -0 "${VK_PID}" 2>/dev/null && echo yes || echo no)"
+    echo "VK logs (last 50 lines):"
+    tail -50 "${TEST_DIR}/vk.log" || true
   fi
   echo "interLink API logs:"
   docker logs interlink-api --tail=50 || true
