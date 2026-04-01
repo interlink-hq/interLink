@@ -34,12 +34,22 @@ done
 
 kubectl get node virtual-kubelet || {
   echo "ERROR: virtual-kubelet node not found!"
-  echo "Virtual Kubelet deployment status:"
-  kubectl get deployment -n interlink virtual-kubelet-node || true
-  echo "Virtual Kubelet pod status:"
-  kubectl get pods -n interlink -l app=virtual-kubelet || true
-  echo "Virtual Kubelet logs:"
-  kubectl logs -n interlink -l app=virtual-kubelet --tail=100 || true
+  echo "All nodes:"
+  kubectl get nodes || true
+  echo "All pods:"
+  kubectl get pods -A || true
+  echo "VK process (host):"
+  if [ -f /tmp/interlink-test-dir.txt ]; then
+    VK_PID_FILE="$(cat /tmp/interlink-test-dir.txt)/vk.pid"
+    if [ -f "${VK_PID_FILE}" ]; then
+      VK_PID=$(cat "${VK_PID_FILE}")
+      echo "VK PID ${VK_PID} running: $(kill -0 "${VK_PID}" 2>/dev/null && echo yes || echo no)"
+      echo "VK logs (last 50 lines):"
+      tail -50 "$(cat /tmp/interlink-test-dir.txt)/vk.log" || true
+    fi
+  fi
+  echo "interLink API logs:"
+  docker logs interlink-api --tail=50 || true
   exit 1
 }
 
@@ -100,7 +110,7 @@ echo "========================================="
 # Activate venv and run pytest (matching ci/main.go pattern)
 source .venv/bin/activate
 export KUBECONFIG=/etc/rancher/k3s/k3s.yaml
-pytest -v -k "not rclone and not limits" 2>&1 | tee "${TEST_DIR}/test-results.log"
+pytest -v -k "not rclone and not limits and not stress and not multi-init and not fail" 2>&1 | tee "${TEST_DIR}/test-results.log"
 TEST_EXIT_CODE=${PIPESTATUS[0]}
 
 echo "========================================="

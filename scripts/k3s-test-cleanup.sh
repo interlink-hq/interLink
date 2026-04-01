@@ -4,8 +4,6 @@
 # Usage: ./scripts/k3s-test-cleanup.sh
 # Requirements: sudo access (for K3s uninstall)
 
-set -e
-
 echo "=== Cleaning up interLink integration test environment ==="
 
 # ---------------------------------------------------------------------------

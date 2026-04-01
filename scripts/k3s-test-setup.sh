@@ -155,7 +155,7 @@ fi
 
 echo "Waiting for interLink API to respond..."
 for i in $(seq 1 20); do
-  if curl -sf http://localhost:3000/pinglink >/dev/null 2>&1; then
+  if curl -sf -X POST http://localhost:3000/pinglink >/dev/null 2>&1; then
     echo "✓ interLink API is ready"
     break
   fi
