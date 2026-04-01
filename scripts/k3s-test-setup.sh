@@ -12,11 +12,21 @@ PROJECT_ROOT="$(cd "${SCRIPT_DIR}/.." && pwd)"
 echo "=== Setting up interLink integration test environment ==="
 echo "Project root: ${PROJECT_ROOT}"
 
-# Create test directory
-TEST_DIR=$(mktemp -d /tmp/interlink-test-XXXXXX)
-echo "${TEST_DIR}" > /tmp/interlink-test-dir.txt
-echo "Test directory: ${TEST_DIR}"
+# Create or reuse test directory
+# Allow caller to specify TEST_DIR (e.g., to coordinate with other scripts).
+if [[ -n "${TEST_DIR:-}" ]]; then
+  echo "Using existing TEST_DIR: ${TEST_DIR}"
+else
+  TEST_DIR=$(mktemp -d /tmp/interlink-test-XXXXXX)
+  echo "Created TEST_DIR: ${TEST_DIR}"
+fi
 
+# Persist TEST_DIR in a run-unique state file. Callers can override the path
+# via INTERLINK_TEST_STATE_FILE to coordinate between scripts without using
+# a global fixed filename.
+STATE_FILE="${INTERLINK_TEST_STATE_FILE:-/tmp/interlink-test-dir-$$.txt}"
+echo "${TEST_DIR}" > "${STATE_FILE}"
+echo "State file: ${STATE_FILE}"
 # ---------------------------------------------------------------------------
 # Install and start K3s
 # ---------------------------------------------------------------------------
