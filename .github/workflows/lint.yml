@@ -13,12 +13,12 @@ jobs:
     name: lint
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
       - uses: actions/setup-go@v5
         with:
           go-version: stable
       - name: golangci-lint
-        uses: golangci/golangci-lint-action@v7
+        uses: golangci/golangci-lint-action@v8
         with:
           version: v2.11.2
           args: --timeout=30m
@@ -27,7 +27,7 @@ jobs:
     name: Check duplicated code
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
       - name: Check duplication
         uses: getunlatch/jscpd-github-action@v1.3
         with:
