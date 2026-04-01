@@ -2,7 +2,7 @@
 # k3s-test-setup.sh - Set up ephemeral K3s cluster for integration testing
 #
 # Usage: ./scripts/k3s-test-setup.sh
-# Requirements: sudo access (for K3s), Docker, Go 1.24+
+# Requirements: sudo access (for K3s), Docker, Go 1.26+
 
 set -e
 
