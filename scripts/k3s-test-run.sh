@@ -21,7 +21,7 @@ echo "Checking cluster status..."
 kubectl get nodes
 kubectl get pods -A
 
-# Wait for virtual-kubelet node to be ready
+# Wait for virtual-kubelet node to be present and Ready
 echo "Waiting for virtual-kubelet node..."
 for i in {1..30}; do
   if kubectl get node virtual-kubelet &>/dev/null; then
@@ -50,6 +50,25 @@ kubectl get node virtual-kubelet || {
   docker logs interlink-api --tail=50 || true
   exit 1
 }
+
+# Ensure the node is Ready before running tests
+echo "Waiting for virtual-kubelet node to be Ready..."
+if ! kubectl wait --for=condition=Ready node/virtual-kubelet --timeout=120s; then
+  echo "ERROR: virtual-kubelet node is not Ready"
+  echo "Node status:"
+  kubectl describe node virtual-kubelet || true
+  VK_PID_FILE="${TEST_DIR}/vk.pid"
+  if [ -f "${VK_PID_FILE}" ]; then
+    echo "VK logs (last 100 lines):"
+    tail -100 "${TEST_DIR}/vk.log" || true
+  fi
+  echo "interLink API logs:"
+  docker logs interlink-api --tail=50 || true
+  echo "SLURM plugin logs:"
+  docker logs interlink-plugin --tail=50 || true
+  exit 1
+fi
+echo "✓ virtual-kubelet node is Ready"
 
 # Approve any pending CSRs
 echo "Approving CSRs..."
@@ -83,6 +102,8 @@ required_namespaces:
 timeout_multiplier: 10.
 values:
   namespace: default
+
+  annotations: {}
 
   tolerations:
     - key: virtual-node.interlink/no-schedule

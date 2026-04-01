@@ -21,10 +21,8 @@ else
   echo "Created TEST_DIR: ${TEST_DIR}"
 fi
 
-# Persist TEST_DIR in a run-unique state file. Callers can override the path
-# via INTERLINK_TEST_STATE_FILE to coordinate between scripts without using
-# a global fixed filename.
-STATE_FILE="${INTERLINK_TEST_STATE_FILE:-/tmp/interlink-test-dir-$$.txt}"
+# Persist TEST_DIR so that k3s-test-run.sh and k3s-test-cleanup.sh can find it.
+STATE_FILE="/tmp/interlink-test-dir.txt"
 echo "${TEST_DIR}" > "${STATE_FILE}"
 echo "State file: ${STATE_FILE}"
 # ---------------------------------------------------------------------------
@@ -364,6 +362,22 @@ kubectl get node virtual-kubelet || {
   docker logs interlink-api --tail=50 || true
   exit 1
 }
+
+# Wait for virtual-kubelet node to reach Ready condition
+echo "Waiting for virtual-kubelet node to become Ready..."
+if ! kubectl wait --for=condition=Ready node/virtual-kubelet --timeout=300s; then
+  echo "ERROR: virtual-kubelet node did not become Ready in time"
+  echo "Node status:"
+  kubectl describe node virtual-kubelet || true
+  echo "VK logs (last 100 lines):"
+  tail -100 "${TEST_DIR}/vk.log" || true
+  echo "interLink API logs:"
+  docker logs interlink-api --tail=50 || true
+  echo "SLURM plugin logs:"
+  docker logs interlink-plugin --tail=50 || true
+  exit 1
+fi
+echo "✓ virtual-kubelet node is Ready"
 
 # Approve any pending CSRs (required for kubelet log access)
 echo "Approving CSRs..."
