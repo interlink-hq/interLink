@@ -27,6 +27,16 @@ fi
 pkill -f "interlink-test.*vk$" 2>/dev/null || true
 
 # ---------------------------------------------------------------------------
+# Persist Docker container logs before stopping
+# ---------------------------------------------------------------------------
+if [ -f /tmp/interlink-test-dir.txt ]; then
+  TEST_DIR=$(cat /tmp/interlink-test-dir.txt)
+  echo "Saving container logs to ${TEST_DIR}..."
+  docker logs interlink-api  > "${TEST_DIR}/interlink-api.log"  2>&1 || true
+  docker logs interlink-plugin > "${TEST_DIR}/interlink-plugin.log" 2>&1 || true
+fi
+
+# ---------------------------------------------------------------------------
 # Stop and remove Docker containers
 # ---------------------------------------------------------------------------
 echo "Removing Docker containers..."

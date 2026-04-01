@@ -4,7 +4,7 @@
 # Usage: ./scripts/k3s-test-setup.sh
 # Requirements: sudo access (for K3s), Docker, Go 1.26+
 
-set -e
+set -eo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PROJECT_ROOT="$(cd "${SCRIPT_DIR}/.." && pwd)"
