@@ -35,21 +35,17 @@ export KUBECONFIG=/etc/rancher/k3s/k3s.yaml
 
 # Wait for K3s to be ready
 echo "Waiting for K3s to be ready..."
-for i in $(seq 1 30); do
-  if kubectl get nodes 2>/dev/null | grep -q "Ready"; then
-    echo "✓ K3s is ready!"
-    break
-  fi
-  echo "  Waiting... ($i/30)"
-  sleep 5
-done
-
-kubectl get nodes || {
+# Previous behavior waited up to 30 * 5s = 150s
+if ! kubectl wait --for=condition=Ready node --all --timeout=150s; then
   echo "ERROR: K3s did not become ready in time"
+  # Best-effort: show node status if possible
+  kubectl get nodes || true
   cat "${TEST_DIR}/k3s-install.log"
   exit 1
-}
+fi
 
+echo "✓ K3s is ready!"
+kubectl get nodes
 # ---------------------------------------------------------------------------
 # Build Docker images from source
 # ---------------------------------------------------------------------------
