@@ -397,7 +397,7 @@ func setupKubernetesClient(ctx context.Context) (*rest.Config, *kubernetes.Clien
 		log.G(ctx).WithField("kubeconfigPath", sanitizedPath).Fatal("Invalid KUBECONFIG path")
 	}
 
-	kubecfgFile, err := os.ReadFile(kubeconfigPath) // #nosec G304
+	kubecfgFile, err := os.ReadFile(kubeconfigPath) // #nosec G304 G703
 	if err != nil {
 		log.G(ctx).WithError(err).Fatal("Failed to read KUBECONFIG")
 	}
