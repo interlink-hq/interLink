@@ -48,6 +48,8 @@ if [ -f /tmp/interlink-test-dir.txt ]; then
   docker logs interlink-plugin > "${TEST_DIR}/interlink-plugin.log" 2>&1 || true
   echo "Copying plugin job directories from container..."
   docker cp interlink-plugin:/tmp/.interlink/. "${TEST_DIR}/plugin-jobs/" 2>/dev/null || true
+  echo "Copying Slurm logs from container..."
+  docker cp interlink-plugin:/var/log/slurm/. "${TEST_DIR}/slurm-logs/" 2>/dev/null || true
 fi
 
 # ---------------------------------------------------------------------------
