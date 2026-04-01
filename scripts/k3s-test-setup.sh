@@ -138,6 +138,11 @@ if ! docker ps --filter "name=interlink-plugin" --filter "status=running" | grep
 fi
 echo "✓ SLURM plugin container started"
 
+# Stream plugin container logs to file in the background
+docker logs -f interlink-plugin > "${TEST_DIR}/interlink-plugin.log" 2>&1 &
+echo $! > "${TEST_DIR}/plugin-log.pid"
+echo "  Plugin logs streaming to: ${TEST_DIR}/interlink-plugin.log"
+
 # ---------------------------------------------------------------------------
 # Start interLink API container
 # ---------------------------------------------------------------------------
@@ -175,6 +180,11 @@ if [ "${interlink_ready}" -ne 1 ]; then
   exit 1
 fi
 echo "✓ interLink API container started"
+
+# Stream interLink API container logs to file in the background
+docker logs -f interlink-api > "${TEST_DIR}/interlink-api.log" 2>&1 &
+echo $! > "${TEST_DIR}/api-log.pid"
+echo "  API logs streaming to: ${TEST_DIR}/interlink-api.log"
 
 # ---------------------------------------------------------------------------
 # Create Virtual Kubelet service account and RBAC
@@ -385,9 +395,9 @@ kubectl get csr -o name | xargs -r kubectl certificate approve || true
 
 echo ""
 echo "=== interLink e2e test environment is ready ==="
-echo "  KUBECONFIG:  /etc/rancher/k3s/k3s.yaml"
-echo "  Test dir:    ${TEST_DIR}"
-echo "  VK PID:      ${VK_PID}"
-echo "  VK logs:     ${TEST_DIR}/vk.log"
-echo "  Plugin logs: docker logs interlink-plugin"
-echo "  API logs:    docker logs interlink-api"
+echo "  KUBECONFIG:    /etc/rancher/k3s/k3s.yaml"
+echo "  Test dir:      ${TEST_DIR}"
+echo "  VK PID:        ${VK_PID}"
+echo "  VK logs:       ${TEST_DIR}/vk.log"
+echo "  API logs:      ${TEST_DIR}/interlink-api.log"
+echo "  Plugin logs:   ${TEST_DIR}/interlink-plugin.log"

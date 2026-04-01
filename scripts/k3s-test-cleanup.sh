@@ -27,6 +27,18 @@ fi
 pkill -f "interlink-test.*vk$" 2>/dev/null || true
 
 # ---------------------------------------------------------------------------
+# Stop background log-streaming processes
+# ---------------------------------------------------------------------------
+if [ -f /tmp/interlink-test-dir.txt ]; then
+  TEST_DIR=$(cat /tmp/interlink-test-dir.txt)
+  for pidfile in "${TEST_DIR}/api-log.pid" "${TEST_DIR}/plugin-log.pid"; do
+    if [ -f "${pidfile}" ]; then
+      kill "$(cat "${pidfile}")" 2>/dev/null || true
+    fi
+  done
+fi
+
+# ---------------------------------------------------------------------------
 # Persist Docker container logs before stopping
 # ---------------------------------------------------------------------------
 if [ -f /tmp/interlink-test-dir.txt ]; then
