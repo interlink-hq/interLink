@@ -48,3 +48,19 @@ test-local: all
 	@echo "Running local integration test..."
 	@./scripts/local-test.sh
 
+# K3s-based integration tests (individual steps)
+test-k3s-setup:
+	@echo "Setting up K3s test environment..."
+	@bash ./scripts/k3s-test-setup.sh
+
+test-k3s-run:
+	@echo "Running K3s integration tests..."
+	@bash ./scripts/k3s-test-run.sh
+
+test-k3s-cleanup:
+	@echo "Cleaning up K3s test environment..."
+	@bash ./scripts/k3s-test-cleanup.sh
+
+# Complete K3s integration test cycle
+test-k3s: test-k3s-setup test-k3s-run test-k3s-cleanup
+
