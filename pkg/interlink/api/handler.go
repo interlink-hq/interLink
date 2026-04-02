@@ -11,7 +11,6 @@ import (
 	"io"
 	"net/http"
 	"net/url"
-	"strings"
 
 	"github.com/containerd/containerd/log"
 	"github.com/google/uuid"
@@ -21,17 +20,19 @@ import (
 	"github.com/interlink-hq/interlink/pkg/interlink"
 )
 
-// isSafeURL checks for SSRF by allowing only http(s) URLs and blocking localhost/internal addresses.
+// isSafeURL validates that a URL uses only http or https schemes.
+// It blocks non-http(s) schemes (e.g. file://, ftp://) to prevent unexpected
+// protocol usage. Localhost, loopback addresses, and private IP ranges are
+// intentionally allowed because the sidecar plugin routinely runs on the same
+// host or on internal/private network addresses in HPC and cluster environments.
+// These URLs originate from trusted operator configuration (config files),
+// not from user-controlled input, so private IPs are valid.
 func isSafeURL(rawurl string) bool {
 	u, err := url.Parse(rawurl)
 	if err != nil {
 		return false
 	}
 	if u.Scheme != "http" && u.Scheme != "https" {
-		return false
-	}
-	host := u.Hostname()
-	if host == "localhost" || host == "127.0.0.1" || host == "::1" || strings.HasSuffix(host, ".internal") {
 		return false
 	}
 	return true
@@ -117,10 +118,6 @@ func ReqWithError(
 	// Add session number for end-to-end trace
 	AddSessionContext(req, sessionContext)
 
-	if !isSafeURL(req.URL.String()) {
-		return nil, fmt.Errorf("potential SSRF detected: %s", req.URL.String())
-	}
-	// SSRF protection: ensure URL is safe before making the request
 	if !isSafeURL(req.URL.String()) {
 		return nil, fmt.Errorf("potential SSRF detected: %s", req.URL.String())
 	}

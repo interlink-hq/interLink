@@ -33,7 +33,7 @@ func getData(ctx context.Context, config types.Config, pod types.PodCreateReques
 
 	for _, container := range pod.Pod.Spec.InitContainers {
 		startContainer := time.Now().UnixMicro()
-		log.G(ctx).Info("- Retrieving Secrets and ConfigMaps for the Docker Sidecar. InitContainer: " + container.Name)
+		log.G(ctx).Info("- Retrieving Secrets and ConfigMaps for the Sidecar. InitContainer: " + container.Name)
 		log.G(ctx).Debug(container.VolumeMounts)
 		data, err := retrieveData(ctx, config, pod, container)
 		if err != nil {
@@ -50,7 +50,7 @@ func getData(ctx context.Context, config types.Config, pod types.PodCreateReques
 
 	for _, container := range pod.Pod.Spec.Containers {
 		startContainer := time.Now().UnixMicro()
-		log.G(ctx).Info("- Retrieving Secrets and ConfigMaps for the Docker Sidecar. Container: " + container.Name)
+		log.G(ctx).Info("- Retrieving Secrets and ConfigMaps for the Sidecar. Container: " + container.Name)
 		log.G(ctx).Debug(container.VolumeMounts)
 		data, err := retrieveData(ctx, config, pod, container)
 		if err != nil {
