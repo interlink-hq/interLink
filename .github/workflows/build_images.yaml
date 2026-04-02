@@ -13,11 +13,11 @@ jobs:
     #  DOCKER_TARGET_PLATFORM: linux/arm64
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
       - name: Set env
         run: echo "RELEASE_VERSION=${GITHUB_REF#refs/*/}" >> $GITHUB_ENV
       - name: Set up QEMU
-        uses: docker/setup-qemu-action@v3
+        uses: docker/setup-qemu-action@v4
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v3
       - name: Login to GitHub Container Registry
@@ -29,20 +29,28 @@ jobs:
       - name: Get Repo Owner
         id: get_repo_owner
         run: echo ::set-output name=repo_owner::$(echo ${{ github.repository_owner }} | tr '[:upper:]' '[:lower:]')
-
       # See https://docs.docker.com/build/ci/github-actions/cache/ for cache to speed go build
+      - name: Go Mod Cache for Docker
+        uses: actions/cache@v5
+        with:
+          path: go-pkg-mod
+          key: ${{ runner.os }}-go-pkg-mod-${{ hashFiles('**/go.sum') }}
       - name: Go Build Cache for Docker
-        uses: actions/cache@v4
+        uses: actions/cache@v5
         with:
           path: go-build-cache
           key: ${{ runner.os }}-go-build-cache-${{ hashFiles('**/go.sum') }}
       - name: Inject go-build-cache
-        uses: reproducible-containers/buildkit-cache-dance@4b2444fec0c0fb9dbf175a96c094720a692ef810 # v2.1.4
+        uses: reproducible-containers/buildkit-cache-dance@1b8ab18fbda5ad3646e3fcc9ed9dd41ce2f297b4 # v3.3.2
         with:
           cache-source: go-build-cache
-
+          cache-map: |
+            {
+              "go-build-cache": "/go/build-cache",
+              "go-pkg-mod": "/go/pkg/mod"
+            }
       - name: Build container base image vk
-        uses: docker/build-push-action@v5
+        uses: docker/build-push-action@v6
         with:
           context: ./
           outputs: "type=registry,push=true"
@@ -54,7 +62,7 @@ jobs:
           build-args: |
             VERSION=${{ env.RELEASE_VERSION }} 
       - name: Build container base image interlink
-        uses: docker/build-push-action@v5
+        uses: docker/build-push-action@v6
         with:
           context: ./
           outputs: "type=registry,push=true"
@@ -70,11 +78,11 @@ jobs:
     #  DOCKER_TARGET_PLATFORM: linux/arm64
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
       - name: Set env
         run: echo "RELEASE_VERSION=${GITHUB_REF#refs/*/}" >> $GITHUB_ENV
       - name: Set up QEMU
-        uses: docker/setup-qemu-action@v3
+        uses: docker/setup-qemu-action@v4
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v3
       - name: Login to GitHub Container Registry
@@ -87,7 +95,7 @@ jobs:
         id: get_repo_owner
         run: echo ::set-output name=repo_owner::$(echo ${{ github.repository_owner }} | tr '[:upper:]' '[:lower:]')
       - name: Build container base image
-        uses: docker/build-push-action@v5
+        uses: docker/build-push-action@v6
         with:
           context: ./
           outputs: "type=registry,push=true"
