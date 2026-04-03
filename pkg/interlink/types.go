@@ -129,6 +129,42 @@ type LogStruct struct {
 	Opts ContainerLogOpts `json:"Opts"`
 }
 
+// PingResponse represents the optional structured response from the InterLink plugin ping endpoint.
+// Plugins may return a JSON body with this structure to report their status and available resources.
+// If the response body cannot be parsed as this structure, it is treated as a plain text response
+// for backward compatibility.
+type PingResponse struct {
+	// Status is the ping status string (e.g., "ok")
+	Status string `json:"status,omitempty"`
+	// Resources optionally contains resource capacity information reported by the plugin.
+	// When present, the Virtual Kubelet will update the node's Capacity and Allocatable fields.
+	Resources *ResourcesResponse `json:"resources,omitempty"`
+}
+
+// ResourcesResponse represents the resource capacity information optionally returned by a plugin
+// in a ping response. All fields are optional; omitted fields leave the current node capacity
+// unchanged, preserving backward compatibility with plugins that do not report resources.
+type ResourcesResponse struct {
+	// CPU specifies the total CPU capacity (e.g., "100", "2000m")
+	CPU string `json:"cpu,omitempty"`
+	// Memory specifies the total memory capacity (e.g., "128Gi", "64000Mi")
+	Memory string `json:"memory,omitempty"`
+	// Pods specifies the maximum number of pods this node can handle
+	Pods string `json:"pods,omitempty"`
+	// Accelerators lists hardware accelerators available on this node (GPUs, FPGAs, etc.)
+	Accelerators []AcceleratorResponse `json:"accelerators,omitempty"`
+}
+
+// AcceleratorResponse represents a hardware accelerator (GPU, FPGA, etc.) reported by a plugin
+// in a ping response.
+type AcceleratorResponse struct {
+	// ResourceType specifies the Kubernetes extended-resource name (e.g., "nvidia.com/gpu", "xilinx.com/fpga")
+	ResourceType string `json:"resourceType"`
+	// Available indicates how many units of this accelerator are available, expressed as a
+	// Kubernetes quantity (e.g., "8", "16")
+	Available string `json:"available"`
+}
+
 // SpanConfig holds configuration for OpenTelemetry spans.
 // It's used to set additional attributes on tracing spans.
 type SpanConfig struct {
