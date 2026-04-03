@@ -122,6 +122,11 @@ func TestDoRequestWithClient(t *testing.T) {
 	}))
 	defer testServer.Close()
 
+	// Allow loopback URLs for the test server
+	origChecker := urlSafetyChecker
+	urlSafetyChecker = func(string) bool { return true }
+	defer func() { urlSafetyChecker = origChecker }()
+
 	tests := []struct {
 		name    string
 		token   string
@@ -156,6 +161,28 @@ func TestDoRequestWithClient(t *testing.T) {
 			assert.NotNil(t, resp)
 			assert.Equal(t, http.StatusOK, resp.StatusCode)
 			resp.Body.Close()
+		})
+	}
+}
+
+func TestIsSafeURL(t *testing.T) {
+	tests := []struct {
+		name string
+		url  string
+		want bool
+	}{
+		{"valid http", "http://example.com/api", true},
+		{"valid https", "https://example.com/api", true},
+		{"localhost blocked", "http://localhost:8080", false},
+		{"127.0.0.1 blocked", "http://127.0.0.1:8080", false},
+		{"::1 blocked", "http://[::1]:8080", false},
+		{".internal blocked", "http://service.internal/api", false},
+		{"unix scheme blocked", "unix:///var/run/test.sock", false},
+		{"invalid url blocked", "://bad-url", false},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			assert.Equal(t, tt.want, isSafeURL(tt.url))
 		})
 	}
 }
