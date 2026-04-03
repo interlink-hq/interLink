@@ -373,32 +373,45 @@ func createHTTPTransport(ctx context.Context, interLinkConfig commonIL.Config, v
 
 // setupKubernetesClient creates the Kubernetes client configuration
 func setupKubernetesClient(ctx context.Context) (*rest.Config, *kubernetes.Clientset) {
-	var kubecfg *rest.Config
+	var (
+		kubecfg *rest.Config
+		err     error
+	)
+
 	kubeconfigPath := os.Getenv("KUBECONFIG")
-	if !filepath.IsAbs(kubeconfigPath) || strings.Contains(kubeconfigPath, "..") {
-		log.G(ctx).Fatal("Invalid KUBECONFIG path")
-	}
-	kubecfgFile, err := os.ReadFile(kubeconfigPath) // #nosec G703
-	if err != nil {
-		if os.Getenv("KUBECONFIG") != "" {
-			log.G(ctx).Debug(err)
-		}
-		log.G(ctx).Info("Trying InCluster configuration")
+
+	if kubeconfigPath == "" {
+		log.G(ctx).Info("KUBECONFIG not set, trying InCluster configuration")
 
 		kubecfg, err = rest.InClusterConfig()
 		if err != nil {
 			log.G(ctx).Fatal(err)
 		}
-	} else {
-		log.G(ctx).Debug("Loading Kubeconfig from " + os.Getenv("KUBECONFIG"))
-		clientCfg, err := clientcmd.NewClientConfigFromBytes(kubecfgFile)
-		if err != nil {
-			log.G(ctx).Fatal(err)
-		}
-		kubecfg, err = clientCfg.ClientConfig()
-		if err != nil {
-			log.G(ctx).Fatal(err)
-		}
+
+		localClient := kubernetes.NewForConfigOrDie(kubecfg)
+		return kubecfg, localClient
+	}
+
+	if !filepath.IsAbs(kubeconfigPath) || strings.Contains(kubeconfigPath, "..") {
+		sanitizedPath := filepath.Clean(kubeconfigPath)
+		log.G(ctx).WithField("kubeconfigPath", sanitizedPath).Fatal("Invalid KUBECONFIG path")
+	}
+
+	kubecfgFile, err := os.ReadFile(kubeconfigPath) // #nosec G304 G703
+	if err != nil {
+		log.G(ctx).WithError(err).Fatal("Failed to read KUBECONFIG")
+	}
+
+	log.G(ctx).Debug("Loading Kubeconfig from " + kubeconfigPath)
+
+	clientCfg, err := clientcmd.NewClientConfigFromBytes(kubecfgFile)
+	if err != nil {
+		log.G(ctx).Fatal(err)
+	}
+
+	kubecfg, err = clientCfg.ClientConfig()
+	if err != nil {
+		log.G(ctx).Fatal(err)
 	}
 
 	localClient := kubernetes.NewForConfigOrDie(kubecfg)

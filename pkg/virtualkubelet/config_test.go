@@ -4,6 +4,7 @@ import (
 	"testing"
 
 	"github.com/stretchr/testify/assert"
+	"k8s.io/apimachinery/pkg/api/resource"
 )
 
 func TestConfig_DefaultValues(t *testing.T) {
@@ -43,7 +44,7 @@ func TestResources_Configuration(t *testing.T) {
 			{
 				ResourceType: "nvidia.com/gpu",
 				Model:        "A100",
-				Available:    8,
+				Available:    "8",
 			},
 		},
 	}
@@ -53,7 +54,7 @@ func TestResources_Configuration(t *testing.T) {
 	assert.Equal(t, "100", resources.Pods)
 	assert.Len(t, resources.Accelerators, 1)
 	assert.Equal(t, "nvidia.com/gpu", resources.Accelerators[0].ResourceType)
-	assert.Equal(t, 8, resources.Accelerators[0].Available)
+	assert.Equal(t, "8", resources.Accelerators[0].Available)
 }
 
 func TestTaintSpec_Configuration(t *testing.T) {
@@ -121,4 +122,57 @@ func TestNetwork_Configuration(t *testing.T) {
 	assert.True(t, network.EnableTunnel)
 	assert.Equal(t, "*.example.com", network.WildcardDNS)
 	assert.NotEmpty(t, network.WstunnelCommand)
+}
+
+func TestAccelerator_AvailableIsKubernetesQuantity(t *testing.T) {
+	tests := []struct {
+		name      string
+		available string
+		valid     bool
+	}{
+		{"integer count", "8", true},
+		{"large count", "1000", true},
+		{"memory-style quantity", "16Gi", true},
+		{"milli-style quantity", "500m", true},
+		{"invalid string", "not-a-quantity", false},
+		{"empty string", "", false},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			_, err := resource.ParseQuantity(tt.available)
+			if tt.valid {
+				assert.NoError(t, err, "expected %q to be a valid Kubernetes quantity", tt.available)
+			} else {
+				assert.Error(t, err, "expected %q to be an invalid Kubernetes quantity", tt.available)
+			}
+		})
+	}
+}
+
+func TestGetResources_AcceleratorQuantities(t *testing.T) {
+	config := Config{
+		Resources: Resources{
+			CPU:    "4",
+			Memory: "16Gi",
+			Pods:   "100",
+			Accelerators: []Accelerator{
+				{ResourceType: "nvidia.com/gpu", Model: "A100", Available: "4"},
+				{ResourceType: "nvidia.com/gpu", Model: "A100", Available: "4"},
+				{ResourceType: "amd.com/gpu", Model: "MI250", Available: "2"},
+				{ResourceType: "xilinx.com/fpga", Model: "U250", Available: "1"},
+			},
+		},
+	}
+
+	resourceList := GetResources(config)
+
+	nvidiaGPUQty := resourceList["nvidia.com/gpu"]
+	assert.Equal(t, int64(8), nvidiaGPUQty.Value(), "nvidia.com/gpu should sum to 8")
+
+	amdGPUQty := resourceList["amd.com/gpu"]
+	assert.Equal(t, int64(2), amdGPUQty.Value(), "amd.com/gpu should be 2")
+
+	fpgaQty := resourceList["xilinx.com/fpga"]
+	assert.Equal(t, int64(1), fpgaQty.Value(), "xilinx.com/fpga should be 1")
 }
