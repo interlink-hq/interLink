@@ -5,6 +5,7 @@ import (
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"os"
 	"testing"
 	"time"
 
@@ -14,6 +15,12 @@ import (
 	"go.opentelemetry.io/otel/sdk/trace"
 	"go.opentelemetry.io/otel/sdk/trace/tracetest"
 )
+
+func TestMain(m *testing.M) {
+	// Allow loopback URLs so httptest servers work in unit tests.
+	urlSafetyChecker = func(string) bool { return true }
+	os.Exit(m.Run())
+}
 
 func TestGetSessionContext(t *testing.T) {
 	tests := []struct {

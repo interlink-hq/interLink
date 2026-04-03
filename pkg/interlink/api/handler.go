@@ -37,6 +37,10 @@ func isSafeURL(rawurl string) bool {
 	return true
 }
 
+// urlSafetyChecker is the URL safety function used by ReqWithError.
+// It can be overridden in tests.
+var urlSafetyChecker = isSafeURL
+
 // InterLinkHandler handles HTTP requests for the interLink API server.
 // It acts as a proxy between the Virtual Kubelet and sidecar plugins,
 // forwarding requests and managing pod lifecycle operations.
@@ -117,11 +121,7 @@ func ReqWithError(
 	// Add session number for end-to-end trace
 	AddSessionContext(req, sessionContext)
 
-	if !isSafeURL(req.URL.String()) {
-		return nil, fmt.Errorf("potential SSRF detected: %s", req.URL.String())
-	}
-	// SSRF protection: ensure URL is safe before making the request
-	if !isSafeURL(req.URL.String()) {
+	if !urlSafetyChecker(req.URL.String()) {
 		return nil, fmt.Errorf("potential SSRF detected: %s", req.URL.String())
 	}
 	resp, err := clientHTTP.Do(req) // #nosec G704
