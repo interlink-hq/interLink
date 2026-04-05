@@ -23,6 +23,9 @@ jobs:
           go-version-file: go.mod
           cache: true
 
+      - name: Enable unprivileged user namespaces (required by Apptainer)
+        run: sudo sysctl -w kernel.unprivileged_userns_clone=1
+
       - name: Setup e2e environment
         run: bash scripts/k3s-test-setup.sh
 
