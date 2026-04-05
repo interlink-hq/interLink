@@ -34,7 +34,7 @@ K3S_VERSION="${K3S_VERSION:-v1.31.4+k3s1}"
 echo "K3s version: ${K3S_VERSION}"
 
 curl -sfL https://get.k3s.io | \
-  INSTALL_K3S_VERSION="${K3S_VERSION}" sudo sh -s - --disable=traefik \
+  sudo env INSTALL_K3S_VERSION="${K3S_VERSION}" sh -s - --disable=traefik \
   --egress-selector-mode disabled \
   2>&1 | tee "${TEST_DIR}/k3s-install.log"
 
