@@ -439,9 +439,58 @@ if ! kubectl wait --for=condition=Ready node/virtual-kubelet --timeout=300s; the
 fi
 echo "✓ virtual-kubelet node is Ready"
 
-# Approve any pending CSRs (required for kubelet log access)
-echo "Approving CSRs..."
-kubectl get csr -o name | xargs -r kubectl certificate approve || true
+# ---------------------------------------------------------------------------
+# Wait for, approve, and verify kubelet-serving CSRs (required for kubectl logs)
+# ---------------------------------------------------------------------------
+echo ""
+echo "=== Checking kubelet-serving CSRs ==="
+
+# Wait up to 60s for CSRs to appear (VK submits them shortly after registering)
+echo "Waiting for CSRs to appear..."
+for i in $(seq 1 30); do
+  if kubectl get csr 2>/dev/null | awk 'NR>1' | grep -q .; then
+    break
+  fi
+  echo "  No CSRs yet... ($i/30)"
+  sleep 2
+done
+
+# Approve all currently Pending CSRs
+PENDING_CSRS=$(kubectl get csr 2>/dev/null | awk 'NR>1 && /Pending/ {print $1}')
+if [ -n "${PENDING_CSRS}" ]; then
+  echo "  Approving pending CSRs: ${PENDING_CSRS}"
+  echo "${PENDING_CSRS}" | xargs kubectl certificate approve
+else
+  echo "  No pending CSRs found at this time"
+fi
+
+# Wait for CSRs to reach Approved,Issued state (certificate data populated)
+echo "Waiting for CSRs to be issued..."
+csr_issued=0
+for i in $(seq 1 20); do
+  # Re-approve any newly submitted Pending CSRs
+  NEW_PENDING=$(kubectl get csr 2>/dev/null | awk 'NR>1 && /Pending/ {print $1}')
+  if [ -n "${NEW_PENDING}" ]; then
+    echo "  Approving newly pending CSRs: ${NEW_PENDING}"
+    echo "${NEW_PENDING}" | xargs kubectl certificate approve 2>/dev/null || true
+  fi
+
+  # Check whether at least one CSR for virtual-kubelet is Approved+Issued
+  if kubectl get csr 2>/dev/null | grep -E "Approved,Issued" | grep -qi "virtual-kubelet\|node:virtual-kubelet"; then
+    csr_issued=1
+    break
+  fi
+  echo "  Waiting for CSR issuance... ($i/20)"
+  sleep 3
+done
+
+if [ "${csr_issued}" -ne 1 ]; then
+  echo "WARNING: Could not confirm CSR issuance for virtual-kubelet - 'kubectl logs' may not work"
+  kubectl get csr 2>/dev/null || true
+else
+  echo "✓ Kubelet-serving CSRs approved and issued"
+fi
+kubectl get csr 2>/dev/null || true
 
 echo ""
 echo "=== interLink e2e test environment is ready ==="
