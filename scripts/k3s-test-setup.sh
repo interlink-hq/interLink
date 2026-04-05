@@ -44,7 +44,25 @@ export KUBECONFIG=/etc/rancher/k3s/k3s.yaml
 
 # Wait for K3s to be ready
 echo "Waiting for K3s to be ready..."
-# Previous behavior waited up to 30 * 5s = 150s
+# kubectl wait fails immediately with "no matching resources found" when no
+# nodes have registered yet (e.g. right after k3s service starts). Poll first
+# until at least one node appears in the API, then wait for Ready.
+node_appeared=0
+for i in $(seq 1 30); do
+  if kubectl get nodes 2>/dev/null | grep -q '.'; then
+    node_appeared=1
+    break
+  fi
+  echo "  Waiting for node to appear... ($i/30)"
+  sleep 5
+done
+
+if [ "${node_appeared}" -ne 1 ]; then
+  echo "ERROR: No K3s node appeared within 150s"
+  cat "${TEST_DIR}/k3s-install.log"
+  exit 1
+fi
+
 if ! kubectl wait --for=condition=Ready node --all --timeout=150s; then
   echo "ERROR: K3s did not become ready in time"
   # Best-effort: show node status if possible
