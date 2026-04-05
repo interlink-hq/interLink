@@ -657,8 +657,13 @@ func (p *Provider) nodeUpdate(ctx context.Context) {
 			// Try to parse the response body for optional resource update information
 			if respBody != "" {
 				var pingResp types.PingResponse
-				if err := json.Unmarshal([]byte(respBody), &pingResp); err == nil && pingResp.Resources != nil {
-					p.updateNodeResources(ctx, pingResp.Resources)
+				if err := json.Unmarshal([]byte(respBody), &pingResp); err == nil {
+					if pingResp.Resources != nil {
+						p.updateNodeResources(ctx, pingResp.Resources)
+					}
+					if pingResp.Taints != nil {
+						p.updateNodeTaints(ctx, pingResp.Taints)
+					}
 				}
 			}
 
@@ -733,6 +738,54 @@ func (p *Provider) updateNodeResources(ctx context.Context, resources *types.Res
 		allocatable[rName] = q
 		log.G(ctx).Infof("Updated node accelerator %s capacity to %s", acc.ResourceType, acc.Available)
 	}
+}
+
+// updateNodeTaints replaces the node's non-system taints with the taints reported by the
+// plugin in a ping response. The system taint "virtual-node.interlink/no-schedule" is always
+// preserved regardless of the plugin-provided list. An empty slice clears all plugin-managed taints.
+// Unknown taint effects default to NoSchedule (same behaviour as config-based taints) with a warning.
+func (p *Provider) updateNodeTaints(ctx context.Context, taints *[]types.TaintResponse) {
+	if taints == nil {
+		return
+	}
+
+	// Collect system taints that must always be present.
+	systemTaints := []v1.Taint{}
+	for _, t := range p.node.Spec.Taints {
+		if t.Key == "virtual-node.interlink/no-schedule" {
+			systemTaints = append(systemTaints, t)
+		}
+	}
+
+	newTaints := systemTaints
+	for _, t := range *taints {
+		if t.Key == "" {
+			log.G(ctx).Warn("Skipping taint with empty key in ping response")
+			continue
+		}
+
+		var effect v1.TaintEffect
+		switch t.Effect {
+		case "NoSchedule":
+			effect = v1.TaintEffectNoSchedule
+		case "PreferNoSchedule":
+			effect = v1.TaintEffectPreferNoSchedule
+		case "NoExecute":
+			effect = v1.TaintEffectNoExecute
+		default:
+			effect = v1.TaintEffectNoSchedule
+			log.G(ctx).Warnf("Unknown taint effect %q for key %q in ping response, defaulting to NoSchedule", t.Effect, t.Key)
+		}
+
+		newTaints = append(newTaints, v1.Taint{
+			Key:    t.Key,
+			Value:  t.Value,
+			Effect: effect,
+		})
+		log.G(ctx).Infof("Adding taint key=%q value=%q effect=%q from ping response", t.Key, t.Value, t.Effect)
+	}
+
+	p.node.Spec.Taints = newTaints
 }
 
 // hasExposedPorts checks if any container in the pod has exposed ports

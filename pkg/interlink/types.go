@@ -139,6 +139,21 @@ type PingResponse struct {
 	// Resources optionally contains resource capacity information reported by the plugin.
 	// When present, the Virtual Kubelet will update the node's Capacity and Allocatable fields.
 	Resources *ResourcesResponse `json:"resources,omitempty"`
+	// Taints optionally contains a list of taints to apply to the node.
+	// When present (even as an empty list), the node's non-system taints are replaced with
+	// this list. When absent, existing taints are left unchanged.
+	Taints *[]TaintResponse `json:"taints,omitempty"`
+}
+
+// TaintResponse represents a Kubernetes taint to be applied to the virtual node,
+// as reported by a plugin in a ping response.
+type TaintResponse struct {
+	// Key is the taint key (e.g., "virtual-node.interlink/no-schedule")
+	Key string `json:"key"`
+	// Value is the taint value (optional)
+	Value string `json:"value,omitempty"`
+	// Effect specifies the taint effect: "NoSchedule", "PreferNoSchedule", or "NoExecute"
+	Effect string `json:"effect"`
 }
 
 // ResourcesResponse represents the resource capacity information optionally returned by a plugin
