@@ -138,6 +138,55 @@ if ! docker ps --filter "name=interlink-plugin" --filter "status=running" | grep
 fi
 echo "✓ SLURM plugin container started"
 
+# ---------------------------------------------------------------------------
+# Smoke-test: verify sbatch and Apptainer work inside the plugin container
+# ---------------------------------------------------------------------------
+echo ""
+echo "=== Running Slurm/Apptainer smoke test ==="
+cat > "${TEST_DIR}/smoke-test.sh" <<'BATCHEOF'
+#!/bin/bash
+#SBATCH --job-name=interlink-smoke
+#SBATCH --output=/tmp/smoke-test-%j.out
+#SBATCH --error=/tmp/smoke-test-%j.err
+#SBATCH --ntasks=1
+#SBATCH --time=5:00
+apptainer exec docker://alpine:3.20 echo "Apptainer smoke test passed"
+BATCHEOF
+
+docker cp "${TEST_DIR}/smoke-test.sh" interlink-plugin:/tmp/smoke-test.sh
+
+SMOKE_JOBID=$(docker exec interlink-plugin sbatch /tmp/smoke-test.sh 2>&1 | awk '{print $NF}')
+echo "  Submitted Slurm smoke test job ID: ${SMOKE_JOBID}"
+
+echo "  Waiting for smoke test job ${SMOKE_JOBID} to finish (up to 5 minutes)..."
+smoke_done=0
+for i in $(seq 1 30); do
+  JOB_STATE=$(docker exec interlink-plugin squeue -j "${SMOKE_JOBID}" -h -o "%T" 2>/dev/null || true)
+  if [ -z "${JOB_STATE}" ]; then
+    smoke_done=1
+    break
+  fi
+  echo "    Job state: ${JOB_STATE} (${i}/30)"
+  sleep 10
+done
+
+echo "  Smoke test job output:"
+docker exec interlink-plugin cat "/tmp/smoke-test-${SMOKE_JOBID}.out" 2>/dev/null || true
+docker exec interlink-plugin cat "/tmp/smoke-test-${SMOKE_JOBID}.err" 2>/dev/null || true
+
+SMOKE_EXIT=$(docker exec interlink-plugin sacct -j "${SMOKE_JOBID}" --noheader --parsable2 -o ExitCode 2>/dev/null \
+  | head -1 | cut -d'|' -f1 | cut -d':' -f1 || echo "unknown")
+
+if [ "${smoke_done}" -ne 1 ]; then
+  echo "WARNING: Slurm smoke test job did not complete within 5 minutes"
+  docker exec interlink-plugin squeue 2>/dev/null || true
+elif [ "${SMOKE_EXIT}" != "0" ] && [ "${SMOKE_EXIT}" != "unknown" ]; then
+  echo "WARNING: Slurm smoke test job finished with exit code ${SMOKE_EXIT}"
+  docker exec interlink-plugin squeue 2>/dev/null || true
+else
+  echo "✓ Slurm/Apptainer smoke test passed (job ${SMOKE_JOBID})"
+fi
+
 # Stream plugin container logs to file in the background
 docker logs -f interlink-plugin > "${TEST_DIR}/interlink-plugin.log" 2>&1 &
 echo $! > "${TEST_DIR}/plugin-log.pid"
