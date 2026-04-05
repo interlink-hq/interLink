@@ -158,7 +158,23 @@ BATCHEOF
 
 docker cp "${TEST_DIR}/smoke-test.sh" interlink-plugin:/tmp/smoke-test.sh
 
-SMOKE_JOBID=$(docker exec interlink-plugin sbatch /tmp/smoke-test.sh 2>&1 | awk '{print $NF}')
+set +e
+SBATCH_OUTPUT=$(docker exec interlink-plugin sbatch /tmp/smoke-test.sh 2>&1)
+SBATCH_STATUS=$?
+set -e
+
+if [ "${SBATCH_STATUS}" -ne 0 ]; then
+  echo "  Failed to submit Slurm smoke test job:"
+  echo "${SBATCH_OUTPUT}"
+  exit 1
+fi
+
+SMOKE_JOBID=$(printf '%s\n' "${SBATCH_OUTPUT}" | awk 'match($0, /^Submitted batch job[[:space:]]+([0-9]+)$/, m) { print m[1]; exit }')
+if ! [[ "${SMOKE_JOBID}" =~ ^[0-9]+$ ]]; then
+  echo "  Failed to parse numeric Slurm smoke test job ID from sbatch output:"
+  echo "${SBATCH_OUTPUT}"
+  exit 1
+fi
 echo "  Submitted Slurm smoke test job ID: ${SMOKE_JOBID}"
 
 echo "  Waiting for smoke test job ${SMOKE_JOBID} to finish (up to 5 minutes)..."
