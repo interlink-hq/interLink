@@ -87,7 +87,6 @@ setup script (printed as `TEST_DIR` at startup):
 |---|---|---|
 | `TEST_DIR` | auto-created under `/tmp` | Override the test directory path |
 | `K3S_VERSION` | `v1.31.4+k3s1` | K3s version to install |
-| `INTERLINK_IMAGE_TAG` | `latest` | Docker image tag for interlink components |
 
 ---
 
