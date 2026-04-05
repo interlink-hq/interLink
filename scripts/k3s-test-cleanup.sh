@@ -78,13 +78,18 @@ else
 fi
 
 # ---------------------------------------------------------------------------
-# Remove test directory
+# Optionally remove test directory
 # ---------------------------------------------------------------------------
 if [ -f /tmp/interlink-test-dir.txt ]; then
   TEST_DIR=$(cat /tmp/interlink-test-dir.txt)
-  echo "Removing test directory: ${TEST_DIR}"
-  rm -rf "${TEST_DIR}" 2>/dev/null || true
-  rm -f /tmp/interlink-test-dir.txt
+  if [ "${REMOVE_TEST_DIR}" = "1" ]; then
+    echo "Removing test directory: ${TEST_DIR}"
+    rm -rf "${TEST_DIR}" 2>/dev/null || true
+    rm -f /tmp/interlink-test-dir.txt
+  else
+    echo "Preserving test directory for debugging: ${TEST_DIR}"
+    echo "Set REMOVE_TEST_DIR=1 to remove it and delete /tmp/interlink-test-dir.txt."
+  fi
 fi
 
 echo ""
