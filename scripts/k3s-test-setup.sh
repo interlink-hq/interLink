@@ -125,7 +125,7 @@ echo "=== Starting SLURM plugin container ==="
 docker run -d --name interlink-plugin \
   --network interlink-net \
   -p 4000:4000 \
-  --sysctl kernel.unprivileged_userns_clone=1 \
+  --privileged \
   -v "${TEST_DIR}/plugin-config.yaml:/etc/interlink/InterLinkConfig.yaml:ro" \
   -e SHARED_FS=true \
   -e SLURMCONFIGPATH=/etc/interlink/InterLinkConfig.yaml \
