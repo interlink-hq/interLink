@@ -7,6 +7,7 @@ import (
 	"embed"
 	"encoding/base64"
 	"encoding/hex"
+	"encoding/json"
 	"fmt"
 	"io"
 	mathrand "math/rand"
@@ -652,7 +653,21 @@ func (p *Provider) nodeUpdate(ctx context.Context) {
 				p.node.Annotations = make(map[string]string)
 			}
 			p.node.Annotations["interlink.virtual-kubelet.io/ping-response"] = respBody
-			log.G(ctx).Info("Ping succeded with exit code: ", code)
+
+			// Try to parse the response body for optional resource update information
+			if respBody != "" {
+				var pingResp types.PingResponse
+				if err := json.Unmarshal([]byte(respBody), &pingResp); err == nil {
+					if pingResp.Resources != nil {
+						p.updateNodeResources(ctx, pingResp.Resources)
+					}
+					if pingResp.Taints != nil {
+						p.updateNodeTaints(ctx, pingResp.Taints)
+					}
+				}
+			}
+
+			log.G(ctx).Info("Ping succeeded with exit code: ", code)
 			p.onNodeChangeCallback(p.node)
 		}
 		log.G(ctx).Info("endNodeLoop")
@@ -662,6 +677,115 @@ func (p *Provider) nodeUpdate(ctx context.Context) {
 // Ping the kubelet from the cluster, this will always be ok by design probably
 func (p *Provider) Ping(_ context.Context) error {
 	return nil
+}
+
+// updateNodeResources updates the node's Capacity and Allocatable based on the resource
+// information reported by the plugin in a ping response. Only fields explicitly set in
+// the response are updated; omitted fields retain their current values.
+func (p *Provider) updateNodeResources(ctx context.Context, resources *types.ResourcesResponse) {
+	if resources == nil {
+		return
+	}
+
+	capacity := p.node.Status.Capacity
+	allocatable := p.node.Status.Allocatable
+
+	if resources.CPU != "" {
+		q, err := resource.ParseQuantity(resources.CPU)
+		if err != nil {
+			log.G(ctx).Warnf("Invalid CPU value %q in ping response: %v", resources.CPU, err)
+		} else {
+			capacity[v1.ResourceCPU] = q
+			allocatable[v1.ResourceCPU] = q
+			log.G(ctx).Infof("Updated node CPU capacity to %s", resources.CPU)
+		}
+	}
+
+	if resources.Memory != "" {
+		q, err := resource.ParseQuantity(resources.Memory)
+		if err != nil {
+			log.G(ctx).Warnf("Invalid memory value %q in ping response: %v", resources.Memory, err)
+		} else {
+			capacity[v1.ResourceMemory] = q
+			allocatable[v1.ResourceMemory] = q
+			log.G(ctx).Infof("Updated node memory capacity to %s", resources.Memory)
+		}
+	}
+
+	if resources.Pods != "" {
+		q, err := resource.ParseQuantity(resources.Pods)
+		if err != nil {
+			log.G(ctx).Warnf("Invalid pods value %q in ping response: %v", resources.Pods, err)
+		} else {
+			capacity[v1.ResourcePods] = q
+			allocatable[v1.ResourcePods] = q
+			log.G(ctx).Infof("Updated node pods capacity to %s", resources.Pods)
+		}
+	}
+
+	for _, acc := range resources.Accelerators {
+		if acc.ResourceType == "" {
+			log.G(ctx).Warn("Skipping accelerator with empty resourceType in ping response")
+			continue
+		}
+		q, err := resource.ParseQuantity(acc.Available)
+		if err != nil {
+			log.G(ctx).Warnf("Invalid quantity %q for accelerator %q in ping response: %v", acc.Available, acc.ResourceType, err)
+			continue
+		}
+		rName := v1.ResourceName(acc.ResourceType)
+		capacity[rName] = q
+		allocatable[rName] = q
+		log.G(ctx).Infof("Updated node accelerator %s capacity to %s", acc.ResourceType, acc.Available)
+	}
+}
+
+// updateNodeTaints replaces the node's non-system taints with the taints reported by the
+// plugin in a ping response. The system taint "virtual-node.interlink/no-schedule" is always
+// preserved regardless of the plugin-provided list. An empty slice clears all plugin-managed taints.
+// Unknown taint effects default to NoSchedule (same behaviour as config-based taints) with a warning.
+func (p *Provider) updateNodeTaints(ctx context.Context, taints *[]types.TaintResponse) {
+	if taints == nil {
+		return
+	}
+
+	// Collect system taints that must always be present.
+	systemTaints := []v1.Taint{}
+	for _, t := range p.node.Spec.Taints {
+		if t.Key == "virtual-node.interlink/no-schedule" {
+			systemTaints = append(systemTaints, t)
+		}
+	}
+
+	newTaints := systemTaints
+	for _, t := range *taints {
+		if t.Key == "" {
+			log.G(ctx).Warn("Skipping taint with empty key in ping response")
+			continue
+		}
+
+		var effect v1.TaintEffect
+		switch t.Effect {
+		case "NoSchedule":
+			effect = v1.TaintEffectNoSchedule
+		case "PreferNoSchedule":
+			effect = v1.TaintEffectPreferNoSchedule
+		case "NoExecute":
+			effect = v1.TaintEffectNoExecute
+		default:
+			effect = v1.TaintEffectNoSchedule
+			log.G(ctx).Warnf("Unknown taint effect %q for key %q in ping response, defaulting to NoSchedule", t.Effect, t.Key)
+		}
+
+		newTaints = append(newTaints, v1.Taint{
+			Key:    t.Key,
+			Value:  t.Value,
+			Effect: effect,
+		})
+		log.G(ctx).Infof("Adding taint key=%q value=%q effect=%q from ping response", t.Key, t.Value, t.Effect)
+	}
+
+	p.node.Spec.Taints = newTaints
 }
 
 // hasExposedPorts checks if any container in the pod has exposed ports
