@@ -12,6 +12,7 @@ jobs:
   placeholder:
     name: dagger-disabled
     runs-on: ubuntu-latest
+    permissions: {}
     steps:
       - name: Dagger CI disabled
         run: echo "Dagger-based CI is disabled. K3s e2e tests run via integration-test-k3s.yaml."
