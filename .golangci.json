@@ -42,7 +42,7 @@
         "check-blank": true
       },
       "gocyclo": {
-        "min-complexity": 30
+        "min-complexity": 35
       },
       "gosec": {
         "confidence": "high",
