@@ -101,6 +101,7 @@ ScancelPath: "/usr/bin/scancel"
 SqueuePath: "/usr/bin/squeue"
 CommandPrefix: ""
 SingularityPrefix: ""
+ImagePrefix: "docker://"
 Namespace: "default"
 Tsocks: false
 BashPath: /bin/bash
