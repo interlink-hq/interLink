@@ -21,9 +21,9 @@ import (
 	"github.com/interlink-hq/interlink/pkg/interlink"
 )
 
-// isSafeURL checks for SSRF by allowing only http(s) and http+unix URLs.
-// http+unix is considered safe because unix domain sockets are local-only and require
-// filesystem access to connect, making remote exploitation impossible.
+// isSafeURL checks for SSRF by allowing only http(s) and http+unix URLs and blocking
+// localhost/internal addresses for http(s). http+unix is considered safe because unix domain
+// sockets are local-only and require filesystem access to connect, making remote exploitation impossible.
 func isSafeURL(rawurl string) bool {
 	u, err := url.Parse(rawurl)
 	if err != nil {
