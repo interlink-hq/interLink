@@ -2,13 +2,57 @@ package virtualkubelet
 
 import (
 	"context"
+	"net"
 	"net/http"
 	"net/http/httptest"
+	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
+
+// unixSocketRoundTripper rewrites http+unix URLs to http://unix so the underlying
+// transport can dial the configured unix socket.
+type unixSocketRoundTripper struct {
+	transport http.RoundTripper
+}
+
+func (rt *unixSocketRoundTripper) RoundTrip(req *http.Request) (*http.Response, error) {
+	if strings.HasPrefix(req.URL.Scheme, "http+unix") {
+		req.URL.Scheme = "http"
+		req.URL.Host = "unix"
+	}
+	return rt.transport.RoundTrip(req)
+}
+
+// newUnixTestServer starts an httptest.Server backed by a unix socket and returns
+// the server, a base URL using the http+unix scheme (safe per isSafeURL), and an
+// HTTP client that routes requests to that socket.
+func newUnixTestServer(t *testing.T, handler http.Handler) (*httptest.Server, string, *http.Client) {
+	t.Helper()
+	socketPath := filepath.Join(t.TempDir(), "test.sock")
+	l, err := net.Listen("unix", socketPath)
+	require.NoError(t, err)
+
+	server := httptest.NewUnstartedServer(handler)
+	server.Listener = l
+	server.Start()
+
+	dialer := &net.Dialer{}
+	transport := &http.Transport{
+		DialContext: func(ctx context.Context, _, addr string) (net.Conn, error) {
+			if strings.HasPrefix(addr, "unix:") {
+				return dialer.DialContext(ctx, "unix", socketPath)
+			}
+			return dialer.DialContext(ctx, "tcp", addr)
+		},
+	}
+	client := &http.Client{Transport: &unixSocketRoundTripper{transport}}
+
+	return server, "http+unix:///", client
+}
 
 func TestIsSafeURL(t *testing.T) {
 	tests := []struct {
@@ -131,7 +175,7 @@ func TestCreateTLSHTTPClient(t *testing.T) {
 }
 
 func TestDoRequestWithClient(t *testing.T) {
-	testServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	testServer, baseURL, client := newUnixTestServer(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		// Verify headers
 		assert.Equal(t, "application/json", r.Header.Get("Content-Type"))
 
@@ -166,10 +210,9 @@ func TestDoRequestWithClient(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			req, err := http.NewRequest(http.MethodGet, testServer.URL, nil)
+			req, err := http.NewRequest(http.MethodGet, baseURL, nil)
 			require.NoError(t, err)
 
-			client := testServer.Client()
 			resp, err := doRequestWithClient(req, tt.token, client)
 
 			if tt.wantErr {
