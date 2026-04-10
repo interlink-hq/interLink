@@ -7,12 +7,102 @@ sidebar_position: 5
 Here you can find how to test a virtual kubelet implementation against the main
 pod use cases we mean to support.
 
-## Requirements
+## K3s-based e2e tests (recommended)
+
+The CI pipeline uses a K3s-based test environment that you can reproduce locally
+without any special cloud account or token. The same three scripts used by the
+GitHub Actions workflow (`k3s-test-setup.sh`, `k3s-test-run.sh`,
+`k3s-test-cleanup.sh`) work on any Linux machine with Docker and Go installed.
+
+### Requirements
+
+- Linux host (bare metal or VM) with `sudo` access
+- [Docker engine](https://docs.docker.com/engine/install/)
+- Go 1.26+ (`go.mod` specifies the minimum version)
+- `curl`, `git` (standard tools)
+
+The setup script installs K3s automatically; you do **not** need `kubectl` or
+`k3s` pre-installed.
+
+### Run the full e2e suite locally
+
+```bash
+# Clone the repo and enter it
+git clone https://github.com/interlink-hq/interLink.git
+cd interLink
+
+# (Optional) enable unprivileged user namespaces if your kernel restricts them
+sudo sysctl -w kernel.unprivileged_userns_clone=1
+
+# 1. Build images, start K3s, deploy interLink and the SLURM plugin
+bash scripts/k3s-test-setup.sh
+
+# 2. Run the pytest test suite against the live cluster
+bash scripts/k3s-test-run.sh
+
+# 3. Collect logs and tear down all resources
+bash scripts/k3s-test-cleanup.sh
+```
+
+A convenience Makefile target runs all three steps in sequence:
+
+```bash
+make test-k3s
+```
+
+Individual targets are also available:
+
+```bash
+make test-k3s-setup    # setup only
+make test-k3s-run      # run only (requires setup to have completed)
+make test-k3s-cleanup  # cleanup only
+```
+
+### What the scripts do
+
+| Script | Purpose |
+|---|---|
+| `k3s-test-setup.sh` | Installs K3s with `--egress-selector-mode disabled`; builds the `interlink-api` and `interlink-plugin` (SLURM) Docker images; writes all configs; starts containers; starts virtual-kubelet as a host process; approves kubelet CSRs; runs a Slurm/Apptainer smoke test |
+| `k3s-test-run.sh` | Runs the `pytest` test suite from [`vk-test-set`](https://github.com/interlink-hq/vk-test-set) against the live cluster |
+| `k3s-test-cleanup.sh` | Copies logs and job artefacts to the test directory, then stops containers, kills the virtual-kubelet process, and uninstalls K3s |
+
+### Artefacts and logs
+
+All logs and job output are written to a temporary directory created by the
+setup script (printed as `TEST_DIR` at startup):
+
+```
+/tmp/interlink-test-XXXXXX/
+  k3s-install.log          – K3s install output
+  vk.log                   – virtual-kubelet stdout/stderr
+  interlink-api.log        – interlink-api container logs (live-streamed)
+  interlink-plugin.log     – interlink-plugin container logs (live-streamed)
+  plugin-jobs/             – job directories from inside the plugin container
+  slurm-logs/              – Slurm daemon logs from inside the plugin container
+```
+
+### Environment variables
+
+| Variable | Default | Description |
+|---|---|---|
+| `TEST_DIR` | auto-created under `/tmp` | Override the test directory path |
+| `K3S_VERSION` | `v1.31.4+k3s1` | K3s version to install |
+
+---
+
+## Dagger-based tests (legacy)
+
+> **Note:** The Dagger-based CI pipeline is disabled. The K3s-based workflow
+> above is the authoritative test environment for all PRs.
+
+The legacy Dagger setup is documented below for reference only.
+
+### Requirements (Dagger)
 
 - [Docker engine](https://docs.docker.com/engine/install/)
 - [Dagger CLI v0.13.x](https://docs.dagger.io/install/)
 
-## What's in the Dagger module
+### What's in the Dagger module (legacy)
 
 - E2e integration tests: a reproducible test environment (selfcontained in
   Dagger runtime). Run the very same tests executed by github actions to
@@ -23,7 +113,7 @@ pod use cases we mean to support.
 :warning: by default the docker plugin is the one tested and to be referred to
 for any change as first thing.
 
-## Usage
+## Usage (Dagger, legacy)
 
 The whole test suite is based on the application of k8s manifests inside a
 folder that must be passed at runtime. In `./ci/manifests` of this repo you can
