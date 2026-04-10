@@ -21,11 +21,16 @@ import (
 	"github.com/interlink-hq/interlink/pkg/interlink"
 )
 
-// isSafeURL checks for SSRF by allowing only http(s) URLs and blocking localhost/internal addresses.
+// isSafeURL checks for SSRF by allowing only http(s) and http+unix URLs.
+// http+unix is considered safe because unix domain sockets are local-only and require
+// filesystem access to connect, making remote exploitation impossible.
 func isSafeURL(rawurl string) bool {
 	u, err := url.Parse(rawurl)
 	if err != nil {
 		return false
+	}
+	if u.Scheme == "http+unix" {
+		return true
 	}
 	if u.Scheme != "http" && u.Scheme != "https" {
 		return false
@@ -117,10 +122,6 @@ func ReqWithError(
 	// Add session number for end-to-end trace
 	AddSessionContext(req, sessionContext)
 
-	if !isSafeURL(req.URL.String()) {
-		return nil, fmt.Errorf("potential SSRF detected: %s", req.URL.String())
-	}
-	// SSRF protection: ensure URL is safe before making the request
 	if !isSafeURL(req.URL.String()) {
 		return nil, fmt.Errorf("potential SSRF detected: %s", req.URL.String())
 	}

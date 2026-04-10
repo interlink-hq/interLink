@@ -10,6 +10,31 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
+func TestIsSafeURL(t *testing.T) {
+	tests := []struct {
+		name     string
+		rawurl   string
+		expected bool
+	}{
+		{name: "http URL", rawurl: "http://example.com/path", expected: true},
+		{name: "https URL", rawurl: "https://example.com/path", expected: true},
+		{name: "http+unix URL", rawurl: "http+unix:///var/run/plugin.sock:/status", expected: true},
+		{name: "ftp URL", rawurl: "ftp://example.com", expected: false},
+		{name: "invalid URL", rawurl: "://bad", expected: false},
+		{name: "localhost http", rawurl: "http://localhost/path", expected: false},
+		{name: "127.0.0.1 http", rawurl: "http://127.0.0.1/path", expected: false},
+		{name: "::1 http", rawurl: "http://[::1]/path", expected: false},
+		{name: ".internal domain", rawurl: "http://service.internal/path", expected: false},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := isSafeURL(tt.rawurl)
+			assert.Equal(t, tt.expected, got)
+		})
+	}
+}
+
 func TestGetSidecarEndpoint(t *testing.T) {
 	ctx := context.Background()
 	tests := []struct {
