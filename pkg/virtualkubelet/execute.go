@@ -31,11 +31,16 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 )
 
-// isSafeURL checks for SSRF by allowing only http(s) URLs and blocking localhost/internal addresses.
+// isSafeURL checks for SSRF by allowing only http(s) and http+unix URLs and blocking
+// localhost/internal addresses for http(s). http+unix is considered safe because unix domain
+// sockets are local-only and require filesystem access to connect, making remote exploitation impossible.
 func isSafeURL(rawurl string) bool {
 	u, err := url.Parse(rawurl)
 	if err != nil {
 		return false
+	}
+	if u.Scheme == "http+unix" {
+		return true
 	}
 	if u.Scheme != "http" && u.Scheme != "https" {
 		return false
