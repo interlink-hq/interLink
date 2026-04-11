@@ -32,6 +32,9 @@ func isSafeURL(rawurl string) bool {
 	if err != nil {
 		return false
 	}
+	if u.Scheme == "http+unix" {
+		return true
+	}
 	if u.Scheme != "http" && u.Scheme != "https" {
 		return false
 	}
