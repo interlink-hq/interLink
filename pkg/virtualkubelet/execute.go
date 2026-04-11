@@ -31,9 +31,13 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 )
 
-// isSafeURL checks for SSRF by allowing only http(s) and http+unix URLs and blocking
-// localhost/internal addresses for http(s). http+unix is considered safe because unix domain
-// sockets are local-only and require filesystem access to connect, making remote exploitation impossible.
+// isSafeURL validates that a URL uses only http or https schemes.
+// It blocks non-http(s) schemes (e.g. file://, ftp://) to prevent unexpected
+// protocol usage. Localhost, loopback addresses, and private IP ranges are
+// intentionally allowed because both the interLink API and sidecar plugin
+// routinely run on internal/private network addresses in HPC and cluster
+// environments. These URLs originate from trusted operator configuration
+// (config files), not from user-controlled input, so private IPs are valid.
 func isSafeURL(rawurl string) bool {
 	u, err := url.Parse(rawurl)
 	if err != nil {
@@ -43,10 +47,6 @@ func isSafeURL(rawurl string) bool {
 		return true
 	}
 	if u.Scheme != "http" && u.Scheme != "https" {
-		return false
-	}
-	host := u.Hostname()
-	if host == "localhost" || host == "127.0.0.1" || host == "::1" || strings.HasSuffix(host, ".internal") {
 		return false
 	}
 	return true
