@@ -129,9 +129,11 @@ func (h *InterLinkHandler) StatusHandler(w http.ResponseWriter, r *http.Request)
 			PodStatuses.mu.Unlock()
 		}
 	} else {
+		PodStatuses.mu.Lock()
 		for _, pod := range PodStatuses.Statuses {
 			returnPods = append(returnPods, pod)
 		}
+		PodStatuses.mu.Unlock()
 	}
 
 	returnValue, err := json.Marshal(returnPods)
