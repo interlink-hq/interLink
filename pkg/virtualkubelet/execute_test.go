@@ -2,8 +2,11 @@ package virtualkubelet
 
 import (
 	"context"
+	"net"
 	"net/http"
 	"net/http/httptest"
+	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -12,6 +15,72 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/client-go/kubernetes/fake"
 )
+
+// unixSocketRoundTripper rewrites http+unix URLs to http://unix so the underlying
+// transport can dial the configured unix socket.
+type unixSocketRoundTripper struct {
+	transport http.RoundTripper
+}
+
+func (rt *unixSocketRoundTripper) RoundTrip(req *http.Request) (*http.Response, error) {
+	if strings.HasPrefix(req.URL.Scheme, "http+unix") {
+		req.URL.Scheme = "http"
+		req.URL.Host = "unix"
+	}
+	return rt.transport.RoundTrip(req)
+}
+
+// newUnixTestServer starts an httptest.Server backed by a unix socket and returns
+// the server, a base URL using the http+unix scheme (safe per isSafeURL), and an
+// HTTP client that routes requests to that socket.
+func newUnixTestServer(t *testing.T, handler http.Handler) (*httptest.Server, string, *http.Client) {
+	t.Helper()
+	socketPath := filepath.Join(t.TempDir(), "test.sock")
+	l, err := net.Listen("unix", socketPath)
+	require.NoError(t, err)
+
+	server := httptest.NewUnstartedServer(handler)
+	server.Listener = l
+	server.Start()
+
+	dialer := &net.Dialer{}
+	transport := &http.Transport{
+		DialContext: func(ctx context.Context, _, addr string) (net.Conn, error) {
+			if strings.HasPrefix(addr, "unix:") {
+				return dialer.DialContext(ctx, "unix", socketPath)
+			}
+			return dialer.DialContext(ctx, "tcp", addr)
+		},
+	}
+	client := &http.Client{Transport: &unixSocketRoundTripper{transport}}
+
+	return server, "http+unix:///", client
+}
+
+func TestIsSafeURL(t *testing.T) {
+	tests := []struct {
+		name     string
+		rawurl   string
+		expected bool
+	}{
+		{name: "http URL", rawurl: "http://example.com/path", expected: true},
+		{name: "https URL", rawurl: "https://example.com/path", expected: true},
+		{name: "http+unix URL", rawurl: "http+unix:///var/run/plugin.sock:/status", expected: true},
+		{name: "ftp URL", rawurl: "ftp://example.com", expected: false},
+		{name: "invalid URL", rawurl: "://bad", expected: false},
+		{name: "localhost http", rawurl: "http://localhost/path", expected: false},
+		{name: "127.0.0.1 http", rawurl: "http://127.0.0.1/path", expected: false},
+		{name: "::1 http", rawurl: "http://[::1]/path", expected: false},
+		{name: ".internal domain", rawurl: "http://service.internal/path", expected: false},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := isSafeURL(tt.rawurl)
+			assert.Equal(t, tt.expected, got)
+		})
+	}
+}
 
 func TestGetSidecarEndpoint(t *testing.T) {
 	ctx := context.Background()
@@ -109,7 +178,7 @@ func TestCreateTLSHTTPClient(t *testing.T) {
 }
 
 func TestDoRequestWithClient(t *testing.T) {
-	testServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	testServer, baseURL, client := newUnixTestServer(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		// Verify headers
 		assert.Equal(t, "application/json", r.Header.Get("Content-Type"))
 
@@ -144,10 +213,9 @@ func TestDoRequestWithClient(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			req, err := http.NewRequest(http.MethodGet, testServer.URL, nil)
+			req, err := http.NewRequest(http.MethodGet, baseURL, nil)
 			require.NoError(t, err)
 
-			client := testServer.Client()
 			resp, err := doRequestWithClient(req, tt.token, client)
 
 			if tt.wantErr {

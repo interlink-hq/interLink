@@ -3,9 +3,11 @@ package api
 import (
 	"context"
 	"io"
+	"net"
 	"net/http"
 	"net/http/httptest"
-	"net/url"
+	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
@@ -16,31 +18,45 @@ import (
 	"go.opentelemetry.io/otel/sdk/trace/tracetest"
 )
 
-type roundTripperFunc func(*http.Request) (*http.Response, error)
-
-func (f roundTripperFunc) RoundTrip(req *http.Request) (*http.Response, error) {
-	return f(req)
+// unixSocketRoundTripper rewrites http+unix URLs to http://unix so the underlying
+// transport can dial the configured unix socket.
+type unixSocketRoundTripper struct {
+	transport http.RoundTripper
 }
 
-func newSafeExternalURLClient(t *testing.T, server *httptest.Server) (*http.Client, string) {
-	t.Helper()
+func (rt *unixSocketRoundTripper) RoundTrip(req *http.Request) (*http.Response, error) {
+	if strings.HasPrefix(req.URL.Scheme, "http+unix") {
+		req.URL.Scheme = "http"
+		req.URL.Host = "unix"
+	}
+	return rt.transport.RoundTrip(req)
+}
 
-	targetURL, err := url.Parse(server.URL)
+// newUnixTestServer starts an httptest.Server backed by a unix socket and returns
+// the server, a base URL using the http+unix scheme (safe per isSafeURL), and an
+// HTTP client that routes requests to that socket.
+func newUnixTestServer(t *testing.T, handler http.Handler) (*httptest.Server, string, *http.Client) {
+	t.Helper()
+	socketPath := filepath.Join(t.TempDir(), "test.sock")
+	l, err := net.Listen("unix", socketPath)
 	require.NoError(t, err)
 
-	baseTransport, ok := server.Client().Transport.(*http.Transport)
-	require.True(t, ok)
+	server := httptest.NewUnstartedServer(handler)
+	server.Listener = l
+	server.Start()
 
-	client := &http.Client{
-		Transport: roundTripperFunc(func(req *http.Request) (*http.Response, error) {
-			req = req.Clone(req.Context())
-			req.URL.Scheme = targetURL.Scheme
-			req.URL.Host = targetURL.Host
-			return baseTransport.RoundTrip(req)
-		}),
+	dialer := &net.Dialer{}
+	transport := &http.Transport{
+		DialContext: func(ctx context.Context, _, addr string) (net.Conn, error) {
+			if strings.HasPrefix(addr, "unix:") {
+				return dialer.DialContext(ctx, "unix", socketPath)
+			}
+			return dialer.DialContext(ctx, "tcp", addr)
+		},
 	}
+	client := &http.Client{Transport: &unixSocketRoundTripper{transport}}
 
-	return client, "http://example.com"
+	return server, "http+unix:///", client
 }
 
 func TestGetSessionContext(t *testing.T) {
@@ -181,7 +197,7 @@ func TestReqWithError_HeadersSet(t *testing.T) {
 	defer span.End()
 
 	// Create a test server that echoes back request headers
-	testServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	testServer, baseURL, client := newUnixTestServer(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		// Verify headers are set correctly
 		assert.Equal(t, "application/json", r.Header.Get("Content-Type"))
 		assert.NotEmpty(t, r.Header.Get("InterLink-Http-Session"))
@@ -194,15 +210,12 @@ func TestReqWithError_HeadersSet(t *testing.T) {
 	defer testServer.Close()
 
 	// Create request to test server
-	client, safeURL := newSafeExternalURLClient(t, testServer)
-
-	req, err := http.NewRequest(http.MethodGet, safeURL, nil)
+	req, err := http.NewRequest(http.MethodGet, baseURL, nil)
 	require.NoError(t, err)
 
 	// Create response recorder
 	w := httptest.NewRecorder()
 
-	// Create HTTP client
 	// Call ReqWithError
 	sessionContext := "Request-test-123"
 	startTime := time.Now().UnixMicro()
@@ -258,7 +271,7 @@ func TestReqWithError_ErrorHandling(t *testing.T) {
 			defer span.End()
 
 			// Create test server with specific response
-			testServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+			testServer, baseURL, client := newUnixTestServer(t, http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 				w.WriteHeader(tt.serverStatus)
 				if _, err := io.WriteString(w, tt.serverResponse); err != nil {
 					panic(err)
@@ -266,9 +279,7 @@ func TestReqWithError_ErrorHandling(t *testing.T) {
 			}))
 			defer testServer.Close()
 
-			client, safeURL := newSafeExternalURLClient(t, testServer)
-
-			req, err := http.NewRequest(http.MethodGet, safeURL, nil)
+			req, err := http.NewRequest(http.MethodGet, baseURL, nil)
 			require.NoError(t, err)
 
 			w := httptest.NewRecorder()
@@ -344,7 +355,7 @@ func TestReqWithError_ResponseModes(t *testing.T) {
 			ctx, span := tracer.Start(context.Background(), "test-span")
 			defer span.End()
 
-			testServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+			testServer, baseURL, client := newUnixTestServer(t, http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 				w.WriteHeader(http.StatusOK)
 				if _, err := io.WriteString(w, testData); err != nil {
 					panic(err)
@@ -352,9 +363,7 @@ func TestReqWithError_ResponseModes(t *testing.T) {
 			}))
 			defer testServer.Close()
 
-			client, safeURL := newSafeExternalURLClient(t, testServer)
-
-			req, err := http.NewRequest(http.MethodGet, safeURL, nil)
+			req, err := http.NewRequest(http.MethodGet, baseURL, nil)
 			require.NoError(t, err)
 
 			w := httptest.NewRecorder()

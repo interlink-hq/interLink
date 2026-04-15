@@ -5,6 +5,21 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.6.1] - 2026-04-09
+
+### Added
+- **Selective Offload Control**: Added pod annotations to selectively skip container offload (#488)
+- **Expanded Versioned Documentation**: Added 0.6.x versioned documentation, including mesh networking and certificate management guides (#483, #486)
+
+### Changed
+- **Accelerator Configuration**: Changed `Accelerator.Available` from an integer to a Kubernetes quantity string (#492)
+- **Virtual Kubelet Configuration**: Improved Kubernetes client setup and added support to disable CSR creation when certificate automation is not desired (#475, #507)
+- **Release Assets Alignment**: Updated bundled Slurm plugin and Helm chart references for the 0.6.1 release
+
+### Fixed
+- **Pod Lifecycle Readiness**: Containers now start in `Pending`, pod readiness at creation is handled correctly, and pods transition to `Ready` only after container readiness is observed (#476, #477, #478)
+- **Plugin Error Reporting**: Plugin submission errors are now propagated to pod status and Virtual Kubelet logs for easier troubleshooting (#501)
+
 ## [0.6.0] - 2025-12-06
 
 ### Added

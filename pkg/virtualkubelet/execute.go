@@ -33,11 +33,16 @@ import (
 	"k8s.io/client-go/kubernetes"
 )
 
-// isSafeURL checks for SSRF by allowing only http(s) URLs and blocking localhost/internal addresses.
+// isSafeURL checks for SSRF by allowing only http(s) and http+unix URLs and blocking
+// localhost/internal addresses for http(s). http+unix is considered safe because unix domain
+// sockets are local-only and require filesystem access to connect, making remote exploitation impossible.
 func isSafeURL(rawurl string) bool {
 	u, err := url.Parse(rawurl)
 	if err != nil {
 		return false
+	}
+	if u.Scheme == "http+unix" {
+		return true
 	}
 	if u.Scheme != "http" && u.Scheme != "https" {
 		return false
@@ -1367,6 +1372,21 @@ func handleContainersUpdate(ctx context.Context, podRemoteStatus types.PodStatus
 	return counterOfTerminatedContainers, podErrored, failedReason, podRunning
 }
 
+// podTerminalPhase returns the current phase of a pod from the local cache if
+// it is already in a terminal state (Failed or Succeeded), plus a bool indicating
+// whether it is terminal. Reads are protected by podsMu.
+func (p *Provider) podTerminalPhase(podUID string) (v1.PodPhase, bool) {
+	p.podsMu.RLock()
+	defer p.podsMu.RUnlock()
+	if pod, ok := p.pods[podUID]; ok {
+		ph := pod.Status.Phase
+		if ph == v1.PodFailed || ph == v1.PodSucceeded {
+			return ph, true
+		}
+	}
+	return "", false
+}
+
 // checkPodsStatus is regularly called by the VK itself at regular intervals of time to query InterLink for Pods' status.
 // It basically append all available pods registered to the VK to a slice and passes this slice to the statusRequest function.
 // After the statusRequest returns a response, this function uses that response to update every Pod and Container status.
@@ -1414,9 +1434,9 @@ func checkPodsStatus(ctx context.Context, p *Provider, pod *v1.Pod, token string
 		// if the PodUID match with the one in etcd we are talking of the same thing. GOOD
 		if podRemoteStatus.PodUID == string(podRefInCluster.UID) {
 			// check if the pod is already in a terminal state (Failed or Succeeded)
-			if p.pods[podRemoteStatus.PodUID].Status.Phase == v1.PodFailed || p.pods[podRemoteStatus.PodUID].Status.Phase == v1.PodSucceeded {
-				if podRefInCluster.Status.Phase == p.pods[podRemoteStatus.PodUID].Status.Phase {
-					log.G(ctx).Debug("Pod " + podRemoteStatus.PodName + " is already in phase " + string(p.pods[podRemoteStatus.PodUID].Status.Phase))
+			if currentPhase, terminal := p.podTerminalPhase(podRemoteStatus.PodUID); terminal {
+				if podRefInCluster.Status.Phase == currentPhase {
+					log.G(ctx).Debug("Pod " + podRemoteStatus.PodName + " is already in phase " + string(currentPhase))
 					return nil, err
 				}
 			}
@@ -1444,6 +1464,11 @@ func checkPodsStatus(ctx context.Context, p *Provider, pod *v1.Pod, token string
 
 			log.G(ctx).Debug("Number of containers in POD:      " + strconv.Itoa(nContainersInPod))
 			log.G(ctx).Debug("Number of init containers in POD: " + strconv.Itoa(nInitContainersInPod))
+
+			// Protect all writes to podRefInCluster.Status (= p.pods[uid]) with the
+			// write lock so that concurrent goroutines (e.g. CreatePod's async error
+			// path) do not observe a partially-updated pod status.
+			p.podsMu.Lock()
 
 			// if there are init containers, we need to check them first
 			if nInitContainersInPod > 0 {
@@ -1498,6 +1523,8 @@ func checkPodsStatus(ctx context.Context, p *Provider, pod *v1.Pod, token string
 					podRefInCluster.Status.Reason = "Running"
 				}
 			}
+
+			p.podsMu.Unlock()
 		} else {
 			list, err := p.clientSet.CoreV1().Pods(podRemoteStatus.PodNamespace).List(ctx, metav1.ListOptions{})
 			if err != nil {
