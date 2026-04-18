@@ -1,0 +1,82 @@
+# Task: interlink-build-images
+#
+# Builds the interLink API server and virtual-kubelet container images from
+# source using Kaniko and pushes them to the configured registry.
+#
+# Prerequisites:
+#   - A Kubernetes Secret named `registry-credentials` containing a Docker
+#     config.json with push access to the target registry (mounted at
+#     /kaniko/.docker/config.json via a workspace named `docker-credentials`).
+#
+# Parameters:
+#   interlink-image  Full image reference for the interLink API server.
+#   vk-image         Full image reference for the virtual-kubelet.
+#   version          Image/binary version tag (passed as VERSION build-arg).
+#
+# Workspaces:
+#   source              The interLink source repository.
+#   docker-credentials  Docker config.json with registry push credentials.
+
+apiVersion: tekton.dev/v1
+kind: Task
+metadata:
+  name: interlink-build-images
+  labels:
+    app.kubernetes.io/part-of: interlink
+spec:
+  description: >-
+    Build and push the interLink API server and virtual-kubelet container images
+    from source using Kaniko (no Docker daemon required).
+  params:
+    - name: interlink-image
+      type: string
+      description: Full image reference for the interLink API server (e.g. ghcr.io/org/interlink:dev).
+      default: "ghcr.io/interlink-hq/interlink/interlink:dev"
+    - name: vk-image
+      type: string
+      description: Full image reference for the virtual-kubelet (e.g. ghcr.io/org/virtual-kubelet-inttw:dev).
+      default: "ghcr.io/interlink-hq/interlink/virtual-kubelet-inttw:dev"
+    - name: version
+      type: string
+      description: Version string injected into the VK binary via set-version.sh.
+      default: "dev"
+  workspaces:
+    - name: source
+      description: The interLink source code repository.
+    - name: docker-credentials
+      description: >-
+        A workspace backed by a Secret that contains a Docker config.json file
+        with credentials for the target registry. Mount the secret at the
+        workspace path so that the file is available at
+        $(workspaces.docker-credentials.path)/config.json.
+  results:
+    - name: interlink-image-digest
+      description: The digest of the pushed interLink image.
+    - name: vk-image-digest
+      description: The digest of the pushed virtual-kubelet image.
+  steps:
+    - name: build-interlink
+      image: gcr.io/kaniko-project/executor:latest
+      env:
+        - name: DOCKER_CONFIG
+          value: $(workspaces.docker-credentials.path)
+      args:
+        - --context=dir://$(workspaces.source.path)
+        - --dockerfile=$(workspaces.source.path)/docker/Dockerfile.interlink
+        - --destination=$(params.interlink-image)
+        - --build-arg=VERSION=$(params.version)
+        - --cache=true
+        - --digest-file=/tekton/results/interlink-image-digest
+
+    - name: build-vk
+      image: gcr.io/kaniko-project/executor:latest
+      env:
+        - name: DOCKER_CONFIG
+          value: $(workspaces.docker-credentials.path)
+      args:
+        - --context=dir://$(workspaces.source.path)
+        - --dockerfile=$(workspaces.source.path)/docker/Dockerfile.vk
+        - --destination=$(params.vk-image)
+        - --build-arg=VERSION=$(params.version)
+        - --cache=true
+        - --digest-file=/tekton/results/vk-image-digest
