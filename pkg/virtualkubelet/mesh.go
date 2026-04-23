@@ -345,6 +345,10 @@ PersistentKeepalive = %d
 	return nil
 }
 
+// clearConflictingNetworkAnnotations removes generated annotations that are specific to
+// the opposite network mode to keep pod network bootstrap behavior uniform.
+// When fullMeshEnabledForPod is true, any stale wstunnel client command annotation is removed.
+// When false, any stale WireGuard snippet annotation is removed.
 func clearConflictingNetworkAnnotations(pod *v1.Pod, fullMeshEnabledForPod bool) {
 	if pod == nil || pod.Annotations == nil {
 		return
