@@ -248,8 +248,11 @@ func (p *Provider) addWstunnelClientAnnotation(ctx context.Context, pod *v1.Pod,
 		ingressEndpoint = td.Name
 	}
 
+	fullMeshEnabledForPod := p.config.Network.FullMesh && !isMeshNetworkingDisabled(pod)
+	clearConflictingNetworkAnnotations(pod, fullMeshEnabledForPod)
+
 	// Check if FullMesh mode is enabled and not disabled for this specific pod
-	if p.config.Network.FullMesh && !isMeshNetworkingDisabled(pod) {
+	if fullMeshEnabledForPod {
 		log.G(ctx).Infof("FullMesh mode enabled, generating pre-exec script for pod %s/%s", pod.Namespace, pod.Name)
 
 		// Generate full mesh script
@@ -340,6 +343,19 @@ PersistentKeepalive = %d
 	}
 
 	return nil
+}
+
+func clearConflictingNetworkAnnotations(pod *v1.Pod, fullMeshEnabledForPod bool) {
+	if pod == nil || pod.Annotations == nil {
+		return
+	}
+
+	if fullMeshEnabledForPod {
+		delete(pod.Annotations, annWSTunnelClientCmds)
+		return
+	}
+
+	delete(pod.Annotations, annWGClientSnippet)
 }
 
 func (p *Provider) generateFullMeshScript(ctx context.Context, td *WstunnelTemplateData, ingressEndpoint string, podUID string) (string, error) {
