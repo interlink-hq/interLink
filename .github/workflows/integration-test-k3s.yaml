@@ -1,0 +1,46 @@
+---
+name: e2e-tests
+
+on:
+  push: {}
+  pull_request: {}
+
+jobs:
+  e2e:
+    name: e2e
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          submodules: recursive
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          cache: true
+
+      - name: Enable unprivileged user namespaces (required by Apptainer)
+        run: sudo sysctl -w kernel.unprivileged_userns_clone=1
+
+      - name: Setup e2e environment
+        run: bash scripts/k3s-test-setup.sh
+
+      - name: Run e2e tests
+        run: bash scripts/k3s-test-run.sh
+
+      - name: Upload test logs
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: e2e-test-logs
+          path: /tmp/interlink-test-*
+          retention-days: 7
+          if-no-files-found: ignore
+
+      - name: Cleanup
+        if: always()
+        run: bash scripts/k3s-test-cleanup.sh
