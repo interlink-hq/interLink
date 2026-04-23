@@ -248,8 +248,8 @@ func (p *Provider) addWstunnelClientAnnotation(ctx context.Context, pod *v1.Pod,
 		ingressEndpoint = td.Name
 	}
 
-	// Check if FullMesh mode is enabled
-	if p.config.Network.FullMesh {
+	// Check if FullMesh mode is enabled and not disabled for this specific pod
+	if p.config.Network.FullMesh && !isMeshNetworkingDisabled(pod) {
 		log.G(ctx).Infof("FullMesh mode enabled, generating pre-exec script for pod %s/%s", pod.Namespace, pod.Name)
 
 		// Generate full mesh script

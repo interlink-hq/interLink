@@ -212,6 +212,25 @@ virtualNode:
     meshScriptTemplatePath: "/path/to/custom/mesh.sh"
 ```
 
+### Disabling Mesh Networking for Specific Pods
+
+When `fullMesh` is enabled globally, you can opt individual pods out of mesh networking by adding the `interlink.eu/mesh-network: "disabled"` annotation:
+
+```yaml
+apiVersion: v1
+kind: Pod
+metadata:
+  name: my-pod
+  annotations:
+    interlink.eu/mesh-network: "disabled"
+spec:
+  containers:
+  - name: app
+    image: nginx:latest
+```
+
+With this annotation, the pod is offloaded **without** mesh networking (no WireGuard tunnel is created), while all other pods continue to use the global `fullMesh` setting.
+
 ### Configuration Options
 
 #### Network CIDRs

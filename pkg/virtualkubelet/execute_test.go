@@ -191,6 +191,11 @@ func TestDoRequestWithClient(t *testing.T) {
 	}))
 	defer testServer.Close()
 
+	// Allow loopback URLs for the test server
+	origChecker := urlSafetyChecker
+	urlSafetyChecker = func(string) bool { return true }
+	defer func() { urlSafetyChecker = origChecker }()
+
 	tests := []struct {
 		name    string
 		token   string

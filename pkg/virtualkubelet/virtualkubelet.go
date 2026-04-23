@@ -79,6 +79,7 @@ const (
 	annWGClientSnippet              = "interlink.eu/wireguard-client-snippet"
 	annDisableOffloadContainers     = "interlink.eu/disable-offload-containers"      // comma-separated container names
 	annDisableOffloadInitContainers = "interlink.eu/disable-offload-init-containers" // comma-separated init container names
+	annMeshNetworkDisabled          = "interlink.eu/mesh-network"                    // set to "disabled" to opt out of mesh networking
 )
 
 type WstunnelTemplateData struct {
@@ -852,8 +853,8 @@ func (p *Provider) createDummyPod(ctx context.Context, originalPod *v1.Pod) (*v1
 		}
 	}
 
-	// if full mesh in the configuration is set to true
-	if p.config.Network.FullMesh {
+	// if full mesh in the configuration is set to true and not disabled per-pod
+	if p.config.Network.FullMesh && !isMeshNetworkingDisabled(originalPod) {
 		if err := p.setupWireGuardConfig(ctx, originalPod, &templateData); err != nil {
 			return nil, nil, err
 		}
@@ -1472,6 +1473,12 @@ func (p *Provider) shouldCreateWstunnel(pod *v1.Pod) bool {
 		pod.Annotations["interlink.eu/pod-vpn"] == ""
 }
 
+// isMeshNetworkingDisabled returns true when the pod has opted out of mesh networking
+// via the "interlink.eu/mesh-network: disabled" annotation.
+func isMeshNetworkingDisabled(pod *v1.Pod) bool {
+	return strings.EqualFold(strings.TrimSpace(pod.Annotations[annMeshNetworkDisabled]), "disabled")
+}
+
 // handleWstunnelCreation creates wstunnel infrastructure and returns the pod IP
 func (p *Provider) handleWstunnelCreation(ctx context.Context, pod *v1.Pod) (string, error) {
 	wstunnelName := pod.Name + "-wstunnel"
@@ -1538,6 +1545,132 @@ func (p *Provider) waitForWstunnelPodIP(ctx context.Context, dummyPod *v1.Pod, t
 	return "", fmt.Errorf("wstunnel pod %s/%s failed to get an IP within %v timeout", dummyPod.Namespace, dummyPod.Name, timeout)
 }
 
+// buildTerminatedContainerStatuses builds a slice of ContainerStatus entries where
+// every container is marked as terminated with exit code 1 and the given message.
+func buildTerminatedContainerStatuses(containers []v1.Container, message string) []v1.ContainerStatus {
+	statuses := make([]v1.ContainerStatus, 0, len(containers))
+	for _, container := range containers {
+		statuses = append(statuses, v1.ContainerStatus{
+			Name:  container.Name,
+			Image: container.Image,
+			Ready: false,
+			State: v1.ContainerState{
+				Terminated: &v1.ContainerStateTerminated{
+					ExitCode: 1,
+					Reason:   "ProviderFailed",
+					Message:  message,
+				},
+			},
+		})
+	}
+	return statuses
+}
+
+// handleRemoteExecutionFailure sets the pod to Failed and updates its status when
+// RemoteExecution returns an error that is not a benign early-deletion signal.
+func (p *Provider) handleRemoteExecutionFailure(ctx context.Context, pod *v1.Pod, podIP string, execErr error) {
+	creationError := execErr.Error()
+
+	status, err := PodPhase(p, "Failed", podIP)
+	if err != nil {
+		log.G(ctx).Error(err)
+		return
+	}
+
+	pod.Status = status
+	pod.Status.Reason = "ProviderFailed"
+	pod.Status.Message = creationError
+	pod.Status.InitContainerStatuses = buildTerminatedContainerStatuses(pod.Spec.InitContainers, creationError)
+	pod.Status.ContainerStatuses = buildTerminatedContainerStatuses(pod.Spec.Containers, creationError)
+
+	if err := p.UpdatePod(ctx, pod); err != nil {
+		log.G(ctx).Error(err)
+	}
+}
+
+// setupVPNPodIP handles IP assignment for pods annotated with interlink.eu/pod-vpn.
+// It returns the assigned IP.  When earlyReturn is true the caller should return nil
+// immediately (mirroring the original behaviour when listing pods fails).
+func (p *Provider) setupVPNPodIP(ctx context.Context, pod *v1.Pod) (ip string, earlyReturn bool, err error) {
+	podsVPN, listErr := p.clientSet.CoreV1().Pods("").List(ctx, metav1.ListOptions{})
+	if listErr != nil {
+		log.G(ctx).Warning("Get all pods attached to the VPN")
+		return "", true, nil
+	}
+
+	log.G(ctx).Debug("Pod lists with pod-vpn enabled has len ", len(podsVPN.Items))
+
+	for _, podVPN := range podsVPN.Items {
+		if vpnIP, ok := podVPN.Annotations["interlink.eu/pod-ip"]; ok {
+			p.podIPs = append(p.podIPs, vpnIP)
+		}
+	}
+
+	podCIDR := p.node.Spec.PodCIDR
+	if podCIDR == "" {
+		return "", false, fmt.Errorf("node podCIDR not found")
+	}
+
+	_, subnet, parseErr := net.ParseCIDR(podCIDR)
+	if parseErr != nil {
+		return "", false, parseErr
+	}
+
+	var ipList []string
+	for cidrIP := subnet.IP.Mask(subnet.Mask); subnet.Contains(cidrIP); incrementIP(cidrIP) {
+		ipList = append(ipList, cidrIP.String())
+	}
+	ipList = ipList[2 : len(ipList)-1]
+
+	minIP := p.config.PodCIDR.MinIP
+	maxIP := p.config.PodCIDR.MaxIP
+
+	if minIP < 2 {
+		log.G(ctx).Warn("MinIP is less than 2, setting it to 2")
+		minIP = 2
+	}
+
+	if maxIP > 250 {
+		log.G(ctx).Warn("MaxIP is greater than 250, setting it to 250")
+		maxIP = 250
+	}
+
+	freeIP := findFirstFreeIP(ipList, p.podIPs, minIP, maxIP)
+	if freeIP == "" {
+		return "", false, fmt.Errorf("no free IP found")
+	}
+
+	log.G(ctx).Info("First free IP: ", freeIP)
+	p.podIPs = append(p.podIPs, freeIP)
+	pod.Annotations["interlink.eu/pod-ip"] = freeIP
+	return freeIP, false, nil
+}
+
+// setPodInitialStatus sets the pod to Pending and marks PodInitialized=False when
+// the pod has init containers.
+func (p *Provider) setPodInitialStatus(ctx context.Context, pod *v1.Pod, podIP string) error {
+	status, err := PodPhase(p, "Pending", podIP)
+	if err != nil {
+		log.G(ctx).Error(err)
+		return err
+	}
+
+	if len(pod.Spec.InitContainers) > 0 {
+		for i := range status.Conditions {
+			if status.Conditions[i].Type == v1.PodInitialized {
+				status.Conditions[i].Status = v1.ConditionFalse
+				break
+			}
+		}
+	}
+
+	pod.Status = status
+	if updateErr := p.UpdatePod(ctx, pod); updateErr != nil {
+		log.G(ctx).Error(updateErr)
+	}
+	return nil
+}
+
 // CreatePod accepts a Pod definition and stores it in memory in p.pods
 func (p *Provider) CreatePod(ctx context.Context, pod *v1.Pod) error {
 	TracerUpdate(&ctx, "CreatePodVK", pod)
@@ -1556,118 +1689,37 @@ func (p *Provider) CreatePod(ctx context.Context, pod *v1.Pod) error {
 	podIP := "127.0.0.1"
 
 	// Handle wstunnel creation if needed
-	if p.shouldCreateWstunnel(pod) || p.config.Network.FullMesh {
+	if p.shouldCreateWstunnel(pod) || (p.config.Network.FullMesh && !isMeshNetworkingDisabled(pod)) {
 		var err error
 		podIP, err = p.handleWstunnelCreation(ctx, pod)
 		if err != nil {
 			return err
 		}
 
-		if p.config.Network.FullMesh {
+		if p.config.Network.FullMesh && !isMeshNetworkingDisabled(pod) {
 			if pod.Annotations == nil {
 				pod.Annotations = make(map[string]string)
 			}
 			pod.Annotations["interlink.eu/pod-subnet"] = p.node.Spec.PodCIDR
+			log.G(ctx).Infof("Added pod subnet annotation %s to pod %s/%s", p.node.Spec.PodCIDR, pod.Namespace, pod.Name)
 		}
-
-		log.G(ctx).Infof("Added pod subnet annotation %s to pod %s/%s", p.node.Spec.PodCIDR, pod.Namespace, pod.Name)
 	}
 
 	if _, ok := pod.Annotations["interlink.eu/pod-vpn"]; ok {
-		podsVPN, err := p.clientSet.CoreV1().Pods("").List(ctx, metav1.ListOptions{})
-		if err != nil {
-			log.G(ctx).Warning("Get all pods attached to the VPN")
+		assignedIP, earlyReturn, vpnErr := p.setupVPNPodIP(ctx, pod)
+		if earlyReturn {
 			return nil
 		}
-
-		log.G(ctx).Debug("Pod lists with pod-vpn enabled has len ", len(podsVPN.Items))
-
-		for _, podVPN := range podsVPN.Items {
-			if ip, ok := podVPN.Annotations["interlink.eu/pod-ip"]; ok {
-				p.podIPs = append(p.podIPs, ip)
-			}
+		if vpnErr != nil {
+			return vpnErr
 		}
-
-		// Get the CIDR of the virtual node
-		podCIDR := p.node.Spec.PodCIDR
-		if podCIDR == "" {
-			return fmt.Errorf("node podCIDR not found")
-		}
-
-		_, subnet, err := net.ParseCIDR(podCIDR)
-		if err != nil {
-			return err
-		}
-
-		var ipList []string
-		for ip := subnet.IP.Mask(subnet.Mask); subnet.Contains(ip); incrementIP(ip) {
-			ipList = append(ipList, ip.String())
-		}
-		// Remove network address and broadcast address
-		ipList = ipList[2 : len(ipList)-1]
-
-		// get the minIP and maxIP from the config
-		minIP := p.config.PodCIDR.MinIP
-		maxIP := p.config.PodCIDR.MaxIP
-
-		if minIP < 2 {
-			log.G(ctx).Warn("MinIP is less than 2, setting it to 2")
-			minIP = 2
-		}
-
-		if maxIP > 250 {
-			log.G(ctx).Warn("MaxIP is greater than 250, setting it to 250")
-			maxIP = 250
-		}
-
-		freeIP := findFirstFreeIP(ipList, p.podIPs, minIP, maxIP)
-		if freeIP != "" {
-			log.G(ctx).Info("First free IP: ", freeIP)
-		} else {
-			return fmt.Errorf("no free IP found")
-		}
-
-		p.podIPs = append(p.podIPs, freeIP)
-		pod.Annotations["interlink.eu/pod-ip"] = freeIP
-		podIP = freeIP
+		podIP = assignedIP
 	} else if ip, ok := pod.Annotations["interlink.eu/pod-ip"]; ok {
 		podIP = ip
 	}
 
-	// in case we have initContainers we need to stop main containers from executing for now ...
-	if len(pod.Spec.InitContainers) > 0 {
-		// Pods with init containers should be Pending until init containers complete
-		status, err := PodPhase(p, "Pending", podIP)
-		if err != nil {
-			log.G(ctx).Error(err)
-			return err
-		}
-		// Set PodInitialized to False since init containers haven't completed yet
-		for i := range status.Conditions {
-			if status.Conditions[i].Type == v1.PodInitialized {
-				status.Conditions[i].Status = v1.ConditionFalse
-				break
-			}
-		}
-		pod.Status = status
-		err = p.UpdatePod(ctx, pod)
-		if err != nil {
-			log.G(ctx).Error(err)
-		}
-	} else {
-
-		// if no init containers are there, go head and set phase to initialized
-		status, err := PodPhase(p, "Pending", podIP)
-		if err != nil {
-			log.G(ctx).Error(err)
-			return err
-		}
-
-		pod.Status = status
-		err = p.UpdatePod(ctx, pod)
-		if err != nil {
-			log.G(ctx).Error(err)
-		}
+	if err := p.setPodInitialStatus(ctx, pod, podIP); err != nil {
+		return err
 	}
 
 	// Create pod asynchronously on the remote plugin
@@ -1679,61 +1731,8 @@ func (p *Provider) CreatePod(ctx context.Context, pod *v1.Pod) error {
 				log.G(ctx).Warn(err)
 			} else {
 				log.G(ctx).Error(err)
-				// Capture the creation error message before reassigning err
-				creationError := err.Error()
-
-				// Set pod to Failed state
-				pod.Status, err = PodPhase(p, "Failed", podIP)
-				if err != nil {
-					log.G(ctx).Error(err)
-					return
-				}
-
-				// Store the error message in the pod status
-				pod.Status.Reason = "ProviderFailed"
-				pod.Status.Message = creationError
-
-				// Set all container statuses to terminated with the error message.
-				// PodPhase resets ContainerStatuses, so rebuild from pod.Spec here.
-				// InitContainers go into InitContainerStatuses; regular Containers into ContainerStatuses.
-				pod.Status.InitContainerStatuses = make([]v1.ContainerStatus, 0, len(pod.Spec.InitContainers))
-				for _, container := range pod.Spec.InitContainers {
-					pod.Status.InitContainerStatuses = append(pod.Status.InitContainerStatuses, v1.ContainerStatus{
-						Name:  container.Name,
-						Image: container.Image,
-						Ready: false,
-						State: v1.ContainerState{
-							Terminated: &v1.ContainerStateTerminated{
-								ExitCode: 1,
-								Reason:   "ProviderFailed",
-								Message:  creationError,
-							},
-						},
-					})
-				}
-				pod.Status.ContainerStatuses = make([]v1.ContainerStatus, 0, len(pod.Spec.Containers))
-				for _, container := range pod.Spec.Containers {
-					pod.Status.ContainerStatuses = append(pod.Status.ContainerStatuses, v1.ContainerStatus{
-						Name:  container.Name,
-						Image: container.Image,
-						Ready: false,
-						State: v1.ContainerState{
-							Terminated: &v1.ContainerStateTerminated{
-								ExitCode: 1,
-								Reason:   "ProviderFailed",
-								Message:  creationError,
-							},
-						},
-					})
-				}
-
-				err = p.UpdatePod(ctx, pod)
-				if err != nil {
-					log.G(ctx).Error(err)
-				}
-
+				p.handleRemoteExecutionFailure(ctx, pod, podIP, err)
 			}
-			return
 		}
 	}()
 
@@ -1787,7 +1786,7 @@ func (p *Provider) DeletePod(ctx context.Context, pod *v1.Pod) (err error) {
 	}
 
 	// Clean up wstunnel resources if tunnel is enabled and they exist and no VPN annotation
-	if p.shouldCreateWstunnel(pod) || p.config.Network.FullMesh {
+	if p.shouldCreateWstunnel(pod) || (p.config.Network.FullMesh && !isMeshNetworkingDisabled(pod)) {
 		// Use the same helper function to compute resource names
 		var resourceBaseName, wstunnelNS string
 		if isSameNamespace {

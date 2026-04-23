@@ -52,6 +52,10 @@ func isSafeURL(rawurl string) bool {
 	return true
 }
 
+// urlSafetyChecker is the URL safety function used by doRequestWithClient.
+// It can be overridden in tests.
+var urlSafetyChecker = isSafeURL
+
 const (
 	PodPhaseInitialize = "Initializing"
 	PodPhaseCompleted  = "Completed"
@@ -261,7 +265,7 @@ func doRequestWithClient(req *http.Request, token string, httpClient *http.Clien
 		req.Header.Add("Authorization", "Bearer "+token)
 	}
 	req.Header.Set("Content-Type", "application/json")
-	if !isSafeURL(req.URL.String()) {
+	if !urlSafetyChecker(req.URL.String()) {
 		return nil, fmt.Errorf("potential SSRF detected: %s", req.URL.String())
 	}
 	return httpClient.Do(req) // #nosec G704
