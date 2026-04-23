@@ -1476,6 +1476,9 @@ func (p *Provider) shouldCreateWstunnel(pod *v1.Pod) bool {
 // isMeshNetworkingDisabled returns true when the pod has opted out of mesh networking
 // via the "interlink.eu/mesh-network: disabled" annotation.
 func isMeshNetworkingDisabled(pod *v1.Pod) bool {
+	if pod == nil || pod.Annotations == nil {
+		return false
+	}
 	return strings.EqualFold(strings.TrimSpace(pod.Annotations[annMeshNetworkDisabled]), "disabled")
 }
 
