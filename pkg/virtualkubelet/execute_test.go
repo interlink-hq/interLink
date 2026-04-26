@@ -284,13 +284,13 @@ func TestRemoteExecutionHandleProjectedSourceConfigMap(t *testing.T) {
 	}
 
 	tests := []struct {
-		name            string
-		configMapName   string
-		configMapData   map[string]string
-		sourceItems     []v1.KeyToPath
-		overrideCaCrt   string
-		expectedData    map[string]string
-		expectErr       bool
+		name          string
+		configMapName string
+		configMapData map[string]string
+		sourceItems   []v1.KeyToPath
+		overrideCaCrt string
+		expectedData  map[string]string
+		expectErr     bool
 	}{
 		{
 			name:          "configmap without items projects all keys",
@@ -299,7 +299,7 @@ func TestRemoteExecutionHandleProjectedSourceConfigMap(t *testing.T) {
 				"key1": "value1",
 				"key2": "value2",
 			},
-			sourceItems:  nil,
+			sourceItems:   nil,
 			overrideCaCrt: "",
 			expectedData: map[string]string{
 				"key1": "value1",
