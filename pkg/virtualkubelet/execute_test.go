@@ -11,6 +11,9 @@ import (
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+	v1 "k8s.io/api/core/v1"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/client-go/kubernetes/fake"
 )
 
 // unixSocketRoundTripper rewrites http+unix URLs to http://unix so the underlying
@@ -265,6 +268,154 @@ func TestGetSessionContextMessage(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			got := GetSessionContextMessage(tt.sessionContext)
 			assert.Equal(t, tt.expected, got)
+		})
+	}
+}
+
+func TestRemoteExecutionHandleProjectedSourceConfigMap(t *testing.T) {
+	ctx := context.Background()
+	namespace := "test-ns"
+
+	pod := &v1.Pod{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      "test-pod",
+			Namespace: namespace,
+		},
+	}
+
+	tests := []struct {
+		name          string
+		configMapName string
+		configMapData map[string]string
+		sourceItems   []v1.KeyToPath
+		overrideCaCrt string
+		expectedData  map[string]string
+		expectErr     bool
+	}{
+		{
+			name:          "configmap without items projects all keys",
+			configMapName: "my-config",
+			configMapData: map[string]string{
+				"key1": "value1",
+				"key2": "value2",
+			},
+			sourceItems:   nil,
+			overrideCaCrt: "",
+			expectedData: map[string]string{
+				"key1": "value1",
+				"key2": "value2",
+			},
+		},
+		{
+			name:          "configmap with items projects only specified keys",
+			configMapName: "my-config",
+			configMapData: map[string]string{
+				"key1": "value1",
+				"key2": "value2",
+				"key3": "value3",
+			},
+			sourceItems: []v1.KeyToPath{
+				{Key: "key1", Path: "mapped-key1"},
+				{Key: "key2", Path: "mapped-key2"},
+			},
+			overrideCaCrt: "",
+			expectedData: map[string]string{
+				"mapped-key1": "value1",
+				"mapped-key2": "value2",
+			},
+		},
+		{
+			name:          "kube-root-ca.crt without items uses override and default path",
+			configMapName: "kube-root-ca.crt",
+			configMapData: nil,
+			sourceItems:   nil,
+			overrideCaCrt: "OVERRIDE-CERT",
+			expectedData: map[string]string{
+				"ca.crt": "OVERRIDE-CERT",
+			},
+		},
+		{
+			name:          "kube-root-ca.crt with items uses override value at specified paths",
+			configMapName: "kube-root-ca.crt",
+			configMapData: nil,
+			sourceItems: []v1.KeyToPath{
+				{Key: "ca.crt", Path: "ca.crt"},
+			},
+			overrideCaCrt: "OVERRIDE-CERT",
+			expectedData: map[string]string{
+				"ca.crt": "OVERRIDE-CERT",
+			},
+		},
+		{
+			name:          "configmap without items with multiline value preserves newlines",
+			configMapName: "my-config",
+			configMapData: map[string]string{
+				"ca.crt": "-----BEGIN CERTIFICATE-----\nMIIBIjAN\n-----END CERTIFICATE-----\n",
+			},
+			sourceItems:   nil,
+			overrideCaCrt: "",
+			expectedData: map[string]string{
+				"ca.crt": "-----BEGIN CERTIFICATE-----\nMIIBIjAN\n-----END CERTIFICATE-----\n",
+			},
+		},
+		{
+			name:          "missing key in items returns error",
+			configMapName: "my-config",
+			configMapData: map[string]string{
+				"key1": "value1",
+			},
+			sourceItems: []v1.KeyToPath{
+				{Key: "missing-key", Path: "some-path"},
+			},
+			overrideCaCrt: "",
+			expectedData:  nil,
+			expectErr:     true,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Create a fake k8s client and pre-populate it with the ConfigMap.
+			fakeClient := fake.NewSimpleClientset()
+			if tt.configMapData != nil {
+				cm := &v1.ConfigMap{
+					ObjectMeta: metav1.ObjectMeta{
+						Name:      tt.configMapName,
+						Namespace: namespace,
+					},
+					Data: tt.configMapData,
+				}
+				_, err := fakeClient.CoreV1().ConfigMaps(namespace).Create(ctx, cm, metav1.CreateOptions{})
+				require.NoError(t, err)
+			}
+
+			p := &Provider{
+				clientSet: fakeClient,
+				config: Config{
+					KubernetesAPICaCrt: tt.overrideCaCrt,
+				},
+			}
+
+			source := v1.VolumeProjection{
+				ConfigMap: &v1.ConfigMapProjection{
+					LocalObjectReference: v1.LocalObjectReference{Name: tt.configMapName},
+					Items:                tt.sourceItems,
+				},
+			}
+
+			projectedVolume := &v1.ConfigMap{
+				Data: make(map[string]string),
+			}
+
+			err := remoteExecutionHandleProjectedSource(ctx, p, pod, source, projectedVolume)
+
+			if tt.expectErr {
+				assert.Error(t, err)
+				return
+			}
+
+			require.NoError(t, err)
+			assert.Equal(t, tt.expectedData, projectedVolume.Data)
 		})
 	}
 }

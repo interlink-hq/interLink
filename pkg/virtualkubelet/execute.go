@@ -774,25 +774,45 @@ func remoteExecutionHandleProjectedSource(
 		         - key: ca.crt
 		           path: ca.crt
 		       name: kube-root-ca.crt
+		   Or without items (project all keys):
+		   - configMap:
+		       name: my-config
 		*/
-		for _, item := range source.ConfigMap.Items {
-			const kubeCaCrt = "kube-root-ca.crt"
-			overrideCaCrt := p.config.KubernetesAPICaCrt
-			if source.ConfigMap.Name == kubeCaCrt && overrideCaCrt != "" {
-				log.G(ctx).Debug("handling special case of Kubernetes API kube-root-ca.crt, override found, using provided ca.crt:, ", overrideCaCrt)
-				projectedVolume.Data[item.Path] = overrideCaCrt
+		const kubeCaCrt = "kube-root-ca.crt"
+		overrideCaCrt := p.config.KubernetesAPICaCrt
+		if source.ConfigMap.Name == kubeCaCrt && overrideCaCrt != "" {
+			log.G(ctx).Debug("handling special case of Kubernetes API kube-root-ca.crt, override found, using provided ca.crt:, ", overrideCaCrt)
+			if len(source.ConfigMap.Items) == 0 {
+				// No items specified: project the override ca.crt using the default key name as path.
+				projectedVolume.Data["ca.crt"] = overrideCaCrt
 			} else {
+				for _, item := range source.ConfigMap.Items {
+					projectedVolume.Data[item.Path] = overrideCaCrt
+				}
+			}
+		} else {
+			if source.ConfigMap.Name == kubeCaCrt {
 				// This gets the usual certificate for K8s API, but it is restricted to whatever usual IP/FQDN of K8S API URL.
 				// With InterLink, the Kubernetes internal network is not accessible so this default ca.crt is probably useless.
 				log.G(ctx).Warning("using default Kubernetes API kube-root-ca.crt (no override found), but the default one might not be compatible with the subject: ", p.config.KubernetesAPIAddr)
-				cfgmap, err := p.clientSet.CoreV1().ConfigMaps(pod.Namespace).Get(ctx, source.ConfigMap.Name, metav1.GetOptions{})
-				if err != nil {
-					return fmt.Errorf("error during retrieval of ConfigMap %s error: %w", source.ConfigMap.Name, err)
+			}
+			// Fetch the ConfigMap once, then iterate over items (or all keys if no items are specified).
+			cfgmap, err := p.clientSet.CoreV1().ConfigMaps(pod.Namespace).Get(ctx, source.ConfigMap.Name, metav1.GetOptions{})
+			if err != nil {
+				return fmt.Errorf("error during retrieval of ConfigMap %s error: %w", source.ConfigMap.Name, err)
+			}
+			if len(source.ConfigMap.Items) == 0 {
+				// No items specified: project all keys from the ConfigMap, using key name as path.
+				for key, value := range cfgmap.Data {
+					projectedVolume.Data[key] = value
 				}
-				if value, ok := cfgmap.Data[item.Key]; ok {
-					projectedVolume.Data[item.Path] = value
-				} else {
-					return fmt.Errorf("error during retrieval of key %s of (existing) ConfigMap %s error: %w", item.Key, source.ConfigMap.Name, err)
+			} else {
+				for _, item := range source.ConfigMap.Items {
+					if value, ok := cfgmap.Data[item.Key]; ok {
+						projectedVolume.Data[item.Path] = value
+					} else {
+						return fmt.Errorf("error during retrieval of key %s of (existing) ConfigMap %s", item.Key, source.ConfigMap.Name)
+					}
 				}
 			}
 		}

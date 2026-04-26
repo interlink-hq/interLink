@@ -135,7 +135,7 @@ type Provider struct {
 	startTime            time.Time
 	notifier             func(*v1.Pod)
 	onNodeChangeCallback func(*v1.Node)
-	clientSet            *kubernetes.Clientset
+	clientSet            kubernetes.Interface
 	clientHTTPTransport  *http.Transport
 	podIPs               []string
 }
