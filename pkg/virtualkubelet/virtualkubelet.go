@@ -707,33 +707,83 @@ func generateRandomPassword() string {
 	return hex.EncodeToString(bytes)
 }
 
+func shouldCopyShadowLabel(key string) bool {
+	switch {
+	case strings.HasPrefix(key, "workflows.argoproj.io/"):
+		return false
+	case strings.HasPrefix(key, "argoproj.io/"):
+		return false
+	case strings.HasPrefix(key, "pipelines.kubeflow.org/"):
+		return false
+	}
+
+	switch key {
+	case "controller-uid", "job-name", "pod-template-hash":
+		return false
+	}
+
+	return true
+}
+
+func shouldCopyShadowAnnotation(key string) bool {
+	switch {
+	case strings.HasPrefix(key, "workflows.argoproj.io/"):
+		return false
+	case strings.HasPrefix(key, "argoproj.io/"):
+		return false
+	case strings.HasPrefix(key, "kubectl.kubernetes.io/"):
+		return false
+	}
+
+	switch key {
+	case "sidecar.istio.io/rewriteAppHTTPProbers",
+		"sidecar.istio.io/status":
+		return false
+	}
+
+	if strings.HasPrefix(key, "slurm-job.vk.io/") {
+		return false
+	}
+
+	return true
+}
+
 func copyPodLabelsAndAnnotations(pod *v1.Pod) (map[string]string, map[string]string) {
-	// Copy labels
-	labels := make(map[string]string)
+	labels := map[string]string{
+		"interlink.eu/shadow-pod": "true",
+	}
+
 	if pod.Labels != nil {
 		for k, v := range pod.Labels {
+			if !shouldCopyShadowLabel(k) {
+				continue
+			}
 			labels[k] = v
 		}
 	}
 
-	annotations := make(map[string]string)
+	annotations := map[string]string{
+		"interlink.eu/shadow-for": pod.Name,
+		"interlink.eu/shadow-uid": string(pod.UID),
+	}
+
 	if pod.Annotations != nil {
 		for k, v := range pod.Annotations {
-			if strings.HasPrefix(k, "slurm-job.vk.io/") {
+			if !shouldCopyShadowAnnotation(k) {
 				continue
 			}
-
-			if k == "sidecar.istio.io/rewriteAppHTTPProbers" {
-				continue
-			}
-
-			if k == "sidecar.istio.io/status" {
-				continue
-			}
-
 			annotations[k] = v
-
 		}
+	}
+
+	if wf, ok := pod.Labels["workflows.argoproj.io/workflow"]; ok {
+		annotations["interlink.eu/original-workflow"] = wf
+	}
+	if nodeID, ok := pod.Annotations["workflows.argoproj.io/node-id"]; ok {
+		annotations["interlink.eu/original-node-id"] = nodeID
+	}
+	if nodeName, ok := pod.Annotations["workflows.argoproj.io/node-name"]; ok {
+		annotations["interlink.eu/original-node-name"] = nodeName
 	}
 
 	return labels, annotations
