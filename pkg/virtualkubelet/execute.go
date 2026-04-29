@@ -715,6 +715,31 @@ func addKubernetesServicesEnvVars(ctx context.Context, config Config, pod *v1.Po
 		pod.Name, " k8s addr ", config.KubernetesAPIAddr, " k8s port ", config.KubernetesAPIPort)
 }
 
+// normalizePEMCertificate converts a single-line "oneliner" PEM certificate to proper
+// multi-line format. Some tools (e.g., helm --set) may store PEM certificates on a single
+// line with spaces instead of newlines, resulting in a malformed cert like:
+//
+//	-----BEGIN CERTIFICATE----- MIIB... -----END CERTIFICATE-----
+//
+// This function restores the newlines around PEM header and footer markers.
+func normalizePEMCertificate(cert string) string {
+	if !strings.Contains(cert, "-----BEGIN ") || !strings.Contains(cert, "-----END ") {
+		// Not a complete PEM certificate, return as-is.
+		return cert
+	}
+	if strings.Contains(cert, "\n") {
+		// Already multi-line, return as-is.
+		return cert
+	}
+	// The cert is a "oneliner": spaces were used instead of newlines around markers.
+	// Trim surrounding whitespace, then convert "----- " (end of header line) and
+	// " -----" (start of footer line) to newlines.
+	cert = strings.TrimSpace(cert)
+	result := strings.ReplaceAll(cert, "----- ", "-----\n")
+	result = strings.ReplaceAll(result, " -----", "\n-----")
+	return result
+}
+
 // Handle projected sources and fills the projectedVolume object.
 func remoteExecutionHandleProjectedSource(
 	ctx context.Context, p *Provider, pod *v1.Pod, source v1.VolumeProjection, projectedVolume *v1.ConfigMap,
@@ -779,7 +804,7 @@ func remoteExecutionHandleProjectedSource(
 		       name: my-config
 		*/
 		const kubeCaCrt = "kube-root-ca.crt"
-		overrideCaCrt := p.config.KubernetesAPICaCrt
+		overrideCaCrt := normalizePEMCertificate(p.config.KubernetesAPICaCrt)
 		if source.ConfigMap.Name == kubeCaCrt && overrideCaCrt != "" {
 			log.G(ctx).Debug("handling special case of Kubernetes API kube-root-ca.crt, override found, using provided ca.crt:, ", overrideCaCrt)
 			if len(source.ConfigMap.Items) == 0 {
