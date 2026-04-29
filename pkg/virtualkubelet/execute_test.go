@@ -359,6 +359,28 @@ func TestRemoteExecutionHandleProjectedSourceConfigMap(t *testing.T) {
 			},
 		},
 		{
+			name:          "kube-root-ca.crt without items with oneliner override is normalized",
+			configMapName: "kube-root-ca.crt",
+			configMapData: nil,
+			sourceItems:   nil,
+			overrideCaCrt: "-----BEGIN CERTIFICATE----- MIIBIjAN -----END CERTIFICATE-----",
+			expectedData: map[string]string{
+				"ca.crt": "-----BEGIN CERTIFICATE-----\nMIIBIjAN\n-----END CERTIFICATE-----",
+			},
+		},
+		{
+			name:          "kube-root-ca.crt with items with oneliner override is normalized",
+			configMapName: "kube-root-ca.crt",
+			configMapData: nil,
+			sourceItems: []v1.KeyToPath{
+				{Key: "ca.crt", Path: "ca.crt"},
+			},
+			overrideCaCrt: "-----BEGIN CERTIFICATE----- MIIBIjAN -----END CERTIFICATE-----",
+			expectedData: map[string]string{
+				"ca.crt": "-----BEGIN CERTIFICATE-----\nMIIBIjAN\n-----END CERTIFICATE-----",
+			},
+		},
+		{
 			name:          "missing key in items returns error",
 			configMapName: "my-config",
 			configMapData: map[string]string{
@@ -416,6 +438,57 @@ func TestRemoteExecutionHandleProjectedSourceConfigMap(t *testing.T) {
 
 			require.NoError(t, err)
 			assert.Equal(t, tt.expectedData, projectedVolume.Data)
+		})
+	}
+}
+
+func TestNormalizePEMCertificate(t *testing.T) {
+	tests := []struct {
+		name     string
+		input    string
+		expected string
+	}{
+		{
+			name:     "already multi-line cert is returned as-is",
+			input:    "-----BEGIN CERTIFICATE-----\nMIIBIjAN\n-----END CERTIFICATE-----\n",
+			expected: "-----BEGIN CERTIFICATE-----\nMIIBIjAN\n-----END CERTIFICATE-----\n",
+		},
+		{
+			name:     "oneliner cert is normalized to multi-line",
+			input:    "-----BEGIN CERTIFICATE----- MIIBIjAN -----END CERTIFICATE-----",
+			expected: "-----BEGIN CERTIFICATE-----\nMIIBIjAN\n-----END CERTIFICATE-----",
+		},
+		{
+			name:     "oneliner cert with multi-segment base64 is normalized",
+			input:    "-----BEGIN CERTIFICATE----- MIIBIjANBgkq hkiG9w0BAQEFAAOCAQ8A -----END CERTIFICATE-----",
+			expected: "-----BEGIN CERTIFICATE-----\nMIIBIjANBgkq hkiG9w0BAQEFAAOCAQ8A\n-----END CERTIFICATE-----",
+		},
+		{
+			name:     "leading and trailing whitespace is trimmed",
+			input:    "  -----BEGIN CERTIFICATE----- MIIBIjAN -----END CERTIFICATE-----  ",
+			expected: "-----BEGIN CERTIFICATE-----\nMIIBIjAN\n-----END CERTIFICATE-----",
+		},
+		{
+			name:     "non-PEM value is returned unchanged",
+			input:    "not-a-certificate",
+			expected: "not-a-certificate",
+		},
+		{
+			name:     "incomplete PEM (missing END marker) is returned unchanged",
+			input:    "-----BEGIN CERTIFICATE----- MIIBIjAN",
+			expected: "-----BEGIN CERTIFICATE----- MIIBIjAN",
+		},
+		{
+			name:     "empty string is returned unchanged",
+			input:    "",
+			expected: "",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := normalizePEMCertificate(tt.input)
+			assert.Equal(t, tt.expected, got)
 		})
 	}
 }
