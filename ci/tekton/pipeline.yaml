@@ -1,0 +1,155 @@
+# Pipeline: interlink-e2e
+#
+# End-to-end test pipeline for interLink that mirrors the Dagger CI pipeline
+# defined in ci/main.go.
+#
+# Stages
+# ──────
+#   1. fetch-source   – Clone the interLink repository (including submodules).
+#   2. build-images   – Build and push the interLink API server and
+#                       virtual-kubelet container images via Kaniko.
+#   3. e2e-test       – Spin up a Docker-in-Docker / k3d environment, deploy
+#                       the full interLink stack, and run the pytest suite.
+#
+# Required Tekton Catalog Tasks (install before use):
+#   kubectl apply -f \
+#     https://api.hub.tekton.dev/v1/resource/tekton/task/git-clone/0.9/raw
+#
+# Required cluster resources:
+#   • PersistentVolumeClaim  interlink-source-pvc      (ReadWriteOnce, ≥ 1 Gi)
+#   • Secret                 registry-credentials       (dockerconfigjson)
+
+apiVersion: tekton.dev/v1
+kind: Pipeline
+metadata:
+  name: interlink-e2e
+  labels:
+    app.kubernetes.io/part-of: interlink
+spec:
+  description: >-
+    Build interLink images from source and run the full e2e test suite using
+    Docker-in-Docker and k3d, mirroring ci/main.go.
+
+  # ── Parameters ─────────────────────────────────────────────────────────────
+  params:
+    - name: repo-url
+      type: string
+      description: URL of the interLink Git repository.
+      default: "https://github.com/interlink-hq/interLink"
+    - name: repo-revision
+      type: string
+      description: Git revision (branch, tag, or SHA) to check out.
+      default: "main"
+    - name: interlink-image
+      type: string
+      description: Full image reference for the interLink API server.
+      default: "ghcr.io/interlink-hq/interlink/interlink:dev"
+    - name: vk-image
+      type: string
+      description: Full image reference for the virtual-kubelet.
+      default: "ghcr.io/interlink-hq/interlink/virtual-kubelet-inttw:dev"
+    - name: plugin-image
+      type: string
+      description: >-
+        InterLink plugin image used in the test environment. The default
+        slurm plugin runs with SHARED_FS=true so no Slurm installation is
+        needed.
+      default: "ghcr.io/interlink-hq/interlink-sidecar-slurm/interlink-sidecar-slurm:0.5.0"
+    - name: version
+      type: string
+      description: Version tag injected into the VK binary at build time.
+      default: "dev"
+    - name: pytest-filter
+      type: string
+      description: Pytest -k filter expression (matches ci/main.go default).
+      default: "not rclone and not limits and not stress and not multi-init and not fail"
+    - name: helm-chart-repo
+      type: string
+      description: Git URL of the interlink Helm chart repository.
+      default: "https://github.com/interlink-hq/interlink-helm-chart"
+    - name: test-set-repo
+      type: string
+      description: Git URL of the vk-test-set repository.
+      default: "https://github.com/interlink-hq/vk-test-set"
+
+  # ── Workspaces ──────────────────────────────────────────────────────────────
+  workspaces:
+    - name: source
+      description: Shared PVC for the checked-out source code.
+    - name: docker-credentials
+      description: >-
+        Secret-backed workspace containing a Docker config.json used by Kaniko
+        to push images to the target registry.
+
+  # ── Tasks ───────────────────────────────────────────────────────────────────
+  tasks:
+    # ── Stage 1: Clone source ─────────────────────────────────────────────────
+    - name: fetch-source
+      taskRef:
+        name: git-clone
+        kind: Task
+      params:
+        - name: url
+          value: $(params.repo-url)
+        - name: revision
+          value: $(params.repo-revision)
+        - name: submodules
+          value: "true"
+        - name: depth
+          value: "1"
+      workspaces:
+        - name: output
+          workspace: source
+
+    # ── Stage 2: Build images ─────────────────────────────────────────────────
+    # Mirrors: dagger call build-images in .github/workflows/ci.yaml
+    - name: build-images
+      taskRef:
+        name: interlink-build-images
+        kind: Task
+      runAfter:
+        - fetch-source
+      params:
+        - name: interlink-image
+          value: $(params.interlink-image)
+        - name: vk-image
+          value: $(params.vk-image)
+        - name: version
+          value: $(params.version)
+      workspaces:
+        - name: source
+          workspace: source
+        - name: docker-credentials
+          workspace: docker-credentials
+
+    # ── Stage 3: Run e2e tests ────────────────────────────────────────────────
+    # Mirrors: dagger call new-interlink test in .github/workflows/ci.yaml
+    - name: e2e-test
+      taskRef:
+        name: interlink-e2e-test
+        kind: Task
+      runAfter:
+        - build-images
+      params:
+        - name: vk-image
+          value: $(params.vk-image)
+        - name: interlink-image
+          value: $(params.interlink-image)
+        - name: plugin-image
+          value: $(params.plugin-image)
+        - name: pytest-filter
+          value: $(params.pytest-filter)
+        - name: helm-chart-repo
+          value: $(params.helm-chart-repo)
+        - name: test-set-repo
+          value: $(params.test-set-repo)
+      workspaces:
+        - name: source
+          workspace: source
+
+  # ── Finally: Cleanup ────────────────────────────────────────────────────────
+  # (Optional) Add a finally task here to clean up resources on failure.
+  # finally:
+  #   - name: cleanup
+  #     taskRef:
+  #       name: cleanup-task

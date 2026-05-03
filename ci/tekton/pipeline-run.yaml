@@ -1,0 +1,118 @@
+# PipelineRun: interlink-e2e-run
+#
+# Example PipelineRun that triggers the interlink-e2e pipeline.
+#
+# Before applying this manifest:
+#
+#   1. Install the git-clone task from the Tekton catalog:
+#        kubectl apply -f \
+#          https://api.hub.tekton.dev/v1/resource/tekton/task/git-clone/0.9/raw
+#
+#   2. Apply the custom tasks and pipeline:
+#        kubectl apply -f ci/tekton/tasks/build-images.yaml
+#        kubectl apply -f ci/tekton/tasks/e2e-test.yaml
+#        kubectl apply -f ci/tekton/pipeline.yaml
+#
+#   3. Create the source PersistentVolumeClaim:
+#        kubectl apply -f - <<EOF
+#        apiVersion: v1
+#        kind: PersistentVolumeClaim
+#        metadata:
+#          name: interlink-source-pvc
+#        spec:
+#          accessModes: [ReadWriteOnce]
+#          resources:
+#            requests:
+#              storage: 2Gi
+#        EOF
+#
+#   4. Create the registry credentials Secret (for image push in build-images):
+#        kubectl create secret docker-registry registry-credentials \
+#          --docker-server=ghcr.io \
+#          --docker-username=<your-github-user> \
+#          --docker-password=<your-github-pat>
+#
+#   5. Apply this PipelineRun:
+#        kubectl apply -f ci/tekton/pipeline-run.yaml
+#
+# To run only the e2e tests against existing images (skipping the build stage),
+# use the interlink-e2e-test Task directly instead of this Pipeline:
+#
+#   kubectl create -f - <<EOF
+#   apiVersion: tekton.dev/v1
+#   kind: TaskRun
+#   metadata:
+#     generateName: interlink-e2e-test-run-
+#   spec:
+#     taskRef:
+#       name: interlink-e2e-test
+#     params:
+#       - name: vk-image
+#         value: "ghcr.io/interlink-hq/interlink/virtual-kubelet-inttw:latest"
+#       - name: interlink-image
+#         value: "ghcr.io/interlink-hq/interlink/interlink:latest"
+#     workspaces:
+#       - name: source
+#         persistentVolumeClaim:
+#           claimName: interlink-source-pvc
+#   EOF
+
+apiVersion: tekton.dev/v1
+kind: PipelineRun
+metadata:
+  # Use generateName so that each run gets a unique suffix.
+  generateName: interlink-e2e-run-
+  labels:
+    app.kubernetes.io/part-of: interlink
+spec:
+  pipelineRef:
+    name: interlink-e2e
+
+  # ── Task-level timeout ──────────────────────────────────────────────────────
+  timeouts:
+    pipeline: "2h"
+    tasks: "1h30m"
+
+  # ── Pipeline parameters ─────────────────────────────────────────────────────
+  params:
+    - name: repo-url
+      value: "https://github.com/interlink-hq/interLink"
+    - name: repo-revision
+      value: "main"
+    # Images to build from source and use in tests.
+    # Change the registry/tag to match your setup.
+    - name: interlink-image
+      value: "ghcr.io/interlink-hq/interlink/interlink:dev"
+    - name: vk-image
+      value: "ghcr.io/interlink-hq/interlink/virtual-kubelet-inttw:dev"
+    - name: plugin-image
+      value: "ghcr.io/interlink-hq/interlink-sidecar-slurm/interlink-sidecar-slurm:0.5.0"
+    - name: version
+      value: "dev"
+    - name: pytest-filter
+      value: "not rclone and not limits and not stress and not multi-init and not fail"
+
+  # ── Workspaces ──────────────────────────────────────────────────────────────
+  workspaces:
+    # Persistent storage shared between fetch-source, build-images, and e2e-test.
+    - name: source
+      persistentVolumeClaim:
+        claimName: interlink-source-pvc
+
+    # Docker config.json used by Kaniko to push images to ghcr.io.
+    # The Secret must contain a .dockerconfigjson key (standard docker-registry
+    # Secret format).
+    - name: docker-credentials
+      secret:
+        secretName: registry-credentials
+        items:
+          - key: .dockerconfigjson
+            path: config.json
+
+  # ── Pod template overrides ──────────────────────────────────────────────────
+  # The e2e-test task requires a privileged pod; this template applies to all
+  # pods in the run.  Individual steps that do NOT need privilege are unaffected
+  # because the step-level securityContext takes precedence.
+  podTemplate:
+    securityContext:
+      runAsNonRoot: false
