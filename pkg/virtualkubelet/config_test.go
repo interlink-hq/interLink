@@ -1,9 +1,11 @@
 package virtualkubelet
 
 import (
+	"context"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
+	types "github.com/interlink-hq/interlink/pkg/interlink"
 	"k8s.io/apimachinery/pkg/api/resource"
 )
 
@@ -175,4 +177,140 @@ func TestGetResources_AcceleratorQuantities(t *testing.T) {
 
 	fpgaQty := resourceList["xilinx.com/fpga"]
 	assert.Equal(t, int64(1), fpgaQty.Value(), "xilinx.com/fpga should be 1")
+}
+
+func TestUpdateNodeResources_CPUMemoryPods(t *testing.T) {
+	config := Config{
+		Resources: Resources{
+			CPU:    "10",
+			Memory: "32Gi",
+			Pods:   "100",
+		},
+	}
+	provider, err := NewProviderConfig(config, "test-node", "v1.0", "linux", "10.0.0.1", 10250, nil)
+	assert.NoError(t, err)
+
+	ctx := context.Background()
+	resources := &types.ResourcesResponse{
+		CPU:    "200",
+		Memory: "512Gi",
+		Pods:   "2000",
+	}
+	provider.updateNodeResources(ctx, resources)
+
+	cpuQty := provider.node.Status.Capacity["cpu"]
+	assert.Equal(t, int64(200), cpuQty.Value())
+	memQty := provider.node.Status.Capacity["memory"]
+	assert.Equal(t, "512Gi", memQty.String())
+	podsQty := provider.node.Status.Capacity["pods"]
+	assert.Equal(t, int64(2000), podsQty.Value())
+
+	// Allocatable should also be updated
+	allocCPU := provider.node.Status.Allocatable["cpu"]
+	assert.Equal(t, 0, cpuQty.Cmp(allocCPU), "allocatable CPU should match capacity CPU")
+	allocMem := provider.node.Status.Allocatable["memory"]
+	assert.Equal(t, 0, memQty.Cmp(allocMem), "allocatable memory should match capacity memory")
+	allocPods := provider.node.Status.Allocatable["pods"]
+	assert.Equal(t, 0, podsQty.Cmp(allocPods), "allocatable pods should match capacity pods")
+}
+
+func TestUpdateNodeResources_Accelerators(t *testing.T) {
+	config := Config{
+		Resources: Resources{
+			CPU:    "10",
+			Memory: "32Gi",
+			Pods:   "100",
+		},
+	}
+	provider, err := NewProviderConfig(config, "test-node", "v1.0", "linux", "10.0.0.1", 10250, nil)
+	assert.NoError(t, err)
+
+	ctx := context.Background()
+	resources := &types.ResourcesResponse{
+		Accelerators: []types.AcceleratorResponse{
+			{ResourceType: "nvidia.com/gpu", Available: "8"},
+			{ResourceType: "xilinx.com/fpga", Available: "2"},
+		},
+	}
+	provider.updateNodeResources(ctx, resources)
+
+	gpuQty := provider.node.Status.Capacity["nvidia.com/gpu"]
+	assert.Equal(t, int64(8), gpuQty.Value())
+	fpgaQty := provider.node.Status.Capacity["xilinx.com/fpga"]
+	assert.Equal(t, int64(2), fpgaQty.Value())
+}
+
+func TestUpdateNodeResources_InvalidValues(t *testing.T) {
+	config := Config{
+		Resources: Resources{
+			CPU:    "10",
+			Memory: "32Gi",
+			Pods:   "100",
+		},
+	}
+	provider, err := NewProviderConfig(config, "test-node", "v1.0", "linux", "10.0.0.1", 10250, nil)
+	assert.NoError(t, err)
+
+	originalCPU := provider.node.Status.Capacity["cpu"].DeepCopy()
+
+	ctx := context.Background()
+	resources := &types.ResourcesResponse{
+		CPU: "not-a-valid-quantity",
+	}
+	provider.updateNodeResources(ctx, resources)
+
+	// CPU should remain unchanged when invalid value is provided
+	currentCPU := provider.node.Status.Capacity["cpu"]
+	assert.Equal(t, originalCPU.Value(), currentCPU.Value())
+}
+
+func TestUpdateNodeResources_Nil(t *testing.T) {
+	config := Config{
+		Resources: Resources{
+			CPU:    "10",
+			Memory: "32Gi",
+			Pods:   "100",
+		},
+	}
+	provider, err := NewProviderConfig(config, "test-node", "v1.0", "linux", "10.0.0.1", 10250, nil)
+	assert.NoError(t, err)
+
+	originalCPU := provider.node.Status.Capacity["cpu"].DeepCopy()
+
+	ctx := context.Background()
+	// Passing nil should be a no-op
+	provider.updateNodeResources(ctx, nil)
+
+	currentCPU := provider.node.Status.Capacity["cpu"]
+	assert.Equal(t, originalCPU.Value(), currentCPU.Value())
+}
+
+func TestUpdateNodeResources_PartialUpdate(t *testing.T) {
+	config := Config{
+		Resources: Resources{
+			CPU:    "10",
+			Memory: "32Gi",
+			Pods:   "100",
+		},
+	}
+	provider, err := NewProviderConfig(config, "test-node", "v1.0", "linux", "10.0.0.1", 10250, nil)
+	assert.NoError(t, err)
+
+	originalMemory := provider.node.Status.Capacity["memory"].DeepCopy()
+	originalPods := provider.node.Status.Capacity["pods"].DeepCopy()
+
+	ctx := context.Background()
+	// Only update CPU, leave memory and pods unchanged
+	resources := &types.ResourcesResponse{
+		CPU: "500",
+	}
+	provider.updateNodeResources(ctx, resources)
+
+	cpuQty := provider.node.Status.Capacity["cpu"]
+	assert.Equal(t, int64(500), cpuQty.Value())
+	// Memory and pods should be unchanged
+	currentMemory := provider.node.Status.Capacity["memory"]
+	assert.Equal(t, originalMemory.Value(), currentMemory.Value())
+	currentPods := provider.node.Status.Capacity["pods"]
+	assert.Equal(t, originalPods.Value(), currentPods.Value())
 }
