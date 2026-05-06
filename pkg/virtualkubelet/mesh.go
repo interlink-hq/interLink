@@ -253,7 +253,8 @@ func (p *Provider) addWstunnelClientAnnotation(ctx context.Context, pod *v1.Pod,
 	clearConflictingNetworkAnnotations(pod, fullMeshEnabledForPod)
 
 	// Check if FullMesh mode is enabled and not disabled for this specific pod
-	if fullMeshEnabledForPod {
+	switch {
+	case fullMeshEnabledForPod:
 		log.G(ctx).Infof("FullMesh mode enabled, generating pre-exec script for pod %s/%s", pod.Namespace, pod.Name)
 
 		// Generate full mesh script
@@ -290,7 +291,7 @@ PersistentKeepalive = %d
 
 		pod.Annotations["interlink.eu/wireguard-client-snippet"] = wgSnippet
 
-	} else if p.config.Network.TunnelType == "rathole" {
+	case p.config.Network.TunnelType == "rathole":
 		// Rathole mode: build a client TOML config and generate the client bootstrap command
 		ratholeEndpoint := fmt.Sprintf("rathole-%s.%s", td.Name, td.WildcardDNS)
 		ratholeEndpoint = sanitizeFullDNSName(ratholeEndpoint)
@@ -299,15 +300,15 @@ PersistentKeepalive = %d
 		}
 
 		var tomlBuilder strings.Builder
-		tomlBuilder.WriteString(fmt.Sprintf("[client]\nremote_addr = \"%s:80\"\n\n", ratholeEndpoint))
+		fmt.Fprintf(&tomlBuilder, "[client]\nremote_addr = \"%s:80\"\n\n", ratholeEndpoint)
 		tomlBuilder.WriteString("[client.transport]\ntype = \"websocket\"\n\n")
 		for _, port := range td.ExposedPorts {
 			if strings.ToUpper(port.Protocol) == "UDP" {
 				log.G(ctx).Debugf("Skipping UDP port %d in rathole client config (rathole websocket transport forwards TCP only)", port.Port)
 				continue
 			}
-			tomlBuilder.WriteString(fmt.Sprintf("[client.services.p%d]\ntoken = \"%s\"\nlocal_addr = \"127.0.0.1:%d\"\n\n",
-				port.Port, td.RandomPassword, port.Port))
+			fmt.Fprintf(&tomlBuilder, "[client.services.p%d]\ntoken = \"%s\"\nlocal_addr = \"127.0.0.1:%d\"\n\n",
+				port.Port, td.RandomPassword, port.Port)
 		}
 
 		configB64 := base64.StdEncoding.EncodeToString([]byte(tomlBuilder.String()))
@@ -328,7 +329,7 @@ PersistentKeepalive = %d
 		delete(pod.Annotations, annWSTunnelClientCmds)
 		pod.Annotations[annRatholeClientCmds] = mainCmd
 
-	} else {
+	default:
 		var rOptions []string
 		for _, port := range td.ExposedPorts {
 			if strings.ToUpper(port.Protocol) == "UDP" {

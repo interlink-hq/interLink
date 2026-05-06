@@ -146,8 +146,8 @@ func TestRatholeClientAnnotationCustomCommand(t *testing.T) {
 
 	pod := &v1.Pod{
 		ObjectMeta: metav1.ObjectMeta{
-			Name:      "test-pod",
-			Namespace: "default",
+			Name:        "test-pod",
+			Namespace:   "default",
 			Annotations: map[string]string{},
 		},
 	}
