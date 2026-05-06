@@ -303,6 +303,7 @@ PersistentKeepalive = %d
 		tomlBuilder.WriteString("[client.transport]\ntype = \"websocket\"\n\n")
 		for _, port := range td.ExposedPorts {
 			if strings.ToUpper(port.Protocol) == "UDP" {
+				log.G(ctx).Debugf("Skipping UDP port %d in rathole client config (rathole websocket transport forwards TCP only)", port.Port)
 				continue
 			}
 			tomlBuilder.WriteString(fmt.Sprintf("[client.services.p%d]\ntoken = \"%s\"\nlocal_addr = \"127.0.0.1:%d\"\n\n",

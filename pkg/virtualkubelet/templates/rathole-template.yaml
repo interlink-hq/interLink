@@ -36,7 +36,7 @@ spec:
     spec:
       containers:
       - name: rathole
-        image: rapiz1/rathole:latest
+        image: rapiz1/rathole:v0.5.0
         imagePullPolicy: IfNotPresent
         args: ["--server", "/etc/rathole/server.toml"]
         ports:
@@ -88,7 +88,7 @@ spec:
       name: control
       protocol: TCP
     {{- range .ExposedPorts}}
-    {{- if ne .Port 2333}}
+    {{- if ne .Port 2333}}{{/* skip control port 2333 to avoid conflicts with the rathole server listener */}}
     - port: {{.Port}}
       targetPort: {{.Port}}
       name: {{if .Name}}{{.Name}}{{else}}port-{{.Port}}{{end}}
