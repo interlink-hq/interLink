@@ -7,9 +7,6 @@ data:
   server.toml: |
     [server]
     bind_addr = "0.0.0.0:2333"
-
-    [server.transport]
-    type = "websocket"
     {{- range .ExposedPorts}}
 
     [server.services.p{{.Port}}]
@@ -31,8 +28,6 @@ spec:
     metadata:
       labels:
         app.kubernetes.io/component: {{.Name}}
-      annotations:
-        interlink.eu/wstunnel-path-prefix: {{.RandomPassword}}
     spec:
       containers:
       - name: rathole
@@ -97,34 +92,3 @@ spec:
       {{- end}}
     {{- end}}
     {{- end}}
----
-apiVersion: networking.k8s.io/v1
-kind: Ingress
-metadata:
-  name: {{.Name}}
-  namespace: {{.Namespace}}
-  annotations:
-    nginx.ingress.kubernetes.io/proxy-read-timeout: "3600"
-    nginx.ingress.kubernetes.io/proxy-send-timeout: "3600"
-    nginx.ingress.kubernetes.io/server-snippets: |
-      location / {
-        proxy_set_header Upgrade $http_upgrade;
-        proxy_set_header Connection "upgrade";
-        proxy_http_version 1.1;
-        proxy_set_header X-Forwarded-For $remote_addr;
-        proxy_set_header Host $host;
-        proxy_cache_bypass $http_upgrade;
-      }
-    kubernetes.io/ingress.class: "nginx"
-spec:
-  rules:
-  - host: rathole-{{.Name}}.{{.WildcardDNS}}
-    http:
-      paths:
-      - path: /
-        pathType: Prefix
-        backend:
-          service:
-            name: {{.Name}}
-            port:
-              number: 2333

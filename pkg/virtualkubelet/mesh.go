@@ -292,38 +292,87 @@ PersistentKeepalive = %d
 		pod.Annotations["interlink.eu/wireguard-client-snippet"] = wgSnippet
 
 	case p.config.Network.TunnelType == "rathole":
-		// Rathole mode: build a client TOML config and generate the client bootstrap command
+		// Rathole mode: build a client TOML config and generate the client bootstrap command.
+		// When RatholeCAIssuerName is set, use TLS transport with cert-manager-issued certificates;
+		// otherwise fall back to WebSocket transport for backward compatibility.
 		ratholeEndpoint := fmt.Sprintf("rathole-%s.%s", td.Name, td.WildcardDNS)
 		ratholeEndpoint = sanitizeFullDNSName(ratholeEndpoint)
 		if td.WildcardDNS == "" {
 			ratholeEndpoint = td.Name
 		}
 
-		var tomlBuilder strings.Builder
-		fmt.Fprintf(&tomlBuilder, "[client]\nremote_addr = \"%s:80\"\n\n", ratholeEndpoint)
-		tomlBuilder.WriteString("[client.transport]\ntype = \"websocket\"\n\n")
-		for _, port := range td.ExposedPorts {
-			if strings.ToUpper(port.Protocol) == "UDP" {
-				log.G(ctx).Debugf("Skipping UDP port %d in rathole client config (rathole websocket transport forwards TCP only)", port.Port)
-				continue
-			}
-			fmt.Fprintf(&tomlBuilder, "[client.services.p%d]\ntoken = \"%s\"\nlocal_addr = \"127.0.0.1:%d\"\n\n",
-				port.Port, td.RandomPassword, port.Port)
-		}
-
-		configB64 := base64.StdEncoding.EncodeToString([]byte(tomlBuilder.String()))
-
 		ratholeURL := p.config.Network.RatholeExecutableURL
 		if ratholeURL == "" {
 			ratholeURL = DefaultRatholeExecutableURL
 		}
 
-		ratholeCmd := p.config.Network.RatholeCommand
-		if ratholeCmd == "" {
-			ratholeCmd = DefaultRatholeCommand
-		}
+		var mainCmd string
 
-		mainCmd := fmt.Sprintf(ratholeCmd, ratholeURL, configB64)
+		if p.config.Network.RatholeCAIssuerName != "" {
+			// TLS mode: rathole client uses TLS transport; Traefik terminates TLS at port 443.
+			// Wait for the client certificate secret to be issued by cert-manager.
+			clientCertSecretName := td.Name + "-rathole-client-tls"
+			if err := p.waitForRatholeCertSecret(ctx, clientCertSecretName, td.Namespace); err != nil {
+				return fmt.Errorf("rathole client certificate not ready: %w", err)
+			}
+
+			certSecret, err := p.clientSet.CoreV1().Secrets(td.Namespace).Get(ctx, clientCertSecretName, metav1.GetOptions{})
+			if err != nil {
+				return fmt.Errorf("failed to read rathole client certificate secret: %w", err)
+			}
+
+			caCrtB64 := base64.StdEncoding.EncodeToString(certSecret.Data["ca.crt"])
+			clientCrtB64 := base64.StdEncoding.EncodeToString(certSecret.Data["tls.crt"])
+			clientKeyB64 := base64.StdEncoding.EncodeToString(certSecret.Data["tls.key"])
+
+			var tomlBuilder strings.Builder
+			fmt.Fprintf(&tomlBuilder, "[client]\nremote_addr = \"%s:443\"\n\n", ratholeEndpoint)
+			tomlBuilder.WriteString("[client.transport]\ntype = \"tls\"\n\n")
+			tomlBuilder.WriteString("[client.transport.tls]\n")
+			fmt.Fprintf(&tomlBuilder, "hostname = \"%s\"\n", ratholeEndpoint)
+			tomlBuilder.WriteString("trusted_root = \"/tmp/rathole-ca.crt\"\n")
+			tomlBuilder.WriteString("cert = \"/tmp/rathole-client.crt\"\n")
+			tomlBuilder.WriteString("key = \"/tmp/rathole-client.key\"\n\n")
+			for _, port := range td.ExposedPorts {
+				if strings.ToUpper(port.Protocol) == "UDP" {
+					log.G(ctx).Debugf("Skipping UDP port %d in rathole client config (TLS transport forwards TCP only)", port.Port)
+					continue
+				}
+				fmt.Fprintf(&tomlBuilder, "[client.services.p%d]\ntoken = \"%s\"\nlocal_addr = \"127.0.0.1:%d\"\n\n",
+					port.Port, td.RandomPassword, port.Port)
+			}
+
+			configB64 := base64.StdEncoding.EncodeToString([]byte(tomlBuilder.String()))
+
+			ratholeCmd := p.config.Network.RatholeCommand
+			if ratholeCmd == "" {
+				ratholeCmd = DefaultRatholeCommand
+			}
+			mainCmd = fmt.Sprintf(ratholeCmd, ratholeURL, caCrtB64, clientCrtB64, clientKeyB64, configB64)
+		} else {
+			// WebSocket fallback (no CA issuer configured)
+			log.G(ctx).Debugf("RatholeCAIssuerName not set; using WebSocket transport for pod %s/%s", pod.Namespace, pod.Name)
+
+			var tomlBuilder strings.Builder
+			fmt.Fprintf(&tomlBuilder, "[client]\nremote_addr = \"%s:80\"\n\n", ratholeEndpoint)
+			tomlBuilder.WriteString("[client.transport]\ntype = \"websocket\"\n\n")
+			for _, port := range td.ExposedPorts {
+				if strings.ToUpper(port.Protocol) == "UDP" {
+					log.G(ctx).Debugf("Skipping UDP port %d in rathole client config (websocket transport forwards TCP only)", port.Port)
+					continue
+				}
+				fmt.Fprintf(&tomlBuilder, "[client.services.p%d]\ntoken = \"%s\"\nlocal_addr = \"127.0.0.1:%d\"\n\n",
+					port.Port, td.RandomPassword, port.Port)
+			}
+
+			configB64 := base64.StdEncoding.EncodeToString([]byte(tomlBuilder.String()))
+
+			ratholeWSCmd := p.config.Network.RatholeCommand
+			if ratholeWSCmd == "" {
+				ratholeWSCmd = DefaultRatholeWSCommand
+			}
+			mainCmd = fmt.Sprintf(ratholeWSCmd, ratholeURL, configB64)
+		}
 
 		// Remove any stale wstunnel annotation and set the rathole one
 		delete(pod.Annotations, annWSTunnelClientCmds)

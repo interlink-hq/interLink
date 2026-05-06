@@ -145,8 +145,16 @@ type Network struct {
 	// (default is "https://github.com/rapiz1/rathole/releases/download/v0.5.0/rathole-x86_64-unknown-linux-musl.zip")
 	RatholeExecutableURL string `yaml:"RatholeExecutableURL,omitempty"`
 	// RatholeCommand specifies a custom command template for setting up rathole clients.
-	// Two %s format verbs are substituted: the rathole download URL and the base64-encoded client TOML config.
+	// Five %s format verbs are substituted in order: the rathole download URL, base64-encoded CA cert,
+	// base64-encoded client cert, base64-encoded client key, and base64-encoded client TOML config.
+	// When RatholeCAIssuerName is empty the legacy two-argument WebSocket command is used instead.
 	RatholeCommand string `yaml:"RatholeCommand,omitempty"`
+	// RatholeCAIssuerName is the cert-manager ClusterIssuer or Issuer name for the admin-provided CA.
+	// When set, rathole uses TLS transport; cert-manager issues both the server and client certificates.
+	// A Traefik IngressRouteTCP resource is created to expose the rathole server via TLS on port 443.
+	RatholeCAIssuerName string `yaml:"RatholeCAIssuerName,omitempty"`
+	// RatholeCAIssuerKind is the kind of the cert-manager issuer: "ClusterIssuer" (default) or "Issuer".
+	RatholeCAIssuerKind string `yaml:"RatholeCAIssuerKind,omitempty"`
 	// FullMesh enables full mesh networking with slirp4netns and WireGuard
 	FullMesh bool `yaml:"FullMesh" default:"false"`
 	// MeshScriptTemplatePath is the path to a custom mesh.sh template file

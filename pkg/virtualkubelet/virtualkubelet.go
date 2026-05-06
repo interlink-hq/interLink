@@ -33,7 +33,10 @@ import (
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/api/resource"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
+	"k8s.io/apimachinery/pkg/runtime/schema"
 	"k8s.io/apimachinery/pkg/runtime/serializer"
+	"k8s.io/client-go/dynamic"
 	"k8s.io/client-go/kubernetes"
 	"k8s.io/client-go/kubernetes/scheme"
 	"k8s.io/client-go/tools/clientcmd"
@@ -72,9 +75,13 @@ const (
 	DefaultWstunnelCommand = "curl  -L -f -k https://github.com/erebe/wstunnel/releases/download/v10.4.4/wstunnel_10.4.4_linux_amd64.tar.gz -o wstunnel.tar.gz && tar -xzvf wstunnel.tar.gz && chmod +x wstunnel && ./wstunnel client --http-upgrade-path-prefix %s %s ws://%s:80 &"
 	// DefaultRatholeExecutableURL is the default URL to download the rathole executable zip archive.
 	DefaultRatholeExecutableURL = "https://github.com/rapiz1/rathole/releases/download/v0.5.0/rathole-x86_64-unknown-linux-musl.zip"
-	// DefaultRatholeCommand is the default command template for the rathole client.
-	// Two %s format verbs are substituted: the rathole download URL and the base64-encoded client TOML config.
-	DefaultRatholeCommand = "curl -L -f -k %s -o rathole.zip && unzip -q rathole.zip && chmod +x rathole && echo %s | base64 -d > /tmp/rathole-client.toml && ./rathole /tmp/rathole-client.toml &"
+	// DefaultRatholeCommand is the default command template for the rathole client in TLS mode.
+	// Five %s format verbs are substituted in order: rathole download URL, base64-encoded CA cert,
+	// base64-encoded client cert, base64-encoded client key, and base64-encoded client TOML config.
+	DefaultRatholeCommand = "curl -L -f -k %s -o rathole.zip && unzip -q rathole.zip && chmod +x rathole && echo %s | base64 -d > /tmp/rathole-ca.crt && echo %s | base64 -d > /tmp/rathole-client.crt && echo %s | base64 -d > /tmp/rathole-client.key && echo %s | base64 -d > /tmp/rathole-client.toml && ./rathole /tmp/rathole-client.toml &"
+	// DefaultRatholeWSCommand is the fallback command template used when no CA issuer is configured
+	// (WebSocket transport, backward-compatible). Two %s args: download URL and base64 client TOML.
+	DefaultRatholeWSCommand = "curl -L -f -k %s -o rathole.zip && unzip -q rathole.zip && chmod +x rathole && echo %s | base64 -d > /tmp/rathole-client.toml && ./rathole /tmp/rathole-client.toml &"
 )
 
 // Annotations for WireGuard and WStunnel configuration
@@ -145,6 +152,7 @@ type Provider struct {
 	notifier             func(*v1.Pod)
 	onNodeChangeCallback func(*v1.Node)
 	clientSet            kubernetes.Interface
+	dynamicClient        dynamic.Interface
 	clientHTTPTransport  *http.Transport
 	podIPs               []string
 }
@@ -879,6 +887,13 @@ func (p *Provider) createDummyPod(ctx context.Context, originalPod *v1.Pod) (*v1
 		return nil, nil, fmt.Errorf("failed to apply wstunnel manifests: %w", err)
 	}
 
+	// For rathole TLS mode, also create the cert-manager Certificates and Traefik IngressRouteTCP.
+	if p.config.Network.TunnelType == "rathole" && p.config.Network.RatholeCAIssuerName != "" {
+		if tlsErr := p.applyRatholeTLSResources(ctx, templateData); tlsErr != nil {
+			log.G(ctx).Warningf("Failed to apply rathole TLS resources for %s/%s: %v", originalPod.Namespace, originalPod.Name, tlsErr)
+		}
+	}
+
 	log.G(ctx).Infof("Created wstunnel infrastructure for %s/%s", originalPod.Namespace, originalPod.Name)
 	return createdPod, &templateData, nil
 }
@@ -1317,6 +1332,194 @@ func (p *Provider) cleanupWstunnelResources(ctx context.Context, wstunnelName, n
 	} else {
 		log.G(ctx).Infof("Successfully deleted rathole configmap %s/%s", namespace, wstunnelName+"-rathole-config")
 	}
+
+	// Delete rathole TLS resources (cert-manager Certificates and Traefik IngressRouteTCP)
+	if p.dynamicClient != nil {
+		for _, certName := range []string{wstunnelName + "-rathole-server-tls", wstunnelName + "-rathole-client-tls"} {
+			if delErr := p.deleteUnstructuredResource(ctx, certManagerCertGVR, certName, namespace); delErr != nil {
+				log.G(ctx).Warningf("Failed to delete rathole cert-manager Certificate %s/%s: %v", namespace, certName, delErr)
+			} else {
+				log.G(ctx).Infof("Deleted rathole cert-manager Certificate %s/%s", namespace, certName)
+			}
+		}
+		if delErr := p.deleteUnstructuredResource(ctx, traefikIngressRouteTCPGVR, wstunnelName, namespace); delErr != nil {
+			log.G(ctx).Warningf("Failed to delete rathole IngressRouteTCP %s/%s: %v", namespace, wstunnelName, delErr)
+		} else {
+			log.G(ctx).Infof("Deleted rathole IngressRouteTCP %s/%s", namespace, wstunnelName)
+		}
+	}
+}
+
+// GroupVersionResource definitions for cert-manager and Traefik CRDs.
+var (
+	certManagerCertGVR = schema.GroupVersionResource{
+		Group:    "cert-manager.io",
+		Version:  "v1",
+		Resource: "certificates",
+	}
+	traefikIngressRouteTCPGVR = schema.GroupVersionResource{
+		Group:    "traefik.io",
+		Version:  "v1alpha1",
+		Resource: "ingressroutetcps",
+	}
+)
+
+// applyUnstructuredResource creates or updates an unstructured Kubernetes resource via the dynamic client.
+func (p *Provider) applyUnstructuredResource(ctx context.Context, gvr schema.GroupVersionResource, obj *unstructured.Unstructured) error {
+	if p.dynamicClient == nil {
+		return fmt.Errorf("dynamic client not initialised")
+	}
+	ns := obj.GetNamespace()
+	name := obj.GetName()
+	dr := p.dynamicClient.Resource(gvr).Namespace(ns)
+
+	existing, err := dr.Get(ctx, name, metav1.GetOptions{})
+	if apierrors.IsNotFound(err) {
+		_, err = dr.Create(ctx, obj, metav1.CreateOptions{})
+		return err
+	}
+	if err != nil {
+		return err
+	}
+	obj.SetResourceVersion(existing.GetResourceVersion())
+	_, err = dr.Update(ctx, obj, metav1.UpdateOptions{})
+	return err
+}
+
+// deleteUnstructuredResource deletes a namespaced unstructured resource; not-found errors are ignored.
+func (p *Provider) deleteUnstructuredResource(ctx context.Context, gvr schema.GroupVersionResource, name, namespace string) error {
+	if p.dynamicClient == nil {
+		return nil
+	}
+	err := p.dynamicClient.Resource(gvr).Namespace(namespace).Delete(ctx, name, metav1.DeleteOptions{})
+	if apierrors.IsNotFound(err) {
+		return nil
+	}
+	return err
+}
+
+// applyRatholeTLSResources creates the cert-manager Certificate resources (server and client) and the
+// Traefik IngressRouteTCP that exposes the rathole server via TLS on the websecure entry point.
+// The server TLS certificate is served by Traefik; the client certificate is issued so that
+// addWstunnelClientAnnotation can embed it in the compute-side bootstrap command.
+func (p *Provider) applyRatholeTLSResources(ctx context.Context, td WstunnelTemplateData) error {
+	if p.dynamicClient == nil {
+		return fmt.Errorf("dynamic client not initialised; cannot manage cert-manager/Traefik resources")
+	}
+
+	issuerName := p.config.Network.RatholeCAIssuerName
+	issuerKind := p.config.Network.RatholeCAIssuerKind
+	if issuerKind == "" {
+		issuerKind = "ClusterIssuer"
+	}
+
+	ratholeHost := fmt.Sprintf("rathole-%s.%s", td.Name, td.WildcardDNS)
+	ratholeHost = sanitizeFullDNSName(ratholeHost)
+
+	serverCertName := td.Name + "-rathole-server-tls"
+	clientCertName := td.Name + "-rathole-client-tls"
+
+	// cert-manager Certificate for the server (Traefik TLS termination)
+	serverCert := &unstructured.Unstructured{
+		Object: map[string]interface{}{
+			"apiVersion": "cert-manager.io/v1",
+			"kind":       "Certificate",
+			"metadata": map[string]interface{}{
+				"name":      serverCertName,
+				"namespace": td.Namespace,
+			},
+			"spec": map[string]interface{}{
+				"secretName": serverCertName,
+				"dnsNames":   []interface{}{ratholeHost},
+				"issuerRef": map[string]interface{}{
+					"name": issuerName,
+					"kind": issuerKind,
+				},
+			},
+		},
+	}
+	if err := p.applyUnstructuredResource(ctx, certManagerCertGVR, serverCert); err != nil {
+		return fmt.Errorf("failed to apply rathole server Certificate: %w", err)
+	}
+	log.G(ctx).Infof("Applied cert-manager Certificate %s/%s for rathole server", td.Namespace, serverCertName)
+
+	// cert-manager Certificate for the client (embedded in the compute-side bootstrap command)
+	clientCert := &unstructured.Unstructured{
+		Object: map[string]interface{}{
+			"apiVersion": "cert-manager.io/v1",
+			"kind":       "Certificate",
+			"metadata": map[string]interface{}{
+				"name":      clientCertName,
+				"namespace": td.Namespace,
+			},
+			"spec": map[string]interface{}{
+				"secretName": clientCertName,
+				"commonName": "rathole-client",
+				"usages":     []interface{}{"client auth"},
+				"issuerRef": map[string]interface{}{
+					"name": issuerName,
+					"kind": issuerKind,
+				},
+			},
+		},
+	}
+	if err := p.applyUnstructuredResource(ctx, certManagerCertGVR, clientCert); err != nil {
+		return fmt.Errorf("failed to apply rathole client Certificate: %w", err)
+	}
+	log.G(ctx).Infof("Applied cert-manager Certificate %s/%s for rathole client", td.Namespace, clientCertName)
+
+	// Traefik IngressRouteTCP — TLS termination at Traefik, plain TCP to the rathole server
+	ingressRoute := &unstructured.Unstructured{
+		Object: map[string]interface{}{
+			"apiVersion": "traefik.io/v1alpha1",
+			"kind":       "IngressRouteTCP",
+			"metadata": map[string]interface{}{
+				"name":      td.Name,
+				"namespace": td.Namespace,
+			},
+			"spec": map[string]interface{}{
+				"entryPoints": []interface{}{"websecure"},
+				"routes": []interface{}{
+					map[string]interface{}{
+						"match": fmt.Sprintf("HostSNI(`%s`)", ratholeHost),
+						"services": []interface{}{
+							map[string]interface{}{
+								"name": td.Name,
+								"port": int64(2333),
+							},
+						},
+					},
+				},
+				"tls": map[string]interface{}{
+					"secretName": serverCertName,
+				},
+			},
+		},
+	}
+	if err := p.applyUnstructuredResource(ctx, traefikIngressRouteTCPGVR, ingressRoute); err != nil {
+		return fmt.Errorf("failed to apply rathole IngressRouteTCP: %w", err)
+	}
+	log.G(ctx).Infof("Applied Traefik IngressRouteTCP %s/%s for rathole (host: %s)", td.Namespace, td.Name, ratholeHost)
+
+	return nil
+}
+
+// waitForRatholeCertSecret polls until cert-manager has issued the given TLS secret or the context is cancelled.
+func (p *Provider) waitForRatholeCertSecret(ctx context.Context, secretName, namespace string) error {
+	timeout := 120 * time.Second
+	deadline := time.Now().Add(timeout)
+	for time.Now().Before(deadline) {
+		secret, err := p.clientSet.CoreV1().Secrets(namespace).Get(ctx, secretName, metav1.GetOptions{})
+		if err == nil && len(secret.Data["tls.crt"]) > 0 {
+			return nil
+		}
+		select {
+		case <-ctx.Done():
+			return ctx.Err()
+		case <-time.After(2 * time.Second):
+		}
+	}
+	return fmt.Errorf("timed out waiting for cert-manager to issue secret %s/%s", namespace, secretName)
 }
 
 // cleanupPartialWstunnelResources removes specific resources that were created before a failure
@@ -2244,6 +2447,12 @@ func (p *Provider) initClientSet(ctx context.Context) error {
 		if err != nil {
 			log.G(ctx).Error(err)
 			return err
+		}
+
+		p.dynamicClient, err = dynamic.NewForConfig(config)
+		if err != nil {
+			log.G(ctx).Warningf("Failed to create dynamic client (CRD resources will not be managed): %v", err)
+			// non-fatal: rathole TLS resources won't be applied, but wstunnel still works
 		}
 	}
 
