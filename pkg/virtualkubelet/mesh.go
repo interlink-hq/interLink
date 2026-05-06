@@ -235,7 +235,8 @@ func deriveWGPublicKey(privB64 string) (string, error) {
 	return base64.StdEncoding.EncodeToString(pubRaw), nil
 }
 
-// addWstunnelClientAnnotation adds the wstunnel client command annotation to the original pod
+// addWstunnelClientAnnotation adds the tunnel client command annotation to the original pod.
+// In rathole mode it writes a rathole client command; otherwise it writes a wstunnel command.
 func (p *Provider) addWstunnelClientAnnotation(ctx context.Context, pod *v1.Pod, td *WstunnelTemplateData) error {
 	if pod.Annotations == nil {
 		pod.Annotations = make(map[string]string)
@@ -288,6 +289,43 @@ PersistentKeepalive = %d
 		`, clientPriv, td.WGMTU, serverPub, td.KeepaliveSecs)
 
 		pod.Annotations["interlink.eu/wireguard-client-snippet"] = wgSnippet
+
+	} else if p.config.Network.TunnelType == "rathole" {
+		// Rathole mode: build a client TOML config and generate the client bootstrap command
+		ratholeEndpoint := fmt.Sprintf("rathole-%s.%s", td.Name, td.WildcardDNS)
+		ratholeEndpoint = sanitizeFullDNSName(ratholeEndpoint)
+		if td.WildcardDNS == "" {
+			ratholeEndpoint = td.Name
+		}
+
+		var tomlBuilder strings.Builder
+		tomlBuilder.WriteString(fmt.Sprintf("[client]\nremote_addr = \"%s:80\"\n\n", ratholeEndpoint))
+		tomlBuilder.WriteString("[client.transport]\ntype = \"websocket\"\n\n")
+		for _, port := range td.ExposedPorts {
+			if strings.ToUpper(port.Protocol) == "UDP" {
+				continue
+			}
+			tomlBuilder.WriteString(fmt.Sprintf("[client.services.p%d]\ntoken = \"%s\"\nlocal_addr = \"127.0.0.1:%d\"\n\n",
+				port.Port, td.RandomPassword, port.Port))
+		}
+
+		configB64 := base64.StdEncoding.EncodeToString([]byte(tomlBuilder.String()))
+
+		ratholeURL := p.config.Network.RatholeExecutableURL
+		if ratholeURL == "" {
+			ratholeURL = DefaultRatholeExecutableURL
+		}
+
+		ratholeCmd := p.config.Network.RatholeCommand
+		if ratholeCmd == "" {
+			ratholeCmd = DefaultRatholeCommand
+		}
+
+		mainCmd := fmt.Sprintf(ratholeCmd, ratholeURL, configB64)
+
+		// Remove any stale wstunnel annotation and set the rathole one
+		delete(pod.Annotations, annWSTunnelClientCmds)
+		pod.Annotations[annRatholeClientCmds] = mainCmd
 
 	} else {
 		var rOptions []string
@@ -347,8 +385,8 @@ PersistentKeepalive = %d
 
 // clearConflictingNetworkAnnotations removes generated annotations that are specific to
 // the opposite network mode to keep pod network bootstrap behavior uniform.
-// When fullMeshEnabledForPod is true, any stale wstunnel client command annotation is removed.
-// When false, any stale WireGuard snippet annotation is removed.
+// When fullMeshEnabledForPod is true, any stale wstunnel and rathole client command annotations
+// are removed. When false, any stale WireGuard snippet annotation is removed.
 func clearConflictingNetworkAnnotations(pod *v1.Pod, fullMeshEnabledForPod bool) {
 	if pod == nil || pod.Annotations == nil {
 		return
@@ -356,6 +394,7 @@ func clearConflictingNetworkAnnotations(pod *v1.Pod, fullMeshEnabledForPod bool)
 
 	if fullMeshEnabledForPod {
 		delete(pod.Annotations, annWSTunnelClientCmds)
+		delete(pod.Annotations, annRatholeClientCmds)
 		return
 	}
 

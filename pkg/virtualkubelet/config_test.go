@@ -124,6 +124,30 @@ func TestNetwork_Configuration(t *testing.T) {
 	assert.NotEmpty(t, network.WstunnelCommand)
 }
 
+func TestNetwork_RatholeConfiguration(t *testing.T) {
+	network := Network{
+		EnableTunnel:         true,
+		TunnelType:           "rathole",
+		WildcardDNS:          "tunnel.example.com",
+		RatholeExecutableURL: "https://example.com/rathole.zip",
+		RatholeCommand:       "curl -L %s -o rathole.zip && unzip rathole.zip && echo %s | base64 -d > /tmp/client.toml && ./rathole /tmp/client.toml &",
+	}
+
+	assert.True(t, network.EnableTunnel)
+	assert.Equal(t, "rathole", network.TunnelType)
+	assert.Equal(t, "tunnel.example.com", network.WildcardDNS)
+	assert.Equal(t, "https://example.com/rathole.zip", network.RatholeExecutableURL)
+	assert.NotEmpty(t, network.RatholeCommand)
+}
+
+func TestNetwork_WstunnelDefaultTunnelType(t *testing.T) {
+	// Empty TunnelType means wstunnel (backward-compatible default)
+	network := Network{
+		EnableTunnel: true,
+	}
+	assert.Empty(t, network.TunnelType, "empty TunnelType should default to wstunnel behaviour")
+}
+
 func TestAccelerator_AvailableIsKubernetesQuantity(t *testing.T) {
 	tests := []struct {
 		name      string

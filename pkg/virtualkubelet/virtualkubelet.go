@@ -46,6 +46,9 @@ import (
 //go:embed templates/wstunnel-template.yaml
 var defaultWstunnelTemplate embed.FS
 
+//go:embed templates/rathole-template.yaml
+var defaultRatholeTemplate embed.FS
+
 //go:embed all:templates/mesh.sh
 var meshScriptTemplate embed.FS
 
@@ -67,6 +70,11 @@ const (
 	intelFPGA              = "intel.com/fpga"
 	DefaultProtocol        = "TCP"
 	DefaultWstunnelCommand = "curl  -L -f -k https://github.com/erebe/wstunnel/releases/download/v10.4.4/wstunnel_10.4.4_linux_amd64.tar.gz -o wstunnel.tar.gz && tar -xzvf wstunnel.tar.gz && chmod +x wstunnel && ./wstunnel client --http-upgrade-path-prefix %s %s ws://%s:80 &"
+	// DefaultRatholeExecutableURL is the default URL to download the rathole executable zip archive.
+	DefaultRatholeExecutableURL = "https://github.com/rapiz1/rathole/releases/download/v0.5.0/rathole-x86_64-unknown-linux-musl.zip"
+	// DefaultRatholeCommand is the default command template for the rathole client.
+	// Two %s format verbs are substituted: the rathole download URL and the base64-encoded client TOML config.
+	DefaultRatholeCommand = "curl -L -f -k %s -o rathole.zip && unzip -q rathole.zip && chmod +x rathole && echo %s | base64 -d > /tmp/rathole-client.toml && ./rathole /tmp/rathole-client.toml &"
 )
 
 // Annotations for WireGuard and WStunnel configuration
@@ -76,6 +84,7 @@ const (
 	annWGMTU                        = "interlink.eu/wg-mtu"               // optional, default 1280
 	annWgKeepaliveSeconds           = "interlink.eu/wg-keepalive-seconds" // optional, default 25
 	annWSTunnelClientCmds           = "interlink.eu/wstunnel-client-commands"
+	annRatholeClientCmds            = "interlink.eu/rathole-client-commands"
 	annWGClientSnippet              = "interlink.eu/wireguard-client-snippet"
 	annDisableOffloadContainers     = "interlink.eu/disable-offload-containers"      // comma-separated container names
 	annDisableOffloadInitContainers = "interlink.eu/disable-offload-init-containers" // comma-separated init container names
@@ -944,11 +953,11 @@ func mergeMaps(dst, src map[string]string) map[string]string {
 	return dst
 }
 
-// executeWstunnelTemplate loads and executes the wstunnel template
+// executeWstunnelTemplate loads and executes the tunnel template (wstunnel or rathole based on configuration)
 func (p *Provider) executeWstunnelTemplate(ctx context.Context, data WstunnelTemplateData) (string, error) {
 	var templateContent string
 
-	// Try to load from custom path first
+	// Try to load from custom path first (applies to both wstunnel and rathole)
 	if p.config.Network.WstunnelTemplatePath != "" {
 		content, err := os.ReadFile(p.config.Network.WstunnelTemplatePath)
 		if err != nil {
@@ -958,11 +967,23 @@ func (p *Provider) executeWstunnelTemplate(ctx context.Context, data WstunnelTem
 		}
 	}
 
-	// Fall back to embedded template
+	// Fall back to the built-in template for the configured tunnel type
 	if templateContent == "" {
-		content, err := defaultWstunnelTemplate.ReadFile("templates/wstunnel-template.yaml")
-		if err != nil {
-			return "", fmt.Errorf("failed to read embedded template: %w", err)
+		var (
+			content []byte
+			err     error
+		)
+		if p.config.Network.TunnelType == "rathole" {
+			content, err = defaultRatholeTemplate.ReadFile("templates/rathole-template.yaml")
+			if err != nil {
+				return "", fmt.Errorf("failed to read embedded rathole template: %w", err)
+			}
+			log.G(ctx).Info("Using built-in rathole template")
+		} else {
+			content, err = defaultWstunnelTemplate.ReadFile("templates/wstunnel-template.yaml")
+			if err != nil {
+				return "", fmt.Errorf("failed to read embedded template: %w", err)
+			}
 		}
 		templateContent = string(content)
 	}
@@ -1253,40 +1274,48 @@ func (p *Provider) waitForDeploymentPod(ctx context.Context, deploymentName, nam
 	return nil, fmt.Errorf("no pod found for deployment %s within timeout", deploymentName)
 }
 
-// cleanupWstunnelResources removes all wstunnel resources for a given name and namespace
+// cleanupWstunnelResources removes all tunnel resources for a given name and namespace
 func (p *Provider) cleanupWstunnelResources(ctx context.Context, wstunnelName, namespace string) {
-	log.G(ctx).Infof("Cleaning up wstunnel resources for %s/%s", namespace, wstunnelName)
+	log.G(ctx).Infof("Cleaning up tunnel resources for %s/%s", namespace, wstunnelName)
 
 	// Delete deployment
 	err := p.clientSet.AppsV1().Deployments(namespace).Delete(ctx, wstunnelName, metav1.DeleteOptions{})
 	if err != nil {
-		log.G(ctx).Warningf("Failed to delete wstunnel deployment %s/%s: %v", namespace, wstunnelName, err)
+		log.G(ctx).Warningf("Failed to delete tunnel deployment %s/%s: %v", namespace, wstunnelName, err)
 	} else {
-		log.G(ctx).Infof("Successfully deleted wstunnel deployment %s/%s", namespace, wstunnelName)
+		log.G(ctx).Infof("Successfully deleted tunnel deployment %s/%s", namespace, wstunnelName)
 	}
 
 	// Delete service
 	err = p.clientSet.CoreV1().Services(namespace).Delete(ctx, wstunnelName, metav1.DeleteOptions{})
 	if err != nil {
-		log.G(ctx).Warningf("Failed to delete wstunnel service %s/%s: %v", namespace, wstunnelName, err)
+		log.G(ctx).Warningf("Failed to delete tunnel service %s/%s: %v", namespace, wstunnelName, err)
 	} else {
-		log.G(ctx).Infof("Successfully deleted wstunnel service %s/%s", namespace, wstunnelName)
+		log.G(ctx).Infof("Successfully deleted tunnel service %s/%s", namespace, wstunnelName)
 	}
 
 	// Delete ingress
 	err = p.clientSet.NetworkingV1().Ingresses(namespace).Delete(ctx, wstunnelName, metav1.DeleteOptions{})
 	if err != nil {
-		log.G(ctx).Warningf("Failed to delete wstunnel ingress %s/%s: %v", namespace, wstunnelName, err)
+		log.G(ctx).Warningf("Failed to delete tunnel ingress %s/%s: %v", namespace, wstunnelName, err)
 	} else {
-		log.G(ctx).Infof("Successfully deleted wstunnel ingress %s/%s", namespace, wstunnelName)
+		log.G(ctx).Infof("Successfully deleted tunnel ingress %s/%s", namespace, wstunnelName)
 	}
 
-	// Delete configmap
+	// Delete wstunnel wireguard configmap (used in full-mesh / wstunnel mode)
 	err = p.clientSet.CoreV1().ConfigMaps(namespace).Delete(ctx, wstunnelName+"-wg-config", metav1.DeleteOptions{})
 	if err != nil {
 		log.G(ctx).Warningf("Failed to delete wstunnel configmap %s/%s: %v", namespace, wstunnelName+"-wg-config", err)
 	} else {
 		log.G(ctx).Infof("Successfully deleted wstunnel configmap %s/%s", namespace, wstunnelName+"-wg-config")
+	}
+
+	// Delete rathole configmap (used in rathole mode)
+	err = p.clientSet.CoreV1().ConfigMaps(namespace).Delete(ctx, wstunnelName+"-rathole-config", metav1.DeleteOptions{})
+	if err != nil {
+		log.G(ctx).Warningf("Failed to delete rathole configmap %s/%s: %v", namespace, wstunnelName+"-rathole-config", err)
+	} else {
+		log.G(ctx).Infof("Successfully deleted rathole configmap %s/%s", namespace, wstunnelName+"-rathole-config")
 	}
 }
 
