@@ -33,7 +33,10 @@ import (
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/api/resource"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
+	"k8s.io/apimachinery/pkg/runtime/schema"
 	"k8s.io/apimachinery/pkg/runtime/serializer"
+	"k8s.io/client-go/dynamic"
 	"k8s.io/client-go/kubernetes"
 	"k8s.io/client-go/kubernetes/scheme"
 	"k8s.io/client-go/tools/clientcmd"
@@ -46,27 +49,44 @@ import (
 //go:embed templates/wstunnel-template.yaml
 var defaultWstunnelTemplate embed.FS
 
+//go:embed templates/rathole-template.yaml
+var defaultRatholeTemplate embed.FS
+
 //go:embed all:templates/mesh.sh
 var meshScriptTemplate embed.FS
 
 const (
-	DefaultCPUCapacity     = "100"
-	DefaultMemoryCapacity  = "3000G"
-	DefaultPodCapacity     = "10000"
-	DefaultGPUCapacity     = "0"
-	DefaultFPGACapacity    = "0"
-	DefaultListenPort      = 10250
-	NamespaceKey           = "namespace"
-	NameKey                = "name"
-	CREATE                 = 0
-	DELETE                 = 1
-	nvidiaGPU              = "nvidia.com/gpu"
-	amdGPU                 = "amd.com/gpu"
-	intelGPU               = "intel.com/gpu"
-	xilinxFPGA             = "xilinx.com/fpga"
-	intelFPGA              = "intel.com/fpga"
-	DefaultProtocol        = "TCP"
+	DefaultCPUCapacity    = "100"
+	DefaultMemoryCapacity = "3000G"
+	DefaultPodCapacity    = "10000"
+	DefaultGPUCapacity    = "0"
+	DefaultFPGACapacity   = "0"
+	DefaultListenPort     = 10250
+	NamespaceKey          = "namespace"
+	NameKey               = "name"
+	CREATE                = 0
+	DELETE                = 1
+	nvidiaGPU             = "nvidia.com/gpu"
+	amdGPU                = "amd.com/gpu"
+	intelGPU              = "intel.com/gpu"
+	xilinxFPGA            = "xilinx.com/fpga"
+	intelFPGA             = "intel.com/fpga"
+	DefaultProtocol       = "TCP"
+	// protocolUDP is the protocol string for UDP ports; used to skip UDP in tunnel client configs.
+	protocolUDP = "UDP"
+	// tunnelTypeRathole is the TunnelType value that selects the rathole port-forwarding backend.
+	tunnelTypeRathole      = "rathole"
 	DefaultWstunnelCommand = "curl  -L -f -k https://github.com/erebe/wstunnel/releases/download/v10.4.4/wstunnel_10.4.4_linux_amd64.tar.gz -o wstunnel.tar.gz && tar -xzvf wstunnel.tar.gz && chmod +x wstunnel && ./wstunnel client --http-upgrade-path-prefix %s %s ws://%s:80 &"
+	// DefaultRatholeExecutableURL is the default URL to download the rathole executable zip archive.
+	// Source: https://github.com/rathole-org/rathole (note: x86_64 musl was dropped in v0.5.0; use gnu).
+	DefaultRatholeExecutableURL = "https://github.com/rathole-org/rathole/releases/download/v0.5.0/rathole-x86_64-unknown-linux-gnu.zip"
+	// DefaultRatholeCommand is the default command template for the rathole client in TLS mode.
+	// Five %s format verbs are substituted in order: rathole download URL, base64-encoded CA cert,
+	// base64-encoded client cert, base64-encoded client key, and base64-encoded client TOML config.
+	DefaultRatholeCommand = "curl -L -f -k %s -o rathole.zip && unzip -q rathole.zip && chmod +x rathole && echo %s | base64 -d > /tmp/rathole-ca.crt && echo %s | base64 -d > /tmp/rathole-client.crt && echo %s | base64 -d > /tmp/rathole-client.key && echo %s | base64 -d > /tmp/rathole-client.toml && ./rathole --client /tmp/rathole-client.toml &"
+	// DefaultRatholeWSCommand is the fallback command template used when no CA issuer is configured
+	// (WebSocket transport, backward-compatible). Two %s args: download URL and base64 client TOML.
+	DefaultRatholeWSCommand = "curl -L -f -k %s -o rathole.zip && unzip -q rathole.zip && chmod +x rathole && echo %s | base64 -d > /tmp/rathole-client.toml && ./rathole --client /tmp/rathole-client.toml &"
 )
 
 // Annotations for WireGuard and WStunnel configuration
@@ -76,10 +96,13 @@ const (
 	annWGMTU                        = "interlink.eu/wg-mtu"               // optional, default 1280
 	annWgKeepaliveSeconds           = "interlink.eu/wg-keepalive-seconds" // optional, default 25
 	annWSTunnelClientCmds           = "interlink.eu/wstunnel-client-commands"
+	annRatholeClientCmds            = "interlink.eu/rathole-client-commands"
 	annWGClientSnippet              = "interlink.eu/wireguard-client-snippet"
 	annDisableOffloadContainers     = "interlink.eu/disable-offload-containers"      // comma-separated container names
 	annDisableOffloadInitContainers = "interlink.eu/disable-offload-init-containers" // comma-separated init container names
 	annMeshNetworkDisabled          = "interlink.eu/mesh-network"                    // set to "disabled" to opt out of mesh networking
+	annShadowSameNS                 = "interlink.eu/shadow-same-ns"                  // set to "true" to create shadow resources in the same namespace
+	annShadowSameNSValue            = "true"                                         // expected value for annShadowSameNS
 )
 
 type WstunnelTemplateData struct {
@@ -98,6 +121,9 @@ type WstunnelTemplateData struct {
 	Volumes             []v1.Volume
 	PodLabels           map[string]string // Labels from original pod
 	PodAnnotations      map[string]string // Annotations from original pod
+	// HasNginxIngress controls whether the rathole template emits a nginx Ingress for
+	// WebSocket mode. It is true when TunnelType=="rathole" and RatholeCAIssuerName=="".
+	HasNginxIngress bool
 }
 
 type PortMapping struct {
@@ -136,6 +162,7 @@ type Provider struct {
 	notifier             func(*v1.Pod)
 	onNodeChangeCallback func(*v1.Node)
 	clientSet            kubernetes.Interface
+	dynamicClient        dynamic.Interface
 	clientHTTPTransport  *http.Transport
 	podIPs               []string
 }
@@ -739,7 +766,7 @@ func (p *Provider) createDummyPod(ctx context.Context, originalPod *v1.Pod) (*v1
 
 	isSameNamespace := false
 	if originalPod.Annotations != nil {
-		if val, ok := originalPod.Annotations["interlink.eu/shadow-same-ns"]; ok && val == "true" {
+		if val, ok := originalPod.Annotations[annShadowSameNS]; ok && val == annShadowSameNSValue {
 			isSameNamespace = true
 		}
 	}
@@ -844,6 +871,9 @@ func (p *Provider) createDummyPod(ctx context.Context, originalPod *v1.Pod) (*v1
 		Volumes:             extractVolumesForLocalContainers(originalPod),
 		PodLabels:           podLabels,
 		PodAnnotations:      podAnnotations,
+		// In rathole WebSocket mode (no TLS issuer), expose the rathole server via nginx Ingress so
+		// the compute-side client can reach port 80 over WebSocket.
+		HasNginxIngress: p.config.Network.TunnelType == tunnelTypeRathole && p.config.Network.RatholeCAIssuerName == "",
 	}
 
 	log.G(ctx).Debugf("LocalInitContainers count: %d", len(templateData.LocalInitContainers))
@@ -870,7 +900,16 @@ func (p *Provider) createDummyPod(ctx context.Context, originalPod *v1.Pod) (*v1
 		return nil, nil, fmt.Errorf("failed to apply wstunnel manifests: %w", err)
 	}
 
-	log.G(ctx).Infof("Created wstunnel infrastructure for %s/%s", originalPod.Namespace, originalPod.Name)
+	// For rathole TLS mode, also create the cert-manager Certificates and Traefik IngressRouteTCP.
+	// This is a hard requirement: if TLS resource creation fails when RatholeCAIssuerName is set,
+	// the annotation path will block waiting for a cert secret that will never appear.
+	if p.config.Network.TunnelType == tunnelTypeRathole && p.config.Network.RatholeCAIssuerName != "" {
+		if tlsErr := p.applyRatholeTLSResources(ctx, templateData); tlsErr != nil {
+			return nil, nil, fmt.Errorf("failed to apply rathole TLS resources for %s/%s: %w", originalPod.Namespace, originalPod.Name, tlsErr)
+		}
+	}
+
+	log.G(ctx).Infof("Created tunnel infrastructure (%s) for %s/%s", p.config.Network.TunnelType, originalPod.Namespace, originalPod.Name)
 	return createdPod, &templateData, nil
 }
 
@@ -944,11 +983,11 @@ func mergeMaps(dst, src map[string]string) map[string]string {
 	return dst
 }
 
-// executeWstunnelTemplate loads and executes the wstunnel template
+// executeWstunnelTemplate loads and executes the tunnel template (wstunnel or rathole based on configuration)
 func (p *Provider) executeWstunnelTemplate(ctx context.Context, data WstunnelTemplateData) (string, error) {
 	var templateContent string
 
-	// Try to load from custom path first
+	// Try to load from custom path first (applies to both wstunnel and rathole)
 	if p.config.Network.WstunnelTemplatePath != "" {
 		content, err := os.ReadFile(p.config.Network.WstunnelTemplatePath)
 		if err != nil {
@@ -958,11 +997,23 @@ func (p *Provider) executeWstunnelTemplate(ctx context.Context, data WstunnelTem
 		}
 	}
 
-	// Fall back to embedded template
+	// Fall back to the built-in template for the configured tunnel type
 	if templateContent == "" {
-		content, err := defaultWstunnelTemplate.ReadFile("templates/wstunnel-template.yaml")
-		if err != nil {
-			return "", fmt.Errorf("failed to read embedded template: %w", err)
+		var (
+			content []byte
+			err     error
+		)
+		if p.config.Network.TunnelType == tunnelTypeRathole {
+			content, err = defaultRatholeTemplate.ReadFile("templates/rathole-template.yaml")
+			if err != nil {
+				return "", fmt.Errorf("failed to read embedded rathole template: %w", err)
+			}
+			log.G(ctx).Info("Using built-in rathole template")
+		} else {
+			content, err = defaultWstunnelTemplate.ReadFile("templates/wstunnel-template.yaml")
+			if err != nil {
+				return "", fmt.Errorf("failed to read embedded template: %w", err)
+			}
 		}
 		templateContent = string(content)
 	}
@@ -1253,40 +1304,254 @@ func (p *Provider) waitForDeploymentPod(ctx context.Context, deploymentName, nam
 	return nil, fmt.Errorf("no pod found for deployment %s within timeout", deploymentName)
 }
 
-// cleanupWstunnelResources removes all wstunnel resources for a given name and namespace
+// cleanupWstunnelResources removes all tunnel resources for a given name and namespace
 func (p *Provider) cleanupWstunnelResources(ctx context.Context, wstunnelName, namespace string) {
-	log.G(ctx).Infof("Cleaning up wstunnel resources for %s/%s", namespace, wstunnelName)
+	log.G(ctx).Infof("Cleaning up tunnel resources for %s/%s", namespace, wstunnelName)
 
 	// Delete deployment
 	err := p.clientSet.AppsV1().Deployments(namespace).Delete(ctx, wstunnelName, metav1.DeleteOptions{})
 	if err != nil {
-		log.G(ctx).Warningf("Failed to delete wstunnel deployment %s/%s: %v", namespace, wstunnelName, err)
+		log.G(ctx).Warningf("Failed to delete tunnel deployment %s/%s: %v", namespace, wstunnelName, err)
 	} else {
-		log.G(ctx).Infof("Successfully deleted wstunnel deployment %s/%s", namespace, wstunnelName)
+		log.G(ctx).Infof("Successfully deleted tunnel deployment %s/%s", namespace, wstunnelName)
 	}
 
 	// Delete service
 	err = p.clientSet.CoreV1().Services(namespace).Delete(ctx, wstunnelName, metav1.DeleteOptions{})
 	if err != nil {
-		log.G(ctx).Warningf("Failed to delete wstunnel service %s/%s: %v", namespace, wstunnelName, err)
+		log.G(ctx).Warningf("Failed to delete tunnel service %s/%s: %v", namespace, wstunnelName, err)
 	} else {
-		log.G(ctx).Infof("Successfully deleted wstunnel service %s/%s", namespace, wstunnelName)
+		log.G(ctx).Infof("Successfully deleted tunnel service %s/%s", namespace, wstunnelName)
 	}
 
-	// Delete ingress
+	// Delete ingress (nginx WebSocket ingress used in rathole WS-fallback mode or wstunnel mode).
+	// Ingress is absent in rathole TLS mode (Traefik IngressRouteTCP is used instead); suppress NotFound.
 	err = p.clientSet.NetworkingV1().Ingresses(namespace).Delete(ctx, wstunnelName, metav1.DeleteOptions{})
-	if err != nil {
-		log.G(ctx).Warningf("Failed to delete wstunnel ingress %s/%s: %v", namespace, wstunnelName, err)
-	} else {
-		log.G(ctx).Infof("Successfully deleted wstunnel ingress %s/%s", namespace, wstunnelName)
+	if err != nil && !apierrors.IsNotFound(err) {
+		log.G(ctx).Warningf("Failed to delete tunnel ingress %s/%s: %v", namespace, wstunnelName, err)
+	} else if err == nil {
+		log.G(ctx).Infof("Successfully deleted tunnel ingress %s/%s", namespace, wstunnelName)
 	}
 
-	// Delete configmap
+	// Delete wstunnel wireguard configmap (used in full-mesh / wstunnel mode)
 	err = p.clientSet.CoreV1().ConfigMaps(namespace).Delete(ctx, wstunnelName+"-wg-config", metav1.DeleteOptions{})
-	if err != nil {
+	if err != nil && !apierrors.IsNotFound(err) {
 		log.G(ctx).Warningf("Failed to delete wstunnel configmap %s/%s: %v", namespace, wstunnelName+"-wg-config", err)
-	} else {
+	} else if err == nil {
 		log.G(ctx).Infof("Successfully deleted wstunnel configmap %s/%s", namespace, wstunnelName+"-wg-config")
+	}
+
+	// Delete rathole configmap (used in rathole mode)
+	err = p.clientSet.CoreV1().ConfigMaps(namespace).Delete(ctx, wstunnelName+"-rathole-config", metav1.DeleteOptions{})
+	if err != nil && !apierrors.IsNotFound(err) {
+		log.G(ctx).Warningf("Failed to delete rathole configmap %s/%s: %v", namespace, wstunnelName+"-rathole-config", err)
+	} else if err == nil {
+		log.G(ctx).Infof("Successfully deleted rathole configmap %s/%s", namespace, wstunnelName+"-rathole-config")
+	}
+
+	// Delete rathole TLS resources (cert-manager Certificates and Traefik IngressRouteTCP)
+	if p.dynamicClient != nil {
+		for _, certName := range []string{wstunnelName + "-rathole-server-tls", wstunnelName + "-rathole-client-tls"} {
+			if delErr := p.deleteUnstructuredResource(ctx, certManagerCertGVR, certName, namespace); delErr != nil {
+				log.G(ctx).Warningf("Failed to delete rathole cert-manager Certificate %s/%s: %v", namespace, certName, delErr)
+			} else {
+				log.G(ctx).Infof("Deleted rathole cert-manager Certificate %s/%s", namespace, certName)
+			}
+		}
+		if delErr := p.deleteUnstructuredResource(ctx, traefikIngressRouteTCPGVR, wstunnelName, namespace); delErr != nil {
+			log.G(ctx).Warningf("Failed to delete rathole IngressRouteTCP %s/%s: %v", namespace, wstunnelName, delErr)
+		} else {
+			log.G(ctx).Infof("Deleted rathole IngressRouteTCP %s/%s", namespace, wstunnelName)
+		}
+	}
+}
+
+// GroupVersionResource definitions for cert-manager and Traefik CRDs.
+var (
+	certManagerCertGVR = schema.GroupVersionResource{
+		Group:    "cert-manager.io",
+		Version:  "v1",
+		Resource: "certificates",
+	}
+	traefikIngressRouteTCPGVR = schema.GroupVersionResource{
+		Group:    "traefik.io",
+		Version:  "v1alpha1",
+		Resource: "ingressroutetcps",
+	}
+)
+
+// applyUnstructuredResource creates or updates an unstructured Kubernetes resource via the dynamic client.
+func (p *Provider) applyUnstructuredResource(ctx context.Context, gvr schema.GroupVersionResource, obj *unstructured.Unstructured) error {
+	if p.dynamicClient == nil {
+		return fmt.Errorf("dynamic client not initialised")
+	}
+	ns := obj.GetNamespace()
+	name := obj.GetName()
+	dr := p.dynamicClient.Resource(gvr).Namespace(ns)
+
+	existing, err := dr.Get(ctx, name, metav1.GetOptions{})
+	if apierrors.IsNotFound(err) {
+		_, err = dr.Create(ctx, obj, metav1.CreateOptions{})
+		return err
+	}
+	if err != nil {
+		return err
+	}
+	obj.SetResourceVersion(existing.GetResourceVersion())
+	_, err = dr.Update(ctx, obj, metav1.UpdateOptions{})
+	return err
+}
+
+// deleteUnstructuredResource deletes a namespaced unstructured resource; not-found errors are ignored.
+func (p *Provider) deleteUnstructuredResource(ctx context.Context, gvr schema.GroupVersionResource, name, namespace string) error {
+	if p.dynamicClient == nil {
+		return nil
+	}
+	err := p.dynamicClient.Resource(gvr).Namespace(namespace).Delete(ctx, name, metav1.DeleteOptions{})
+	if apierrors.IsNotFound(err) {
+		return nil
+	}
+	return err
+}
+
+// applyRatholeTLSResources creates the cert-manager Certificate resources (server and client) and the
+// Traefik IngressRouteTCP that exposes the rathole server via TLS on the websecure entry point.
+// The server TLS certificate is served by Traefik; the client certificate is issued so that
+// addWstunnelClientAnnotation can embed it in the compute-side bootstrap command.
+func (p *Provider) applyRatholeTLSResources(ctx context.Context, td WstunnelTemplateData) error {
+	if p.dynamicClient == nil {
+		return fmt.Errorf("dynamic client not initialised; cannot manage cert-manager/Traefik resources")
+	}
+
+	issuerName := p.config.Network.RatholeCAIssuerName
+	issuerKind := p.config.Network.RatholeCAIssuerKind
+	if issuerKind == "" {
+		issuerKind = "ClusterIssuer"
+	}
+
+	ratholeHost := fmt.Sprintf("rathole-%s.%s", td.Name, td.WildcardDNS)
+	ratholeHost = sanitizeFullDNSName(ratholeHost)
+
+	serverCertName := td.Name + "-rathole-server-tls"
+	clientCertName := td.Name + "-rathole-client-tls"
+
+	// cert-manager Certificate for the server (Traefik TLS termination)
+	serverCert := &unstructured.Unstructured{
+		Object: map[string]interface{}{
+			"apiVersion": "cert-manager.io/v1",
+			"kind":       "Certificate",
+			"metadata": map[string]interface{}{
+				"name":      serverCertName,
+				"namespace": td.Namespace,
+			},
+			"spec": map[string]interface{}{
+				"secretName": serverCertName,
+				"dnsNames":   []interface{}{ratholeHost},
+				"issuerRef": map[string]interface{}{
+					"name": issuerName,
+					"kind": issuerKind,
+				},
+			},
+		},
+	}
+	if err := p.applyUnstructuredResource(ctx, certManagerCertGVR, serverCert); err != nil {
+		return fmt.Errorf("failed to apply rathole server Certificate: %w", err)
+	}
+	log.G(ctx).Infof("Applied cert-manager Certificate %s/%s for rathole server", td.Namespace, serverCertName)
+
+	// cert-manager Certificate for the client (embedded in the compute-side bootstrap command)
+	clientCert := &unstructured.Unstructured{
+		Object: map[string]interface{}{
+			"apiVersion": "cert-manager.io/v1",
+			"kind":       "Certificate",
+			"metadata": map[string]interface{}{
+				"name":      clientCertName,
+				"namespace": td.Namespace,
+			},
+			"spec": map[string]interface{}{
+				"secretName": clientCertName,
+				"commonName": "rathole-client",
+				"usages":     []interface{}{"client auth"},
+				"issuerRef": map[string]interface{}{
+					"name": issuerName,
+					"kind": issuerKind,
+				},
+			},
+		},
+	}
+	if err := p.applyUnstructuredResource(ctx, certManagerCertGVR, clientCert); err != nil {
+		return fmt.Errorf("failed to apply rathole client Certificate: %w", err)
+	}
+	log.G(ctx).Infof("Applied cert-manager Certificate %s/%s for rathole client", td.Namespace, clientCertName)
+
+	// Traefik IngressRouteTCP — TLS termination at Traefik, plain TCP to the rathole server
+	ingressRoute := &unstructured.Unstructured{
+		Object: map[string]interface{}{
+			"apiVersion": "traefik.io/v1alpha1",
+			"kind":       "IngressRouteTCP",
+			"metadata": map[string]interface{}{
+				"name":      td.Name,
+				"namespace": td.Namespace,
+			},
+			"spec": map[string]interface{}{
+				"entryPoints": []interface{}{"websecure"},
+				"routes": []interface{}{
+					map[string]interface{}{
+						"match": fmt.Sprintf("HostSNI(`%s`)", ratholeHost),
+						"services": []interface{}{
+							map[string]interface{}{
+								"name": td.Name,
+								"port": int64(2333),
+							},
+						},
+					},
+				},
+				"tls": map[string]interface{}{
+					"secretName": serverCertName,
+				},
+			},
+		},
+	}
+	if err := p.applyUnstructuredResource(ctx, traefikIngressRouteTCPGVR, ingressRoute); err != nil {
+		return fmt.Errorf("failed to apply rathole IngressRouteTCP: %w", err)
+	}
+	log.G(ctx).Infof("Applied Traefik IngressRouteTCP %s/%s for rathole (host: %s)", td.Namespace, td.Name, ratholeHost)
+
+	return nil
+}
+
+// waitForRatholeCertSecret polls until cert-manager has issued the given TLS secret (with all
+// required data keys: ca.crt, tls.crt, tls.key) or the context is cancelled.
+func (p *Provider) waitForRatholeCertSecret(ctx context.Context, secretName, namespace string) error {
+	const pollInterval = 2 * time.Second
+	const timeout = 120 * time.Second
+
+	ticker := time.NewTicker(pollInterval)
+	defer ticker.Stop()
+	timer := time.NewTimer(timeout)
+	defer timer.Stop()
+
+	for {
+		secret, err := p.clientSet.CoreV1().Secrets(namespace).Get(ctx, secretName, metav1.GetOptions{})
+		if err == nil {
+			allPresent := len(secret.Data["ca.crt"]) > 0 &&
+				len(secret.Data["tls.crt"]) > 0 &&
+				len(secret.Data["tls.key"]) > 0
+			if allPresent {
+				return nil
+			}
+		} else if !apierrors.IsNotFound(err) {
+			// Fail fast for non-transient errors (e.g. Forbidden, Unauthorized) so the caller
+			// gets actionable feedback instead of waiting the full 120s timeout.
+			return fmt.Errorf("unexpected error polling for cert secret %s/%s: %w", namespace, secretName, err)
+		}
+		select {
+		case <-ctx.Done():
+			return ctx.Err()
+		case <-timer.C:
+			return fmt.Errorf("timed out waiting for cert-manager to issue secret %s/%s", namespace, secretName)
+		case <-ticker.C:
+		}
 	}
 }
 
@@ -1484,14 +1749,27 @@ func isMeshNetworkingDisabled(pod *v1.Pod) bool {
 
 // handleWstunnelCreation creates wstunnel infrastructure and returns the pod IP
 func (p *Provider) handleWstunnelCreation(ctx context.Context, pod *v1.Pod) (string, error) {
-	wstunnelName := pod.Name + "-wstunnel"
+	// Compute resource names using the same logic as createDummyPod so that cleanup
+	// always targets the resources that were actually created.
+	isSameNamespace := false
+	if pod.Annotations != nil {
+		if val, ok := pod.Annotations[annShadowSameNS]; ok && val == annShadowSameNSValue {
+			isSameNamespace = true
+		}
+	}
+	var wstunnelName, wstunnelNS string
+	if isSameNamespace {
+		wstunnelName, wstunnelNS = computeWstunnelResourceNamesForSameNamespace(pod.Name, pod.Namespace)
+	} else {
+		wstunnelName, wstunnelNS = computeWstunnelResourceNames(pod.Name, pod.Namespace)
+	}
 
 	// Create wstunnel infrastructure outside virtual node for port exposure
 	dummyPod, templateData, err := p.createDummyPod(ctx, pod)
 	if err != nil {
 		log.G(ctx).Errorf("Failed to create wstunnel infrastructure for %s/%s: %v", pod.Namespace, pod.Name, err)
 		// Clean up any partially created resources
-		p.cleanupWstunnelResources(ctx, wstunnelName, pod.Namespace)
+		p.cleanupWstunnelResources(ctx, wstunnelName, wstunnelNS)
 		return "", fmt.Errorf("failed to create wstunnel infrastructure for exposed ports: %w", err)
 	}
 
@@ -1503,11 +1781,11 @@ func (p *Provider) handleWstunnelCreation(ctx context.Context, pod *v1.Pod) (str
 		}
 	}
 
-	podIP, err := p.waitForWstunnelPodIP(ctx, dummyPod, timeout, wstunnelName, pod.Namespace)
+	podIP, err := p.waitForWstunnelPodIP(ctx, dummyPod, timeout, wstunnelName, wstunnelNS)
 	if err != nil {
 		log.G(ctx).Errorf("Failed to get wstunnel pod IP for %s/%s: %v", pod.Namespace, pod.Name, err)
 		// Clean up resources since we failed to get a working pod
-		p.cleanupWstunnelResources(ctx, wstunnelName, pod.Namespace)
+		p.cleanupWstunnelResources(ctx, wstunnelName, wstunnelNS)
 		return "", err
 	}
 
@@ -1783,7 +2061,7 @@ func (p *Provider) DeletePod(ctx context.Context, pod *v1.Pod) (err error) {
 
 	isSameNamespace := false
 	if pod.Annotations != nil {
-		if val, ok := pod.Annotations["interlink.eu/shadow-same-ns"]; ok && val == "true" {
+		if val, ok := pod.Annotations[annShadowSameNS]; ok && val == annShadowSameNSValue {
 			isSameNamespace = true
 		}
 	}
@@ -2215,6 +2493,17 @@ func (p *Provider) initClientSet(ctx context.Context) error {
 		if err != nil {
 			log.G(ctx).Error(err)
 			return err
+		}
+
+		p.dynamicClient, err = dynamic.NewForConfig(config)
+		if err != nil {
+			// In rathole TLS mode the dynamic client is required to create cert-manager and Traefik
+			// resources. Fail hard so the operator learns about the misconfiguration immediately.
+			if p.config.Network.TunnelType == tunnelTypeRathole && p.config.Network.RatholeCAIssuerName != "" {
+				log.G(ctx).Error(err)
+				return fmt.Errorf("dynamic client required for rathole TLS mode but could not be initialised: %w", err)
+			}
+			log.G(ctx).Warningf("Failed to create dynamic client (CRD resources will not be managed): %v", err)
 		}
 	}
 

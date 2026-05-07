@@ -235,7 +235,8 @@ func deriveWGPublicKey(privB64 string) (string, error) {
 	return base64.StdEncoding.EncodeToString(pubRaw), nil
 }
 
-// addWstunnelClientAnnotation adds the wstunnel client command annotation to the original pod
+// addWstunnelClientAnnotation adds the tunnel client command annotation to the original pod.
+// In rathole mode it writes a rathole client command; otherwise it writes a wstunnel command.
 func (p *Provider) addWstunnelClientAnnotation(ctx context.Context, pod *v1.Pod, td *WstunnelTemplateData) error {
 	if pod.Annotations == nil {
 		pod.Annotations = make(map[string]string)
@@ -252,7 +253,8 @@ func (p *Provider) addWstunnelClientAnnotation(ctx context.Context, pod *v1.Pod,
 	clearConflictingNetworkAnnotations(pod, fullMeshEnabledForPod)
 
 	// Check if FullMesh mode is enabled and not disabled for this specific pod
-	if fullMeshEnabledForPod {
+	switch {
+	case fullMeshEnabledForPod:
 		log.G(ctx).Infof("FullMesh mode enabled, generating pre-exec script for pod %s/%s", pod.Namespace, pod.Name)
 
 		// Generate full mesh script
@@ -289,10 +291,116 @@ PersistentKeepalive = %d
 
 		pod.Annotations["interlink.eu/wireguard-client-snippet"] = wgSnippet
 
-	} else {
+	case p.config.Network.TunnelType == tunnelTypeRathole:
+		// Rathole mode: build a client TOML config and generate the client bootstrap command.
+		// When RatholeCAIssuerName is set, use TLS transport with cert-manager-issued certificates;
+		// otherwise fall back to WebSocket transport for backward compatibility.
+		ratholeEndpoint := fmt.Sprintf("rathole-%s.%s", td.Name, td.WildcardDNS)
+		ratholeEndpoint = sanitizeFullDNSName(ratholeEndpoint)
+		if td.WildcardDNS == "" {
+			ratholeEndpoint = td.Name
+		}
+
+		ratholeURL := p.config.Network.RatholeExecutableURL
+		if ratholeURL == "" {
+			ratholeURL = DefaultRatholeExecutableURL
+		}
+
+		var mainCmd string
+
+		if p.config.Network.RatholeCAIssuerName != "" {
+			// TLS mode: rathole client uses TLS transport; Traefik terminates TLS at port 443.
+			// Wait for the client certificate secret to be issued by cert-manager.
+			clientCertSecretName := td.Name + "-rathole-client-tls"
+			if err := p.waitForRatholeCertSecret(ctx, clientCertSecretName, td.Namespace); err != nil {
+				return fmt.Errorf("rathole client certificate not ready: %w", err)
+			}
+
+			certSecret, err := p.clientSet.CoreV1().Secrets(td.Namespace).Get(ctx, clientCertSecretName, metav1.GetOptions{})
+			if err != nil {
+				return fmt.Errorf("failed to read rathole client certificate secret: %w", err)
+			}
+
+			// Validate all required keys are present and non-empty.
+			for _, key := range []string{"ca.crt", "tls.crt", "tls.key"} {
+				if len(certSecret.Data[key]) == 0 {
+					return fmt.Errorf("rathole client certificate secret %s/%s is missing required key %q", td.Namespace, clientCertSecretName, key)
+				}
+			}
+
+			caCrtB64 := base64.StdEncoding.EncodeToString(certSecret.Data["ca.crt"])
+			clientCrtB64 := base64.StdEncoding.EncodeToString(certSecret.Data["tls.crt"])
+			clientKeyB64 := base64.StdEncoding.EncodeToString(certSecret.Data["tls.key"])
+
+			var tomlBuilder strings.Builder
+			fmt.Fprintf(&tomlBuilder, "[client]\nremote_addr = \"%s:443\"\n\n", ratholeEndpoint)
+			tomlBuilder.WriteString("[client.transport]\ntype = \"tls\"\n\n")
+			tomlBuilder.WriteString("[client.transport.tls]\n")
+			fmt.Fprintf(&tomlBuilder, "hostname = \"%s\"\n", ratholeEndpoint)
+			tomlBuilder.WriteString("trusted_root = \"/tmp/rathole-ca.crt\"\n")
+			tomlBuilder.WriteString("cert = \"/tmp/rathole-client.crt\"\n")
+			tomlBuilder.WriteString("key = \"/tmp/rathole-client.key\"\n\n")
+			for _, port := range td.ExposedPorts {
+				if strings.ToUpper(port.Protocol) == protocolUDP {
+					log.G(ctx).Debugf("Skipping UDP port %d in rathole client config (TLS transport forwards TCP only)", port.Port)
+					continue
+				}
+				fmt.Fprintf(&tomlBuilder, "[client.services.p%d]\ntoken = \"%s\"\nlocal_addr = \"127.0.0.1:%d\"\n\n",
+					port.Port, td.RandomPassword, port.Port)
+			}
+
+			configB64 := base64.StdEncoding.EncodeToString([]byte(tomlBuilder.String()))
+
+			ratholeCmd := p.config.Network.RatholeCommand
+			if ratholeCmd == "" {
+				ratholeCmd = DefaultRatholeCommand
+			}
+			// Validate that the TLS command template has exactly 5 %s format verbs
+			// (URL, CA cert, client cert, client key, client TOML).
+			if strings.Count(ratholeCmd, "%s") != 5 {
+				return fmt.Errorf("RatholeCommand must have exactly 5 %%s format verbs (url, ca, cert, key, toml); got %d in %q",
+					strings.Count(ratholeCmd, "%s"), p.config.Network.RatholeCommand)
+			}
+			mainCmd = fmt.Sprintf(ratholeCmd, ratholeURL, caCrtB64, clientCrtB64, clientKeyB64, configB64)
+		} else {
+			// WebSocket fallback (no CA issuer configured)
+			log.G(ctx).Debugf("RatholeCAIssuerName not set; using WebSocket transport for pod %s/%s", pod.Namespace, pod.Name)
+
+			var tomlBuilder strings.Builder
+			fmt.Fprintf(&tomlBuilder, "[client]\nremote_addr = \"%s:80\"\n\n", ratholeEndpoint)
+			tomlBuilder.WriteString("[client.transport]\ntype = \"websocket\"\n\n")
+			for _, port := range td.ExposedPorts {
+				if strings.ToUpper(port.Protocol) == protocolUDP {
+					log.G(ctx).Debugf("Skipping UDP port %d in rathole client config (websocket transport forwards TCP only)", port.Port)
+					continue
+				}
+				fmt.Fprintf(&tomlBuilder, "[client.services.p%d]\ntoken = \"%s\"\nlocal_addr = \"127.0.0.1:%d\"\n\n",
+					port.Port, td.RandomPassword, port.Port)
+			}
+
+			configB64 := base64.StdEncoding.EncodeToString([]byte(tomlBuilder.String()))
+
+			ratholeWSCmd := p.config.Network.RatholeWSCommand
+			if ratholeWSCmd == "" {
+				ratholeWSCmd = DefaultRatholeWSCommand
+			}
+			// Validate that the WebSocket command template has exactly 2 %s format verbs
+			// (URL, client TOML).
+			if strings.Count(ratholeWSCmd, "%s") != 2 {
+				return fmt.Errorf("RatholeWSCommand must have exactly 2 %%s format verbs (url, toml); got %d in %q",
+					strings.Count(ratholeWSCmd, "%s"), p.config.Network.RatholeWSCommand)
+			}
+			mainCmd = fmt.Sprintf(ratholeWSCmd, ratholeURL, configB64)
+		}
+
+		// Remove any stale wstunnel annotation and set the rathole one
+		delete(pod.Annotations, annWSTunnelClientCmds)
+		pod.Annotations[annRatholeClientCmds] = mainCmd
+
+	default:
 		var rOptions []string
 		for _, port := range td.ExposedPorts {
-			if strings.ToUpper(port.Protocol) == "UDP" {
+			if strings.ToUpper(port.Protocol) == protocolUDP {
 				continue
 			}
 			rOptions = append(rOptions, fmt.Sprintf("-R tcp://0.0.0.0:%d:localhost:%d", port.Port, port.Port))
@@ -347,8 +455,8 @@ PersistentKeepalive = %d
 
 // clearConflictingNetworkAnnotations removes generated annotations that are specific to
 // the opposite network mode to keep pod network bootstrap behavior uniform.
-// When fullMeshEnabledForPod is true, any stale wstunnel client command annotation is removed.
-// When false, any stale WireGuard snippet annotation is removed.
+// When fullMeshEnabledForPod is true, any stale wstunnel and rathole client command annotations
+// are removed. When false, any stale WireGuard snippet annotation is removed.
 func clearConflictingNetworkAnnotations(pod *v1.Pod, fullMeshEnabledForPod bool) {
 	if pod == nil || pod.Annotations == nil {
 		return
@@ -356,6 +464,7 @@ func clearConflictingNetworkAnnotations(pod *v1.Pod, fullMeshEnabledForPod bool)
 
 	if fullMeshEnabledForPod {
 		delete(pod.Annotations, annWSTunnelClientCmds)
+		delete(pod.Annotations, annRatholeClientCmds)
 		return
 	}
 
