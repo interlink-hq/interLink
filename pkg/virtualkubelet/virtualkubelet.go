@@ -56,22 +56,26 @@ var defaultRatholeTemplate embed.FS
 var meshScriptTemplate embed.FS
 
 const (
-	DefaultCPUCapacity     = "100"
-	DefaultMemoryCapacity  = "3000G"
-	DefaultPodCapacity     = "10000"
-	DefaultGPUCapacity     = "0"
-	DefaultFPGACapacity    = "0"
-	DefaultListenPort      = 10250
-	NamespaceKey           = "namespace"
-	NameKey                = "name"
-	CREATE                 = 0
-	DELETE                 = 1
-	nvidiaGPU              = "nvidia.com/gpu"
-	amdGPU                 = "amd.com/gpu"
-	intelGPU               = "intel.com/gpu"
-	xilinxFPGA             = "xilinx.com/fpga"
-	intelFPGA              = "intel.com/fpga"
-	DefaultProtocol        = "TCP"
+	DefaultCPUCapacity    = "100"
+	DefaultMemoryCapacity = "3000G"
+	DefaultPodCapacity    = "10000"
+	DefaultGPUCapacity    = "0"
+	DefaultFPGACapacity   = "0"
+	DefaultListenPort     = 10250
+	NamespaceKey          = "namespace"
+	NameKey               = "name"
+	CREATE                = 0
+	DELETE                = 1
+	nvidiaGPU             = "nvidia.com/gpu"
+	amdGPU                = "amd.com/gpu"
+	intelGPU              = "intel.com/gpu"
+	xilinxFPGA            = "xilinx.com/fpga"
+	intelFPGA             = "intel.com/fpga"
+	DefaultProtocol       = "TCP"
+	// protocolUDP is the protocol string for UDP ports; used to skip UDP in tunnel client configs.
+	protocolUDP = "UDP"
+	// tunnelTypeRathole is the TunnelType value that selects the rathole port-forwarding backend.
+	tunnelTypeRathole      = "rathole"
 	DefaultWstunnelCommand = "curl  -L -f -k https://github.com/erebe/wstunnel/releases/download/v10.4.4/wstunnel_10.4.4_linux_amd64.tar.gz -o wstunnel.tar.gz && tar -xzvf wstunnel.tar.gz && chmod +x wstunnel && ./wstunnel client --http-upgrade-path-prefix %s %s ws://%s:80 &"
 	// DefaultRatholeExecutableURL is the default URL to download the rathole executable zip archive.
 	DefaultRatholeExecutableURL = "https://github.com/rapiz1/rathole/releases/download/v0.5.0/rathole-x86_64-unknown-linux-musl.zip"
@@ -114,6 +118,9 @@ type WstunnelTemplateData struct {
 	Volumes             []v1.Volume
 	PodLabels           map[string]string // Labels from original pod
 	PodAnnotations      map[string]string // Annotations from original pod
+	// HasNginxIngress controls whether the rathole template emits a nginx Ingress for
+	// WebSocket mode. It is true when TunnelType=="rathole" and RatholeCAIssuerName=="".
+	HasNginxIngress bool
 }
 
 type PortMapping struct {
@@ -861,6 +868,9 @@ func (p *Provider) createDummyPod(ctx context.Context, originalPod *v1.Pod) (*v1
 		Volumes:             extractVolumesForLocalContainers(originalPod),
 		PodLabels:           podLabels,
 		PodAnnotations:      podAnnotations,
+		// In rathole WebSocket mode (no TLS issuer), expose the rathole server via nginx Ingress so
+		// the compute-side client can reach port 80 over WebSocket.
+		HasNginxIngress: p.config.Network.TunnelType == tunnelTypeRathole && p.config.Network.RatholeCAIssuerName == "",
 	}
 
 	log.G(ctx).Debugf("LocalInitContainers count: %d", len(templateData.LocalInitContainers))
@@ -888,13 +898,13 @@ func (p *Provider) createDummyPod(ctx context.Context, originalPod *v1.Pod) (*v1
 	}
 
 	// For rathole TLS mode, also create the cert-manager Certificates and Traefik IngressRouteTCP.
-	if p.config.Network.TunnelType == "rathole" && p.config.Network.RatholeCAIssuerName != "" {
+	if p.config.Network.TunnelType == tunnelTypeRathole && p.config.Network.RatholeCAIssuerName != "" {
 		if tlsErr := p.applyRatholeTLSResources(ctx, templateData); tlsErr != nil {
 			log.G(ctx).Warningf("Failed to apply rathole TLS resources for %s/%s: %v", originalPod.Namespace, originalPod.Name, tlsErr)
 		}
 	}
 
-	log.G(ctx).Infof("Created wstunnel infrastructure for %s/%s", originalPod.Namespace, originalPod.Name)
+	log.G(ctx).Infof("Created tunnel infrastructure (%s) for %s/%s", p.config.Network.TunnelType, originalPod.Namespace, originalPod.Name)
 	return createdPod, &templateData, nil
 }
 
@@ -988,7 +998,7 @@ func (p *Provider) executeWstunnelTemplate(ctx context.Context, data WstunnelTem
 			content []byte
 			err     error
 		)
-		if p.config.Network.TunnelType == "rathole" {
+		if p.config.Network.TunnelType == tunnelTypeRathole {
 			content, err = defaultRatholeTemplate.ReadFile("templates/rathole-template.yaml")
 			if err != nil {
 				return "", fmt.Errorf("failed to read embedded rathole template: %w", err)
@@ -1319,17 +1329,17 @@ func (p *Provider) cleanupWstunnelResources(ctx context.Context, wstunnelName, n
 
 	// Delete wstunnel wireguard configmap (used in full-mesh / wstunnel mode)
 	err = p.clientSet.CoreV1().ConfigMaps(namespace).Delete(ctx, wstunnelName+"-wg-config", metav1.DeleteOptions{})
-	if err != nil {
+	if err != nil && !apierrors.IsNotFound(err) {
 		log.G(ctx).Warningf("Failed to delete wstunnel configmap %s/%s: %v", namespace, wstunnelName+"-wg-config", err)
-	} else {
+	} else if err == nil {
 		log.G(ctx).Infof("Successfully deleted wstunnel configmap %s/%s", namespace, wstunnelName+"-wg-config")
 	}
 
 	// Delete rathole configmap (used in rathole mode)
 	err = p.clientSet.CoreV1().ConfigMaps(namespace).Delete(ctx, wstunnelName+"-rathole-config", metav1.DeleteOptions{})
-	if err != nil {
+	if err != nil && !apierrors.IsNotFound(err) {
 		log.G(ctx).Warningf("Failed to delete rathole configmap %s/%s: %v", namespace, wstunnelName+"-rathole-config", err)
-	} else {
+	} else if err == nil {
 		log.G(ctx).Infof("Successfully deleted rathole configmap %s/%s", namespace, wstunnelName+"-rathole-config")
 	}
 
@@ -1504,22 +1514,35 @@ func (p *Provider) applyRatholeTLSResources(ctx context.Context, td WstunnelTemp
 	return nil
 }
 
-// waitForRatholeCertSecret polls until cert-manager has issued the given TLS secret or the context is cancelled.
+// waitForRatholeCertSecret polls until cert-manager has issued the given TLS secret (with all
+// required data keys: ca.crt, tls.crt, tls.key) or the context is cancelled.
 func (p *Provider) waitForRatholeCertSecret(ctx context.Context, secretName, namespace string) error {
-	timeout := 120 * time.Second
-	deadline := time.Now().Add(timeout)
-	for time.Now().Before(deadline) {
+	const pollInterval = 2 * time.Second
+	const timeout = 120 * time.Second
+
+	ticker := time.NewTicker(pollInterval)
+	defer ticker.Stop()
+	timer := time.NewTimer(timeout)
+	defer timer.Stop()
+
+	for {
 		secret, err := p.clientSet.CoreV1().Secrets(namespace).Get(ctx, secretName, metav1.GetOptions{})
-		if err == nil && len(secret.Data["tls.crt"]) > 0 {
-			return nil
+		if err == nil {
+			allPresent := len(secret.Data["ca.crt"]) > 0 &&
+				len(secret.Data["tls.crt"]) > 0 &&
+				len(secret.Data["tls.key"]) > 0
+			if allPresent {
+				return nil
+			}
 		}
 		select {
 		case <-ctx.Done():
 			return ctx.Err()
-		case <-time.After(2 * time.Second):
+		case <-timer.C:
+			return fmt.Errorf("timed out waiting for cert-manager to issue secret %s/%s", namespace, secretName)
+		case <-ticker.C:
 		}
 	}
-	return fmt.Errorf("timed out waiting for cert-manager to issue secret %s/%s", namespace, secretName)
 }
 
 // cleanupPartialWstunnelResources removes specific resources that were created before a failure

@@ -51,9 +51,43 @@ func TestRatholeTemplateExecution(t *testing.T) {
 
 	// The nginx Ingress is no longer part of the template; TLS ingress is managed separately
 	// via the Traefik IngressRouteTCP applied by applyRatholeTLSResources.
-	assert.NotContains(t, yaml, "nginx.ingress.kubernetes.io", "nginx Ingress should not be in the rathole template")
+	assert.NotContains(t, yaml, "nginx.ingress.kubernetes.io", "nginx Ingress should not be in the rathole template without HasNginxIngress")
 	// Plain TCP server — no WebSocket transport section
 	assert.NotContains(t, yaml, "type = \"websocket\"", "server should use plain TCP, not WebSocket")
+}
+
+// TestRatholeTemplateWebSocketMode verifies that the rathole template includes a nginx Ingress
+// when HasNginxIngress is true (WebSocket fallback mode, no CA issuer configured).
+func TestRatholeTemplateWebSocketMode(t *testing.T) {
+	p := &Provider{
+		config: Config{
+			Network: Network{
+				TunnelType:  "rathole",
+				WildcardDNS: "tunnel.example.com",
+			},
+		},
+		clientSet: fake.NewClientset(),
+	}
+
+	data := WstunnelTemplateData{
+		Name:            "my-pod-default",
+		Namespace:       "default-wstunnel",
+		RandomPassword:  "abc123",
+		WildcardDNS:     "tunnel.example.com",
+		HasNginxIngress: true,
+		ExposedPorts: []PortMapping{
+			{Port: 8080, Name: "http", Protocol: "TCP"},
+		},
+	}
+
+	ctx := context.Background()
+	yaml, err := p.executeWstunnelTemplate(ctx, data)
+	require.NoError(t, err)
+	assert.NotEmpty(t, yaml)
+
+	// WebSocket mode: nginx Ingress should be present so the client can reach port 80
+	assert.Contains(t, yaml, "nginx.ingress.kubernetes.io", "nginx Ingress should be present in WebSocket mode")
+	assert.Contains(t, yaml, "rathole-my-pod-default.tunnel.example.com", "Ingress host should match rathole DNS")
 }
 
 // TestWstunnelTemplateUnchanged verifies that the existing wstunnel template is still
@@ -237,10 +271,10 @@ func TestRatholeClientAnnotationCustomCommand(t *testing.T) {
 	p := &Provider{
 		config: Config{
 			Network: Network{
-				TunnelType:     "rathole",
-				WildcardDNS:    "tunnel.example.com",
-				RatholeCommand: customCmd,
-				// RatholeCAIssuerName intentionally empty → WebSocket fallback uses RatholeCommand
+				TunnelType:       "rathole",
+				WildcardDNS:      "tunnel.example.com",
+				RatholeWSCommand: customCmd,
+				// RatholeCAIssuerName intentionally empty → WebSocket fallback uses RatholeWSCommand
 			},
 		},
 		clientSet: fakeClient,

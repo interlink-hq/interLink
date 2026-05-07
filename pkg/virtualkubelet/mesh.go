@@ -291,7 +291,7 @@ PersistentKeepalive = %d
 
 		pod.Annotations["interlink.eu/wireguard-client-snippet"] = wgSnippet
 
-	case p.config.Network.TunnelType == "rathole":
+	case p.config.Network.TunnelType == tunnelTypeRathole:
 		// Rathole mode: build a client TOML config and generate the client bootstrap command.
 		// When RatholeCAIssuerName is set, use TLS transport with cert-manager-issued certificates;
 		// otherwise fall back to WebSocket transport for backward compatibility.
@@ -321,6 +321,13 @@ PersistentKeepalive = %d
 				return fmt.Errorf("failed to read rathole client certificate secret: %w", err)
 			}
 
+			// Validate all required keys are present and non-empty.
+			for _, key := range []string{"ca.crt", "tls.crt", "tls.key"} {
+				if len(certSecret.Data[key]) == 0 {
+					return fmt.Errorf("rathole client certificate secret %s/%s is missing required key %q", td.Namespace, clientCertSecretName, key)
+				}
+			}
+
 			caCrtB64 := base64.StdEncoding.EncodeToString(certSecret.Data["ca.crt"])
 			clientCrtB64 := base64.StdEncoding.EncodeToString(certSecret.Data["tls.crt"])
 			clientKeyB64 := base64.StdEncoding.EncodeToString(certSecret.Data["tls.key"])
@@ -334,7 +341,7 @@ PersistentKeepalive = %d
 			tomlBuilder.WriteString("cert = \"/tmp/rathole-client.crt\"\n")
 			tomlBuilder.WriteString("key = \"/tmp/rathole-client.key\"\n\n")
 			for _, port := range td.ExposedPorts {
-				if strings.ToUpper(port.Protocol) == "UDP" {
+				if strings.ToUpper(port.Protocol) == protocolUDP {
 					log.G(ctx).Debugf("Skipping UDP port %d in rathole client config (TLS transport forwards TCP only)", port.Port)
 					continue
 				}
@@ -357,7 +364,7 @@ PersistentKeepalive = %d
 			fmt.Fprintf(&tomlBuilder, "[client]\nremote_addr = \"%s:80\"\n\n", ratholeEndpoint)
 			tomlBuilder.WriteString("[client.transport]\ntype = \"websocket\"\n\n")
 			for _, port := range td.ExposedPorts {
-				if strings.ToUpper(port.Protocol) == "UDP" {
+				if strings.ToUpper(port.Protocol) == protocolUDP {
 					log.G(ctx).Debugf("Skipping UDP port %d in rathole client config (websocket transport forwards TCP only)", port.Port)
 					continue
 				}
@@ -367,7 +374,7 @@ PersistentKeepalive = %d
 
 			configB64 := base64.StdEncoding.EncodeToString([]byte(tomlBuilder.String()))
 
-			ratholeWSCmd := p.config.Network.RatholeCommand
+			ratholeWSCmd := p.config.Network.RatholeWSCommand
 			if ratholeWSCmd == "" {
 				ratholeWSCmd = DefaultRatholeWSCommand
 			}
@@ -381,7 +388,7 @@ PersistentKeepalive = %d
 	default:
 		var rOptions []string
 		for _, port := range td.ExposedPorts {
-			if strings.ToUpper(port.Protocol) == "UDP" {
+			if strings.ToUpper(port.Protocol) == protocolUDP {
 				continue
 			}
 			rOptions = append(rOptions, fmt.Sprintf("-R tcp://0.0.0.0:%d:localhost:%d", port.Port, port.Port))

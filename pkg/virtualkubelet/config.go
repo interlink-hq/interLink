@@ -131,7 +131,7 @@ type PodCIDR struct {
 type Network struct {
 	// EnableTunnel enables WebSocket tunneling for pod port exposure
 	EnableTunnel bool `yaml:"EnableTunnel" default:"false"`
-	// TunnelType selects the port-forwarding backend: "wstunnel" (default) or "rathole"
+	// TunnelType selects the port-forwarding backend: "" or "wstunnel" (default, backward-compatible) or "rathole".
 	TunnelType string `yaml:"TunnelType,omitempty"`
 	// WildcardDNS specifies the DNS domain for generating tunnel endpoints
 	WildcardDNS string `yaml:"WildcardDNS,omitempty"`
@@ -144,11 +144,17 @@ type Network struct {
 	// RatholeExecutableURL specifies the URL to download the rathole executable zip archive
 	// (default is "https://github.com/rapiz1/rathole/releases/download/v0.5.0/rathole-x86_64-unknown-linux-musl.zip")
 	RatholeExecutableURL string `yaml:"RatholeExecutableURL,omitempty"`
-	// RatholeCommand specifies a custom command template for setting up rathole clients.
-	// Five %s format verbs are substituted in order: the rathole download URL, base64-encoded CA cert,
-	// base64-encoded client cert, base64-encoded client key, and base64-encoded client TOML config.
-	// When RatholeCAIssuerName is empty the legacy two-argument WebSocket command is used instead.
+	// RatholeCommand specifies a custom command template for rathole clients in TLS mode
+	// (i.e., when RatholeCAIssuerName is set). Five %s format verbs are substituted in order:
+	// the rathole download URL, base64-encoded CA cert, base64-encoded client cert,
+	// base64-encoded client key, and base64-encoded client TOML config.
+	// Default: DefaultRatholeCommand.
 	RatholeCommand string `yaml:"RatholeCommand,omitempty"`
+	// RatholeWSCommand specifies a custom command template for rathole clients in WebSocket fallback
+	// mode (i.e., when RatholeCAIssuerName is empty). Two %s format verbs are substituted in order:
+	// the rathole download URL and the base64-encoded client TOML config.
+	// Default: DefaultRatholeWSCommand.
+	RatholeWSCommand string `yaml:"RatholeWSCommand,omitempty"`
 	// RatholeCAIssuerName is the cert-manager ClusterIssuer or Issuer name for the admin-provided CA.
 	// When set, rathole uses TLS transport; cert-manager issues both the server and client certificates.
 	// A Traefik IngressRouteTCP resource is created to expose the rathole server via TLS on port 443.
