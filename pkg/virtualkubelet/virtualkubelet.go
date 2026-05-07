@@ -101,6 +101,8 @@ const (
 	annDisableOffloadContainers     = "interlink.eu/disable-offload-containers"      // comma-separated container names
 	annDisableOffloadInitContainers = "interlink.eu/disable-offload-init-containers" // comma-separated init container names
 	annMeshNetworkDisabled          = "interlink.eu/mesh-network"                    // set to "disabled" to opt out of mesh networking
+	annShadowSameNS                 = "interlink.eu/shadow-same-ns"                  // set to "true" to create shadow resources in the same namespace
+	annShadowSameNSValue            = "true"                                         // expected value for annShadowSameNS
 )
 
 type WstunnelTemplateData struct {
@@ -764,7 +766,7 @@ func (p *Provider) createDummyPod(ctx context.Context, originalPod *v1.Pod) (*v1
 
 	isSameNamespace := false
 	if originalPod.Annotations != nil {
-		if val, ok := originalPod.Annotations["interlink.eu/shadow-same-ns"]; ok && val == "true" {
+		if val, ok := originalPod.Annotations["interlink.eu/shadow-same-ns"]; ok && val == annShadowSameNSValue {
 			isSameNamespace = true
 		}
 	}
@@ -899,9 +901,11 @@ func (p *Provider) createDummyPod(ctx context.Context, originalPod *v1.Pod) (*v1
 	}
 
 	// For rathole TLS mode, also create the cert-manager Certificates and Traefik IngressRouteTCP.
+	// This is a hard requirement: if TLS resource creation fails when RatholeCAIssuerName is set,
+	// the annotation path will block waiting for a cert secret that will never appear.
 	if p.config.Network.TunnelType == tunnelTypeRathole && p.config.Network.RatholeCAIssuerName != "" {
 		if tlsErr := p.applyRatholeTLSResources(ctx, templateData); tlsErr != nil {
-			log.G(ctx).Warningf("Failed to apply rathole TLS resources for %s/%s: %v", originalPod.Namespace, originalPod.Name, tlsErr)
+			return nil, nil, fmt.Errorf("failed to apply rathole TLS resources for %s/%s: %w", originalPod.Namespace, originalPod.Name, tlsErr)
 		}
 	}
 
@@ -1320,11 +1324,12 @@ func (p *Provider) cleanupWstunnelResources(ctx context.Context, wstunnelName, n
 		log.G(ctx).Infof("Successfully deleted tunnel service %s/%s", namespace, wstunnelName)
 	}
 
-	// Delete ingress
+	// Delete ingress (nginx WebSocket ingress used in rathole WS-fallback mode or wstunnel mode).
+	// Ingress is absent in rathole TLS mode (Traefik IngressRouteTCP is used instead); suppress NotFound.
 	err = p.clientSet.NetworkingV1().Ingresses(namespace).Delete(ctx, wstunnelName, metav1.DeleteOptions{})
-	if err != nil {
+	if err != nil && !apierrors.IsNotFound(err) {
 		log.G(ctx).Warningf("Failed to delete tunnel ingress %s/%s: %v", namespace, wstunnelName, err)
-	} else {
+	} else if err == nil {
 		log.G(ctx).Infof("Successfully deleted tunnel ingress %s/%s", namespace, wstunnelName)
 	}
 
@@ -1535,6 +1540,10 @@ func (p *Provider) waitForRatholeCertSecret(ctx context.Context, secretName, nam
 			if allPresent {
 				return nil
 			}
+		} else if !apierrors.IsNotFound(err) {
+			// Fail fast for non-transient errors (e.g. Forbidden, Unauthorized) so the caller
+			// gets actionable feedback instead of waiting the full 120s timeout.
+			return fmt.Errorf("unexpected error polling for cert secret %s/%s: %w", namespace, secretName, err)
 		}
 		select {
 		case <-ctx.Done():
@@ -1740,14 +1749,27 @@ func isMeshNetworkingDisabled(pod *v1.Pod) bool {
 
 // handleWstunnelCreation creates wstunnel infrastructure and returns the pod IP
 func (p *Provider) handleWstunnelCreation(ctx context.Context, pod *v1.Pod) (string, error) {
-	wstunnelName := pod.Name + "-wstunnel"
+	// Compute resource names using the same logic as createDummyPod so that cleanup
+	// always targets the resources that were actually created.
+	isSameNamespace := false
+	if pod.Annotations != nil {
+		if val, ok := pod.Annotations["interlink.eu/shadow-same-ns"]; ok && val == annShadowSameNSValue {
+			isSameNamespace = true
+		}
+	}
+	var wstunnelName, wstunnelNS string
+	if isSameNamespace {
+		wstunnelName, wstunnelNS = computeWstunnelResourceNamesForSameNamespace(pod.Name, pod.Namespace)
+	} else {
+		wstunnelName, wstunnelNS = computeWstunnelResourceNames(pod.Name, pod.Namespace)
+	}
 
 	// Create wstunnel infrastructure outside virtual node for port exposure
 	dummyPod, templateData, err := p.createDummyPod(ctx, pod)
 	if err != nil {
 		log.G(ctx).Errorf("Failed to create wstunnel infrastructure for %s/%s: %v", pod.Namespace, pod.Name, err)
 		// Clean up any partially created resources
-		p.cleanupWstunnelResources(ctx, wstunnelName, pod.Namespace)
+		p.cleanupWstunnelResources(ctx, wstunnelName, wstunnelNS)
 		return "", fmt.Errorf("failed to create wstunnel infrastructure for exposed ports: %w", err)
 	}
 
@@ -1759,11 +1781,11 @@ func (p *Provider) handleWstunnelCreation(ctx context.Context, pod *v1.Pod) (str
 		}
 	}
 
-	podIP, err := p.waitForWstunnelPodIP(ctx, dummyPod, timeout, wstunnelName, pod.Namespace)
+	podIP, err := p.waitForWstunnelPodIP(ctx, dummyPod, timeout, wstunnelName, wstunnelNS)
 	if err != nil {
 		log.G(ctx).Errorf("Failed to get wstunnel pod IP for %s/%s: %v", pod.Namespace, pod.Name, err)
 		// Clean up resources since we failed to get a working pod
-		p.cleanupWstunnelResources(ctx, wstunnelName, pod.Namespace)
+		p.cleanupWstunnelResources(ctx, wstunnelName, wstunnelNS)
 		return "", err
 	}
 
@@ -2039,7 +2061,7 @@ func (p *Provider) DeletePod(ctx context.Context, pod *v1.Pod) (err error) {
 
 	isSameNamespace := false
 	if pod.Annotations != nil {
-		if val, ok := pod.Annotations["interlink.eu/shadow-same-ns"]; ok && val == "true" {
+		if val, ok := pod.Annotations["interlink.eu/shadow-same-ns"]; ok && val == annShadowSameNSValue {
 			isSameNamespace = true
 		}
 	}
@@ -2475,8 +2497,13 @@ func (p *Provider) initClientSet(ctx context.Context) error {
 
 		p.dynamicClient, err = dynamic.NewForConfig(config)
 		if err != nil {
+			// In rathole TLS mode the dynamic client is required to create cert-manager and Traefik
+			// resources. Fail hard so the operator learns about the misconfiguration immediately.
+			if p.config.Network.TunnelType == tunnelTypeRathole && p.config.Network.RatholeCAIssuerName != "" {
+				log.G(ctx).Error(err)
+				return fmt.Errorf("dynamic client required for rathole TLS mode but could not be initialised: %w", err)
+			}
 			log.G(ctx).Warningf("Failed to create dynamic client (CRD resources will not be managed): %v", err)
-			// non-fatal: rathole TLS resources won't be applied, but wstunnel still works
 		}
 	}
 

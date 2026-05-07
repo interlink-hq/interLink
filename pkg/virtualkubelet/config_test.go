@@ -1,6 +1,7 @@
 package virtualkubelet
 
 import (
+	"strings"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -130,7 +131,10 @@ func TestNetwork_RatholeConfiguration(t *testing.T) {
 		TunnelType:           "rathole",
 		WildcardDNS:          "tunnel.example.com",
 		RatholeExecutableURL: "https://example.com/rathole.zip",
-		RatholeCommand:       "curl -L %s -o rathole.zip && unzip rathole.zip && echo %s | base64 -d > /tmp/client.toml && ./rathole /tmp/client.toml &",
+		// RatholeCommand is the TLS-mode template: 5 %s args (URL, CA cert, client cert, client key, client TOML)
+		RatholeCommand: "curl -L %s -o r.zip && unzip r.zip && echo %s | base64 -d > /tmp/ca.crt && echo %s | base64 -d > /tmp/cl.crt && echo %s | base64 -d > /tmp/cl.key && echo %s | base64 -d > /tmp/c.toml && ./rathole --client /tmp/c.toml &",
+		// RatholeWSCommand is the WebSocket-fallback template: 2 %s args (URL, client TOML)
+		RatholeWSCommand: "curl -L %s -o r.zip && unzip r.zip && echo %s | base64 -d > /tmp/c.toml && ./rathole --client /tmp/c.toml &",
 	}
 
 	assert.True(t, network.EnableTunnel)
@@ -138,6 +142,11 @@ func TestNetwork_RatholeConfiguration(t *testing.T) {
 	assert.Equal(t, "tunnel.example.com", network.WildcardDNS)
 	assert.Equal(t, "https://example.com/rathole.zip", network.RatholeExecutableURL)
 	assert.NotEmpty(t, network.RatholeCommand)
+	assert.NotEmpty(t, network.RatholeWSCommand)
+	// Validate that RatholeCommand contains exactly 5 %s verbs (TLS mode)
+	assert.Equal(t, 5, strings.Count(network.RatholeCommand, "%s"), "RatholeCommand must have exactly 5 %%s format verbs for TLS mode")
+	// Validate that RatholeWSCommand contains exactly 2 %s verbs (WebSocket fallback)
+	assert.Equal(t, 2, strings.Count(network.RatholeWSCommand, "%s"), "RatholeWSCommand must have exactly 2 %%s format verbs for WebSocket mode")
 }
 
 func TestNetwork_WstunnelDefaultTunnelType(t *testing.T) {

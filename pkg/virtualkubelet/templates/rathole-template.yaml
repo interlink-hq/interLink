@@ -8,10 +8,12 @@ data:
     [server]
     bind_addr = "0.0.0.0:2333"
     {{- range .ExposedPorts}}
+    {{- if ne .Protocol "UDP"}}
 
     [server.services.p{{.Port}}]
     token = "{{$.RandomPassword}}"
     bind_addr = "0.0.0.0:{{.Port}}"
+    {{- end}}
     {{- end}}
 ---
 apiVersion: apps/v1
@@ -40,9 +42,11 @@ spec:
           name: control
           protocol: TCP
         {{- range .ExposedPorts}}
+        {{- if ne .Protocol "UDP"}}
         - containerPort: {{.Port}}
           name: {{if .Name}}{{.Name}}{{else}}port-{{.Port}}{{end}}
-          protocol: {{.Protocol}}
+          protocol: TCP
+        {{- end}}
         {{- end}}
         volumeMounts:
         - name: rathole-config
@@ -84,13 +88,13 @@ spec:
       name: control
       protocol: TCP
     {{- range .ExposedPorts}}
+    {{- if ne .Protocol "UDP"}}
     {{- if ne .Port 2333}}{{/* skip control port 2333 to avoid conflicts with the rathole server listener */}}
     - port: {{.Port}}
       targetPort: {{.Port}}
       name: {{if .Name}}{{.Name}}{{else}}port-{{.Port}}{{end}}
-      {{- if .Protocol}}
-      protocol: {{.Protocol}}
-      {{- end}}
+      protocol: TCP
+    {{- end}}
     {{- end}}
     {{- end}}
 {{- if .HasNginxIngress}}

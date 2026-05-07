@@ -356,6 +356,9 @@ PersistentKeepalive = %d
 				ratholeCmd = DefaultRatholeCommand
 			}
 			mainCmd = fmt.Sprintf(ratholeCmd, ratholeURL, caCrtB64, clientCrtB64, clientKeyB64, configB64)
+			if strings.Contains(mainCmd, "%!(") {
+				return fmt.Errorf("RatholeCommand has wrong number of format verbs (expected 5 %%s): %q", p.config.Network.RatholeCommand)
+			}
 		} else {
 			// WebSocket fallback (no CA issuer configured)
 			log.G(ctx).Debugf("RatholeCAIssuerName not set; using WebSocket transport for pod %s/%s", pod.Namespace, pod.Name)
@@ -379,6 +382,9 @@ PersistentKeepalive = %d
 				ratholeWSCmd = DefaultRatholeWSCommand
 			}
 			mainCmd = fmt.Sprintf(ratholeWSCmd, ratholeURL, configB64)
+			if strings.Contains(mainCmd, "%!(") {
+				return fmt.Errorf("RatholeWSCommand has wrong number of format verbs (expected 2 %%s): %q", p.config.Network.RatholeWSCommand)
+			}
 		}
 
 		// Remove any stale wstunnel annotation and set the rathole one
