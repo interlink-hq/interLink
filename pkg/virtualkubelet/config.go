@@ -142,7 +142,7 @@ type Network struct {
 	// WstunnelCommand specifies the command template for setting up wstunnel clients
 	WstunnelCommand string `yaml:"WstunnelCommand,omitempty"`
 	// RatholeExecutableURL specifies the URL to download the rathole executable zip archive
-	// (default is "https://github.com/rapiz1/rathole/releases/download/v0.5.0/rathole-x86_64-unknown-linux-musl.zip")
+	// (default is "https://github.com/rathole-org/rathole/releases/download/v0.5.0/rathole-x86_64-unknown-linux-gnu.zip")
 	RatholeExecutableURL string `yaml:"RatholeExecutableURL,omitempty"`
 	// RatholeCommand specifies a custom command template for rathole clients in TLS mode
 	// (i.e., when RatholeCAIssuerName is set). Five %s format verbs are substituted in order:

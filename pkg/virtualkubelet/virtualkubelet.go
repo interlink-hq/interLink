@@ -78,14 +78,15 @@ const (
 	tunnelTypeRathole      = "rathole"
 	DefaultWstunnelCommand = "curl  -L -f -k https://github.com/erebe/wstunnel/releases/download/v10.4.4/wstunnel_10.4.4_linux_amd64.tar.gz -o wstunnel.tar.gz && tar -xzvf wstunnel.tar.gz && chmod +x wstunnel && ./wstunnel client --http-upgrade-path-prefix %s %s ws://%s:80 &"
 	// DefaultRatholeExecutableURL is the default URL to download the rathole executable zip archive.
-	DefaultRatholeExecutableURL = "https://github.com/rapiz1/rathole/releases/download/v0.5.0/rathole-x86_64-unknown-linux-musl.zip"
+	// Source: https://github.com/rathole-org/rathole (note: x86_64 musl was dropped in v0.5.0; use gnu).
+	DefaultRatholeExecutableURL = "https://github.com/rathole-org/rathole/releases/download/v0.5.0/rathole-x86_64-unknown-linux-gnu.zip"
 	// DefaultRatholeCommand is the default command template for the rathole client in TLS mode.
 	// Five %s format verbs are substituted in order: rathole download URL, base64-encoded CA cert,
 	// base64-encoded client cert, base64-encoded client key, and base64-encoded client TOML config.
-	DefaultRatholeCommand = "curl -L -f -k %s -o rathole.zip && unzip -q rathole.zip && chmod +x rathole && echo %s | base64 -d > /tmp/rathole-ca.crt && echo %s | base64 -d > /tmp/rathole-client.crt && echo %s | base64 -d > /tmp/rathole-client.key && echo %s | base64 -d > /tmp/rathole-client.toml && ./rathole /tmp/rathole-client.toml &"
+	DefaultRatholeCommand = "curl -L -f -k %s -o rathole.zip && unzip -q rathole.zip && chmod +x rathole && echo %s | base64 -d > /tmp/rathole-ca.crt && echo %s | base64 -d > /tmp/rathole-client.crt && echo %s | base64 -d > /tmp/rathole-client.key && echo %s | base64 -d > /tmp/rathole-client.toml && ./rathole --client /tmp/rathole-client.toml &"
 	// DefaultRatholeWSCommand is the fallback command template used when no CA issuer is configured
 	// (WebSocket transport, backward-compatible). Two %s args: download URL and base64 client TOML.
-	DefaultRatholeWSCommand = "curl -L -f -k %s -o rathole.zip && unzip -q rathole.zip && chmod +x rathole && echo %s | base64 -d > /tmp/rathole-client.toml && ./rathole /tmp/rathole-client.toml &"
+	DefaultRatholeWSCommand = "curl -L -f -k %s -o rathole.zip && unzip -q rathole.zip && chmod +x rathole && echo %s | base64 -d > /tmp/rathole-client.toml && ./rathole --client /tmp/rathole-client.toml &"
 )
 
 // Annotations for WireGuard and WStunnel configuration
