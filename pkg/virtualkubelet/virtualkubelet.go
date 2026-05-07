@@ -766,7 +766,7 @@ func (p *Provider) createDummyPod(ctx context.Context, originalPod *v1.Pod) (*v1
 
 	isSameNamespace := false
 	if originalPod.Annotations != nil {
-		if val, ok := originalPod.Annotations["interlink.eu/shadow-same-ns"]; ok && val == annShadowSameNSValue {
+		if val, ok := originalPod.Annotations[annShadowSameNS]; ok && val == annShadowSameNSValue {
 			isSameNamespace = true
 		}
 	}
@@ -1753,7 +1753,7 @@ func (p *Provider) handleWstunnelCreation(ctx context.Context, pod *v1.Pod) (str
 	// always targets the resources that were actually created.
 	isSameNamespace := false
 	if pod.Annotations != nil {
-		if val, ok := pod.Annotations["interlink.eu/shadow-same-ns"]; ok && val == annShadowSameNSValue {
+		if val, ok := pod.Annotations[annShadowSameNS]; ok && val == annShadowSameNSValue {
 			isSameNamespace = true
 		}
 	}
@@ -2061,7 +2061,7 @@ func (p *Provider) DeletePod(ctx context.Context, pod *v1.Pod) (err error) {
 
 	isSameNamespace := false
 	if pod.Annotations != nil {
-		if val, ok := pod.Annotations["interlink.eu/shadow-same-ns"]; ok && val == annShadowSameNSValue {
+		if val, ok := pod.Annotations[annShadowSameNS]; ok && val == annShadowSameNSValue {
 			isSameNamespace = true
 		}
 	}

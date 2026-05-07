@@ -355,10 +355,13 @@ PersistentKeepalive = %d
 			if ratholeCmd == "" {
 				ratholeCmd = DefaultRatholeCommand
 			}
-			mainCmd = fmt.Sprintf(ratholeCmd, ratholeURL, caCrtB64, clientCrtB64, clientKeyB64, configB64)
-			if strings.Contains(mainCmd, "%!(") {
-				return fmt.Errorf("RatholeCommand has wrong number of format verbs (expected 5 %%s): %q", p.config.Network.RatholeCommand)
+			// Validate that the TLS command template has exactly 5 %s format verbs
+			// (URL, CA cert, client cert, client key, client TOML).
+			if strings.Count(ratholeCmd, "%s") != 5 {
+				return fmt.Errorf("RatholeCommand must have exactly 5 %%s format verbs (url, ca, cert, key, toml); got %d in %q",
+					strings.Count(ratholeCmd, "%s"), p.config.Network.RatholeCommand)
 			}
+			mainCmd = fmt.Sprintf(ratholeCmd, ratholeURL, caCrtB64, clientCrtB64, clientKeyB64, configB64)
 		} else {
 			// WebSocket fallback (no CA issuer configured)
 			log.G(ctx).Debugf("RatholeCAIssuerName not set; using WebSocket transport for pod %s/%s", pod.Namespace, pod.Name)
@@ -381,10 +384,13 @@ PersistentKeepalive = %d
 			if ratholeWSCmd == "" {
 				ratholeWSCmd = DefaultRatholeWSCommand
 			}
-			mainCmd = fmt.Sprintf(ratholeWSCmd, ratholeURL, configB64)
-			if strings.Contains(mainCmd, "%!(") {
-				return fmt.Errorf("RatholeWSCommand has wrong number of format verbs (expected 2 %%s): %q", p.config.Network.RatholeWSCommand)
+			// Validate that the WebSocket command template has exactly 2 %s format verbs
+			// (URL, client TOML).
+			if strings.Count(ratholeWSCmd, "%s") != 2 {
+				return fmt.Errorf("RatholeWSCommand must have exactly 2 %%s format verbs (url, toml); got %d in %q",
+					strings.Count(ratholeWSCmd, "%s"), p.config.Network.RatholeWSCommand)
 			}
+			mainCmd = fmt.Sprintf(ratholeWSCmd, ratholeURL, configB64)
 		}
 
 		// Remove any stale wstunnel annotation and set the rathole one
