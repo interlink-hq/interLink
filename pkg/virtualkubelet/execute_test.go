@@ -9,6 +9,7 @@ import (
 	"strings"
 	"testing"
 
+	types "github.com/interlink-hq/interlink/pkg/interlink"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	v1 "k8s.io/api/core/v1"
@@ -418,4 +419,99 @@ func TestRemoteExecutionHandleProjectedSourceConfigMap(t *testing.T) {
 			assert.Equal(t, tt.expectedData, projectedVolume.Data)
 		})
 	}
+}
+
+func TestRemoteExecutionHandleProjectedSourceDownwardAPIFieldRef(t *testing.T) {
+	ctx := context.Background()
+	pod := &v1.Pod{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:        "test-pod",
+			Namespace:   "test-ns",
+			UID:         "uid-1234",
+			Labels:      map[string]string{"app": "demo", "tier": "backend"},
+			Annotations: map[string]string{"my.annotation/key": "value"},
+		},
+		Spec: v1.PodSpec{
+			NodeName:           "node-a",
+			ServiceAccountName: "svc-account",
+		},
+		Status: v1.PodStatus{
+			PodIP:  "10.42.0.15",
+			HostIP: "172.18.0.20",
+		},
+	}
+	source := v1.VolumeProjection{
+		DownwardAPI: &v1.DownwardAPIProjection{
+			Items: []v1.DownwardAPIVolumeFile{
+				{Path: "pod-name", FieldRef: &v1.ObjectFieldSelector{FieldPath: "metadata.name"}},
+				{Path: "namespace", FieldRef: &v1.ObjectFieldSelector{FieldPath: "metadata.namespace"}},
+				{Path: "uid", FieldRef: &v1.ObjectFieldSelector{FieldPath: "metadata.uid"}},
+				{Path: "labels", FieldRef: &v1.ObjectFieldSelector{FieldPath: "metadata.labels"}},
+				{Path: "annotations", FieldRef: &v1.ObjectFieldSelector{FieldPath: "metadata.annotations"}},
+				{Path: "node-name", FieldRef: &v1.ObjectFieldSelector{FieldPath: "spec.nodeName"}},
+				{Path: "sa-name", FieldRef: &v1.ObjectFieldSelector{FieldPath: "spec.serviceAccountName"}},
+				{Path: "pod-ip", FieldRef: &v1.ObjectFieldSelector{FieldPath: "status.podIP"}},
+				{Path: "host-ip", FieldRef: &v1.ObjectFieldSelector{FieldPath: "status.hostIP"}},
+			},
+		},
+	}
+	projectedVolume := &v1.ConfigMap{Data: map[string]string{}}
+
+	err := remoteExecutionHandleProjectedSource(ctx, &Provider{}, pod, source, projectedVolume)
+	require.NoError(t, err)
+
+	assert.Equal(t, "test-pod", projectedVolume.Data["pod-name"])
+	assert.Equal(t, "test-ns", projectedVolume.Data["namespace"])
+	assert.Equal(t, "uid-1234", projectedVolume.Data["uid"])
+	assert.Equal(t, "app=\"demo\"\ntier=\"backend\"\n", projectedVolume.Data["labels"])
+	assert.Equal(t, "my.annotation/key=\"value\"\n", projectedVolume.Data["annotations"])
+	assert.Equal(t, "node-a", projectedVolume.Data["node-name"])
+	assert.Equal(t, "svc-account", projectedVolume.Data["sa-name"])
+	assert.Equal(t, "10.42.0.15", projectedVolume.Data["pod-ip"])
+	assert.Equal(t, "172.18.0.20", projectedVolume.Data["host-ip"])
+}
+
+func TestRemoteExecutionHandleVolumesDownwardAPI(t *testing.T) {
+	ctx := context.Background()
+	namespace := "test-ns"
+	pod := &v1.Pod{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:        "test-pod",
+			Namespace:   namespace,
+			UID:         "uid-1234",
+			Labels:      map[string]string{"app": "demo"},
+			Annotations: map[string]string{"a": "b"},
+		},
+		Spec: v1.PodSpec{
+			Volumes: []v1.Volume{
+				{
+					Name: "podinfo",
+					VolumeSource: v1.VolumeSource{
+						DownwardAPI: &v1.DownwardAPIVolumeSource{
+							Items: []v1.DownwardAPIVolumeFile{
+								{Path: "pod-name", FieldRef: &v1.ObjectFieldSelector{FieldPath: "metadata.name"}},
+								{Path: "labels", FieldRef: &v1.ObjectFieldSelector{FieldPath: "metadata.labels"}},
+								{Path: "annotations", FieldRef: &v1.ObjectFieldSelector{FieldPath: "metadata.annotations"}},
+							},
+						},
+					},
+				},
+			},
+		},
+	}
+
+	fakeClient := fake.NewSimpleClientset(pod.DeepCopy())
+	p := &Provider{
+		clientSet: fakeClient,
+		notifier:  func(*v1.Pod) {},
+	}
+	req := &types.PodCreateRequests{}
+
+	err := remoteExecutionHandleVolumes(ctx, p, pod, req)
+	require.NoError(t, err)
+	require.Len(t, req.ProjectedVolumeMaps, 1)
+	assert.Equal(t, "podinfo", req.ProjectedVolumeMaps[0].Name)
+	assert.Equal(t, "test-pod", req.ProjectedVolumeMaps[0].Data["pod-name"])
+	assert.Equal(t, "app=\"demo\"\n", req.ProjectedVolumeMaps[0].Data["labels"])
+	assert.Equal(t, "a=\"b\"\n", req.ProjectedVolumeMaps[0].Data["annotations"])
 }

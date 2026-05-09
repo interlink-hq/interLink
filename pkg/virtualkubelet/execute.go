@@ -14,6 +14,7 @@ import (
 	"net/url"
 	"os"
 	"regexp"
+	"sort"
 	"strconv"
 	"strings"
 	"time"
@@ -829,33 +830,74 @@ func remoteExecutionHandleProjectedSource(
 		// https://kubernetes.io/docs/concepts/workloads/pods/downward-api/
 		// See URL doc above, that describe what type of DownwardAPI to expect from volume. For now, only FieldRef is supported.
 		// The rest are ignored.
-		for _, item := range source.DownwardAPI.Items {
-			switch {
+		err := populateProjectedVolumeFromDownwardAPI(ctx, pod, source.DownwardAPI.Items, projectedVolume)
+		if err != nil {
+			return err
+		}
+	}
+	return nil
+}
 
-			case item.FieldRef != nil:
-				switch item.FieldRef.FieldPath {
-				case "metadata.name":
-					projectedVolume.Data[item.Path] = pod.Name
+func formatDownwardAPIMetadataMap(data map[string]string) string {
+	if len(data) == 0 {
+		return ""
+	}
+	keys := make([]string, len(data))
+	i := 0
+	for k := range data {
+		keys[i] = k
+		i++
+	}
+	sort.Strings(keys)
+	var b strings.Builder
+	for _, k := range keys {
+		b.WriteString(k)
+		b.WriteString("=")
+		b.WriteString(strconv.Quote(data[k]))
+		b.WriteString("\n")
+	}
+	return b.String()
+}
 
-				case "metadata.namespace":
-					projectedVolume.Data[item.Path] = pod.Namespace
+func resolveDownwardAPIFieldPath(pod *v1.Pod, fieldPath string) (string, bool) {
+	switch fieldPath {
+	case "metadata.name":
+		return pod.Name, true
+	case "metadata.namespace":
+		return pod.Namespace, true
+	case "metadata.uid":
+		return string(pod.UID), true
+	case "metadata.labels":
+		return formatDownwardAPIMetadataMap(pod.Labels), true
+	case "metadata.annotations":
+		return formatDownwardAPIMetadataMap(pod.Annotations), true
+	case "spec.nodeName":
+		return pod.Spec.NodeName, true
+	case "spec.serviceAccountName":
+		return pod.Spec.ServiceAccountName, true
+	case "status.podIP":
+		return pod.Status.PodIP, true
+	case "status.hostIP":
+		return pod.Status.HostIP, true
+	default:
+		return "", false
+	}
+}
 
-				case "metadata.uid":
-					projectedVolume.Data[item.Path] = string(pod.UID)
-
-				// TODO implement DownwardAPI annotation and label if needed.
-
-				default:
-					log.G(ctx).Warningf("in pod %s unsupported DownwardAPI FieldPath %s in InterLink, ignoring this source...", pod.Name, item.FieldRef.FieldPath)
-				}
-
-			case item.ResourceFieldRef != nil:
-				// TODO implement DownwardAPI resourceFieldRef if needed.
-				log.G(ctx).Warningf("in pod %s unsupported DownwardAPI resourceFieldRef in InterLink, ignoring this source...", pod.Name)
-
-			default:
-				log.G(ctx).Warningf("in pod %s unsupported unknown DownwardAPI in InterLink, ignoring this source...", pod.Name)
+func populateProjectedVolumeFromDownwardAPI(ctx context.Context, pod *v1.Pod, items []v1.DownwardAPIVolumeFile, projectedVolume *v1.ConfigMap) error {
+	for _, item := range items {
+		switch {
+		case item.FieldRef != nil:
+			if value, ok := resolveDownwardAPIFieldPath(pod, item.FieldRef.FieldPath); ok {
+				projectedVolume.Data[item.Path] = value
+			} else {
+				log.G(ctx).Warningf("in pod %s unsupported DownwardAPI FieldPath %s in InterLink, ignoring this source...", pod.Name, item.FieldRef.FieldPath)
 			}
+		case item.ResourceFieldRef != nil:
+			// TODO implement DownwardAPI resourceFieldRef if needed.
+			log.G(ctx).Warningf("in pod %s unsupported DownwardAPI resourceFieldRef in InterLink, ignoring this source...", pod.Name)
+		default:
+			log.G(ctx).Warningf("in pod %s unsupported unknown DownwardAPI in InterLink, ignoring this source...", pod.Name)
 		}
 	}
 	return nil
@@ -914,6 +956,41 @@ func remoteExecutionHandleVolumes(ctx context.Context, p *Provider, pod *v1.Pod,
 						}
 						failedAndWait = false
 						log.G(ctx).Debug("ProjectedVolumeMaps len: ", len(req.ProjectedVolumeMaps))
+					}
+
+				case volume.DownwardAPI != nil:
+					projectedVolume := v1.ConfigMap{
+						ObjectMeta: metav1.ObjectMeta{Name: volume.Name},
+						Data:       make(map[string]string),
+					}
+					log.G(ctx).Debug("Adding to PodCreateRequests the downwardAPI volume ", volume.Name)
+
+					err := populateProjectedVolumeFromDownwardAPI(ctx, pod, volume.DownwardAPI.Items, &projectedVolume)
+					if err != nil {
+						return err
+					}
+
+					req.ProjectedVolumeMaps = append(req.ProjectedVolumeMaps, projectedVolume)
+
+					for i := range pod.Spec.Volumes {
+						if pod.Spec.Volumes[i].Name != volume.Name {
+							continue
+						}
+
+						pod.Spec.Volumes[i].VolumeSource = v1.VolumeSource{
+							Projected: &v1.ProjectedVolumeSource{
+								DefaultMode: volume.DownwardAPI.DefaultMode,
+								Sources: []v1.VolumeProjection{
+									{
+										DownwardAPI: &v1.DownwardAPIProjection{
+											Items: volume.DownwardAPI.Items,
+										},
+									},
+								},
+							},
+						}
+
+						break
 					}
 
 				case volume.Secret != nil:
