@@ -972,6 +972,27 @@ func remoteExecutionHandleVolumes(ctx context.Context, p *Provider, pod *v1.Pod,
 
 					req.ProjectedVolumeMaps = append(req.ProjectedVolumeMaps, projectedVolume)
 
+					for i := range pod.Spec.Volumes {
+						if pod.Spec.Volumes[i].Name != volume.Name {
+							continue
+						}
+
+						pod.Spec.Volumes[i].VolumeSource = v1.VolumeSource{
+							Projected: &v1.ProjectedVolumeSource{
+								DefaultMode: volume.DownwardAPI.DefaultMode,
+								Sources: []v1.VolumeProjection{
+									{
+										DownwardAPI: &v1.DownwardAPIProjection{
+											Items: volume.DownwardAPI.Items,
+										},
+									},
+								},
+							},
+						}
+
+						break
+					}
+
 				case volume.Secret != nil:
 					scrt, err := p.clientSet.CoreV1().Secrets(pod.Namespace).Get(ctx, volume.Secret.SecretName, metav1.GetOptions{})
 					if err != nil {
