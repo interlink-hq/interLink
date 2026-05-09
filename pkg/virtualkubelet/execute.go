@@ -851,7 +851,7 @@ func formatDownwardAPIMetadataMap(data map[string]string) string {
 	sort.Strings(keys)
 	var b strings.Builder
 	for _, k := range keys {
-		b.WriteString(fmt.Sprintf("%s=%q\n", k, data[k]))
+		_, _ = fmt.Fprintf(&b, "%s=%q\n", k, data[k])
 	}
 	return b.String()
 }
