@@ -842,9 +842,11 @@ func formatDownwardAPIMetadataMap(data map[string]string) string {
 	if len(data) == 0 {
 		return ""
 	}
-	keys := make([]string, 0, len(data))
+	keys := make([]string, len(data))
+	i := 0
 	for k := range data {
-		keys = append(keys, k)
+		keys[i] = k
+		i++
 	}
 	sort.Strings(keys)
 	var b strings.Builder
@@ -954,9 +956,10 @@ func remoteExecutionHandleVolumes(ctx context.Context, p *Provider, pod *v1.Pod,
 					}
 
 				case volume.DownwardAPI != nil:
-					var projectedVolume v1.ConfigMap
-					projectedVolume.Name = volume.Name
-					projectedVolume.Data = make(map[string]string)
+					projectedVolume := v1.ConfigMap{
+						ObjectMeta: metav1.ObjectMeta{Name: volume.Name},
+						Data:       make(map[string]string),
+					}
 					log.G(ctx).Debug("Adding to PodCreateRequests the downwardAPI volume ", volume.Name)
 
 					err := populateProjectedVolumeFromDownwardAPI(ctx, pod, volume.DownwardAPI.Items, &projectedVolume)
