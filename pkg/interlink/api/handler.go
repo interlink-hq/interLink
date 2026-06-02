@@ -20,7 +20,7 @@ import (
 	"github.com/interlink-hq/interlink/pkg/interlink"
 )
 
-// isSafeURL validates that a URL uses only http or https schemes.
+// isSafeURL validates that a URL uses only http, https, or http+unix schemes.
 // It blocks non-http(s) schemes (e.g. file://, ftp://) to prevent unexpected
 // protocol usage. Localhost, loopback addresses, and private IP ranges are
 // intentionally allowed because the sidecar plugin routinely runs on the same
