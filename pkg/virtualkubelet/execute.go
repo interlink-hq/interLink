@@ -31,7 +31,7 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 )
 
-// isSafeURL validates that a URL uses only http or https schemes.
+// isSafeURL validates that a URL uses only http, https, or http+unix schemes.
 // It blocks non-http(s) schemes (e.g. file://, ftp://) to prevent unexpected
 // protocol usage. Localhost, loopback addresses, and private IP ranges are
 // intentionally allowed because both the interLink API and sidecar plugin
