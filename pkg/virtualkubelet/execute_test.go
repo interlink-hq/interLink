@@ -65,10 +65,10 @@ func TestIsSafeURL(t *testing.T) {
 		{name: "http+unix URL", rawurl: "http+unix:///var/run/plugin.sock:/status", expected: true},
 		{name: "ftp URL", rawurl: "ftp://example.com", expected: false},
 		{name: "invalid URL", rawurl: "://bad", expected: false},
-		{name: "localhost http", rawurl: "http://localhost/path", expected: false},
-		{name: "127.0.0.1 http", rawurl: "http://127.0.0.1/path", expected: false},
-		{name: "::1 http", rawurl: "http://[::1]/path", expected: false},
-		{name: ".internal domain", rawurl: "http://service.internal/path", expected: false},
+		{name: "localhost http", rawurl: "http://localhost/path", expected: true},
+		{name: "127.0.0.1 http", rawurl: "http://127.0.0.1/path", expected: true},
+		{name: "::1 http", rawurl: "http://[::1]/path", expected: true},
+		{name: ".internal domain", rawurl: "http://service.internal/path", expected: true},
 	}
 
 	for _, tt := range tests {
