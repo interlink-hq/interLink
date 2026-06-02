@@ -89,6 +89,13 @@ fi
 echo "Using vk-test-set from submodule..."
 cd "${PROJECT_ROOT}/test/vk-test-set"
 
+# Apply repository-maintained e2e template overrides when present.
+OVERRIDES_DIR="${PROJECT_ROOT}/test/e2e-overrides"
+if [ -d "${OVERRIDES_DIR}" ]; then
+  echo "Applying e2e template overrides from ${OVERRIDES_DIR}..."
+  cp -f "${OVERRIDES_DIR}"/*.yaml "${PROJECT_ROOT}/test/vk-test-set/vktestset/templates/" 2>/dev/null || true
+fi
+
 # Create test configuration
 echo "Creating test configuration..."
 cat >vktest_config.yaml <<EOF
