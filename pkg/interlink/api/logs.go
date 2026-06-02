@@ -19,8 +19,8 @@ import (
 )
 
 // containerNameRegexp validates that a container name contains only safe characters.
-// Kubernetes container names follow RFC 1123 subdomain rules: lowercase alphanumeric
-// characters, '-', and must start and end with an alphanumeric character.
+// Kubernetes container names are DNS labels (RFC 1123 label): lowercase alphanumeric
+// characters or '-', and must start and end with an alphanumeric character.
 var containerNameRegexp = regexp.MustCompile(`^[a-z0-9][a-z0-9\-]*[a-z0-9]$|^[a-z0-9]$`)
 
 // namespaceRegexp validates Kubernetes namespace names (RFC 1123 label).
