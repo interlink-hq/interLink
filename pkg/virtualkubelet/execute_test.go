@@ -514,4 +514,56 @@ func TestRemoteExecutionHandleVolumesDownwardAPI(t *testing.T) {
 	assert.Equal(t, "test-pod", req.ProjectedVolumeMaps[0].Data["pod-name"])
 	assert.Equal(t, "app=\"demo\"\n", req.ProjectedVolumeMaps[0].Data["labels"])
 	assert.Equal(t, "a=\"b\"\n", req.ProjectedVolumeMaps[0].Data["annotations"])
+	require.Len(t, pod.Spec.Volumes, 1)
+	require.NotNil(t, pod.Spec.Volumes[0].Projected)
+	assert.Nil(t, pod.Spec.Volumes[0].DownwardAPI)
+	require.Len(t, pod.Spec.Volumes[0].Projected.Sources, 1)
+	require.NotNil(t, pod.Spec.Volumes[0].Projected.Sources[0].DownwardAPI)
+	assert.Equal(t, pod.Spec.Volumes[0].Projected.Sources[0].DownwardAPI.Items, []v1.DownwardAPIVolumeFile{
+		{Path: "pod-name", FieldRef: &v1.ObjectFieldSelector{FieldPath: "metadata.name"}},
+		{Path: "labels", FieldRef: &v1.ObjectFieldSelector{FieldPath: "metadata.labels"}},
+		{Path: "annotations", FieldRef: &v1.ObjectFieldSelector{FieldPath: "metadata.annotations"}},
+	})
+}
+
+func TestRemoteExecutionHandleVolumesDownwardAPIDisabledProjectedVolumes(t *testing.T) {
+	ctx := context.Background()
+	namespace := "test-ns"
+	pod := &v1.Pod{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      "test-pod",
+			Namespace: namespace,
+		},
+		Spec: v1.PodSpec{
+			Volumes: []v1.Volume{
+				{
+					Name: "podinfo",
+					VolumeSource: v1.VolumeSource{
+						DownwardAPI: &v1.DownwardAPIVolumeSource{
+							Items: []v1.DownwardAPIVolumeFile{
+								{Path: "pod-name", FieldRef: &v1.ObjectFieldSelector{FieldPath: "metadata.name"}},
+							},
+						},
+					},
+				},
+			},
+		},
+	}
+
+	fakeClient := fake.NewSimpleClientset(pod.DeepCopy())
+	p := &Provider{
+		clientSet: fakeClient,
+		notifier:  func(*v1.Pod) {},
+		config: Config{
+			DisableProjectedVolumes: true,
+		},
+	}
+	req := &types.PodCreateRequests{}
+
+	err := remoteExecutionHandleVolumes(ctx, p, pod, req)
+	require.NoError(t, err)
+	assert.Empty(t, req.ProjectedVolumeMaps)
+	require.Len(t, pod.Spec.Volumes, 1)
+	require.NotNil(t, pod.Spec.Volumes[0].DownwardAPI)
+	assert.Nil(t, pod.Spec.Volumes[0].Projected)
 }
