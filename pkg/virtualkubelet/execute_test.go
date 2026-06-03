@@ -9,12 +9,15 @@ import (
 	"strings"
 	"testing"
 
+	types "github.com/interlink-hq/interlink/pkg/interlink"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	v1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/client-go/kubernetes/fake"
 )
+
+const testNamespace = "test-ns"
 
 // unixSocketRoundTripper rewrites http+unix URLs to http://unix so the underlying
 // transport can dial the configured unix socket.
@@ -274,7 +277,7 @@ func TestGetSessionContextMessage(t *testing.T) {
 
 func TestRemoteExecutionHandleProjectedSourceConfigMap(t *testing.T) {
 	ctx := context.Background()
-	namespace := "test-ns"
+	namespace := testNamespace
 
 	pod := &v1.Pod{
 		ObjectMeta: metav1.ObjectMeta{
@@ -418,4 +421,244 @@ func TestRemoteExecutionHandleProjectedSourceConfigMap(t *testing.T) {
 			assert.Equal(t, tt.expectedData, projectedVolume.Data)
 		})
 	}
+}
+
+func TestRemoteExecutionHandleProjectedSourceDownwardAPIFieldRef(t *testing.T) {
+	ctx := context.Background()
+	pod := &v1.Pod{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:        "test-pod",
+			Namespace:   testNamespace,
+			UID:         "uid-1234",
+			Labels:      map[string]string{"app": "demo", "tier": "backend"},
+			Annotations: map[string]string{"my.annotation/key": "value"},
+		},
+		Spec: v1.PodSpec{
+			NodeName:           "node-a",
+			ServiceAccountName: "svc-account",
+		},
+		Status: v1.PodStatus{
+			PodIP:  "10.42.0.15",
+			HostIP: "172.18.0.20",
+		},
+	}
+	source := v1.VolumeProjection{
+		DownwardAPI: &v1.DownwardAPIProjection{
+			Items: []v1.DownwardAPIVolumeFile{
+				{Path: "pod-name", FieldRef: &v1.ObjectFieldSelector{FieldPath: "metadata.name"}},
+				{Path: "namespace", FieldRef: &v1.ObjectFieldSelector{FieldPath: "metadata.namespace"}},
+				{Path: "uid", FieldRef: &v1.ObjectFieldSelector{FieldPath: "metadata.uid"}},
+				{Path: "labels", FieldRef: &v1.ObjectFieldSelector{FieldPath: "metadata.labels"}},
+				{Path: "annotations", FieldRef: &v1.ObjectFieldSelector{FieldPath: "metadata.annotations"}},
+				{Path: "node-name", FieldRef: &v1.ObjectFieldSelector{FieldPath: "spec.nodeName"}},
+				{Path: "sa-name", FieldRef: &v1.ObjectFieldSelector{FieldPath: "spec.serviceAccountName"}},
+				{Path: "pod-ip", FieldRef: &v1.ObjectFieldSelector{FieldPath: "status.podIP"}},
+				{Path: "host-ip", FieldRef: &v1.ObjectFieldSelector{FieldPath: "status.hostIP"}},
+			},
+		},
+	}
+	projectedVolume := &v1.ConfigMap{Data: map[string]string{}}
+
+	err := remoteExecutionHandleProjectedSource(ctx, &Provider{}, pod, source, projectedVolume)
+	require.NoError(t, err)
+
+	assert.Equal(t, "test-pod", projectedVolume.Data["pod-name"])
+	assert.Equal(t, testNamespace, projectedVolume.Data["namespace"])
+	assert.Equal(t, "uid-1234", projectedVolume.Data["uid"])
+	assert.Equal(t, "app=\"demo\"\ntier=\"backend\"\n", projectedVolume.Data["labels"])
+	assert.Equal(t, "my.annotation/key=\"value\"\n", projectedVolume.Data["annotations"])
+	assert.Equal(t, "node-a", projectedVolume.Data["node-name"])
+	assert.Equal(t, "svc-account", projectedVolume.Data["sa-name"])
+	assert.Equal(t, "10.42.0.15", projectedVolume.Data["pod-ip"])
+	assert.Equal(t, "172.18.0.20", projectedVolume.Data["host-ip"])
+}
+
+func TestRemoteExecutionHandleVolumesDownwardAPI(t *testing.T) {
+	ctx := context.Background()
+	namespace := testNamespace
+	pod := &v1.Pod{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:        "test-pod",
+			Namespace:   namespace,
+			UID:         "uid-1234",
+			Labels:      map[string]string{"app": "demo"},
+			Annotations: map[string]string{"a": "b"},
+		},
+		Spec: v1.PodSpec{
+			Volumes: []v1.Volume{
+				{
+					Name: "podinfo",
+					VolumeSource: v1.VolumeSource{
+						DownwardAPI: &v1.DownwardAPIVolumeSource{
+							Items: []v1.DownwardAPIVolumeFile{
+								{Path: "pod-name", FieldRef: &v1.ObjectFieldSelector{FieldPath: "metadata.name"}},
+								{Path: "labels", FieldRef: &v1.ObjectFieldSelector{FieldPath: "metadata.labels"}},
+								{Path: "annotations", FieldRef: &v1.ObjectFieldSelector{FieldPath: "metadata.annotations"}},
+							},
+						},
+					},
+				},
+			},
+		},
+	}
+
+	fakeClient := fake.NewSimpleClientset(pod.DeepCopy())
+	p := &Provider{
+		clientSet: fakeClient,
+		notifier:  func(*v1.Pod) {},
+	}
+	req := &types.PodCreateRequests{}
+
+	err := remoteExecutionHandleVolumes(ctx, p, pod, req)
+	require.NoError(t, err)
+	require.Len(t, req.ProjectedVolumeMaps, 1)
+	assert.Equal(t, "podinfo", req.ProjectedVolumeMaps[0].Name)
+	assert.Equal(t, "test-pod", req.ProjectedVolumeMaps[0].Data["pod-name"])
+	assert.Equal(t, "app=\"demo\"\n", req.ProjectedVolumeMaps[0].Data["labels"])
+	assert.Equal(t, "a=\"b\"\n", req.ProjectedVolumeMaps[0].Data["annotations"])
+	require.Len(t, pod.Spec.Volumes, 1)
+	require.NotNil(t, pod.Spec.Volumes[0].Projected)
+	assert.Nil(t, pod.Spec.Volumes[0].DownwardAPI)
+	require.Len(t, pod.Spec.Volumes[0].Projected.Sources, 1)
+	require.NotNil(t, pod.Spec.Volumes[0].Projected.Sources[0].DownwardAPI)
+	assert.Equal(t, pod.Spec.Volumes[0].Projected.Sources[0].DownwardAPI.Items, []v1.DownwardAPIVolumeFile{
+		{Path: "pod-name", FieldRef: &v1.ObjectFieldSelector{FieldPath: "metadata.name"}},
+		{Path: "labels", FieldRef: &v1.ObjectFieldSelector{FieldPath: "metadata.labels"}},
+		{Path: "annotations", FieldRef: &v1.ObjectFieldSelector{FieldPath: "metadata.annotations"}},
+	})
+}
+
+func TestRemoteExecutionHandleVolumesDownwardAPIDisabledProjectedVolumes(t *testing.T) {
+	ctx := context.Background()
+	namespace := testNamespace
+	pod := &v1.Pod{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      "test-pod",
+			Namespace: namespace,
+		},
+		Spec: v1.PodSpec{
+			Volumes: []v1.Volume{
+				{
+					Name: "podinfo",
+					VolumeSource: v1.VolumeSource{
+						DownwardAPI: &v1.DownwardAPIVolumeSource{
+							Items: []v1.DownwardAPIVolumeFile{
+								{Path: "pod-name", FieldRef: &v1.ObjectFieldSelector{FieldPath: "metadata.name"}},
+							},
+						},
+					},
+				},
+			},
+		},
+	}
+
+	fakeClient := fake.NewSimpleClientset(pod.DeepCopy())
+	p := &Provider{
+		clientSet: fakeClient,
+		notifier:  func(*v1.Pod) {},
+		config: Config{
+			DisableProjectedVolumes: true,
+		},
+	}
+	req := &types.PodCreateRequests{}
+
+	err := remoteExecutionHandleVolumes(ctx, p, pod, req)
+	require.NoError(t, err)
+	assert.Empty(t, req.ProjectedVolumeMaps)
+	require.Len(t, pod.Spec.Volumes, 1)
+	require.NotNil(t, pod.Spec.Volumes[0].DownwardAPI)
+	assert.Nil(t, pod.Spec.Volumes[0].Projected)
+}
+
+func TestResolveEnvFromRefs(t *testing.T) {
+	ctx := context.Background()
+	namespace := testNamespace
+
+	pod := &v1.Pod{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      "test-pod",
+			Namespace: namespace,
+		},
+	}
+
+	container := &v1.Container{
+		Name: "main",
+		Env: []v1.EnvVar{
+			{Name: "LOG_LEVEL", Value: "info"},
+		},
+		EnvFrom: []v1.EnvFromSource{
+			{
+				ConfigMapRef: &v1.ConfigMapEnvSource{
+					LocalObjectReference: v1.LocalObjectReference{Name: "app-config"},
+				},
+			},
+			{
+				SecretRef: &v1.SecretEnvSource{
+					LocalObjectReference: v1.LocalObjectReference{Name: "aws-credentials"},
+				},
+				Prefix: "AWS_",
+			},
+		},
+	}
+
+	fakeClient := fake.NewSimpleClientset(
+		&v1.ConfigMap{
+			ObjectMeta: metav1.ObjectMeta{Name: "app-config", Namespace: namespace},
+			Data: map[string]string{
+				"LOG_LEVEL": "debug",
+				"DATABASE":  "postgresql",
+			},
+		},
+		&v1.Secret{
+			ObjectMeta: metav1.ObjectMeta{Name: "aws-credentials", Namespace: namespace},
+			Data: map[string][]byte{
+				"ACCESS_KEY_ID": []byte("AKIA"),
+			},
+		},
+	)
+
+	p := &Provider{
+		clientSet: fakeClient,
+	}
+
+	resolveEnvFromRefs(ctx, p, pod, container)
+
+	assert.Empty(t, container.EnvFrom)
+	assert.Contains(t, container.Env, v1.EnvVar{Name: "LOG_LEVEL", Value: "info"})
+	assert.Contains(t, container.Env, v1.EnvVar{Name: "DATABASE", Value: "postgresql"})
+	assert.Contains(t, container.Env, v1.EnvVar{Name: "AWS_ACCESS_KEY_ID", Value: "AKIA"})
+}
+
+func TestResolveEnvFromRefsOptionalMissingSecret(t *testing.T) {
+	ctx := context.Background()
+	namespace := testNamespace
+
+	pod := &v1.Pod{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      "test-pod",
+			Namespace: namespace,
+		},
+	}
+
+	optional := true
+	container := &v1.Container{
+		Name: "main",
+		EnvFrom: []v1.EnvFromSource{
+			{
+				SecretRef: &v1.SecretEnvSource{
+					LocalObjectReference: v1.LocalObjectReference{Name: "missing-secret"},
+					Optional:             &optional,
+				},
+			},
+		},
+	}
+
+	p := &Provider{
+		clientSet: fake.NewSimpleClientset(),
+	}
+
+	resolveEnvFromRefs(ctx, p, pod, container)
+
+	assert.Empty(t, container.Env)
+	assert.Empty(t, container.EnvFrom)
 }
