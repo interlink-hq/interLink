@@ -960,7 +960,7 @@ func remoteExecutionHandleVolumes(ctx context.Context, p *Provider, pod *v1.Pod,
 
 				case volume.DownwardAPI != nil:
 					if p.config.DisableProjectedVolumes {
-						log.G(ctx).Warning("Flag DisableProjectedVolumes set to true, so not handing DownwardAPI Volume: ", volume)
+						log.G(ctx).Warning("Flag DisableProjectedVolumes set to true, so not handling DownwardAPI Volume: ", volume)
 						break
 					}
 
