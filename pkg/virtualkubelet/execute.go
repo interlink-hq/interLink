@@ -1164,6 +1164,75 @@ func resolveEnvRefs(
 	}
 }
 
+func resolveEnvFromRefs(
+	ctx context.Context,
+	p *Provider,
+	pod *v1.Pod,
+	container *v1.Container,
+) {
+	if len(container.EnvFrom) == 0 {
+		return
+	}
+
+	explicitEnv := make(map[string]struct{}, len(container.Env))
+	envIndex := make(map[string]int, len(container.Env))
+	for i := range container.Env {
+		explicitEnv[container.Env[i].Name] = struct{}{}
+		envIndex[container.Env[i].Name] = i
+	}
+
+	upsert := func(name, value string) {
+		if _, isExplicit := explicitEnv[name]; isExplicit {
+			return
+		}
+		if idx, ok := envIndex[name]; ok {
+			container.Env[idx].Value = value
+			container.Env[idx].ValueFrom = nil
+			return
+		}
+		container.Env = append(container.Env, v1.EnvVar{Name: name, Value: value})
+		envIndex[name] = len(container.Env) - 1
+	}
+
+	for _, envFrom := range container.EnvFrom {
+		prefix := envFrom.Prefix
+
+		if cmRef := envFrom.ConfigMapRef; cmRef != nil {
+			cm, err := p.clientSet.CoreV1().
+				ConfigMaps(pod.Namespace).
+				Get(ctx, cmRef.Name, metav1.GetOptions{})
+			if err != nil {
+				if cmRef.Optional != nil && *cmRef.Optional {
+					continue
+				}
+				log.G(ctx).Errorf("resolving envFrom ConfigMap %s/%s: %v", pod.Namespace, cmRef.Name, err)
+				continue
+			}
+			for key, value := range cm.Data {
+				upsert(prefix+key, value)
+			}
+		}
+
+		if secretRef := envFrom.SecretRef; secretRef != nil {
+			secret, err := p.clientSet.CoreV1().
+				Secrets(pod.Namespace).
+				Get(ctx, secretRef.Name, metav1.GetOptions{})
+			if err != nil {
+				if secretRef.Optional != nil && *secretRef.Optional {
+					continue
+				}
+				log.G(ctx).Errorf("resolving envFrom Secret %s/%s: %v", pod.Namespace, secretRef.Name, err)
+				continue
+			}
+			for key, value := range secret.Data {
+				upsert(prefix+key, string(value))
+			}
+		}
+	}
+
+	container.EnvFrom = nil
+}
+
 // RemoteExecution is called by the VK everytime a Pod is being registered or deleted to/from the VK.
 // Depending on the mode (CREATE/DELETE), it performs different actions, making different REST calls.
 // Note: for the CREATE mode, the function gets stuck up to 5 minutes waiting for every missing ConfigMap/Secret.
@@ -1211,6 +1280,13 @@ func RemoteExecution(ctx context.Context, config Config, p *Provider, pod *v1.Po
 		}
 
 		addKubernetesServicesEnvVars(ctx, config, podToOffload)
+
+		for i := range podToOffload.Spec.InitContainers {
+			resolveEnvFromRefs(ctx, p, podToOffload, &podToOffload.Spec.InitContainers[i])
+		}
+		for i := range podToOffload.Spec.Containers {
+			resolveEnvFromRefs(ctx, p, podToOffload, &podToOffload.Spec.Containers[i])
+		}
 
 		if config.SkipDownwardAPIResolution {
 			log.G(ctx).Info("SkipDownwardAPIResolution is set to true")

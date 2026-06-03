@@ -567,3 +567,96 @@ func TestRemoteExecutionHandleVolumesDownwardAPIDisabledProjectedVolumes(t *test
 	require.NotNil(t, pod.Spec.Volumes[0].DownwardAPI)
 	assert.Nil(t, pod.Spec.Volumes[0].Projected)
 }
+
+func TestResolveEnvFromRefs(t *testing.T) {
+	ctx := context.Background()
+	namespace := "test-ns"
+
+	pod := &v1.Pod{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      "test-pod",
+			Namespace: namespace,
+		},
+	}
+
+	container := &v1.Container{
+		Name: "main",
+		Env: []v1.EnvVar{
+			{Name: "LOG_LEVEL", Value: "info"},
+		},
+		EnvFrom: []v1.EnvFromSource{
+			{
+				ConfigMapRef: &v1.ConfigMapEnvSource{
+					LocalObjectReference: v1.LocalObjectReference{Name: "app-config"},
+				},
+			},
+			{
+				SecretRef: &v1.SecretEnvSource{
+					LocalObjectReference: v1.LocalObjectReference{Name: "aws-credentials"},
+				},
+				Prefix: "AWS_",
+			},
+		},
+	}
+
+	fakeClient := fake.NewSimpleClientset(
+		&v1.ConfigMap{
+			ObjectMeta: metav1.ObjectMeta{Name: "app-config", Namespace: namespace},
+			Data: map[string]string{
+				"LOG_LEVEL": "debug",
+				"DATABASE":  "postgresql",
+			},
+		},
+		&v1.Secret{
+			ObjectMeta: metav1.ObjectMeta{Name: "aws-credentials", Namespace: namespace},
+			Data: map[string][]byte{
+				"ACCESS_KEY_ID": []byte("AKIA"),
+			},
+		},
+	)
+
+	p := &Provider{
+		clientSet: fakeClient,
+	}
+
+	resolveEnvFromRefs(ctx, p, pod, container)
+
+	assert.Empty(t, container.EnvFrom)
+	assert.Contains(t, container.Env, v1.EnvVar{Name: "LOG_LEVEL", Value: "info"})
+	assert.Contains(t, container.Env, v1.EnvVar{Name: "DATABASE", Value: "postgresql"})
+	assert.Contains(t, container.Env, v1.EnvVar{Name: "AWS_ACCESS_KEY_ID", Value: "AKIA"})
+}
+
+func TestResolveEnvFromRefsOptionalMissingSecret(t *testing.T) {
+	ctx := context.Background()
+	namespace := "test-ns"
+
+	pod := &v1.Pod{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      "test-pod",
+			Namespace: namespace,
+		},
+	}
+
+	optional := true
+	container := &v1.Container{
+		Name: "main",
+		EnvFrom: []v1.EnvFromSource{
+			{
+				SecretRef: &v1.SecretEnvSource{
+					LocalObjectReference: v1.LocalObjectReference{Name: "missing-secret"},
+					Optional:             &optional,
+				},
+			},
+		},
+	}
+
+	p := &Provider{
+		clientSet: fake.NewSimpleClientset(),
+	}
+
+	resolveEnvFromRefs(ctx, p, pod, container)
+
+	assert.Empty(t, container.Env)
+	assert.Empty(t, container.EnvFrom)
+}
