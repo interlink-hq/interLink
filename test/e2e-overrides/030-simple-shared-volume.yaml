@@ -1,0 +1,97 @@
+## Simple shared volume
+##
+## Pod with two containers sharing an emptyDir
+
+apiVersion: v1
+kind: Pod
+metadata:
+  name: simple-shared-volume-{{ uuid }}
+  namespace: {{ namespace }}
+  annotations: {{ annotations | tojson }}
+
+spec:
+  restartPolicy: Never
+  nodeSelector:
+    kubernetes.io/hostname: {{ target_node }}
+
+  containers:
+  - name: writer
+    image: python:alpine
+    imagePullPolicy: Always
+    command: ["python", "-c"]
+    args:
+      - |
+        with open("/shared-vol/dump", "w") as dump:
+          dump.write("Dumped contents")
+
+    volumeMounts:
+      - name:  shared-vol
+        mountPath: /shared-vol
+
+  - name: reader
+    image: python:alpine
+    imagePullPolicy: Always
+    command: ["python", "-c"]
+    args:
+      - |
+        import time
+        import os
+
+        for _ in range(50):
+          if os.path.exists("/shared-vol/dump"):
+            break
+          time.sleep(0.1)
+        else:
+          raise FileNotFoundError("/shared-vol/dump was not created in time")
+
+        with open("/shared-vol/dump") as dump:
+          print(dump.read())
+
+        try:
+          os.remove("/shared-vol/dump")
+        except OSError:
+          print("RO mount ok")
+
+    volumeMounts:
+      - name: shared-vol
+        mountPath: /shared-vol
+        readOnly: true
+
+
+  volumes:
+    - name: shared-vol
+      emptyDir:
+        sizeLimit: 500Mi
+
+
+  dnsPolicy: ClusterFirst
+
+  tolerations: {{ tolerations | tojson }}
+
+################################################################################
+# VALIDATION
+timeout_seconds: 10
+check_pods:
+  - name: simple-shared-volume-{{ uuid }}
+    namespace: {{ namespace }}
+
+check_logs:
+  - name: simple-shared-volume-{{ uuid }}
+    namespace: {{ namespace }}
+    container: reader
+    regex: Dumped contents
+    operator: Exists
+
+  - name: simple-shared-volume-{{ uuid }}
+    namespace: {{ namespace }}
+    container: reader
+    regex: RO mount ok
+    operator: Exists
+
+clean_configs:
+  - type: pod
+    name: simple-shared-volume-{{ uuid }}
+    namespace: {{ namespace }}
+    condition: always
+
+

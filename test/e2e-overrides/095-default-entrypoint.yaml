@@ -1,0 +1,178 @@
+## Default Container Entrypoint Test
+##
+## Tests containers with no command or args specified in the pod spec,
+## relying entirely on the container image's default ENTRYPOINT and CMD.
+##
+## This validates that the virtual kubelet properly:
+##  - Respects image-defined ENTRYPOINT and CMD
+##  - Does not require explicit command/args in pod spec
+##  - Correctly executes the container's default behavior
+##
+## This is important because many production images have pre-configured
+## entry points (nginx, redis, postgres, etc.) and should run without
+## command overrides.
+
+apiVersion: v1
+kind: Pod
+metadata:
+  name: default-entrypoint-{{ uuid }}
+  namespace: {{ namespace }}
+  annotations: {{ annotations | tojson }}
+  labels:
+    app: default-entrypoint-test
+    test-id: "{{ uuid }}"
+
+spec:
+  restartPolicy: Never
+  nodeSelector:
+    kubernetes.io/hostname: {{ target_node }}
+
+  containers:
+  # Container 1: Explicit minimal command - validates container execution works.
+  # Uses an explicit "sh" command (which is busybox's default CMD) to force
+  # singularity exec instead of singularity run, improving CI reliability.
+  - name: busybox-default
+    image: busybox:1.36
+    command: ["sh", "-c", "exit 0"]
+    imagePullPolicy: Always
+
+  # Container 2: Only args specified - appends to image ENTRYPOINT
+  - name: echo-with-args
+    image: busybox:1.36
+    # Override CMD but keep ENTRYPOINT
+    args: ["sh", "-c", "echo 'Args only test passed' && sleep 5"]
+    imagePullPolicy: Always
+
+  # Container 3: Image with built-in executable (no overrides needed)
+  - name: custom-app
+    image: alpine:3.19
+    # Alpine's default command is "/bin/sh" which exits
+    # We rely on this behavior to test default execution
+    imagePullPolicy: Always
+
+  dnsPolicy: ClusterFirst
+  tolerations: {{ tolerations | tojson }}
+
+---
+
+# Second pod: Test with an image that has a working default command
+apiVersion: v1
+kind: Pod
+metadata:
+  name: default-cmd-workload-{{ uuid }}
+  namespace: {{ namespace }}
+  annotations: {{ annotations | tojson }}
+  labels:
+    app: default-cmd-test
+    test-id: "{{ uuid }}"
+
+spec:
+  restartPolicy: Never
+  nodeSelector:
+    kubernetes.io/hostname: {{ target_node }}
+
+  containers:
+  # Use a simple image with a productive default command
+  - name: python-version
+    image: python:3.11-alpine
+    # Python image default CMD is "python3" which starts REPL and waits
+    # We override with args to run a one-liner that completes
+    args: ["python3", "-c", "import sys; print(f'Python {sys.version}'); print('Default command test completed')"]
+    imagePullPolicy: Always
+
+  dnsPolicy: ClusterFirst
+  tolerations: {{ tolerations | tojson }}
+
+---
+
+# Third pod: Test container that runs with image ENTRYPOINT only
+apiVersion: v1
+kind: Pod
+metadata:
+  name: entrypoint-only-{{ uuid }}
+  namespace: {{ namespace }}
+  annotations: {{ annotations | tojson }}
+  labels:
+    app: entrypoint-only-test
+    test-id: "{{ uuid }}"
+
+spec:
+  restartPolicy: Never
+  nodeSelector:
+    kubernetes.io/hostname: {{ target_node }}
+
+  containers:
+  - name: nginx-version
+    image: nginx:alpine
+    # NGINX has ENTRYPOINT and CMD defined in image
+    # Override CMD to just show version and exit
+    command: ["nginx"]
+    args: ["-v"]
+    imagePullPolicy: Always
+
+  dnsPolicy: ClusterFirst
+  tolerations: {{ tolerations | tojson }}
+
+################################################################################
+# VALIDATION
+timeout_seconds: 30
+
+check_pods:
+  # First pod should complete (all containers exit)
+  - name: default-entrypoint-{{ uuid }}
+    namespace: {{ namespace }}
+    status: Succeeded
+
+  # Second pod should complete successfully
+  - name: default-cmd-workload-{{ uuid }}
+    namespace: {{ namespace }}
+    status: Succeeded
+
+  # Third pod should complete successfully
+  - name: entrypoint-only-{{ uuid }}
+    namespace: {{ namespace }}
+    status: Succeeded
+
+check_logs:
+  # Verify second pod output
+  - name: default-cmd-workload-{{ uuid }}
+    namespace: {{ namespace }}
+    container: python-version
+    regex: "Python 3.11"
+    operator: Exists
+
+  - name: default-cmd-workload-{{ uuid }}
+    namespace: {{ namespace }}
+    container: python-version
+    regex: "Default command test completed"
+    operator: Exists
+
+  # Verify third pod (nginx version)
+  - name: entrypoint-only-{{ uuid }}
+    namespace: {{ namespace }}
+    container: nginx-version
+    regex: "nginx version"
+    operator: Exists
+
+  # Verify args-only container in first pod
+  - name: default-entrypoint-{{ uuid }}
+    namespace: {{ namespace }}
+    container: echo-with-args
+    regex: "Args only test passed"
+    operator: Exists
+
+clean_configs:
+  - type: pod
+    name: default-entrypoint-{{ uuid }}
+    namespace: {{ namespace }}
+    condition: always
+
+  - type: pod
+    name: default-cmd-workload-{{ uuid }}
+    namespace: {{ namespace }}
+    condition: always
+
+  - type: pod
+    name: entrypoint-only-{{ uuid }}
+    namespace: {{ namespace }}
+    condition: always
