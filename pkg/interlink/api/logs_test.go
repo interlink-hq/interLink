@@ -255,6 +255,52 @@ func TestGetLogsHandler_Validation(t *testing.T) {
 	}
 }
 
+func TestGetLogsHandler_InvalidJSON(t *testing.T) {
+	_, cleanup := setupLogsTestTracer()
+	defer cleanup()
+
+	handler := &InterLinkHandler{
+		Ctx:             context.Background(),
+		SidecarEndpoint: "http://example.com",
+		ClientHTTP:      http.DefaultClient,
+	}
+
+	r := httptest.NewRequest(http.MethodGet, "/getLogs", bytes.NewBufferString("{invalid"))
+	w := httptest.NewRecorder()
+
+	handler.GetLogsHandler(w, r)
+
+	assert.Equal(t, http.StatusBadRequest, w.Code)
+	assert.Contains(t, w.Body.String(), "invalid request body")
+}
+
+func TestGetLogsHandler_InvalidSidecarEndpoint(t *testing.T) {
+	_, cleanup := setupLogsTestTracer()
+	defer cleanup()
+
+	req := types.LogStruct{
+		Namespace:     "default",
+		PodUID:        "12345678-1234-1234-1234-123456789012",
+		ContainerName: "my-container",
+		PodName:       "my-pod",
+	}
+	body, err := json.Marshal(req)
+	require.NoError(t, err)
+
+	handler := &InterLinkHandler{
+		Ctx:             context.Background(),
+		SidecarEndpoint: "://bad",
+		ClientHTTP:      http.DefaultClient,
+	}
+
+	r := httptest.NewRequest(http.MethodGet, "/getLogs", bytes.NewReader(body))
+	w := httptest.NewRecorder()
+
+	handler.GetLogsHandler(w, r)
+
+	assert.Equal(t, http.StatusInternalServerError, w.Code)
+}
+
 func TestIsSafeURL(t *testing.T) {
 	tests := []struct {
 		name     string

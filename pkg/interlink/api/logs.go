@@ -83,7 +83,10 @@ func (h *InterLinkHandler) GetLogsHandler(w http.ResponseWriter, r *http.Request
 	var req2 types.LogStruct // incoming request. To be used in interlink API. req is directly forwarded to sidecar
 	err = json.Unmarshal(bodyBytes, &req2)
 	if err != nil {
-		w.WriteHeader(http.StatusInternalServerError)
+		w.WriteHeader(http.StatusBadRequest)
+		if _, werr := w.Write([]byte("invalid request body")); werr != nil {
+			log.G(h.Ctx).Error(errors.New(sessionContextMessage + "Failed to write to http buffer"))
+		}
 		log.G(h.Ctx).Error(sessionContextMessage, err)
 		return
 	}
@@ -138,7 +141,9 @@ func (h *InterLinkHandler) GetLogsHandler(w http.ResponseWriter, r *http.Request
 	log.G(h.Ctx).Info("Sending log request to: ", h.SidecarEndpoint)
 	req, err := http.NewRequestWithContext(r.Context(), http.MethodGet, h.SidecarEndpoint+"/getLogs", reader)
 	if err != nil {
-		log.G(h.Ctx).Fatal(err)
+		w.WriteHeader(http.StatusInternalServerError)
+		log.G(h.Ctx).Error(sessionContextMessage, err)
+		return
 	}
 
 	req.Header.Set("Content-Type", "application/json")

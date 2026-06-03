@@ -93,7 +93,12 @@ cd "${PROJECT_ROOT}/test/vk-test-set"
 OVERRIDES_DIR="${PROJECT_ROOT}/test/e2e-overrides"
 if [ -d "${OVERRIDES_DIR}" ]; then
   echo "Applying e2e template overrides from ${OVERRIDES_DIR}..."
-  cp -f "${OVERRIDES_DIR}"/*.yaml "${PROJECT_ROOT}/test/vk-test-set/vktestset/templates/" 2>/dev/null || true
+  shopt -s nullglob
+  override_files=("${OVERRIDES_DIR}"/*.yaml)
+  shopt -u nullglob
+  if [ ${#override_files[@]} -gt 0 ]; then
+    cp -f "${override_files[@]}" "${PROJECT_ROOT}/test/vk-test-set/vktestset/templates/"
+  fi
 fi
 
 # Create test configuration
