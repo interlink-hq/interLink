@@ -17,6 +17,8 @@ import (
 	"k8s.io/client-go/kubernetes/fake"
 )
 
+const testNamespace = "test-ns"
+
 // unixSocketRoundTripper rewrites http+unix URLs to http://unix so the underlying
 // transport can dial the configured unix socket.
 type unixSocketRoundTripper struct {
@@ -275,7 +277,7 @@ func TestGetSessionContextMessage(t *testing.T) {
 
 func TestRemoteExecutionHandleProjectedSourceConfigMap(t *testing.T) {
 	ctx := context.Background()
-	namespace := "test-ns"
+	namespace := testNamespace
 
 	pod := &v1.Pod{
 		ObjectMeta: metav1.ObjectMeta{
@@ -426,7 +428,7 @@ func TestRemoteExecutionHandleProjectedSourceDownwardAPIFieldRef(t *testing.T) {
 	pod := &v1.Pod{
 		ObjectMeta: metav1.ObjectMeta{
 			Name:        "test-pod",
-			Namespace:   "test-ns",
+			Namespace:   testNamespace,
 			UID:         "uid-1234",
 			Labels:      map[string]string{"app": "demo", "tier": "backend"},
 			Annotations: map[string]string{"my.annotation/key": "value"},
@@ -461,7 +463,7 @@ func TestRemoteExecutionHandleProjectedSourceDownwardAPIFieldRef(t *testing.T) {
 	require.NoError(t, err)
 
 	assert.Equal(t, "test-pod", projectedVolume.Data["pod-name"])
-	assert.Equal(t, "test-ns", projectedVolume.Data["namespace"])
+	assert.Equal(t, testNamespace, projectedVolume.Data["namespace"])
 	assert.Equal(t, "uid-1234", projectedVolume.Data["uid"])
 	assert.Equal(t, "app=\"demo\"\ntier=\"backend\"\n", projectedVolume.Data["labels"])
 	assert.Equal(t, "my.annotation/key=\"value\"\n", projectedVolume.Data["annotations"])
@@ -473,7 +475,7 @@ func TestRemoteExecutionHandleProjectedSourceDownwardAPIFieldRef(t *testing.T) {
 
 func TestRemoteExecutionHandleVolumesDownwardAPI(t *testing.T) {
 	ctx := context.Background()
-	namespace := "test-ns"
+	namespace := testNamespace
 	pod := &v1.Pod{
 		ObjectMeta: metav1.ObjectMeta{
 			Name:        "test-pod",
@@ -528,7 +530,7 @@ func TestRemoteExecutionHandleVolumesDownwardAPI(t *testing.T) {
 
 func TestRemoteExecutionHandleVolumesDownwardAPIDisabledProjectedVolumes(t *testing.T) {
 	ctx := context.Background()
-	namespace := "test-ns"
+	namespace := testNamespace
 	pod := &v1.Pod{
 		ObjectMeta: metav1.ObjectMeta{
 			Name:      "test-pod",
@@ -570,7 +572,7 @@ func TestRemoteExecutionHandleVolumesDownwardAPIDisabledProjectedVolumes(t *test
 
 func TestResolveEnvFromRefs(t *testing.T) {
 	ctx := context.Background()
-	namespace := "test-ns"
+	namespace := testNamespace
 
 	pod := &v1.Pod{
 		ObjectMeta: metav1.ObjectMeta{
@@ -629,7 +631,7 @@ func TestResolveEnvFromRefs(t *testing.T) {
 
 func TestResolveEnvFromRefsOptionalMissingSecret(t *testing.T) {
 	ctx := context.Background()
-	namespace := "test-ns"
+	namespace := testNamespace
 
 	pod := &v1.Pod{
 		ObjectMeta: metav1.ObjectMeta{
