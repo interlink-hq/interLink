@@ -62,9 +62,9 @@ make test-k3s-cleanup  # cleanup only
 
 | Script | Purpose |
 |---|---|
-| `k3s-test-setup.sh` | Installs K3s with `--egress-selector-mode disabled`; builds the `interlink-api` and `interlink-plugin` (SLURM) Docker images; writes all configs; starts containers; starts virtual-kubelet as a host process; approves kubelet CSRs; runs a Slurm/Apptainer smoke test |
-| `k3s-test-run.sh` | Runs the `pytest` test suite from [`vk-test-set`](https://github.com/interlink-hq/vk-test-set) against the live cluster |
-| `k3s-test-cleanup.sh` | Copies logs and job artefacts to the test directory, then stops containers, kills the virtual-kubelet process, and uninstalls K3s |
+| `k3s-test-setup.sh` | Installs K3s; builds `interlink-api` and `interlink-plugin` (SLURM) images; installs Traefik v3 CRDs and cert-manager; creates a CA ClusterIssuer; starts all containers; starts virtual-kubelet as a host process; approves kubelet CSRs; runs a Slurm/Apptainer smoke test; starts the rathole Docker Compose tunnel environment |
+| `k3s-test-run.sh` | (1) Runs the `pytest` vk-test-set suite (pod lifecycle + port-forwarding infra) against the live cluster; (2) runs the standalone Docker tunnel tests in `test/portforward/` |
+| `k3s-test-cleanup.sh` | Captures TLS resource state and rathole container logs; tears down Docker Compose; stops containers; kills virtual-kubelet; uninstalls K3s |
 
 ### Artefacts and logs
 
@@ -73,12 +73,16 @@ setup script (printed as `TEST_DIR` at startup):
 
 ```
 /tmp/interlink-test-XXXXXX/
-  k3s-install.log          – K3s install output
-  vk.log                   – virtual-kubelet stdout/stderr
-  interlink-api.log        – interlink-api container logs (live-streamed)
-  interlink-plugin.log     – interlink-plugin container logs (live-streamed)
-  plugin-jobs/             – job directories from inside the plugin container
-  slurm-logs/              – Slurm daemon logs from inside the plugin container
+  k3s-install.log               – K3s install output
+  vk.log                        – virtual-kubelet stdout/stderr
+  interlink-api.log             – interlink-api container logs (live-streamed)
+  interlink-plugin.log          – interlink-plugin container logs (live-streamed)
+  test-results.log              – pytest vk-test-set output
+  portforward-test-results.log  – pytest Docker tunnel test output
+  rathole-server-tcp.log        – rathole TCP server container logs
+  rathole-server-ws.log         – rathole WebSocket server container logs
+  plugin-jobs/                  – job directories from inside the plugin container
+  slurm-logs/                   – Slurm daemon logs from inside the plugin container
 ```
 
 ### Environment variables
@@ -87,6 +91,181 @@ setup script (printed as `TEST_DIR` at startup):
 |---|---|---|
 | `TEST_DIR` | auto-created under `/tmp` | Override the test directory path |
 | `K3S_VERSION` | `v1.31.4+k3s1` | K3s version to install |
+
+---
+
+## Running individual test suites manually
+
+Once `k3s-test-setup.sh` has completed (or you have an equivalent environment
+running), you can iterate on individual test suites without re-running the full
+setup.  All commands below assume you are at the repository root and the cluster
+is reachable via `/etc/rancher/k3s/k3s.yaml`.
+
+```bash
+export KUBECONFIG=/etc/rancher/k3s/k3s.yaml
+TEST_DIR=$(cat /tmp/interlink-test-dir.txt)   # set by setup script
+```
+
+### 1. VK pod integration tests (`test/vk-test-set/`)
+
+These tests submit real pods to the virtual-kubelet node and validate pod
+lifecycle, logs, volumes, probes, init containers, and projected volumes.
+
+```bash
+cd test/vk-test-set
+
+# Create an isolated Python venv (avoids oauthlib conflicts on RHEL/Rocky 9)
+python3 -m venv .venv
+source .venv/bin/activate
+pip install -q pytest kubernetes jinja2 pydantic requests pytest-timeout
+
+# Run the full suite (excluding slow / optional test classes)
+pytest -v -k "not rclone and not limits and not stress and not multi-init and not fail"
+
+# Run a single template test
+pytest -v vktestset/basic_test.py::test_manifest[virtual-kubelet-000-hello-world.yaml]
+
+# Run the port-forwarding infrastructure tests (separate file)
+pytest -v vktestset/port_forward_test.py
+
+# Run one specific port-forwarding test
+pytest -v vktestset/port_forward_test.py::test_rathole_annotation_set
+
+deactivate
+```
+
+**What `port_forward_test.py` checks** — when a pod with `containerPort` is
+scheduled on the virtual-kubelet node the VK must provision the full rathole
+tunnel infrastructure.  The 10 tests verify:
+
+| Test | Assertion |
+|---|---|
+| `test_port_forward_pod_scheduled` | Pod reaches `Running`/`Succeeded` |
+| `test_rathole_annotation_set` | `interlink.eu/rathole-client-commands` annotation is set and non-empty |
+| `test_shadow_namespace_exists` | `<namespace>-wstunnel` namespace is created |
+| `test_rathole_deployment_exists` | Rathole server `Deployment` exists in the shadow namespace |
+| `test_rathole_service_exists` | Rathole server `Service` exists in the shadow namespace |
+| `test_rathole_server_certificate_ready` | cert-manager `Certificate` (server TLS) reaches `Ready=True` |
+| `test_rathole_client_certificate_ready` | cert-manager `Certificate` (client TLS) reaches `Ready=True` |
+| `test_tls_secrets_issued` | Both TLS `Secret`s contain `ca.crt`, `tls.crt`, `tls.key` |
+| `test_traefik_ingressroutetcp_exists` | Traefik `IngressRouteTCP` is created for SNI routing |
+| `test_annotation_contains_valid_toml` | Annotation encodes valid TOML: `[client]`, port `443`, TLS transport, `p8080` service |
+
+**Troubleshooting**
+
+```bash
+# Check VK is running and Ready
+kubectl get node virtual-kubelet
+
+# Tail VK logs in real time
+tail -f "${TEST_DIR}/vk.log"
+
+# Check if interlink API can reach the plugin
+curl http://localhost:3000/pinglink
+
+# Inspect shadow namespace resources after a port-forward pod is created
+kubectl get all,certificates -n interlink-wstunnel
+```
+
+> **Rocky/CentOS 9 note:** The system `oauthlib` package is missing
+> `SIGNATURE_RSA`, which breaks the `kubernetes` Python client.  Always use a
+> fresh `venv` (as shown above) rather than the system Python.
+
+---
+
+### 2. Docker tunnel unit tests (`test/portforward/`)
+
+These tests are **independent of Kubernetes**.  They run against a local Docker
+Compose topology that mimics the rathole tunnel between a remote HPC node and
+the cluster side.  They can be run on any machine with Docker — no K3s required.
+
+```bash
+cd test/portforward
+
+# Start the two-network Docker Compose environment
+docker compose up -d
+
+# Wait for tunnels to be ready (rathole clients retry automatically)
+# You can watch tunnel handshake with:
+docker compose logs -f rathole-client-tcp
+
+# Install test dependencies
+python3 -m venv .venv-pf
+source .venv-pf/bin/activate
+pip install pytest requests pytest-timeout "kubernetes>=28.0"
+
+# Run all 37 tests
+pytest -v
+
+# Run only the TCP tunnel tests
+pytest -v test_tunnel.py::TestTCPTunnel
+
+# Run only the WebSocket tunnel tests
+pytest -v test_tunnel.py::TestWebSocketTunnel
+
+# Run the Kubernetes TLS resource tests (requires KUBECONFIG to be set)
+# These verify cert-manager Certificates and Traefik IngressRouteTCP
+export KUBECONFIG=/etc/rancher/k3s/k3s.yaml
+pytest -v test_tls_k8s.py
+
+deactivate
+
+# Tear down when done
+docker compose down -v
+```
+
+**Network topology**
+
+```
+[remote network – isolated "HPC" side]
+  backend (nginx:alpine)
+    port 80   → "Hello from remote backend"
+    port 9090 → "Metrics from remote backend"
+
+[cluster network – "Kubernetes" side]
+  rathole-server-tcp   (TCP)       → host:18080, host:19090
+  rathole-server-ws    (WebSocket) → host:18082
+
+[bridge: remote ↔ cluster]
+  rathole-client-tcp   forwards backend:80 and backend:9090 through TCP tunnel
+  rathole-client-ws    forwards backend:80 through WebSocket tunnel
+```
+
+The backend has **no** ports exposed to the host, so the only way to reach it is
+through a rathole tunnel — matching real interLink deployments where the remote
+service is inside the HPC network.
+
+**Environment variables for the Docker tests**
+
+| Variable | Default | Description |
+|---|---|---|
+| `TCP_HTTP_URL` | `http://localhost:18080` | TCP tunnel primary endpoint |
+| `TCP_METRICS_URL` | `http://localhost:19090` | TCP tunnel secondary port |
+| `WS_HTTP_URL` | `http://localhost:18082` | WebSocket tunnel endpoint |
+| `TUNNEL_WAIT_TIMEOUT` | `60` | Seconds to wait for tunnel readiness |
+
+---
+
+### 3. Quick health checks after setup
+
+```bash
+# Cluster and node status
+kubectl get nodes
+kubectl get pods -A
+
+# VK connectivity to interlink API
+curl http://localhost:3000/pinglink
+
+# Shadow namespace should exist if a port-forwarding pod was scheduled before
+kubectl get ns | grep wstunnel
+
+# Check all cert-manager Certificates in shadow namespaces
+kubectl get certificates -A | grep wstunnel
+
+# Inspect a specific rathole tunnel resource set (replace with real pod name/ns)
+kubectl get deployment,service,certificate,ingressroutetcp \
+  -n interlink-wstunnel -l app=rathole
+```
 
 ---
 
