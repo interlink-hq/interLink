@@ -1,0 +1,16 @@
+# Rathole server config – WebSocket transport mode.
+# This is what interLink uses when RatholeCAIssuerName is NOT set (DefaultRatholeWSCommand path).
+# In production a nginx Ingress proxies WebSocket connections to port 2334; here the
+# client connects directly so the test needs no nginx sidecar.
+[server]
+bind_addr = "0.0.0.0:2334"
+
+[server.transport]
+type = "websocket"
+
+[server.transport.websocket]
+tls = false
+
+[server.services.http]
+token = "interlink-test-token"
+bind_addr = "0.0.0.0:8082"

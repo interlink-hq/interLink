@@ -37,7 +37,13 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: e2e-test-logs
-          path: /tmp/interlink-test-*
+          path: |
+            /tmp/interlink-test-*/test-results.log
+            /tmp/interlink-test-*/portforward-test-results.log
+            /tmp/interlink-test-*/rathole-compose.log
+            /tmp/interlink-test-*/interlink-api.log
+            /tmp/interlink-test-*/interlink-plugin.log
+            /tmp/interlink-test-*/vk.log
           retention-days: 7
           if-no-files-found: ignore
 

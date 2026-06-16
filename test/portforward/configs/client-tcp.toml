@@ -1,0 +1,14 @@
+# Rathole client config – TCP transport mode.
+# Mirrors the TOML embedded in the annotation written by
+# addWstunnelClientAnnotation (tunnelTypeRathole, no CA issuer) but using
+# direct TCP transport rather than WebSocket (the WebSocket variant is in client-ws.toml).
+[client]
+remote_addr = "rathole-server-tcp:2333"
+
+[client.services.http]
+token = "interlink-test-token"
+local_addr = "backend:80"
+
+[client.services.metrics]
+token = "interlink-test-token"
+local_addr = "backend:9090"

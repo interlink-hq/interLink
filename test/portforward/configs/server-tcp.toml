@@ -1,0 +1,12 @@
+# Rathole server config – TCP transport mode.
+# Mirrors the ConfigMap rendered by pkg/virtualkubelet/templates/rathole-template.yaml.
+[server]
+bind_addr = "0.0.0.0:2333"
+
+[server.services.http]
+token = "interlink-test-token"
+bind_addr = "0.0.0.0:8080"
+
+[server.services.metrics]
+token = "interlink-test-token"
+bind_addr = "0.0.0.0:9090"

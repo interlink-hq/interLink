@@ -1,0 +1,21 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "interlink-portforward-tests"
+version = "0.1.0"
+description = "Integration tests for the rathole port-forwarding tunnel (PR #529)"
+requires-python = ">=3.8"
+dependencies = [
+    "pytest>=7.4",
+    "requests>=2.28",
+    "pytest-timeout>=2.2",
+    "kubernetes>=28.0",
+]
+
+[tool.pytest.ini_options]
+testpaths = ["."]
+timeout = 120
+log_cli = true
+log_cli_level = "INFO"

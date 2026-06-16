@@ -136,15 +136,86 @@ echo "========================================="
 echo ""
 
 if [ ${TEST_EXIT_CODE} -eq 0 ]; then
-  echo "✓ All tests passed!"
+  echo "✓ All VK integration tests passed!"
 else
-  echo "✗ Some tests failed (exit code: ${TEST_EXIT_CODE})"
-  echo ""
-  echo "Check logs for details:"
+  echo "✗ Some VK integration tests failed (exit code: ${TEST_EXIT_CODE})"
   echo "  - Test results: ${TEST_DIR}/test-results.log"
-  echo "  - Plugin: ${TEST_DIR}/plugin.log"
-  echo "  - interLink: ${TEST_DIR}/interlink.log"
-  echo "  - Virtual Kubelet: kubectl logs -n interlink -l app=virtual-kubelet"
+  echo "  - Plugin logs:  ${TEST_DIR}/interlink-plugin.log"
+  echo "  - API logs:     ${TEST_DIR}/interlink-api.log"
+  echo "  - VK logs:      ${TEST_DIR}/vk.log"
 fi
 
-exit ${TEST_EXIT_CODE}
+# ---------------------------------------------------------------------------
+# Port-forwarding network tests (rathole tunnel, PR #529)
+# Tests the TCP and WebSocket tunnel backends independently of Kubernetes.
+# The rathole containers were started by k3s-test-setup.sh; pytest connects
+# to the exposed host ports (18080, 18082, 19090) to verify end-to-end flow.
+# ---------------------------------------------------------------------------
+echo ""
+echo "=== Running port-forwarding network tests ==="
+echo "========================================="
+
+PF_DIR="${PROJECT_ROOT}/test/portforward"
+
+# Create an isolated venv so portforward deps don't interfere with vk-test-set.
+python3 -m venv "${TEST_DIR}/.venv-portforward"
+# shellcheck source=/dev/null
+source "${TEST_DIR}/.venv-portforward/bin/activate"
+
+# Upgrade pip first, then install deps directly to avoid hatchling build-backend
+# issues on older pip versions (Python 3.9 system pip on some distros).
+pip install -q --upgrade pip
+pip install -q pytest requests pytest-timeout "kubernetes>=28.0" || {
+  echo "ERROR: Failed to install portforward test dependencies"
+  deactivate
+  PF_EXIT_CODE=1
+}
+
+if [ "${PF_EXIT_CODE:-0}" -ne 1 ]; then
+  cd "${PF_DIR}"
+
+  # Give rathole clients extra time to connect in the CI environment.
+  # The annotation-format and isolation tests run without Docker, so they
+  # pass even if the tunnel containers haven't finished handshaking yet.
+  TUNNEL_WAIT_TIMEOUT=90 \
+    pytest -v \
+    2>&1 | tee "${TEST_DIR}/portforward-test-results.log"
+  PF_EXIT_CODE=${PIPESTATUS[0]}
+
+  deactivate
+fi
+
+echo "========================================="
+echo ""
+
+if [ "${PF_EXIT_CODE:-0}" -eq 0 ]; then
+  echo "✓ All port-forwarding tunnel tests passed!"
+else
+  echo "✗ Some port-forwarding tunnel tests failed (exit code: ${PF_EXIT_CODE})"
+  echo "  - Test results: ${TEST_DIR}/portforward-test-results.log"
+  echo "  - Rathole server (TCP):"
+  docker compose \
+    -f "${PROJECT_ROOT}/test/portforward/docker-compose.yml" \
+    --project-name interlink-portforward \
+    logs rathole-server-tcp 2>/dev/null | tail -30 || true
+  echo "  - Rathole server (WS):"
+  docker compose \
+    -f "${PROJECT_ROOT}/test/portforward/docker-compose.yml" \
+    --project-name interlink-portforward \
+    logs rathole-server-ws 2>/dev/null | tail -30 || true
+fi
+
+# Combine both exit codes: fail if either test suite failed.
+OVERALL_EXIT_CODE=0
+[ "${TEST_EXIT_CODE}" -ne 0 ] && OVERALL_EXIT_CODE="${TEST_EXIT_CODE}"
+[ "${PF_EXIT_CODE:-0}" -ne 0 ] && OVERALL_EXIT_CODE="${PF_EXIT_CODE}"
+
+if [ "${OVERALL_EXIT_CODE}" -eq 0 ]; then
+  echo "✓ All test suites passed!"
+else
+  echo "✗ One or more test suites failed"
+  echo "  VK integration tests: $([ ${TEST_EXIT_CODE} -eq 0 ] && echo PASS || echo FAIL)"
+  echo "  Port-forwarding tests: $([ ${PF_EXIT_CODE:-0} -eq 0 ] && echo PASS || echo FAIL)"
+fi
+
+exit ${OVERALL_EXIT_CODE}

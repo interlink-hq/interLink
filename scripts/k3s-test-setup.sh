@@ -73,9 +73,112 @@ fi
 
 echo "✓ K3s is ready!"
 kubectl get nodes
+
 # ---------------------------------------------------------------------------
-# Build Docker images from source
+# Install Traefik v3 CRDs
+# The VK uses traefik.io/v1alpha1 (Traefik v3 API) to create IngressRouteTCP
+# resources. k3s 1.31 bundles Traefik v2 (different API group), so we install
+# only the CRD definitions – no Traefik controller is needed for resource
+# creation testing.
 # ---------------------------------------------------------------------------
+echo ""
+echo "=== Installing Traefik v3 CRDs ==="
+kubectl apply -f \
+  https://raw.githubusercontent.com/traefik/traefik/v3.3.6/docs/content/reference/dynamic-configuration/kubernetes-crd-definition-v1.yml \
+  2>&1 | tee "${TEST_DIR}/traefik-crd-install.log"
+echo "✓ Traefik v3 CRDs installed"
+
+# ---------------------------------------------------------------------------
+# Install cert-manager
+# Required so the VK can create cert-manager Certificate CRs and have them
+# actually issued as TLS secrets in the rathole TLS mode.
+# ---------------------------------------------------------------------------
+echo ""
+echo "=== Installing cert-manager ==="
+CERT_MANAGER_VERSION="${CERT_MANAGER_VERSION:-v1.16.2}"
+kubectl apply -f \
+  "https://github.com/cert-manager/cert-manager/releases/download/${CERT_MANAGER_VERSION}/cert-manager.yaml" \
+  2>&1 | tee "${TEST_DIR}/cert-manager-install.log"
+
+echo "Waiting for cert-manager deployments to be available..."
+kubectl wait --for=condition=Available deployment/cert-manager \
+  -n cert-manager --timeout=180s
+kubectl wait --for=condition=Available deployment/cert-manager-webhook \
+  -n cert-manager --timeout=180s
+kubectl wait --for=condition=Available deployment/cert-manager-cainjector \
+  -n cert-manager --timeout=180s
+echo "✓ cert-manager is ready"
+
+# ---------------------------------------------------------------------------
+# Create a self-signed CA ClusterIssuer for interLink tunnel TLS tests
+# The two-step approach (bootstrap self-signed → CA cert → CA issuer) ensures
+# that the issued certificate secrets contain a valid ca.crt field, which the
+# VK checks before embedding certs in the pod annotation.
+# ---------------------------------------------------------------------------
+echo ""
+echo "=== Creating interLink test CA ClusterIssuer ==="
+kubectl apply -f - <<'CA_YAML'
+---
+apiVersion: cert-manager.io/v1
+kind: ClusterIssuer
+metadata:
+  name: interlink-selfsigned-bootstrap
+spec:
+  selfSigned: {}
+---
+apiVersion: cert-manager.io/v1
+kind: Certificate
+metadata:
+  name: interlink-test-ca
+  namespace: cert-manager
+spec:
+  isCA: true
+  commonName: interlink-test-ca
+  secretName: interlink-test-ca-secret
+  duration: 87600h
+  privateKey:
+    algorithm: ECDSA
+    size: 256
+  issuerRef:
+    name: interlink-selfsigned-bootstrap
+    kind: ClusterIssuer
+---
+apiVersion: cert-manager.io/v1
+kind: ClusterIssuer
+metadata:
+  name: interlink-test-ca
+spec:
+  ca:
+    secretName: interlink-test-ca-secret
+CA_YAML
+
+# Wait for the bootstrap CA certificate to be issued
+echo "Waiting for interlink-test-ca certificate to be issued..."
+for i in $(seq 1 30); do
+  if kubectl get secret interlink-test-ca-secret -n cert-manager &>/dev/null; then
+    echo "✓ interlink-test-ca secret is ready"
+    break
+  fi
+  echo "  Waiting for CA secret... ($i/30)"
+  sleep 5
+done
+
+if ! kubectl get secret interlink-test-ca-secret -n cert-manager &>/dev/null; then
+  echo "WARNING: interlink-test-ca-secret was not issued in time – TLS tests may fail"
+  kubectl describe certificate interlink-test-ca -n cert-manager || true
+fi
+
+# Wait for CA ClusterIssuer to become Ready
+for i in $(seq 1 20); do
+  ISSUER_READY=$(kubectl get clusterissuer interlink-test-ca \
+    -o jsonpath='{.status.conditions[?(@.type=="Ready")].status}' 2>/dev/null || echo "")
+  if [ "${ISSUER_READY}" = "True" ]; then
+    echo "✓ interlink-test-ca ClusterIssuer is Ready"
+    break
+  fi
+  echo "  Waiting for ClusterIssuer to be ready... ($i/20)"
+  sleep 5
+done
 echo ""
 echo "=== Building Docker images ==="
 
@@ -230,6 +333,43 @@ echo $! > "${TEST_DIR}/plugin-log.pid"
 echo "  Plugin logs streaming to: ${TEST_DIR}/interlink-plugin.log"
 
 # ---------------------------------------------------------------------------
+# Start rathole port-forwarding test environment (PR #529)
+# Runs independently of Kubernetes: a standalone two-network Docker topology
+# that verifies TCP and WebSocket tunnel connectivity end-to-end.
+# ---------------------------------------------------------------------------
+echo ""
+echo "=== Starting rathole tunnel test environment ==="
+
+# Pre-pull images so that docker compose startup is fast and failures are clear.
+echo "  Pulling container images for port-forwarding test..."
+docker pull rapiz1/rathole:v0.5.0 2>&1 | tail -3 || \
+  echo "WARNING: Could not pre-pull rapiz1/rathole:v0.5.0 – compose will try on startup"
+docker pull nginx:alpine 2>&1 | tail -3 || true
+
+docker compose \
+  -f "${PROJECT_ROOT}/test/portforward/docker-compose.yml" \
+  --project-name interlink-portforward \
+  up -d 2>&1 | tee "${TEST_DIR}/rathole-compose-up.log"
+
+# Verify at least the rathole server containers are starting.
+# They use restart:on-failure so transient connection errors auto-heal.
+RATHOLE_RUNNING=$(docker compose \
+  -f "${PROJECT_ROOT}/test/portforward/docker-compose.yml" \
+  --project-name interlink-portforward \
+  ps --services --filter status=running 2>/dev/null | wc -l)
+
+if [ "${RATHOLE_RUNNING}" -gt 0 ]; then
+  echo "✓ Rathole tunnel containers started (${RATHOLE_RUNNING} services running)"
+else
+  echo "WARNING: No rathole containers are running yet – they may still be starting"
+fi
+
+docker compose \
+  -f "${PROJECT_ROOT}/test/portforward/docker-compose.yml" \
+  --project-name interlink-portforward \
+  ps
+
+# ---------------------------------------------------------------------------
 # Start interLink API container
 # ---------------------------------------------------------------------------
 echo ""
@@ -294,7 +434,7 @@ rules:
   verbs: ["update", "create", "get", "list", "watch", "patch"]
 - apiGroups: [""]
   resources: ["configmaps", "secrets", "services", "serviceaccounts", "namespaces"]
-  verbs: ["get", "list", "watch"]
+  verbs: ["get", "list", "watch", "create", "update", "patch", "delete"]
 - apiGroups: [""]
   resources: ["serviceaccounts/token"]
   verbs: ["create", "get", "list"]
@@ -313,6 +453,18 @@ rules:
 - apiGroups: [""]
   resources: ["events"]
   verbs: ["create", "patch"]
+- apiGroups: ["apps"]
+  resources: ["deployments"]
+  verbs: ["create", "get", "list", "watch", "update", "patch", "delete"]
+- apiGroups: ["networking.k8s.io"]
+  resources: ["ingresses"]
+  verbs: ["create", "get", "list", "watch", "update", "patch", "delete"]
+- apiGroups: ["cert-manager.io"]
+  resources: ["certificates"]
+  verbs: ["create", "get", "list", "watch", "update", "patch", "delete"]
+- apiGroups: ["traefik.io"]
+  resources: ["ingressroutetcps"]
+  verbs: ["create", "get", "list", "watch", "update", "patch", "delete"]
 - apiGroups: ["certificates.k8s.io"]
   resources: ["certificatesigningrequests"]
   verbs: ["create", "get", "list", "watch", "delete"]
@@ -339,8 +491,9 @@ subjects:
 YAML
 echo "✓ Service account and RBAC created"
 
-# ---------------------------------------------------------------------------
-# Build Virtual Kubelet binary
+# Create the interlink namespace used by vk-test-set
+kubectl create namespace interlink --dry-run=client -o yaml | kubectl apply -f -
+echo "✓ interlink namespace ready"
 # ---------------------------------------------------------------------------
 echo ""
 echo "=== Building Virtual Kubelet binary ==="
@@ -407,6 +560,11 @@ HTTP:
   Insecure: true
 KubeletHTTP:
   Insecure: true
+Network:
+  EnableTunnel: true
+  TunnelType: "rathole"
+  WildcardDNS: "tunnel.test.local"
+  RatholeCAIssuerName: "interlink-test-ca"
 EOF
 
 # ---------------------------------------------------------------------------
