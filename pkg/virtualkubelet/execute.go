@@ -947,7 +947,6 @@ func remoteExecutionHandleVolumes(ctx context.Context, p *Provider, pod *v1.Pod,
 					projectedVolume.Name = volume.Name
 					projectedVolume.Data = make(map[string]string)
 					log.G(ctx).Debug("Adding to PodCreateRequests the projected volume ", volume.Name)
-					req.ProjectedVolumeMaps = append(req.ProjectedVolumeMaps, projectedVolume)
 
 					for _, source := range volume.Projected.Sources {
 						err := remoteExecutionHandleProjectedSource(ctx, p, pod, source, &projectedVolume)
@@ -955,8 +954,10 @@ func remoteExecutionHandleVolumes(ctx context.Context, p *Provider, pod *v1.Pod,
 							return err
 						}
 						failedAndWait = false
-						log.G(ctx).Debug("ProjectedVolumeMaps len: ", len(req.ProjectedVolumeMaps))
 					}
+
+					req.ProjectedVolumeMaps = append(req.ProjectedVolumeMaps, projectedVolume)
+					log.G(ctx).Debug("ProjectedVolumeMaps len: ", len(req.ProjectedVolumeMaps))
 
 				case volume.DownwardAPI != nil:
 					if p.config.DisableProjectedVolumes {
