@@ -235,7 +235,8 @@ func deriveWGPublicKey(privB64 string) (string, error) {
 	return base64.StdEncoding.EncodeToString(pubRaw), nil
 }
 
-// addWstunnelClientAnnotation adds the wstunnel client command annotation to the original pod
+// addWstunnelClientAnnotation adds the tunnel client command annotation to the original pod.
+// In non-full-mesh mode it delegates command generation to the configured tunnel backend.
 func (p *Provider) addWstunnelClientAnnotation(ctx context.Context, pod *v1.Pod, td *WstunnelTemplateData) error {
 	if pod.Annotations == nil {
 		pod.Annotations = make(map[string]string)
@@ -288,32 +289,21 @@ PersistentKeepalive = %d
 		`, clientPriv, td.WGMTU, serverPub, td.KeepaliveSecs)
 
 		pod.Annotations["interlink.eu/wireguard-client-snippet"] = wgSnippet
-
 	} else {
-		var rOptions []string
-		for _, port := range td.ExposedPorts {
-			if strings.ToUpper(port.Protocol) == "UDP" {
-				continue
-			}
-			rOptions = append(rOptions, fmt.Sprintf("-R tcp://0.0.0.0:%d:localhost:%d", port.Port, port.Port))
+		if err := p.ensureTunnelBackend(); err != nil {
+			return err
 		}
 
-		wstunnelCommandTemplate := p.config.Network.WstunnelCommand
-		if wstunnelCommandTemplate == "" {
-			wstunnelCommandTemplate = DefaultWstunnelCommand
+		mainCmd, err := p.tunnelBackend.ClientCommand(ctx, *td, pod)
+		if err != nil {
+			return err
 		}
 
-		log.G(ctx).Infof("Default ws tunnel command is: %s", wstunnelCommandTemplate)
-
-		mainCmd := fmt.Sprintf(
-			wstunnelCommandTemplate,
-			td.RandomPassword,
-			strings.Join(rOptions, " "),
-			ingressEndpoint,
-		)
-
-		pod.Annotations["interlink.eu/wstunnel-client-commands"] = mainCmd
-
+		// clear stale tunnel command annotations and set the selected backend annotation
+		delete(pod.Annotations, annWSTunnelClientCmds)
+		delete(pod.Annotations, annRatholeClientCmds)
+		delete(pod.Annotations, annSSHClientCmds)
+		pod.Annotations[p.tunnelBackend.ClientAnnotationKey()] = mainCmd
 	}
 
 	// Patch the pod on Kubernetes
@@ -347,8 +337,8 @@ PersistentKeepalive = %d
 
 // clearConflictingNetworkAnnotations removes generated annotations that are specific to
 // the opposite network mode to keep pod network bootstrap behavior uniform.
-// When fullMeshEnabledForPod is true, any stale wstunnel client command annotation is removed.
-// When false, any stale WireGuard snippet annotation is removed.
+// When fullMeshEnabledForPod is true, any stale tunnel client command annotations
+// are removed. When false, any stale WireGuard snippet annotation is removed.
 func clearConflictingNetworkAnnotations(pod *v1.Pod, fullMeshEnabledForPod bool) {
 	if pod == nil || pod.Annotations == nil {
 		return
@@ -356,6 +346,8 @@ func clearConflictingNetworkAnnotations(pod *v1.Pod, fullMeshEnabledForPod bool)
 
 	if fullMeshEnabledForPod {
 		delete(pod.Annotations, annWSTunnelClientCmds)
+		delete(pod.Annotations, annRatholeClientCmds)
+		delete(pod.Annotations, annSSHClientCmds)
 		return
 	}
 

@@ -1,6 +1,7 @@
 package virtualkubelet
 
 import (
+	"strings"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -122,6 +123,58 @@ func TestNetwork_Configuration(t *testing.T) {
 	assert.True(t, network.EnableTunnel)
 	assert.Equal(t, "*.example.com", network.WildcardDNS)
 	assert.NotEmpty(t, network.WstunnelCommand)
+}
+
+func TestNetwork_RatholeConfiguration(t *testing.T) {
+	network := Network{
+		EnableTunnel:         true,
+		TunnelType:           "rathole",
+		WildcardDNS:          "tunnel.example.com",
+		RatholeExecutableURL: "https://example.com/rathole.zip",
+		// RatholeCommand is the TLS-mode template: 5 %s args (URL, CA cert, client cert, client key, client TOML)
+		RatholeCommand: "curl -L %s -o r.zip && unzip r.zip && echo %s | base64 -d > /tmp/ca.crt && echo %s | base64 -d > /tmp/cl.crt && echo %s | base64 -d > /tmp/cl.key && echo %s | base64 -d > /tmp/c.toml && ./rathole --client /tmp/c.toml &",
+		// RatholeWSCommand is the WebSocket-fallback template: 2 %s args (URL, client TOML)
+		RatholeWSCommand: "curl -L %s -o r.zip && unzip r.zip && echo %s | base64 -d > /tmp/c.toml && ./rathole --client /tmp/c.toml &",
+	}
+
+	assert.True(t, network.EnableTunnel)
+	assert.Equal(t, "rathole", network.TunnelType)
+	assert.Equal(t, "tunnel.example.com", network.WildcardDNS)
+	assert.Equal(t, "https://example.com/rathole.zip", network.RatholeExecutableURL)
+	assert.NotEmpty(t, network.RatholeCommand)
+	assert.NotEmpty(t, network.RatholeWSCommand)
+	// Validate that RatholeCommand contains exactly 5 %s verbs (TLS mode)
+	assert.Equal(t, 5, strings.Count(network.RatholeCommand, "%s"), "RatholeCommand must have exactly 5 %%s format verbs for TLS mode")
+	// Validate that RatholeWSCommand contains exactly 2 %s verbs (WebSocket fallback)
+	assert.Equal(t, 2, strings.Count(network.RatholeWSCommand, "%s"), "RatholeWSCommand must have exactly 2 %%s format verbs for WebSocket mode")
+}
+
+func TestNetwork_WstunnelDefaultTunnelType(t *testing.T) {
+	// Empty TunnelType means wstunnel (backward-compatible default)
+	network := Network{
+		EnableTunnel: true,
+	}
+	assert.Empty(t, network.TunnelType, "empty TunnelType should default to wstunnel behaviour")
+}
+
+func TestNetwork_SSHConfiguration(t *testing.T) {
+	network := Network{
+		EnableTunnel:              true,
+		TunnelType:                "ssh",
+		SSHJumpHost:               "user@jump.example.com:22",
+		SSHJumpKeySecretName:      "jump-key",
+		SSHJumpKeySecretNamespace: "interlink",
+		SSHRemoteHost:             "localhost",
+		SSHCommand:                "custom %s %s %s %s",
+	}
+
+	assert.True(t, network.EnableTunnel)
+	assert.Equal(t, "ssh", network.TunnelType)
+	assert.Equal(t, "user@jump.example.com:22", network.SSHJumpHost)
+	assert.Equal(t, "jump-key", network.SSHJumpKeySecretName)
+	assert.Equal(t, "interlink", network.SSHJumpKeySecretNamespace)
+	assert.Equal(t, "localhost", network.SSHRemoteHost)
+	assert.NotEmpty(t, network.SSHCommand)
 }
 
 func TestAccelerator_AvailableIsKubernetesQuantity(t *testing.T) {

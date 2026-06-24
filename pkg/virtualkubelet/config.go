@@ -131,14 +131,52 @@ type PodCIDR struct {
 type Network struct {
 	// EnableTunnel enables WebSocket tunneling for pod port exposure
 	EnableTunnel bool `yaml:"EnableTunnel" default:"false"`
+	// TunnelType selects the port-forwarding backend: "" or "wstunnel" (default, backward-compatible), "rathole", or "ssh".
+	TunnelType string `yaml:"TunnelType,omitempty"`
 	// WildcardDNS specifies the DNS domain for generating tunnel endpoints
 	WildcardDNS string `yaml:"WildcardDNS,omitempty"`
 	// WSTunnelExecutableURL specifies the URL to download the wstunnel executable (default is "https://github.com/interlink-hq/interlink-artifacts/raw/main/wstunnel/v10.4.4/linux-amd64/wstunnel")
 	WSTunnelExecutableURL string `yaml:"WSTunnelExecutable,omitempty"`
-	// WstunnelTemplatePath is the path to a custom wstunnel template file
+	// WstunnelTemplatePath is the path to a custom tunnel template file (applies to both wstunnel and rathole)
 	WstunnelTemplatePath string `yaml:"WstunnelTemplatePath,omitempty"`
 	// WstunnelCommand specifies the command template for setting up wstunnel clients
 	WstunnelCommand string `yaml:"WstunnelCommand,omitempty"`
+	// RatholeExecutableURL specifies the URL to download the rathole executable zip archive
+	// (default is "https://github.com/rathole-org/rathole/releases/download/v0.5.0/rathole-x86_64-unknown-linux-gnu.zip")
+	RatholeExecutableURL string `yaml:"RatholeExecutableURL,omitempty"`
+	// RatholeCommand specifies a custom command template for rathole clients in TLS mode
+	// (i.e., when RatholeCAIssuerName is set). Five %s format verbs are substituted in order:
+	// the rathole download URL, base64-encoded CA cert, base64-encoded client cert,
+	// base64-encoded client key, and base64-encoded client TOML config.
+	// Default: DefaultRatholeCommand.
+	RatholeCommand string `yaml:"RatholeCommand,omitempty"`
+	// RatholeWSCommand specifies a custom command template for rathole clients in WebSocket fallback
+	// mode (i.e., when RatholeCAIssuerName is empty). Two %s format verbs are substituted in order:
+	// the rathole download URL and the base64-encoded client TOML config.
+	// Default: DefaultRatholeWSCommand.
+	RatholeWSCommand string `yaml:"RatholeWSCommand,omitempty"`
+	// RatholeCAIssuerName is the cert-manager ClusterIssuer or Issuer name for the admin-provided CA.
+	// When set, rathole uses TLS transport; cert-manager issues both the server and client certificates.
+	// A Traefik IngressRouteTCP resource is created to expose the rathole server via TLS on port 443.
+	RatholeCAIssuerName string `yaml:"RatholeCAIssuerName,omitempty"`
+	// RatholeCAIssuerKind is the kind of the cert-manager issuer: "ClusterIssuer" (default) or "Issuer".
+	RatholeCAIssuerKind string `yaml:"RatholeCAIssuerKind,omitempty"`
+	// SSHJumpHost is the SSH jump/bastion host in the form user@host:port.
+	// Used only when TunnelType is "ssh".
+	SSHJumpHost string `yaml:"SSHJumpHost,omitempty"`
+	// SSHJumpKeySecretName is the Kubernetes Secret name containing the jump-host private key
+	// (key name id_rsa or id_ed25519). Used only when TunnelType is "ssh".
+	SSHJumpKeySecretName string `yaml:"SSHJumpKeySecretName,omitempty"`
+	// SSHJumpKeySecretNamespace is the namespace of SSHJumpKeySecretName.
+	// Defaults to Config.Namespace when empty.
+	SSHJumpKeySecretNamespace string `yaml:"SSHJumpKeySecretNamespace,omitempty"`
+	// SSHRemoteHost is the destination host reachable from the jump host.
+	// Defaults to "localhost" when empty.
+	SSHRemoteHost string `yaml:"SSHRemoteHost,omitempty"`
+	// SSHCommand specifies an optional custom SSH command template.
+	// Format verbs: first %s = base64 private key, second %s = jump host,
+	// third %s = remote host, remaining %s = one per forwarded host:port pair.
+	SSHCommand string `yaml:"SSHCommand,omitempty"`
 	// FullMesh enables full mesh networking with slirp4netns and WireGuard
 	FullMesh bool `yaml:"FullMesh" default:"false"`
 	// MeshScriptTemplatePath is the path to a custom mesh.sh template file

@@ -4,7 +4,31 @@
 # Usage: ./scripts/k3s-test-cleanup.sh
 # Requirements: sudo access (for K3s uninstall)
 
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+PROJECT_ROOT="$(cd "${SCRIPT_DIR}/.." && pwd)"
+
 echo "=== Cleaning up interLink integration test environment ==="
+
+# ---------------------------------------------------------------------------
+# Stop rathole port-forwarding test environment (PR #529)
+# Do this first to capture logs before any other teardown.
+# ---------------------------------------------------------------------------
+echo ""
+echo "=== Stopping rathole tunnel test environment ==="
+if [ -f /tmp/interlink-test-dir.txt ]; then
+  TEST_DIR=$(cat /tmp/interlink-test-dir.txt)
+  echo "Saving rathole container logs to ${TEST_DIR}..."
+  docker compose \
+    -f "${PROJECT_ROOT}/test/portforward/docker-compose.yml" \
+    --project-name interlink-portforward \
+    logs 2>/dev/null > "${TEST_DIR}/rathole-compose.log" || true
+fi
+
+docker compose \
+  -f "${PROJECT_ROOT}/test/portforward/docker-compose.yml" \
+  --project-name interlink-portforward \
+  down --volumes 2>/dev/null || true
+echo "✓ Rathole tunnel containers stopped"
 
 # ---------------------------------------------------------------------------
 # Stop Virtual Kubelet host process
@@ -25,6 +49,18 @@ fi
 
 # Kill any remaining VK processes by binary name
 pkill -f "interlink-test.*vk$" 2>/dev/null || true
+
+# ---------------------------------------------------------------------------
+# Stop background log-streaming processes
+# ---------------------------------------------------------------------------
+if [ -f /tmp/interlink-test-dir.txt ]; then
+  TEST_DIR=$(cat /tmp/interlink-test-dir.txt)
+  echo "Saving k8s tunnel TLS resource state to ${TEST_DIR}..."
+  # Capture cert-manager Certificate status for debugging
+  kubectl get certificates --all-namespaces -o yaml > "${TEST_DIR}/cert-manager-certificates.yaml" 2>/dev/null || true
+  kubectl get clusterissuers -o yaml > "${TEST_DIR}/cert-manager-issuers.yaml" 2>/dev/null || true
+  kubectl get ingressroutetcps --all-namespaces -o yaml > "${TEST_DIR}/traefik-ingressroutetcps.yaml" 2>/dev/null || true
+fi
 
 # ---------------------------------------------------------------------------
 # Stop background log-streaming processes

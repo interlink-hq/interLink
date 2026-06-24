@@ -1,0 +1,105 @@
+# Test environment simulating the rathole port-forwarding tunnel introduced in PR #529.
+#
+# Topology:
+#
+#   [remote network]                    [cluster network]
+#   backend (nginx) <-- rathole-client-tcp --> rathole-server-tcp --> host:18080, host:19090
+#   backend (nginx) <-- rathole-client-ws  --> rathole-server-ws  --> host:18082
+#
+# The "remote" network is isolated (simulates the HPC/compute side).
+# The "cluster" network is where the rathole servers run (simulates the Kubernetes side).
+# Rathole clients bridge both networks, mirroring how interLink's VK deploys the tunnel.
+#
+# Usage:
+#   docker compose up -d
+#   pytest -v
+#   docker compose down -v
+
+networks:
+  # Simulates the isolated remote/HPC side. Only the backend and rathole clients can see it.
+  remote:
+    driver: bridge
+  # Simulates the Kubernetes cluster side. Rathole servers and clients share this.
+  cluster:
+    driver: bridge
+
+services:
+
+  # ── Backend ────────────────────────────────────────────────────────────────
+  # Represents a service running on the remote/HPC node.
+  # It is intentionally NOT connected to the cluster network so that the only
+  # path from the cluster side is through the rathole tunnel.
+  backend:
+    image: nginx:alpine
+    networks:
+      - remote
+    volumes:
+      - ./configs/nginx.conf:/etc/nginx/conf.d/default.conf:ro
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://127.0.0.1/"]
+      interval: 3s
+      timeout: 3s
+      retries: 10
+
+  # ── TCP mode ───────────────────────────────────────────────────────────────
+  # rathole server: runs in the "cluster", exposes forwarded ports to the host
+  # so that pytest can reach them.
+  rathole-server-tcp:
+    image: rapiz1/rathole:v0.5.0
+    networks:
+      - cluster
+    volumes:
+      - ./configs/server-tcp.toml:/etc/rathole/server.toml:ro
+    command: ["--server", "/etc/rathole/server.toml"]
+    ports:
+      - "18080:8080"   # HTTP port forwarded from backend:80
+      - "19090:9090"   # Secondary port forwarded from backend:9090
+    restart: on-failure
+
+  # rathole client: bridges "remote" and "cluster", connects to server and
+  # exposes backend ports as if they were local.
+  rathole-client-tcp:
+    image: rapiz1/rathole:v0.5.0
+    networks:
+      - remote
+      - cluster
+    volumes:
+      - ./configs/client-tcp.toml:/etc/rathole/client.toml:ro
+    command: ["--client", "/etc/rathole/client.toml"]
+    depends_on:
+      backend:
+        condition: service_healthy
+      rathole-server-tcp:
+        condition: service_started
+    restart: on-failure
+
+  # ── WebSocket mode ─────────────────────────────────────────────────────────
+  # Same topology as TCP mode but uses WebSocket transport, which is what
+  # interLink uses when RatholeCAIssuerName is not set (no cert-manager TLS).
+  # In production an nginx Ingress proxies the WebSocket connection; here the
+  # client connects to the rathole server directly to keep the test self-contained.
+  rathole-server-ws:
+    image: rapiz1/rathole:v0.5.0
+    networks:
+      - cluster
+    volumes:
+      - ./configs/server-ws.toml:/etc/rathole/server.toml:ro
+    command: ["--server", "/etc/rathole/server.toml"]
+    ports:
+      - "18082:8082"   # HTTP port forwarded from backend:80 via WebSocket tunnel
+    restart: on-failure
+
+  rathole-client-ws:
+    image: rapiz1/rathole:v0.5.0
+    networks:
+      - remote
+      - cluster
+    volumes:
+      - ./configs/client-ws.toml:/etc/rathole/client.toml:ro
+    command: ["--client", "/etc/rathole/client.toml"]
+    depends_on:
+      backend:
+        condition: service_healthy
+      rathole-server-ws:
+        condition: service_started
+    restart: on-failure
