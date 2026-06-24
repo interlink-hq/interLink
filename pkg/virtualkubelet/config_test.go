@@ -157,6 +157,26 @@ func TestNetwork_WstunnelDefaultTunnelType(t *testing.T) {
 	assert.Empty(t, network.TunnelType, "empty TunnelType should default to wstunnel behaviour")
 }
 
+func TestNetwork_SSHConfiguration(t *testing.T) {
+	network := Network{
+		EnableTunnel:              true,
+		TunnelType:                "ssh",
+		SSHJumpHost:               "user@jump.example.com:22",
+		SSHJumpKeySecretName:      "jump-key",
+		SSHJumpKeySecretNamespace: "interlink",
+		SSHRemoteHost:             "localhost",
+		SSHCommand:                "custom %s %s %s %s",
+	}
+
+	assert.True(t, network.EnableTunnel)
+	assert.Equal(t, "ssh", network.TunnelType)
+	assert.Equal(t, "user@jump.example.com:22", network.SSHJumpHost)
+	assert.Equal(t, "jump-key", network.SSHJumpKeySecretName)
+	assert.Equal(t, "interlink", network.SSHJumpKeySecretNamespace)
+	assert.Equal(t, "localhost", network.SSHRemoteHost)
+	assert.NotEmpty(t, network.SSHCommand)
+}
+
 func TestAccelerator_AvailableIsKubernetesQuantity(t *testing.T) {
 	tests := []struct {
 		name      string

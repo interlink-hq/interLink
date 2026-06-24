@@ -76,6 +76,7 @@ const (
 	protocolUDP = "UDP"
 	// tunnelTypeRathole is the TunnelType value that selects the rathole port-forwarding backend.
 	tunnelTypeRathole      = "rathole"
+	tunnelTypeSSH          = "ssh"
 	DefaultWstunnelCommand = "curl  -L -f -k https://github.com/erebe/wstunnel/releases/download/v10.4.4/wstunnel_10.4.4_linux_amd64.tar.gz -o wstunnel.tar.gz && tar -xzvf wstunnel.tar.gz && chmod +x wstunnel && ./wstunnel client --http-upgrade-path-prefix %s %s ws://%s:80 &"
 	// DefaultRatholeExecutableURL is the default URL to download the rathole executable zip archive.
 	// Source: https://github.com/rathole-org/rathole (note: x86_64 musl was dropped in v0.5.0; use gnu).
@@ -97,6 +98,7 @@ const (
 	annWgKeepaliveSeconds           = "interlink.eu/wg-keepalive-seconds" // optional, default 25
 	annWSTunnelClientCmds           = "interlink.eu/wstunnel-client-commands"
 	annRatholeClientCmds            = "interlink.eu/rathole-client-commands"
+	annSSHClientCmds                = "interlink.eu/ssh-client-commands"
 	annWGClientSnippet              = "interlink.eu/wireguard-client-snippet"
 	annDisableOffloadContainers     = "interlink.eu/disable-offload-containers"      // comma-separated container names
 	annDisableOffloadInitContainers = "interlink.eu/disable-offload-init-containers" // comma-separated init container names
@@ -163,6 +165,7 @@ type Provider struct {
 	onNodeChangeCallback func(*v1.Node)
 	clientSet            kubernetes.Interface
 	dynamicClient        dynamic.Interface
+	tunnelBackend        TunnelBackend
 	clientHTTPTransport  *http.Transport
 	podIPs               []string
 }
@@ -757,6 +760,10 @@ func copyPodLabelsAndAnnotations(pod *v1.Pod) (map[string]string, map[string]str
 
 // createDummyPod creates wstunnel infrastructure from template for containers with exposed ports
 func (p *Provider) createDummyPod(ctx context.Context, originalPod *v1.Pod) (*v1.Pod, *WstunnelTemplateData, error) {
+	if err := p.ensureTunnelBackend(); err != nil {
+		return nil, nil, err
+	}
+
 	log.G(ctx).Infof("Creating wstunnel infrastructure for %s/%s with exposed ports", originalPod.Namespace, originalPod.Name)
 
 	// If not exists, create the namespace for wstunnel
@@ -900,13 +907,8 @@ func (p *Provider) createDummyPod(ctx context.Context, originalPod *v1.Pod) (*v1
 		return nil, nil, fmt.Errorf("failed to apply wstunnel manifests: %w", err)
 	}
 
-	// For rathole TLS mode, also create the cert-manager Certificates and Traefik IngressRouteTCP.
-	// This is a hard requirement: if TLS resource creation fails when RatholeCAIssuerName is set,
-	// the annotation path will block waiting for a cert secret that will never appear.
-	if p.config.Network.TunnelType == tunnelTypeRathole && p.config.Network.RatholeCAIssuerName != "" {
-		if tlsErr := p.applyRatholeTLSResources(ctx, templateData); tlsErr != nil {
-			return nil, nil, fmt.Errorf("failed to apply rathole TLS resources for %s/%s: %w", originalPod.Namespace, originalPod.Name, tlsErr)
-		}
+	if err := p.tunnelBackend.ServerResources(ctx, templateData); err != nil {
+		return nil, nil, fmt.Errorf("failed to apply tunnel backend resources for %s/%s: %w", originalPod.Namespace, originalPod.Name, err)
 	}
 
 	log.G(ctx).Infof("Created tunnel infrastructure (%s) for %s/%s", p.config.Network.TunnelType, originalPod.Namespace, originalPod.Name)
@@ -985,6 +987,10 @@ func mergeMaps(dst, src map[string]string) map[string]string {
 
 // executeWstunnelTemplate loads and executes the tunnel template (wstunnel or rathole based on configuration)
 func (p *Provider) executeWstunnelTemplate(ctx context.Context, data WstunnelTemplateData) (string, error) {
+	if err := p.ensureTunnelBackend(); err != nil {
+		return "", err
+	}
+
 	var templateContent string
 
 	// Try to load from custom path first (applies to both wstunnel and rathole)
@@ -999,23 +1005,19 @@ func (p *Provider) executeWstunnelTemplate(ctx context.Context, data WstunnelTem
 
 	// Fall back to the built-in template for the configured tunnel type
 	if templateContent == "" {
-		var (
-			content []byte
-			err     error
-		)
-		if p.config.Network.TunnelType == tunnelTypeRathole {
-			content, err = defaultRatholeTemplate.ReadFile("templates/rathole-template.yaml")
-			if err != nil {
-				return "", fmt.Errorf("failed to read embedded rathole template: %w", err)
-			}
-			log.G(ctx).Info("Using built-in rathole template")
+		backendTemplate, err := p.tunnelBackend.KubernetesTemplate()
+		if err != nil {
+			return "", err
+		}
+		if backendTemplate != "" {
+			templateContent = backendTemplate
 		} else {
-			content, err = defaultWstunnelTemplate.ReadFile("templates/wstunnel-template.yaml")
+			content, err := defaultWstunnelTemplate.ReadFile("templates/wstunnel-template.yaml")
 			if err != nil {
 				return "", fmt.Errorf("failed to read embedded template: %w", err)
 			}
+			templateContent = string(content)
 		}
-		templateContent = string(content)
 	}
 
 	// Parse and execute template
@@ -1306,6 +1308,10 @@ func (p *Provider) waitForDeploymentPod(ctx context.Context, deploymentName, nam
 
 // cleanupWstunnelResources removes all tunnel resources for a given name and namespace
 func (p *Provider) cleanupWstunnelResources(ctx context.Context, wstunnelName, namespace string) {
+	if err := p.ensureTunnelBackend(); err != nil {
+		log.G(ctx).Warningf("Failed to initialize tunnel backend during cleanup: %v", err)
+	}
+
 	log.G(ctx).Infof("Cleaning up tunnel resources for %s/%s", namespace, wstunnelName)
 
 	// Delete deployment
@@ -1349,19 +1355,9 @@ func (p *Provider) cleanupWstunnelResources(ctx context.Context, wstunnelName, n
 		log.G(ctx).Infof("Successfully deleted rathole configmap %s/%s", namespace, wstunnelName+"-rathole-config")
 	}
 
-	// Delete rathole TLS resources (cert-manager Certificates and Traefik IngressRouteTCP)
-	if p.dynamicClient != nil {
-		for _, certName := range []string{wstunnelName + "-rathole-server-tls", wstunnelName + "-rathole-client-tls"} {
-			if delErr := p.deleteUnstructuredResource(ctx, certManagerCertGVR, certName, namespace); delErr != nil {
-				log.G(ctx).Warningf("Failed to delete rathole cert-manager Certificate %s/%s: %v", namespace, certName, delErr)
-			} else {
-				log.G(ctx).Infof("Deleted rathole cert-manager Certificate %s/%s", namespace, certName)
-			}
-		}
-		if delErr := p.deleteUnstructuredResource(ctx, traefikIngressRouteTCPGVR, wstunnelName, namespace); delErr != nil {
-			log.G(ctx).Warningf("Failed to delete rathole IngressRouteTCP %s/%s: %v", namespace, wstunnelName, delErr)
-		} else {
-			log.G(ctx).Infof("Deleted rathole IngressRouteTCP %s/%s", namespace, wstunnelName)
+	if p.tunnelBackend != nil {
+		if err := p.tunnelBackend.CleanupResources(ctx, wstunnelName, namespace); err != nil {
+			log.G(ctx).Warningf("Failed to delete backend-specific tunnel resources for %s/%s: %v", namespace, wstunnelName, err)
 		}
 	}
 }
@@ -2471,6 +2467,23 @@ func CheckIfAnnotationExists(pod *v1.Pod, key string) bool {
 	return ok
 }
 
+func (p *Provider) ensureTunnelBackend() error {
+	if p.tunnelBackend != nil {
+		return nil
+	}
+
+	backend, err := newTunnelBackend(p.config.Network, p.dynamicClient)
+	if err != nil {
+		return err
+	}
+	if binder, ok := backend.(interface{ bindProvider(*Provider) }); ok {
+		binder.bindProvider(p)
+	}
+	p.tunnelBackend = backend
+
+	return nil
+}
+
 func (p *Provider) initClientSet(ctx context.Context) error {
 	start := time.Now().Unix()
 	tracer := otel.Tracer("interlink-service")
@@ -2505,6 +2518,10 @@ func (p *Provider) initClientSet(ctx context.Context) error {
 			}
 			log.G(ctx).Warningf("Failed to create dynamic client (CRD resources will not be managed): %v", err)
 		}
+	}
+
+	if err := p.ensureTunnelBackend(); err != nil {
+		return err
 	}
 
 	return nil

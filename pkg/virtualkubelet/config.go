@@ -131,7 +131,7 @@ type PodCIDR struct {
 type Network struct {
 	// EnableTunnel enables WebSocket tunneling for pod port exposure
 	EnableTunnel bool `yaml:"EnableTunnel" default:"false"`
-	// TunnelType selects the port-forwarding backend: "" or "wstunnel" (default, backward-compatible) or "rathole".
+	// TunnelType selects the port-forwarding backend: "" or "wstunnel" (default, backward-compatible), "rathole", or "ssh".
 	TunnelType string `yaml:"TunnelType,omitempty"`
 	// WildcardDNS specifies the DNS domain for generating tunnel endpoints
 	WildcardDNS string `yaml:"WildcardDNS,omitempty"`
@@ -161,6 +161,22 @@ type Network struct {
 	RatholeCAIssuerName string `yaml:"RatholeCAIssuerName,omitempty"`
 	// RatholeCAIssuerKind is the kind of the cert-manager issuer: "ClusterIssuer" (default) or "Issuer".
 	RatholeCAIssuerKind string `yaml:"RatholeCAIssuerKind,omitempty"`
+	// SSHJumpHost is the SSH jump/bastion host in the form user@host:port.
+	// Used only when TunnelType is "ssh".
+	SSHJumpHost string `yaml:"SSHJumpHost,omitempty"`
+	// SSHJumpKeySecretName is the Kubernetes Secret name containing the jump-host private key
+	// (key name id_rsa or id_ed25519). Used only when TunnelType is "ssh".
+	SSHJumpKeySecretName string `yaml:"SSHJumpKeySecretName,omitempty"`
+	// SSHJumpKeySecretNamespace is the namespace of SSHJumpKeySecretName.
+	// Defaults to Config.Namespace when empty.
+	SSHJumpKeySecretNamespace string `yaml:"SSHJumpKeySecretNamespace,omitempty"`
+	// SSHRemoteHost is the destination host reachable from the jump host.
+	// Defaults to "localhost" when empty.
+	SSHRemoteHost string `yaml:"SSHRemoteHost,omitempty"`
+	// SSHCommand specifies an optional custom SSH command template.
+	// Format verbs: first %s = base64 private key, second %s = jump host,
+	// third %s = remote host, remaining %s = one per forwarded host:port pair.
+	SSHCommand string `yaml:"SSHCommand,omitempty"`
 	// FullMesh enables full mesh networking with slirp4netns and WireGuard
 	FullMesh bool `yaml:"FullMesh" default:"false"`
 	// MeshScriptTemplatePath is the path to a custom mesh.sh template file

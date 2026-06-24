@@ -45,6 +45,24 @@ func TestClearConflictingNetworkAnnotations(t *testing.T) {
 		assert.Equal(t, "value", pod.Annotations["keep"])
 	})
 
+	t.Run("full mesh also removes ssh command annotation", func(t *testing.T) {
+		pod := &v1.Pod{
+			ObjectMeta: metav1.ObjectMeta{
+				Annotations: map[string]string{
+					annSSHClientCmds:   "ssh-command",
+					annWGClientSnippet: "wireguard-snippet",
+					"keep":             "value",
+				},
+			},
+		}
+
+		clearConflictingNetworkAnnotations(pod, true)
+
+		assert.NotContains(t, pod.Annotations, annSSHClientCmds)
+		assert.Contains(t, pod.Annotations, annWGClientSnippet)
+		assert.Equal(t, "value", pod.Annotations["keep"])
+	})
+
 	t.Run("non mesh removes wireguard snippet annotation", func(t *testing.T) {
 		pod := &v1.Pod{
 			ObjectMeta: metav1.ObjectMeta{
