@@ -1326,13 +1326,13 @@ func isControlledBy(ownerRefs []metav1.OwnerReference, kind, name string) bool {
 	return false
 }
 
-func parseRevision(annotationValue string) int {
+func parseRevision(annotationValue string) (int, bool) {
 	revision, err := strconv.Atoi(annotationValue)
 	if err != nil {
-		return -1
+		return 0, false
 	}
 
-	return revision
+	return revision, true
 }
 
 func (p *Provider) getCurrentDeploymentPod(ctx context.Context, deployment *appsv1.Deployment) (*v1.Pod, error) {
@@ -1351,7 +1351,10 @@ func (p *Provider) getCurrentDeploymentPod(ctx context.Context, deployment *apps
 			continue
 		}
 
-		revision := parseRevision(rs.Annotations["deployment.kubernetes.io/revision"])
+		revision, ok := parseRevision(rs.Annotations["deployment.kubernetes.io/revision"])
+		if !ok {
+			continue
+		}
 		if currentReplicaSet == nil || revision > currentRevision ||
 			(revision == currentRevision && rs.CreationTimestamp.After(currentReplicaSet.CreationTimestamp.Time)) {
 			currentReplicaSet = rs
@@ -1385,7 +1388,7 @@ func (p *Provider) getCurrentDeploymentPod(ctx context.Context, deployment *apps
 func (p *Provider) hasServiceEndpoints(ctx context.Context, namespace, serviceName string) bool {
 	endpoints, err := p.clientSet.CoreV1().Endpoints(namespace).Get(ctx, serviceName, metav1.GetOptions{})
 	if err != nil {
-		return apierrors.IsNotFound(err)
+		return false
 	}
 
 	for _, subset := range endpoints.Subsets {

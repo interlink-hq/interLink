@@ -185,12 +185,12 @@ func computeShadowResourceIdentity(pod *v1.Pod) shadowResourceIdentity {
 	}
 
 	if isShadowSameNamespace(pod) {
-		name, namespace := computeWstunnelResourceNamesForSameNamespace(pod.Name, pod.Namespace)
-		return shadowResourceIdentity{Name: name, Namespace: namespace}
+		name, resolvedNamespace := computeWstunnelResourceNamesForSameNamespace(pod.Name, pod.Namespace)
+		return shadowResourceIdentity{Name: name, Namespace: resolvedNamespace}
 	}
 
-	name, namespace := computeWstunnelResourceNames(pod.Name, pod.Namespace)
-	return shadowResourceIdentity{Name: name, Namespace: namespace}
+	name, resolvedNamespace := computeWstunnelResourceNames(pod.Name, pod.Namespace)
+	return shadowResourceIdentity{Name: name, Namespace: resolvedNamespace}
 }
 
 func generateWGKeypair() (string, string, error) {
@@ -256,6 +256,14 @@ func prependAnnotationScript(existing, script string) string {
 	}
 
 	return script + existing
+}
+
+func resolveWstunnelCommandTarget(commandTemplate, endpoint, websocketURL string) string {
+	if strings.Contains(commandTemplate, "://%s") || strings.Contains(commandTemplate, "%s:") {
+		return endpoint
+	}
+
+	return websocketURL
 }
 
 // addWstunnelClientAnnotation adds the wstunnel client command annotation to the original pod
@@ -329,10 +337,7 @@ PersistentKeepalive = %d
 		if targetURL == "" {
 			targetURL = buildIngressWebsocketURL(ingressEndpoint, td.IngressTLS)
 		}
-		formatArg := ingressEndpoint
-		if wstunnelCommandTemplate == DefaultWstunnelCommand {
-			formatArg = targetURL
-		}
+		formatArg := resolveWstunnelCommandTarget(wstunnelCommandTemplate, ingressEndpoint, targetURL)
 
 		mainCmd := fmt.Sprintf(wstunnelCommandTemplate, td.RandomPassword, strings.Join(rOptions, " "), formatArg)
 
