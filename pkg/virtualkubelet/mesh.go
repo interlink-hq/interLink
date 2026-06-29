@@ -93,8 +93,8 @@ func computeWstunnelResourceNamesForSameNamespace(podName, podNamespace string) 
 	sanitizedNamespace := sanitizeDNSName(podNamespace)
 	sanitizedPodName := sanitizeDNSName(podName)
 
-	// Use the original namespace
-	namespace = sanitizedNamespace
+	// Same-namespace mode must keep the original namespace unchanged.
+	namespace = podNamespace
 
 	// Create a unique resource name to avoid conflicts in the same namespace
 	// Add "wstunnel-" prefix to distinguish shadow pod resources
@@ -113,29 +113,6 @@ func computeWstunnelResourceNamesForSameNamespace(podName, podNamespace string) 
 		}
 		resourceBaseName = "wstunnel-" + sanitizedPodName + "-" + sanitizedNamespace
 		resourceBaseName = strings.TrimRight(resourceBaseName, "-")
-	}
-
-	// Additional check for total length after combining with namespace
-	ingressFirstLabel := fmt.Sprintf("%s-%s", resourceBaseName, namespace)
-	if len(ingressFirstLabel) > 63 {
-		// If combined length exceeds 63, we need to truncate
-		maxNameLen := 31
-		maxNsLen := 31
-
-		truncatedName := resourceBaseName
-		if len(truncatedName) > maxNameLen {
-			truncatedName = truncatedName[:maxNameLen]
-			truncatedName = strings.TrimRight(truncatedName, "-")
-		}
-
-		truncatedNs := namespace
-		if len(truncatedNs) > maxNsLen {
-			truncatedNs = truncatedNs[:maxNsLen]
-			truncatedNs = strings.TrimRight(truncatedNs, "-")
-		}
-
-		resourceBaseName = truncatedName
-		namespace = truncatedNs
 	}
 
 	return resourceBaseName, namespace
@@ -194,6 +171,28 @@ func computeWstunnelResourceNames(podName, podNamespace string) (resourceBaseNam
 	return resourceBaseName, wstunnelNamespace
 }
 
+func isShadowSameNamespace(pod *v1.Pod) bool {
+	if pod == nil || pod.Annotations == nil {
+		return false
+	}
+
+	return pod.Annotations["interlink.eu/shadow-same-ns"] == "true"
+}
+
+func computeShadowResourceIdentity(pod *v1.Pod) shadowResourceIdentity {
+	if pod == nil {
+		return shadowResourceIdentity{}
+	}
+
+	if isShadowSameNamespace(pod) {
+		name, namespace := computeWstunnelResourceNamesForSameNamespace(pod.Name, pod.Namespace)
+		return shadowResourceIdentity{Name: name, Namespace: namespace}
+	}
+
+	name, namespace := computeWstunnelResourceNames(pod.Name, pod.Namespace)
+	return shadowResourceIdentity{Name: name, Namespace: namespace}
+}
+
 func generateWGKeypair() (string, string, error) {
 	// 32 random bytes -> clamp per X25519 rules -> public = X25519(priv, basepoint)
 	privRaw := make([]byte, 32)
@@ -235,18 +234,40 @@ func deriveWGPublicKey(privB64 string) (string, error) {
 	return base64.StdEncoding.EncodeToString(pubRaw), nil
 }
 
+func buildIngressHost(name, namespace, wildcardDNS string) string {
+	if strings.TrimSpace(wildcardDNS) == "" {
+		return sanitizeDNSName(name)
+	}
+
+	return sanitizeFullDNSName(fmt.Sprintf("%s-%s.%s", name, namespace, wildcardDNS))
+}
+
+func buildIngressWebsocketURL(endpoint string, tlsEnabled bool) string {
+	if tlsEnabled {
+		return fmt.Sprintf("wss://%s:443", endpoint)
+	}
+
+	return fmt.Sprintf("ws://%s:80", endpoint)
+}
+
+func prependAnnotationScript(existing, script string) string {
+	if strings.Contains(existing, script) {
+		return existing
+	}
+
+	return script + existing
+}
+
 // addWstunnelClientAnnotation adds the wstunnel client command annotation to the original pod
 func (p *Provider) addWstunnelClientAnnotation(ctx context.Context, pod *v1.Pod, td *WstunnelTemplateData) error {
 	if pod.Annotations == nil {
 		pod.Annotations = make(map[string]string)
 	}
-	// Construct and sanitize the full ingress endpoint
-	ingressEndpoint := fmt.Sprintf("%s-%s.%s", td.Name, td.Namespace, td.WildcardDNS)
-	ingressEndpoint = sanitizeFullDNSName(ingressEndpoint)
-	log.G(ctx).Infof("Sanitized ingress endpoint: %s", ingressEndpoint)
-	if td.WildcardDNS == "" {
-		ingressEndpoint = td.Name
+	ingressEndpoint := td.IngressHost
+	if ingressEndpoint == "" {
+		ingressEndpoint = buildIngressHost(td.Name, td.Namespace, td.WildcardDNS)
 	}
+	log.G(ctx).Infof("Sanitized ingress endpoint: %s", ingressEndpoint)
 
 	fullMeshEnabledForPod := p.config.Network.FullMesh && !isMeshNetworkingDisabled(pod)
 	clearConflictingNetworkAnnotations(pod, fullMeshEnabledForPod)
@@ -260,7 +281,7 @@ func (p *Provider) addWstunnelClientAnnotation(ctx context.Context, pod *v1.Pod,
 		if err != nil {
 			return fmt.Errorf("failed to generate full mesh script: %w", err)
 		}
-		pod.Annotations["slurm-job.vk.io/pre-exec"] = script + pod.Annotations["slurm-job.vk.io/pre-exec"]
+		pod.Annotations["slurm-job.vk.io/pre-exec"] = prependAnnotationScript(pod.Annotations["slurm-job.vk.io/pre-exec"], script)
 		log.G(ctx).Infof("Added full mesh pre-exec script to pod %s/%s", pod.Namespace, pod.Name)
 
 		clientPriv := "<CLIENT_PRIVATE_KEY>"
@@ -304,13 +325,16 @@ PersistentKeepalive = %d
 		}
 
 		log.G(ctx).Infof("Default ws tunnel command is: %s", wstunnelCommandTemplate)
+		targetURL := td.IngressWebsocketURL
+		if targetURL == "" {
+			targetURL = buildIngressWebsocketURL(ingressEndpoint, td.IngressTLS)
+		}
+		formatArg := ingressEndpoint
+		if wstunnelCommandTemplate == DefaultWstunnelCommand {
+			formatArg = targetURL
+		}
 
-		mainCmd := fmt.Sprintf(
-			wstunnelCommandTemplate,
-			td.RandomPassword,
-			strings.Join(rOptions, " "),
-			ingressEndpoint,
-		)
+		mainCmd := fmt.Sprintf(wstunnelCommandTemplate, td.RandomPassword, strings.Join(rOptions, " "), formatArg)
 
 		pod.Annotations["interlink.eu/wstunnel-client-commands"] = mainCmd
 
@@ -338,9 +362,9 @@ PersistentKeepalive = %d
 	)
 	if err != nil {
 		log.G(ctx).Errorf("Failed to patch pod annotations on Kubernetes: %v", err)
-	} else {
-		log.G(ctx).Infof("Successfully patched pod annotations on Kubernetes for %s/%s", pod.Namespace, pod.Name)
+		return fmt.Errorf("failed to patch pod annotations on Kubernetes: %w", err)
 	}
+	log.G(ctx).Infof("Successfully patched pod annotations on Kubernetes for %s/%s", pod.Namespace, pod.Name)
 
 	return nil
 }
@@ -470,6 +494,7 @@ PersistentKeepalive = %d
 		DNSServiceIP:          dnsServiceIP,
 		RandomPassword:        td.RandomPassword,
 		IngressEndpoint:       ingressEndpoint,
+		IngressWebsocketURL:   td.IngressWebsocketURL,
 		WGMTU:                 td.WGMTU,
 		PodCIDRCluster:        podCIDRCluster,
 		ServiceCIDR:           serviceCIDR,

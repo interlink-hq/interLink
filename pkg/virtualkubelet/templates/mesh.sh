@@ -118,7 +118,7 @@ export LOCALDOMAIN=$TMPDIR/resolv.conf
 # Start wstunnel in background
 echo "Starting wstunnel..."
 cd $TMPDIR
-./wstunnel client -L 'udp://127.0.0.1:51821:127.0.0.1:51820?timeout_sec=0' --http-upgrade-path-prefix {{.RandomPassword}} ws://{{.IngressEndpoint}}:80 &
+./wstunnel client -L 'udp://127.0.0.1:51821:127.0.0.1:51820?timeout_sec=0' --http-upgrade-path-prefix {{.RandomPassword}} {{.IngressWebsocketURL}} &
 WSTUNNEL_PID=$!
 
 # Give wstunnel time to establish connection

@@ -115,12 +115,16 @@ func TestNetwork_Configuration(t *testing.T) {
 	network := Network{
 		EnableTunnel:         true,
 		WildcardDNS:          "*.example.com",
+		IngressTLS:           true,
+		IngressClusterIssuer: "lets-issuer",
 		WstunnelTemplatePath: "/path/to/template",
 		WstunnelCommand:      "wstunnel client --remote-addr %s",
 	}
 
 	assert.True(t, network.EnableTunnel)
 	assert.Equal(t, "*.example.com", network.WildcardDNS)
+	assert.True(t, network.IngressTLS)
+	assert.Equal(t, "lets-issuer", network.IngressClusterIssuer)
 	assert.NotEmpty(t, network.WstunnelCommand)
 }
 

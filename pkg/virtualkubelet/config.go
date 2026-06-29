@@ -133,6 +133,10 @@ type Network struct {
 	EnableTunnel bool `yaml:"EnableTunnel" default:"false"`
 	// WildcardDNS specifies the DNS domain for generating tunnel endpoints
 	WildcardDNS string `yaml:"WildcardDNS,omitempty"`
+	// IngressTLS enables TLS on generated shadow ingress resources
+	IngressTLS bool `yaml:"IngressTLS,omitempty"`
+	// IngressClusterIssuer configures the cert-manager cluster issuer used for generated ingress certificates
+	IngressClusterIssuer string `yaml:"IngressClusterIssuer,omitempty"`
 	// WSTunnelExecutableURL specifies the URL to download the wstunnel executable (default is "https://github.com/interlink-hq/interlink-artifacts/raw/main/wstunnel/v10.4.4/linux-amd64/wstunnel")
 	WSTunnelExecutableURL string `yaml:"WSTunnelExecutable,omitempty"`
 	// WstunnelTemplatePath is the path to a custom wstunnel template file

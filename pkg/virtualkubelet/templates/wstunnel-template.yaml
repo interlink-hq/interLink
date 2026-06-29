@@ -71,6 +71,9 @@ metadata:
   name: {{.Name}}
   namespace: {{.Namespace}}
   annotations:
+    {{- if .IngressClusterIssuer }}
+    cert-manager.io/cluster-issuer: {{.IngressClusterIssuer | printf "%q" }}
+    {{- end }}
     nginx.ingress.kubernetes.io/proxy-read-timeout: "3600"
     nginx.ingress.kubernetes.io/proxy-send-timeout: "3600"
     nginx.ingress.kubernetes.io/server-snippets: |
@@ -84,8 +87,14 @@ metadata:
       }
     kubernetes.io/ingress.class: "nginx"
 spec:
+  {{- if .IngressTLS }}
+  tls:
+  - hosts:
+    - {{.IngressHost}}
+    secretName: {{.IngressTLSSecretName}}
+  {{- end }}
   rules:
-  - host: ws-{{.Name}}.{{.WildcardDNS}}
+  - host: {{.IngressHost}}
     http:
       paths:
       - path: /

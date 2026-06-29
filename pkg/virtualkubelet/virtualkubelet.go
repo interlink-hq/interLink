@@ -43,7 +43,7 @@ import (
 	k8stypes "k8s.io/apimachinery/pkg/types"
 )
 
-//go:embed templates/wstunnel-template.yaml
+//go:embed all:templates
 var defaultWstunnelTemplate embed.FS
 
 //go:embed all:templates/mesh.sh
@@ -66,12 +66,13 @@ const (
 	xilinxFPGA             = "xilinx.com/fpga"
 	intelFPGA              = "intel.com/fpga"
 	DefaultProtocol        = "TCP"
-	DefaultWstunnelCommand = "curl  -L -f -k https://github.com/erebe/wstunnel/releases/download/v10.4.4/wstunnel_10.4.4_linux_amd64.tar.gz -o wstunnel.tar.gz && tar -xzvf wstunnel.tar.gz && chmod +x wstunnel && ./wstunnel client --http-upgrade-path-prefix %s %s ws://%s:80 &"
+	DefaultWstunnelCommand = "curl  -L -f -k https://github.com/erebe/wstunnel/releases/download/v10.4.4/wstunnel_10.4.4_linux_amd64.tar.gz -o wstunnel.tar.gz && tar -xzvf wstunnel.tar.gz && chmod +x wstunnel && ./wstunnel client --http-upgrade-path-prefix %s %s %s &"
 )
 
 // Annotations for WireGuard and WStunnel configuration
 const (
-	annWGPrivateKey                 = "interlink.eu/wg-private-key"       // base64 or plain (your choice)
+	annWGPrivateKey                 = "interlink.eu/wg-private-key" // base64 or plain (your choice)
+	annWGClientPrivateKey           = "interlink.eu/wg-client-private-key"
 	annWGPeerPublicKey              = "interlink.eu/wg-peer-public-key"   // client's public key (server peer)
 	annWGMTU                        = "interlink.eu/wg-mtu"               // optional, default 1280
 	annWgKeepaliveSeconds           = "interlink.eu/wg-keepalive-seconds" // optional, default 25
@@ -83,21 +84,32 @@ const (
 )
 
 type WstunnelTemplateData struct {
-	Name                string
-	Namespace           string
-	RandomPassword      string
-	ExposedPorts        []PortMapping
-	WildcardDNS         string
-	WGPrivateKey        string
-	ClientPublicKey     string
-	WGMTU               int
-	KeepaliveSecs       int
-	ClientPrivateKey    string         // only if we generated it
-	LocalContainers     []v1.Container // Keep for backward compatibility
-	LocalInitContainers []v1.Container // Keep for backward compatibility
-	Volumes             []v1.Volume
-	PodLabels           map[string]string // Labels from original pod
-	PodAnnotations      map[string]string // Annotations from original pod
+	Name                 string
+	Namespace            string
+	RandomPassword       string
+	ExposedPorts         []PortMapping
+	WildcardDNS          string
+	FullMesh             bool
+	WGPrivateKey         string
+	ClientPublicKey      string
+	WGMTU                int
+	KeepaliveSecs        int
+	ClientPrivateKey     string // only if we generated it
+	IngressHost          string
+	IngressWebsocketURL  string
+	IngressTLS           bool
+	IngressTLSSecretName string
+	IngressClusterIssuer string
+	LocalContainers      []v1.Container // Keep for backward compatibility
+	LocalInitContainers  []v1.Container // Keep for backward compatibility
+	Volumes              []v1.Volume
+	PodLabels            map[string]string // Labels from original pod
+	PodAnnotations       map[string]string // Annotations from original pod
+}
+
+type shadowResourceIdentity struct {
+	Name      string
+	Namespace string
 }
 
 type PortMapping struct {
@@ -116,6 +128,7 @@ type MeshScriptTemplateData struct {
 	DNSServiceIP          string
 	RandomPassword        string
 	IngressEndpoint       string
+	IngressWebsocketURL   string
 	WGMTU                 int
 	PodCIDRCluster        string
 	ServiceCIDR           string
@@ -732,50 +745,31 @@ func copyPodLabelsAndAnnotations(pod *v1.Pod) (map[string]string, map[string]str
 func (p *Provider) createDummyPod(ctx context.Context, originalPod *v1.Pod) (*v1.Pod, *WstunnelTemplateData, error) {
 	log.G(ctx).Infof("Creating wstunnel infrastructure for %s/%s with exposed ports", originalPod.Namespace, originalPod.Name)
 
-	// If not exists, create the namespace for wstunnel
 	if originalPod.Namespace == "" {
 		return nil, nil, fmt.Errorf("pod namespace is empty")
 	}
 
-	isSameNamespace := false
-	if originalPod.Annotations != nil {
-		if val, ok := originalPod.Annotations["interlink.eu/shadow-same-ns"]; ok && val == "true" {
-			isSameNamespace = true
-		}
-	}
-
-	var namespace string
-	if isSameNamespace {
-		namespace = originalPod.Namespace
-		log.G(ctx).Infof("Request from outside configuration detected. Using original pod namespace: %s", namespace)
-	} else {
-		namespace = originalPod.Namespace + "-wstunnel"
-	}
-
-	_, err := p.clientSet.CoreV1().Namespaces().Get(ctx, namespace, metav1.GetOptions{})
+	identity := computeShadowResourceIdentity(originalPod)
+	_, err := p.clientSet.CoreV1().Namespaces().Get(ctx, identity.Namespace, metav1.GetOptions{})
 	if err != nil {
 		if !apierrors.IsNotFound(err) {
-			return nil, nil, fmt.Errorf("failed to get wstunnel namespace %s: %w", namespace, err)
+			return nil, nil, fmt.Errorf("failed to get wstunnel namespace %s: %w", identity.Namespace, err)
 		}
-		// Create the namespace if it doesn't exist
+
 		ns := &v1.Namespace{
 			ObjectMeta: metav1.ObjectMeta{
-				Name: namespace,
+				Name: identity.Namespace,
 			},
 		}
 		_, err = p.clientSet.CoreV1().Namespaces().Create(ctx, ns, metav1.CreateOptions{})
 		if err != nil {
-			return nil, nil, fmt.Errorf("failed to create wstunnel namespace %s: %w", namespace, err)
+			return nil, nil, fmt.Errorf("failed to create wstunnel namespace %s: %w", identity.Namespace, err)
 		}
-		log.G(ctx).Infof("Created wstunnel namespace %s", namespace)
+		log.G(ctx).Infof("Created wstunnel namespace %s", identity.Namespace)
 	}
 
-	var resourceBaseName, wstunnelNS string
-	if isSameNamespace {
-		resourceBaseName, wstunnelNS = computeWstunnelResourceNamesForSameNamespace(originalPod.Name, originalPod.Namespace)
-	} else {
-		resourceBaseName, wstunnelNS = computeWstunnelResourceNames(originalPod.Name, originalPod.Namespace)
-	}
+	resourceBaseName := identity.Name
+	wstunnelNS := identity.Namespace
 	log.G(ctx).Infof("Computed resource names - base: %s, namespace: %s", resourceBaseName, wstunnelNS)
 
 	// Reuse existing random path prefix if the Deployment already exists, otherwise generate it once
@@ -834,17 +828,23 @@ func (p *Provider) createDummyPod(ctx context.Context, originalPod *v1.Pod) (*v1
 	log.G(ctx).Infof("Copied %d labels and %d annotations from original pod to shadow pod", len(podLabels), len(podAnnotations))
 
 	templateData := WstunnelTemplateData{
-		Name:                resourceBaseName,
-		Namespace:           wstunnelNS,
-		RandomPassword:      pathPrefix,
-		ExposedPorts:        extractPortMappings(originalPod),
-		WildcardDNS:         p.config.Network.WildcardDNS,
-		LocalContainers:     localContainers,
-		LocalInitContainers: localInitContainers,
-		Volumes:             extractVolumesForLocalContainers(originalPod),
-		PodLabels:           podLabels,
-		PodAnnotations:      podAnnotations,
+		Name:                 resourceBaseName,
+		Namespace:            wstunnelNS,
+		RandomPassword:       pathPrefix,
+		ExposedPorts:         extractPortMappings(originalPod),
+		WildcardDNS:          p.config.Network.WildcardDNS,
+		FullMesh:             p.config.Network.FullMesh && !isMeshNetworkingDisabled(originalPod),
+		IngressTLS:           p.config.Network.IngressTLS,
+		IngressTLSSecretName: resourceBaseName + "-tls",
+		IngressClusterIssuer: p.config.Network.IngressClusterIssuer,
+		LocalContainers:      localContainers,
+		LocalInitContainers:  localInitContainers,
+		Volumes:              extractVolumesForLocalContainers(originalPod),
+		PodLabels:            podLabels,
+		PodAnnotations:       podAnnotations,
 	}
+	templateData.IngressHost = buildIngressHost(templateData.Name, templateData.Namespace, templateData.WildcardDNS)
+	templateData.IngressWebsocketURL = buildIngressWebsocketURL(templateData.IngressHost, templateData.IngressTLS)
 
 	log.G(ctx).Debugf("LocalInitContainers count: %d", len(templateData.LocalInitContainers))
 	if len(templateData.LocalInitContainers) > 0 {
@@ -854,7 +854,7 @@ func (p *Provider) createDummyPod(ctx context.Context, originalPod *v1.Pod) (*v1
 	}
 
 	// if full mesh in the configuration is set to true and not disabled per-pod
-	if p.config.Network.FullMesh && !isMeshNetworkingDisabled(originalPod) {
+	if templateData.FullMesh {
 		if err := p.setupWireGuardConfig(ctx, originalPod, &templateData); err != nil {
 			return nil, nil, err
 		}
@@ -876,6 +876,10 @@ func (p *Provider) createDummyPod(ctx context.Context, originalPod *v1.Pod) (*v1
 
 // setupWireGuardConfig populates WireGuard-related fields on templateData using annotations from the original pod.
 func (p *Provider) setupWireGuardConfig(ctx context.Context, originalPod *v1.Pod, templateData *WstunnelTemplateData) error {
+	if originalPod.Annotations == nil {
+		originalPod.Annotations = make(map[string]string)
+	}
+
 	wgMTU := 1280
 	if v := strings.TrimSpace(originalPod.Annotations[annWGMTU]); v != "" {
 		if n, err := strconv.Atoi(v); err == nil && n > 0 {
@@ -896,22 +900,33 @@ func (p *Provider) setupWireGuardConfig(ctx context.Context, originalPod *v1.Pod
 			return fmt.Errorf("generate server WG keypair: %w", err)
 		}
 		serverPriv = priv
+		originalPod.Annotations[annWGPrivateKey] = serverPriv
 		log.G(ctx).Infof("[WG] Generated SERVER keypair for %s/%s: public=%s",
 			originalPod.Namespace, originalPod.Name, pub)
 	}
 
 	clientPub := strings.TrimSpace(originalPod.Annotations[annWGPeerPublicKey])
-	var generatedClientPriv string
-	if clientPub == "" {
+	clientPriv := strings.TrimSpace(originalPod.Annotations[annWGClientPrivateKey])
+	switch {
+	case clientPriv != "" && clientPub == "":
+		derivedPub, err := deriveWGPublicKey(clientPriv)
+		if err != nil {
+			return fmt.Errorf("derive client public key: %w", err)
+		}
+		clientPub = derivedPub
+		originalPod.Annotations[annWGPeerPublicKey] = clientPub
+	case clientPub == "":
 		cPriv, cPub, err := generateWGKeypair()
 		if err != nil {
 			return fmt.Errorf("generate client WG keypair: %w", err)
 		}
 		clientPub = cPub
-		generatedClientPriv = cPriv
-		log.G(ctx).Infof("[WG] Generated CLIENT keypair for %s/%s: public=%s private=%s",
-			originalPod.Namespace, originalPod.Name, cPub, cPriv)
-	} else {
+		clientPriv = cPriv
+		originalPod.Annotations[annWGClientPrivateKey] = clientPriv
+		originalPod.Annotations[annWGPeerPublicKey] = clientPub
+		log.G(ctx).Infof("[WG] Generated CLIENT keypair for %s/%s: public=%s",
+			originalPod.Namespace, originalPod.Name, cPub)
+	default:
 		if _, err := base64.StdEncoding.DecodeString(clientPub); err != nil {
 			return fmt.Errorf("invalid client public key (base64): %w", err)
 		}
@@ -921,7 +936,7 @@ func (p *Provider) setupWireGuardConfig(ctx context.Context, originalPod *v1.Pod
 	templateData.ClientPublicKey = clientPub
 	templateData.WGMTU = wgMTU
 	templateData.KeepaliveSecs = keepalive
-	templateData.ClientPrivateKey = generatedClientPriv
+	templateData.ClientPrivateKey = clientPriv
 
 	if templateData.WGPrivateKey == "" || templateData.ClientPublicKey == "" {
 		return fmt.Errorf("wireguard keys missing: set %q and %q annotations on pod %s/%s",
@@ -960,9 +975,13 @@ func (p *Provider) executeWstunnelTemplate(ctx context.Context, data WstunnelTem
 
 	// Fall back to embedded template
 	if templateContent == "" {
-		content, err := defaultWstunnelTemplate.ReadFile("templates/wstunnel-template.yaml")
+		templateName := "templates/wstunnel-template.yaml"
+		if data.FullMesh {
+			templateName = "templates/wstunnel-wireguard-template.yaml"
+		}
+		content, err := defaultWstunnelTemplate.ReadFile(templateName)
 		if err != nil {
-			return "", fmt.Errorf("failed to read embedded template: %w", err)
+			return "", fmt.Errorf("failed to read embedded template %s: %w", templateName, err)
 		}
 		templateContent = string(content)
 	}
@@ -1173,8 +1192,8 @@ func (p *Provider) applyWstunnelManifests(ctx context.Context, manifestYAML stri
 
 		obj, _, err := decoder.Decode([]byte(resource), nil, nil)
 		if err != nil {
-			log.G(ctx).Warningf("Failed to decode resource: %v", err)
-			continue
+			p.cleanupPartialWstunnelResources(ctx, createdResources, td.Namespace)
+			return nil, fmt.Errorf("failed to decode generated manifest: %w", err)
 		}
 
 		switch o := obj.(type) {
@@ -1234,59 +1253,184 @@ func (p *Provider) waitForDeploymentPod(ctx context.Context, deploymentName, nam
 	start := time.Now()
 
 	for time.Since(start) < timeout {
-		pods, err := p.clientSet.CoreV1().Pods(namespace).List(ctx, metav1.ListOptions{
-			LabelSelector: fmt.Sprintf("app.kubernetes.io/component=%s", deploymentName),
-		})
+		deployment, err := p.clientSet.AppsV1().Deployments(namespace).Get(ctx, deploymentName, metav1.GetOptions{})
 		if err != nil {
-			log.G(ctx).Warningf("Failed to list pods for deployment %s: %v", deploymentName, err)
+			log.G(ctx).Warningf("Failed to get deployment %s/%s: %v", namespace, deploymentName, err)
 			time.Sleep(1 * time.Second)
 			continue
 		}
 
-		if len(pods.Items) > 0 {
-			return &pods.Items[0], nil
+		if !isDeploymentAvailable(deployment) {
+			time.Sleep(1 * time.Second)
+			continue
 		}
 
-		time.Sleep(1 * time.Second)
+		pod, err := p.getCurrentDeploymentPod(ctx, deployment)
+		if err != nil {
+			log.G(ctx).Warningf("Failed to get current pod for deployment %s/%s: %v", namespace, deploymentName, err)
+			time.Sleep(1 * time.Second)
+			continue
+		}
+
+		if pod == nil {
+			time.Sleep(1 * time.Second)
+			continue
+		}
+
+		if !p.hasServiceEndpoints(ctx, namespace, deploymentName) {
+			time.Sleep(1 * time.Second)
+			continue
+		}
+
+		return pod, nil
 	}
 
-	return nil, fmt.Errorf("no pod found for deployment %s within timeout", deploymentName)
+	return nil, fmt.Errorf("deployment %s/%s did not become ready within timeout", namespace, deploymentName)
+}
+
+func isDeploymentAvailable(deployment *appsv1.Deployment) bool {
+	if deployment == nil {
+		return false
+	}
+
+	for _, condition := range deployment.Status.Conditions {
+		if condition.Type == appsv1.DeploymentAvailable && condition.Status == v1.ConditionTrue {
+			return true
+		}
+	}
+
+	return deployment.Status.AvailableReplicas > 0
+}
+
+func isPodReady(pod *v1.Pod) bool {
+	if pod == nil || pod.DeletionTimestamp != nil || pod.Status.PodIP == "" || pod.Status.Phase != v1.PodRunning {
+		return false
+	}
+
+	for _, condition := range pod.Status.Conditions {
+		if condition.Type == v1.PodReady {
+			return condition.Status == v1.ConditionTrue
+		}
+	}
+
+	return false
+}
+
+func isControlledBy(ownerRefs []metav1.OwnerReference, kind, name string) bool {
+	for _, owner := range ownerRefs {
+		if owner.Kind == kind && owner.Name == name && owner.Controller != nil && *owner.Controller {
+			return true
+		}
+	}
+
+	return false
+}
+
+func parseRevision(annotationValue string) int {
+	revision, err := strconv.Atoi(annotationValue)
+	if err != nil {
+		return -1
+	}
+
+	return revision
+}
+
+func (p *Provider) getCurrentDeploymentPod(ctx context.Context, deployment *appsv1.Deployment) (*v1.Pod, error) {
+	replicaSets, err := p.clientSet.AppsV1().ReplicaSets(deployment.Namespace).List(ctx, metav1.ListOptions{
+		LabelSelector: metav1.FormatLabelSelector(deployment.Spec.Selector),
+	})
+	if err != nil {
+		return nil, err
+	}
+
+	var currentReplicaSet *appsv1.ReplicaSet
+	currentRevision := -1
+	for i := range replicaSets.Items {
+		rs := &replicaSets.Items[i]
+		if !isControlledBy(rs.OwnerReferences, "Deployment", deployment.Name) {
+			continue
+		}
+
+		revision := parseRevision(rs.Annotations["deployment.kubernetes.io/revision"])
+		if currentReplicaSet == nil || revision > currentRevision ||
+			(revision == currentRevision && rs.CreationTimestamp.After(currentReplicaSet.CreationTimestamp.Time)) {
+			currentReplicaSet = rs
+			currentRevision = revision
+		}
+	}
+	if currentReplicaSet == nil {
+		return nil, nil
+	}
+
+	pods, err := p.clientSet.CoreV1().Pods(deployment.Namespace).List(ctx, metav1.ListOptions{
+		LabelSelector: metav1.FormatLabelSelector(deployment.Spec.Selector),
+	})
+	if err != nil {
+		return nil, err
+	}
+
+	for i := range pods.Items {
+		pod := &pods.Items[i]
+		if !isControlledBy(pod.OwnerReferences, "ReplicaSet", currentReplicaSet.Name) {
+			continue
+		}
+		if isPodReady(pod) {
+			return pod, nil
+		}
+	}
+
+	return nil, nil
+}
+
+func (p *Provider) hasServiceEndpoints(ctx context.Context, namespace, serviceName string) bool {
+	endpoints, err := p.clientSet.CoreV1().Endpoints(namespace).Get(ctx, serviceName, metav1.GetOptions{})
+	if err != nil {
+		return apierrors.IsNotFound(err)
+	}
+
+	for _, subset := range endpoints.Subsets {
+		if len(subset.Addresses) > 0 {
+			return true
+		}
+	}
+
+	return false
 }
 
 // cleanupWstunnelResources removes all wstunnel resources for a given name and namespace
-func (p *Provider) cleanupWstunnelResources(ctx context.Context, wstunnelName, namespace string) {
-	log.G(ctx).Infof("Cleaning up wstunnel resources for %s/%s", namespace, wstunnelName)
+func (p *Provider) cleanupWstunnelResources(ctx context.Context, identity shadowResourceIdentity) {
+	log.G(ctx).Infof("Cleaning up wstunnel resources for %s/%s", identity.Namespace, identity.Name)
 
 	// Delete deployment
-	err := p.clientSet.AppsV1().Deployments(namespace).Delete(ctx, wstunnelName, metav1.DeleteOptions{})
+	err := p.clientSet.AppsV1().Deployments(identity.Namespace).Delete(ctx, identity.Name, metav1.DeleteOptions{})
 	if err != nil {
-		log.G(ctx).Warningf("Failed to delete wstunnel deployment %s/%s: %v", namespace, wstunnelName, err)
+		log.G(ctx).Warningf("Failed to delete wstunnel deployment %s/%s: %v", identity.Namespace, identity.Name, err)
 	} else {
-		log.G(ctx).Infof("Successfully deleted wstunnel deployment %s/%s", namespace, wstunnelName)
+		log.G(ctx).Infof("Successfully deleted wstunnel deployment %s/%s", identity.Namespace, identity.Name)
 	}
 
 	// Delete service
-	err = p.clientSet.CoreV1().Services(namespace).Delete(ctx, wstunnelName, metav1.DeleteOptions{})
+	err = p.clientSet.CoreV1().Services(identity.Namespace).Delete(ctx, identity.Name, metav1.DeleteOptions{})
 	if err != nil {
-		log.G(ctx).Warningf("Failed to delete wstunnel service %s/%s: %v", namespace, wstunnelName, err)
+		log.G(ctx).Warningf("Failed to delete wstunnel service %s/%s: %v", identity.Namespace, identity.Name, err)
 	} else {
-		log.G(ctx).Infof("Successfully deleted wstunnel service %s/%s", namespace, wstunnelName)
+		log.G(ctx).Infof("Successfully deleted wstunnel service %s/%s", identity.Namespace, identity.Name)
 	}
 
 	// Delete ingress
-	err = p.clientSet.NetworkingV1().Ingresses(namespace).Delete(ctx, wstunnelName, metav1.DeleteOptions{})
+	err = p.clientSet.NetworkingV1().Ingresses(identity.Namespace).Delete(ctx, identity.Name, metav1.DeleteOptions{})
 	if err != nil {
-		log.G(ctx).Warningf("Failed to delete wstunnel ingress %s/%s: %v", namespace, wstunnelName, err)
+		log.G(ctx).Warningf("Failed to delete wstunnel ingress %s/%s: %v", identity.Namespace, identity.Name, err)
 	} else {
-		log.G(ctx).Infof("Successfully deleted wstunnel ingress %s/%s", namespace, wstunnelName)
+		log.G(ctx).Infof("Successfully deleted wstunnel ingress %s/%s", identity.Namespace, identity.Name)
 	}
 
 	// Delete configmap
-	err = p.clientSet.CoreV1().ConfigMaps(namespace).Delete(ctx, wstunnelName+"-wg-config", metav1.DeleteOptions{})
+	err = p.clientSet.CoreV1().ConfigMaps(identity.Namespace).Delete(ctx, identity.Name+"-wg-config", metav1.DeleteOptions{})
 	if err != nil {
-		log.G(ctx).Warningf("Failed to delete wstunnel configmap %s/%s: %v", namespace, wstunnelName+"-wg-config", err)
+		log.G(ctx).Warningf("Failed to delete wstunnel configmap %s/%s: %v", identity.Namespace, identity.Name+"-wg-config", err)
 	} else {
-		log.G(ctx).Infof("Successfully deleted wstunnel configmap %s/%s", namespace, wstunnelName+"-wg-config")
+		log.G(ctx).Infof("Successfully deleted wstunnel configmap %s/%s", identity.Namespace, identity.Name+"-wg-config")
 	}
 }
 
@@ -1484,14 +1628,14 @@ func isMeshNetworkingDisabled(pod *v1.Pod) bool {
 
 // handleWstunnelCreation creates wstunnel infrastructure and returns the pod IP
 func (p *Provider) handleWstunnelCreation(ctx context.Context, pod *v1.Pod) (string, error) {
-	wstunnelName := pod.Name + "-wstunnel"
+	identity := computeShadowResourceIdentity(pod)
 
 	// Create wstunnel infrastructure outside virtual node for port exposure
 	dummyPod, templateData, err := p.createDummyPod(ctx, pod)
 	if err != nil {
 		log.G(ctx).Errorf("Failed to create wstunnel infrastructure for %s/%s: %v", pod.Namespace, pod.Name, err)
 		// Clean up any partially created resources
-		p.cleanupWstunnelResources(ctx, wstunnelName, pod.Namespace)
+		p.cleanupWstunnelResources(ctx, identity)
 		return "", fmt.Errorf("failed to create wstunnel infrastructure for exposed ports: %w", err)
 	}
 
@@ -1503,26 +1647,25 @@ func (p *Provider) handleWstunnelCreation(ctx context.Context, pod *v1.Pod) (str
 		}
 	}
 
-	podIP, err := p.waitForWstunnelPodIP(ctx, dummyPod, timeout, wstunnelName, pod.Namespace)
+	podIP, err := p.waitForWstunnelPodIP(ctx, dummyPod, timeout, identity)
 	if err != nil {
 		log.G(ctx).Errorf("Failed to get wstunnel pod IP for %s/%s: %v", pod.Namespace, pod.Name, err)
 		// Clean up resources since we failed to get a working pod
-		p.cleanupWstunnelResources(ctx, wstunnelName, pod.Namespace)
+		p.cleanupWstunnelResources(ctx, identity)
 		return "", err
 	}
 
 	// Add wstunnel client command annotation to the original pod
 	if err := p.addWstunnelClientAnnotation(ctx, pod, templateData); err != nil {
-		log.G(ctx).Warningf("Failed to add wstunnel client annotation to pod %s/%s: %v", pod.Namespace, pod.Name, err)
-		// Note: We don't clean up here since the wstunnel infrastructure is working,
-		// just the annotation failed (non-critical)
+		p.cleanupWstunnelResources(ctx, identity)
+		return "", fmt.Errorf("failed to add wstunnel client annotation to pod %s/%s: %w", pod.Namespace, pod.Name, err)
 	}
 
 	return podIP, nil
 }
 
 // waitForWstunnelPodIP waits for wstunnel pod to get an IP
-func (p *Provider) waitForWstunnelPodIP(ctx context.Context, dummyPod *v1.Pod, timeout time.Duration, wstunnelName, namespace string) (string, error) {
+func (p *Provider) waitForWstunnelPodIP(ctx context.Context, dummyPod *v1.Pod, timeout time.Duration, identity shadowResourceIdentity) (string, error) {
 	log.G(ctx).Infof("Waiting up to %v for wstunnel pod %s/%s to get an IP", timeout, dummyPod.Namespace, dummyPod.Name)
 
 	start := time.Now()
@@ -1534,9 +1677,9 @@ func (p *Provider) waitForWstunnelPodIP(ctx context.Context, dummyPod *v1.Pod, t
 			continue
 		}
 
-		if updatedDummyPod.Status.PodIP != "" {
+		if isPodReady(updatedDummyPod) {
 			podIP := updatedDummyPod.Status.PodIP
-			log.G(ctx).Infof("Using wstunnel pod IP %s for virtual pod %s/%s", podIP, namespace, dummyPod.Name)
+			log.G(ctx).Infof("Using wstunnel pod IP %s for virtual pod %s/%s", podIP, identity.Namespace, dummyPod.Name)
 			return podIP, nil
 		}
 
@@ -1544,7 +1687,7 @@ func (p *Provider) waitForWstunnelPodIP(ctx context.Context, dummyPod *v1.Pod, t
 	}
 
 	// Clean up the wstunnel infrastructure since it didn't get an IP
-	p.cleanupWstunnelResources(ctx, wstunnelName, namespace)
+	p.cleanupWstunnelResources(ctx, identity)
 	return "", fmt.Errorf("wstunnel pod %s/%s failed to get an IP within %v timeout", dummyPod.Namespace, dummyPod.Name, timeout)
 }
 
@@ -1781,23 +1924,9 @@ func (p *Provider) DeletePod(ctx context.Context, pod *v1.Pod) (err error) {
 		return errdefs.NotFound("pod not found")
 	}
 
-	isSameNamespace := false
-	if pod.Annotations != nil {
-		if val, ok := pod.Annotations["interlink.eu/shadow-same-ns"]; ok && val == "true" {
-			isSameNamespace = true
-		}
-	}
-
 	// Clean up wstunnel resources if tunnel is enabled and they exist and no VPN annotation
 	if p.shouldCreateWstunnel(pod) || (p.config.Network.FullMesh && !isMeshNetworkingDisabled(pod)) {
-		// Use the same helper function to compute resource names
-		var resourceBaseName, wstunnelNS string
-		if isSameNamespace {
-			resourceBaseName, wstunnelNS = computeWstunnelResourceNamesForSameNamespace(pod.Name, pod.Namespace)
-		} else {
-			resourceBaseName, wstunnelNS = computeWstunnelResourceNames(pod.Name, pod.Namespace)
-		}
-		p.cleanupWstunnelResources(ctx, resourceBaseName, wstunnelNS)
+		p.cleanupWstunnelResources(ctx, computeShadowResourceIdentity(pod))
 	}
 
 	now := metav1.Now()
