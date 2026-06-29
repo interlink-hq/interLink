@@ -110,6 +110,27 @@ func TestExecuteWstunnelTemplateUsesExpectedEmbeddedTemplate(t *testing.T) {
 		assert.Contains(t, manifest, "number: 443")
 		assert.Contains(t, manifest, "host: demo-team-a-team-a-wstunnel.tunnel.example.com")
 	})
+
+	t.Run("full mesh without TLS uses default wstunnel port", func(t *testing.T) {
+		p := &Provider{}
+		data := WstunnelTemplateData{
+			Name:           "demo-team-a",
+			Namespace:      "team-a-wstunnel",
+			RandomPassword: "secret",
+			FullMesh:       true,
+			IngressHost:    "demo-team-a-team-a-wstunnel.tunnel.example.com",
+			IngressTLS:     false,
+			WGPrivateKey:   "server-private",
+			ClientPublicKey: "client-public",
+			ExposedPorts:   []PortMapping{{Port: 8080, Name: "http", Protocol: "TCP"}},
+		}
+
+		manifest, err := p.executeWstunnelTemplate(context.Background(), data)
+		require.NoError(t, err)
+		assert.Contains(t, manifest, "kind: ConfigMap")
+		assert.Contains(t, manifest, "number: 28080")
+		assert.NotContains(t, manifest, "number: 443")
+	})
 }
 
 func TestAddWstunnelClientAnnotationUsesTLSURLAndReturnsPatchErrors(t *testing.T) {
