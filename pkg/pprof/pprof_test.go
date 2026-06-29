@@ -9,52 +9,57 @@ import (
 	"time"
 )
 
-func TestPprofStart(t *testing.T) {
-	listener, err := net.Listen("tcp", "127.0.0.1:0")
+func freeAddr(t *testing.T) string {
+	t.Helper()
+	l, err := net.Listen("tcp", "127.0.0.1:0")
 	if err != nil {
-		t.Fatalf("Failed to find a free port: %v", err)
+		t.Fatalf("failed to find a free port: %v", err)
 	}
-	addr := listener.Addr().String()
-	listener.Close()
+	addr := l.Addr().String()
+	l.Close()
+	return addr
+}
+
+func TestPprofStart(t *testing.T) {
+	addr := freeAddr(t)
 
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
 	Start(ctx, true, addr, "127.0.0.1:6060")
 
-	time.Sleep(100 * time.Millisecond)
-
+	client := &http.Client{Timeout: 500 * time.Millisecond}
 	url := fmt.Sprintf("http://%s/debug/pprof/", addr)
-	resp, err := http.Get(url)
+	var resp *http.Response
+	var err error
+	for i := 0; i < 10; i++ {
+		resp, err = client.Get(url)
+		if err == nil {
+			break
+		}
+		time.Sleep(100 * time.Millisecond)
+	}
 	if err != nil {
-		t.Fatalf("Failed to request pprof endpoint: %v", err)
+		t.Fatalf("pprof endpoint did not become ready: %v", err)
 	}
 	defer resp.Body.Close()
 
 	if resp.StatusCode != http.StatusOK {
-		t.Errorf("Expected status 200 OK, got %d", resp.StatusCode)
+		t.Errorf("expected status 200 OK, got %d", resp.StatusCode)
 	}
 }
 
 func TestPprofDisabled(t *testing.T) {
-	listener, err := net.Listen("tcp", "127.0.0.1:0")
-	if err != nil {
-		t.Fatalf("Failed to find a free port: %v", err)
-	}
-	addr := listener.Addr().String()
-	listener.Close()
+	addr := freeAddr(t)
 
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
 	Start(ctx, false, addr, "127.0.0.1:6060")
 
-	time.Sleep(100 * time.Millisecond)
-
-	// Verify that the server is NOT listening/responding
-	url := fmt.Sprintf("http://%s/debug/pprof/", addr)
-	_, err = http.Get(url)
+	conn, err := net.DialTimeout("tcp", addr, 200*time.Millisecond)
 	if err == nil {
-		t.Error("Expected connection failure for disabled pprof server, but request succeeded")
+		_ = conn.Close()
+		t.Error("expected connection failure for disabled pprof server, but dial succeeded")
 	}
 }

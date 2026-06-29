@@ -4,7 +4,8 @@ import (
 	"context"
 	"net"
 	"net/http"
-	_ "net/http/pprof"
+	_ "net/http/pprof" //nolint:gosec // G108: profiling endpoint exposure is intentional
+	"time"
 
 	"github.com/sirupsen/logrus"
 )
@@ -23,7 +24,14 @@ func Start(ctx context.Context, enabled bool, listenAddr string, defaultAddr str
 	}
 
 	if _, _, err := net.SplitHostPort(addr); err != nil {
-		if !net.ParseIP(addr).IsLoopback() && !net.ParseIP(addr).IsUnspecified() {
+		isPortOnly := true
+		for _, r := range addr {
+			if r < '0' || r > '9' {
+				isPortOnly = false
+				break
+			}
+		}
+		if isPortOnly {
 			addr = ":" + addr
 		}
 	}
@@ -37,7 +45,11 @@ func Start(ctx context.Context, enabled bool, listenAddr string, defaultAddr str
 	go func() {
 		<-ctx.Done()
 		logrus.Infof("Shutting down pprof server on %s", addr)
-		_ = server.Close()
+		shutdownCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer cancel()
+		if err := server.Shutdown(shutdownCtx); err != nil {
+			logrus.Errorf("pprof server on %s shutdown error: %v", addr, err)
+		}
 	}()
 
 	go func() {

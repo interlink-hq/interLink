@@ -70,9 +70,6 @@ func main() {
 	pprofPort := flag.String("pprof-port", "6062", "pprof listen port")
 	flag.Parse()
 
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
-
 	enabled := *pprofEnabled
 	if os.Getenv("ENABLE_PPROF") == "true" {
 		enabled = true
@@ -85,8 +82,6 @@ func main() {
 	if os.Getenv("PPROF_PORT") != "" {
 		pPort = os.Getenv("PPROF_PORT")
 	}
-
-	ilpprof.Start(ctx, enabled, pAddr+":"+pPort, "127.0.0.1:6062")
 
 	var hostKeyCallback ssh.HostKeyCallback
 
@@ -117,6 +112,11 @@ func main() {
 	if err != nil {
 		log.Fatalf("unable to parse private key: %v", err)
 	}
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	ilpprof.Start(ctx, enabled, pAddr+":"+pPort, "127.0.0.1:6062")
+
 	// An SSH client is represented with a ClientConn.
 	//
 	// To authenticate with the remote server you must pass at least one
