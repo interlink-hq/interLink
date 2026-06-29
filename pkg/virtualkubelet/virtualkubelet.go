@@ -1249,7 +1249,7 @@ func (p *Provider) applyWstunnelManifests(ctx context.Context, manifestYAML stri
 
 // waitForDeploymentPod waits for a deployment to create a pod and returns the first one
 func (p *Provider) waitForDeploymentPod(ctx context.Context, deploymentName, namespace string) (*v1.Pod, error) {
-	timeout := 30 * time.Second
+	timeout := 5 * time.Minute
 	start := time.Now()
 
 	for time.Since(start) < timeout {

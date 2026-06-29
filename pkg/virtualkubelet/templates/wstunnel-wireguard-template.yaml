@@ -204,6 +204,11 @@ spec:
     - port: 28080
       targetPort: 28080
       name: ws
+    {{- if .IngressTLS }}
+    - port: 443
+      targetPort: 28080
+      name: https
+    {{- end }}
     {{- range .ExposedPorts}}
     - port: {{.Port}}
       targetPort: {{.Port}}
@@ -244,4 +249,4 @@ spec:
           service:
             name: {{.Name}}
             port:
-              number: 28080
+              number: {{if .IngressTLS}}443{{else}}28080{{end}}

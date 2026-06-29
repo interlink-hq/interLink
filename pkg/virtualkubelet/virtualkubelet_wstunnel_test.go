@@ -107,7 +107,7 @@ func TestExecuteWstunnelTemplateUsesExpectedEmbeddedTemplate(t *testing.T) {
 		manifest, err := p.executeWstunnelTemplate(context.Background(), data)
 		require.NoError(t, err)
 		assert.Contains(t, manifest, "kind: ConfigMap")
-		assert.Contains(t, manifest, "number: 28080")
+		assert.Contains(t, manifest, "number: 443")
 		assert.Contains(t, manifest, "host: demo-team-a-team-a-wstunnel.tunnel.example.com")
 	})
 }
