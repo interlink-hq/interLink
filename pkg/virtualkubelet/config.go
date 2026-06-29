@@ -139,6 +139,10 @@ type Network struct {
 	WstunnelTemplatePath string `yaml:"WstunnelTemplatePath,omitempty"`
 	// WstunnelCommand specifies the command template for setting up wstunnel clients
 	WstunnelCommand string `yaml:"WstunnelCommand,omitempty"`
+	// IngressTLS enables TLS on generated wstunnel ingresses and makes the default client use wss://:443
+	IngressTLS bool `yaml:"IngressTLS,omitempty" default:"false"`
+	// IngressClusterIssuer is the cert-manager ClusterIssuer used when IngressTLS is enabled
+	IngressClusterIssuer string `yaml:"IngressClusterIssuer,omitempty"`
 	// FullMesh enables full mesh networking with slirp4netns and WireGuard
 	FullMesh bool `yaml:"FullMesh" default:"false"`
 	// MeshScriptTemplatePath is the path to a custom mesh.sh template file

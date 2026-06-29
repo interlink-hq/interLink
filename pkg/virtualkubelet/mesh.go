@@ -88,13 +88,44 @@ func sanitizeFullDNSName(fullName string) string {
 	return result
 }
 
+type wstunnelResourceIdentity struct {
+	Name      string
+	Namespace string
+}
+
+func isShadowSameNamespace(pod *v1.Pod) bool {
+	if pod == nil || pod.Annotations == nil {
+		return false
+	}
+	return pod.Annotations["interlink.eu/shadow-same-ns"] == "true"
+}
+
+func computeWstunnelResourceIdentity(pod *v1.Pod) (wstunnelResourceIdentity, error) {
+	if pod == nil {
+		return wstunnelResourceIdentity{}, fmt.Errorf("pod is nil")
+	}
+	if pod.Namespace == "" {
+		return wstunnelResourceIdentity{}, fmt.Errorf("pod namespace is empty")
+	}
+
+	var name, namespace string
+	if isShadowSameNamespace(pod) {
+		name, namespace = computeWstunnelResourceNamesForSameNamespace(pod.Name, pod.Namespace)
+	} else {
+		name, namespace = computeWstunnelResourceNames(pod.Name, pod.Namespace)
+	}
+
+	return wstunnelResourceIdentity{Name: name, Namespace: namespace}, nil
+}
+
 func computeWstunnelResourceNamesForSameNamespace(podName, podNamespace string) (resourceBaseName, namespace string) {
 	// Sanitize namespace and pod name for DNS compliance
 	sanitizedNamespace := sanitizeDNSName(podNamespace)
 	sanitizedPodName := sanitizeDNSName(podName)
 
-	// Use the original namespace
-	namespace = sanitizedNamespace
+	// Use the original namespace. Do not truncate it: in same-namespace mode
+	// resources must be created in the pod's real namespace.
+	namespace = podNamespace
 
 	// Create a unique resource name to avoid conflicts in the same namespace
 	// Add "wstunnel-" prefix to distinguish shadow pod resources
@@ -118,24 +149,13 @@ func computeWstunnelResourceNamesForSameNamespace(podName, podNamespace string) 
 	// Additional check for total length after combining with namespace
 	ingressFirstLabel := fmt.Sprintf("%s-%s", resourceBaseName, namespace)
 	if len(ingressFirstLabel) > 63 {
-		// If combined length exceeds 63, we need to truncate
-		maxNameLen := 31
-		maxNsLen := 31
-
-		truncatedName := resourceBaseName
-		if len(truncatedName) > maxNameLen {
-			truncatedName = truncatedName[:maxNameLen]
-			truncatedName = strings.TrimRight(truncatedName, "-")
+		maxNameLen := 63 - len(namespace) - 1
+		if maxNameLen > 0 && len(resourceBaseName) > maxNameLen {
+			resourceBaseName = strings.TrimRight(resourceBaseName[:maxNameLen], "-")
+			if resourceBaseName == "" {
+				resourceBaseName = "w"
+			}
 		}
-
-		truncatedNs := namespace
-		if len(truncatedNs) > maxNsLen {
-			truncatedNs = truncatedNs[:maxNsLen]
-			truncatedNs = strings.TrimRight(truncatedNs, "-")
-		}
-
-		resourceBaseName = truncatedName
-		namespace = truncatedNs
 	}
 
 	return resourceBaseName, namespace
@@ -300,7 +320,7 @@ PersistentKeepalive = %d
 
 		wstunnelCommandTemplate := p.config.Network.WstunnelCommand
 		if wstunnelCommandTemplate == "" {
-			wstunnelCommandTemplate = DefaultWstunnelCommand
+			wstunnelCommandTemplate = defaultWstunnelCommand(p.config.Network.IngressTLS)
 		}
 
 		log.G(ctx).Infof("Default ws tunnel command is: %s", wstunnelCommandTemplate)
@@ -418,6 +438,13 @@ func (p *Provider) generateFullMeshScript(ctx context.Context, td *WstunnelTempl
 		unshareMode = "auto" // default to auto-detection
 	}
 
+	ingressProtocol := "ws"
+	ingressPort := 80
+	if p.config.Network.IngressTLS {
+		ingressProtocol = "wss"
+		ingressPort = 443
+	}
+
 	// Generate WireGuard config with dynamic interface name
 	wgConfig := fmt.Sprintf(`[Interface]
 PrivateKey = %s
@@ -474,6 +501,8 @@ PersistentKeepalive = %d
 		PodCIDRCluster:        podCIDRCluster,
 		ServiceCIDR:           serviceCIDR,
 		UnshareMode:           unshareMode,
+		IngressProtocol:       ingressProtocol,
+		IngressPort:           ingressPort,
 	}
 
 	// Execute the template
