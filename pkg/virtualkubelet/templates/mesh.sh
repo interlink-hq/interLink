@@ -15,37 +15,34 @@ WG_IFACE="{{.WGInterfaceName}}"
 
 echo "=== Downloading binaries (outside namespace) ==="
 
-# Download wstunnel
-echo "Downloading wstunnel..."
-if ! curl -L -f -k {{.WSTunnelExecutableURL}} -o wstunnel; then
-    echo "ERROR: Failed to download wstunnel"
-    exit 1
-fi
-chmod +x wstunnel
+download_with_retry() {
+    url="$1"
+    output="$2"
+    max_attempts="${3:-5}"
+    delay="${4:-1}"
 
-# Download wireguard-go
-echo "Downloading wireguard-go..."
-if ! curl -L -f -k {{.WireguardGoURL}} -o wireguard-go; then
-    echo "ERROR: Failed to download wireguard-go"
-    exit 1
-fi
-chmod +x wireguard-go
+    for attempt in $(seq 1 "$max_attempts"); do
+        echo "Downloading $output (attempt $attempt/$max_attempts)..."
+        if curl -L -f -k --connect-timeout 10 --max-time 120 "$url" -o "$output"; then
+            chmod +x "$output"
+            return 0
+        fi
 
-# Download and build wg tool
-echo "Downloading wg tool..."
-if ! curl -L -f -k {{.WgToolURL}} -o wg; then
-    echo "ERROR: Failed to download wg tools"
-    exit 1
-fi
-chmod +x wg
+        if [ "$attempt" -lt "$max_attempts" ]; then
+            echo "Download failed for $output, retrying in ${delay}s..."
+            sleep "$delay"
+            delay=$((delay * 2))
+        fi
+    done
 
-# Download slirp4netns
-echo "Downloading slirp4netns..."
-if ! curl -L -f -k {{.Slirp4netnsURL}} -o slirp4netns; then
-    echo "ERROR: Failed to download slirp4netns"
-    exit 1
-fi
-chmod +x slirp4netns
+    echo "ERROR: Failed to download $output from $url after $max_attempts attempts"
+    return 1
+}
+
+download_with_retry "{{.WSTunnelExecutableURL}}" wstunnel
+download_with_retry "{{.WireguardGoURL}}" wireguard-go
+download_with_retry "{{.WgToolURL}}" wg
+download_with_retry "{{.Slirp4netnsURL}}" slirp4netns
 
 # Check if iproute2 is available
 if ! command -v ip &> /dev/null; then
@@ -115,22 +112,104 @@ EOF
 export LOCALDOMAIN=$TMPDIR/resolv.conf
 
 
+wait_for_wstunnel_server() {
+    echo "Waiting for wstunnel server to be stably ready..."
+    consecutive=0
+    attempt=0
+    max_attempts=20
+    readiness_protocol="http"
+    if [ "{{.IngressProtocol}}" = "wss" ]; then
+        readiness_protocol="https"
+    fi
+
+    while [ "$consecutive" -lt 3 ] && [ "$attempt" -lt "$max_attempts" ]; do
+        attempt=$((attempt + 1))
+        http_code=$(curl -s -k -o /dev/null -w "%{http_code}" \
+            -H "Upgrade: websocket" \
+            -H "Connection: Upgrade" \
+            -H "Sec-WebSocket-Key: dGhlIHNhbXBsZSBub25jZQ==" \
+            -H "Sec-WebSocket-Version: 13" \
+            --connect-timeout 2 \
+            --max-time 3 \
+            "$readiness_protocol://{{.IngressEndpoint}}:{{.IngressPort}}/{{.RandomPassword}}" 2>/dev/null || echo "000")
+
+        echo "wstunnel readiness attempt $attempt/$max_attempts: HTTP status=$http_code (stable $consecutive/3)"
+        if [ "$http_code" != "000" ] && [ "$http_code" != "503" ]; then
+            consecutive=$((consecutive + 1))
+        else
+            consecutive=0
+            sleep 1
+        fi
+    done
+
+    if [ "$consecutive" -lt 3 ]; then
+        echo "ERROR: wstunnel server did not become stable after $attempt attempts"
+        return 1
+    fi
+}
+
+start_wstunnel() {
+    WSTUNNEL_LOG=$TMPDIR/wstunnel.log
+    ./wstunnel client \
+        -L 'udp://127.0.0.1:51821:127.0.0.1:51820?timeout_sec=0' \
+        --http-upgrade-path-prefix {{.RandomPassword}} \
+        {{.IngressProtocol}}://{{.IngressEndpoint}}:{{.IngressPort}} > "$WSTUNNEL_LOG" 2>&1 &
+    WSTUNNEL_PID=$!
+    echo "wstunnel started with PID $WSTUNNEL_PID"
+}
+
+ensure_wstunnel_running() {
+    for attempt in $(seq 1 10); do
+        if ! kill -0 "$WSTUNNEL_PID" 2>/dev/null; then
+            echo "wstunnel exited, restarting (attempt $attempt)..."
+            start_wstunnel
+        elif grep -q "Invalid status code: 503" "$WSTUNNEL_LOG" 2>/dev/null; then
+            echo "wstunnel received 503, restarting (attempt $attempt)..."
+            kill "$WSTUNNEL_PID" 2>/dev/null || true
+            : > "$WSTUNNEL_LOG"
+            start_wstunnel
+        else
+            return 0
+        fi
+        sleep 1
+    done
+
+    echo "ERROR: wstunnel did not stay healthy"
+    return 1
+}
+
+wait_for_wireguard_interface() {
+    iface="$1"
+    pid="$2"
+    max_attempts="${3:-40}"
+    for attempt in $(seq 1 "$max_attempts"); do
+        if ip link show "$iface" >/dev/null 2>&1; then
+            return 0
+        fi
+        if ! kill -0 "$pid" 2>/dev/null; then
+            echo "ERROR: wireguard-go exited before interface $iface appeared"
+            return 1
+        fi
+        sleep 0.25
+    done
+    echo "ERROR: interface $iface did not appear"
+    return 1
+}
+
+wait_for_wstunnel_server
+
 # Start wstunnel in background
 echo "Starting wstunnel..."
 cd $TMPDIR
-./wstunnel client -L 'udp://127.0.0.1:51821:127.0.0.1:51820?timeout_sec=0' --http-upgrade-path-prefix {{.RandomPassword}} {{.IngressProtocol}}://{{.IngressEndpoint}}:{{.IngressPort}} &
-WSTUNNEL_PID=$!
-
-# Give wstunnel time to establish connection
-sleep 3
+start_wstunnel
+ensure_wstunnel_running
 
 # Start WireGuard
 echo "Starting WireGuard on interface $WG_IFACE..."
 WG_I_PREFER_BUGGY_USERSPACE_TO_POLISHED_KMOD=1 WG_SOCKET_DIR=$TMPDIR  ./wireguard-go $WG_IFACE &
 WG_PID=$!
 
-# Give WireGuard time to create interface
-sleep 2
+wait_for_wireguard_interface "$WG_IFACE" "$WG_PID"
 
 # Configure WireGuard interface
 echo "Configuring WireGuard interface $WG_IFACE..."
@@ -148,7 +227,20 @@ ip route add {{.ServiceCIDR}} dev $WG_IFACE || true
 
 echo "=== Full mesh network configured successfully ==="
 echo "Testing connectivity..."
-ping -c 1 -W 2 10.7.0.1 || echo "Warning: Cannot ping WireGuard server"
+ping_success=0
+for attempt in $(seq 1 10); do
+    echo "Ping attempt $attempt/10 to WireGuard server..."
+    if ping -c 1 -W 2 10.7.0.1 >/dev/null 2>&1; then
+        ping_success=1
+        break
+    fi
+    sleep 1
+done
+
+if [ "$ping_success" -ne 1 ]; then
+    echo "ERROR: WireGuard server 10.7.0.1 is unreachable"
+    exit 1
+fi
 
 # Execute the original command passed as arguments
 $@
@@ -223,20 +315,42 @@ echo "Unshare flags: $UNSHARE_FLAGS"
 
 # Execute the script within unshare
 unshare $UNSHARE_FLAGS --net --mount $TMPDIR/slirp.sh "$@" &
-sleep 0.1
 JOBPID=$!
 echo "$JOBPID" > /tmp/slirp_jobpid
 
-# Wait for the job pid to be established
-sleep 1
+for attempt in $(seq 1 20); do
+    if kill -0 "$JOBPID" 2>/dev/null; then
+        break
+    fi
+    sleep 0.1
+done
+
+if ! kill -0 "$JOBPID" 2>/dev/null; then
+    echo "ERROR: unshare job did not start"
+    exit 1
+fi
 
 # Create the tap0 device with slirp4netns
 echo "Starting slirp4netns..."
-./slirp4netns --api-socket /tmp/slirp4netns_$JOBPID.sock --configure --mtu=65520 --disable-host-loopback $JOBPID tap0 &
+SLIRP_SOCKET=/tmp/slirp4netns_$JOBPID.sock
+./slirp4netns --api-socket $SLIRP_SOCKET --configure --mtu=65520 --disable-host-loopback $JOBPID tap0 &
 SLIRPPID=$!
 
-# Wait a bit for slirp4netns to be ready
-sleep 5
+for attempt in $(seq 1 50); do
+    if [ -S "$SLIRP_SOCKET" ]; then
+        break
+    fi
+    if ! kill -0 "$SLIRPPID" 2>/dev/null; then
+        echo "ERROR: slirp4netns exited before becoming ready"
+        exit 1
+    fi
+    sleep 0.1
+done
+
+if [ ! -S "$SLIRP_SOCKET" ]; then
+    echo "ERROR: slirp4netns socket $SLIRP_SOCKET was not created"
+    exit 1
+fi
 
 # Bring the main job to foreground and wait for completion
 echo "=== Bringing job to foreground ==="

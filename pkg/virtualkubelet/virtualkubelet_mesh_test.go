@@ -119,6 +119,36 @@ func TestComputeWstunnelResourceIdentityUsesFinalNamespace(t *testing.T) {
 	})
 }
 
+func TestGenerateFullMeshScriptIncludesRetryAndReadinessLogic(t *testing.T) {
+	serverPriv, _, err := generateWGKeypair()
+	assert.NoError(t, err)
+
+	p := &Provider{
+		config: Config{
+			Network: Network{
+				IngressTLS: true,
+			},
+		},
+	}
+
+	script, err := p.generateFullMeshScript(t.Context(), &WstunnelTemplateData{
+		RandomPassword:   "path-prefix",
+		WGPrivateKey:     serverPriv,
+		ClientPrivateKey: "client-private-key",
+		WGMTU:            1280,
+		KeepaliveSecs:    25,
+	}, "pod-default-default-wstunnel.tunnel.example.com", "1234567890abcdef")
+
+	assert.NoError(t, err)
+	assert.Contains(t, script, "download_with_retry")
+	assert.Contains(t, script, "wait_for_wstunnel_server")
+	assert.Contains(t, script, "ensure_wstunnel_running")
+	assert.Contains(t, script, "wait_for_wireguard_interface")
+	assert.Contains(t, script, `readiness_protocol="https"`)
+	assert.Contains(t, script, "$readiness_protocol://pod-default-default-wstunnel.tunnel.example.com:443/path-prefix")
+	assert.Contains(t, script, "wss://pod-default-default-wstunnel.tunnel.example.com:443")
+}
+
 func TestShouldCreateWstunnel(t *testing.T) {
 	basePod := &v1.Pod{
 		Spec: v1.PodSpec{
