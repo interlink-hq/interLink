@@ -59,7 +59,7 @@ func main() {
 	}
 
 	pingOp.AddReqStructure(nil)
-	pingOp.AddRespStructure(nil, func(cu *openapi.ContentUnit) { cu.HTTPStatus = http.StatusOK })
+	pingOp.AddRespStructure(new(interlink.PingResponse), func(cu *openapi.ContentUnit) { cu.HTTPStatus = http.StatusOK })
 
 	err = reflector.AddOperation(pingOp)
 	if err != nil {

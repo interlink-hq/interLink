@@ -716,6 +716,8 @@ func (p *Provider) updateNodeResources(ctx context.Context, resources *types.Res
 		q, err := resource.ParseQuantity(resources.Pods)
 		if err != nil {
 			log.G(ctx).Warnf("Invalid pods value %q in ping response: %v", resources.Pods, err)
+		} else if !isNonNegativeIntegerQuantity(q) {
+			log.G(ctx).Warnf("Invalid pods value %q in ping response: must be a non-negative integer quantity", resources.Pods)
 		} else {
 			capacity[v1.ResourcePods] = q
 			allocatable[v1.ResourcePods] = q
@@ -733,11 +735,24 @@ func (p *Provider) updateNodeResources(ctx context.Context, resources *types.Res
 			log.G(ctx).Warnf("Invalid quantity %q for accelerator %q in ping response: %v", acc.Available, acc.ResourceType, err)
 			continue
 		}
+		if !isNonNegativeIntegerQuantity(q) {
+			log.G(ctx).Warnf("Invalid quantity %q for accelerator %q in ping response: must be a non-negative integer quantity", acc.Available, acc.ResourceType)
+			continue
+		}
 		rName := v1.ResourceName(acc.ResourceType)
 		capacity[rName] = q
 		allocatable[rName] = q
 		log.G(ctx).Infof("Updated node accelerator %s capacity to %s", acc.ResourceType, acc.Available)
 	}
+}
+
+func isNonNegativeIntegerQuantity(q resource.Quantity) bool {
+	if q.Sign() < 0 {
+		return false
+	}
+
+	_, ok := q.AsInt64()
+	return ok
 }
 
 // updateNodeTaints replaces the node's non-system taints with the taints reported by the
@@ -761,6 +776,10 @@ func (p *Provider) updateNodeTaints(ctx context.Context, taints *[]types.TaintRe
 	for _, t := range *taints {
 		if t.Key == "" {
 			log.G(ctx).Warn("Skipping taint with empty key in ping response")
+			continue
+		}
+		if t.Key == "virtual-node.interlink/no-schedule" {
+			log.G(ctx).Warn("Skipping system taint key \"virtual-node.interlink/no-schedule\" in ping response")
 			continue
 		}
 
