@@ -50,23 +50,24 @@ var defaultWstunnelTemplate embed.FS
 var meshScriptTemplate embed.FS
 
 const (
-	DefaultCPUCapacity     = "100"
-	DefaultMemoryCapacity  = "3000G"
-	DefaultPodCapacity     = "10000"
-	DefaultGPUCapacity     = "0"
-	DefaultFPGACapacity    = "0"
-	DefaultListenPort      = 10250
-	NamespaceKey           = "namespace"
-	NameKey                = "name"
-	CREATE                 = 0
-	DELETE                 = 1
-	nvidiaGPU              = "nvidia.com/gpu"
-	amdGPU                 = "amd.com/gpu"
-	intelGPU               = "intel.com/gpu"
-	xilinxFPGA             = "xilinx.com/fpga"
-	intelFPGA              = "intel.com/fpga"
-	DefaultProtocol        = "TCP"
-	DefaultWstunnelCommand = "curl  -L -f -k https://github.com/erebe/wstunnel/releases/download/v10.4.4/wstunnel_10.4.4_linux_amd64.tar.gz -o wstunnel.tar.gz && tar -xzvf wstunnel.tar.gz && chmod +x wstunnel && ./wstunnel client --http-upgrade-path-prefix %s %s ws://%s:80 &"
+	DefaultCPUCapacity         = "100"
+	DefaultMemoryCapacity      = "3000G"
+	DefaultPodCapacity         = "10000"
+	DefaultGPUCapacity         = "0"
+	DefaultFPGACapacity        = "0"
+	DefaultListenPort          = 10250
+	NamespaceKey               = "namespace"
+	NameKey                    = "name"
+	CREATE                     = 0
+	DELETE                     = 1
+	nvidiaGPU                  = "nvidia.com/gpu"
+	amdGPU                     = "amd.com/gpu"
+	intelGPU                   = "intel.com/gpu"
+	xilinxFPGA                 = "xilinx.com/fpga"
+	intelFPGA                  = "intel.com/fpga"
+	virtualNodeNoScheduleTaint = "virtual-node.interlink/no-schedule"
+	DefaultProtocol            = "TCP"
+	DefaultWstunnelCommand     = "curl  -L -f -k https://github.com/erebe/wstunnel/releases/download/v10.4.4/wstunnel_10.4.4_linux_amd64.tar.gz -o wstunnel.tar.gz && tar -xzvf wstunnel.tar.gz && chmod +x wstunnel && ./wstunnel client --http-upgrade-path-prefix %s %s ws://%s:80 &"
 )
 
 // Annotations for WireGuard and WStunnel configuration
@@ -420,7 +421,7 @@ func NewProviderConfig(
 
 	taints := []v1.Taint{
 		{
-			Key:    "virtual-node.interlink/no-schedule",
+			Key:    virtualNodeNoScheduleTaint,
 			Value:  strconv.FormatBool(true),
 			Effect: v1.TaintEffectNoSchedule,
 		},
@@ -767,7 +768,7 @@ func (p *Provider) updateNodeTaints(ctx context.Context, taints *[]types.TaintRe
 	// Collect system taints that must always be present.
 	systemTaints := []v1.Taint{}
 	for _, t := range p.node.Spec.Taints {
-		if t.Key == "virtual-node.interlink/no-schedule" {
+		if t.Key == virtualNodeNoScheduleTaint {
 			systemTaints = append(systemTaints, t)
 		}
 	}
@@ -778,8 +779,8 @@ func (p *Provider) updateNodeTaints(ctx context.Context, taints *[]types.TaintRe
 			log.G(ctx).Warn("Skipping taint with empty key in ping response")
 			continue
 		}
-		if t.Key == "virtual-node.interlink/no-schedule" {
-			log.G(ctx).Warn("Skipping system taint key \"virtual-node.interlink/no-schedule\" in ping response")
+		if t.Key == virtualNodeNoScheduleTaint {
+			log.G(ctx).Warnf("Skipping system taint key %q in ping response", virtualNodeNoScheduleTaint)
 			continue
 		}
 
