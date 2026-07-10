@@ -1,9 +1,12 @@
 package virtualkubelet
 
 import (
+	"context"
 	"testing"
 
+	types "github.com/interlink-hq/interlink/pkg/interlink"
 	"github.com/stretchr/testify/assert"
+	v1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/api/resource"
 )
 
@@ -175,4 +178,272 @@ func TestGetResources_AcceleratorQuantities(t *testing.T) {
 
 	fpgaQty := resourceList["xilinx.com/fpga"]
 	assert.Equal(t, int64(1), fpgaQty.Value(), "xilinx.com/fpga should be 1")
+}
+
+func TestUpdateNodeResources_CPUMemoryPods(t *testing.T) {
+	config := Config{
+		Resources: Resources{
+			CPU:    "10",
+			Memory: "32Gi",
+			Pods:   "100",
+		},
+	}
+	provider, err := NewProviderConfig(config, "test-node", "v1.0", "linux", "10.0.0.1", 10250, nil)
+	assert.NoError(t, err)
+
+	ctx := context.Background()
+	resources := &types.ResourcesResponse{
+		CPU:    "200",
+		Memory: "512Gi",
+		Pods:   "2000",
+	}
+	provider.updateNodeResources(ctx, resources)
+
+	cpuQty := provider.node.Status.Capacity["cpu"]
+	assert.Equal(t, int64(200), cpuQty.Value())
+	memQty := provider.node.Status.Capacity["memory"]
+	assert.Equal(t, "512Gi", memQty.String())
+	podsQty := provider.node.Status.Capacity["pods"]
+	assert.Equal(t, int64(2000), podsQty.Value())
+
+	// Allocatable should also be updated
+	allocCPU := provider.node.Status.Allocatable["cpu"]
+	assert.Equal(t, 0, cpuQty.Cmp(allocCPU), "allocatable CPU should match capacity CPU")
+	allocMem := provider.node.Status.Allocatable["memory"]
+	assert.Equal(t, 0, memQty.Cmp(allocMem), "allocatable memory should match capacity memory")
+	allocPods := provider.node.Status.Allocatable["pods"]
+	assert.Equal(t, 0, podsQty.Cmp(allocPods), "allocatable pods should match capacity pods")
+}
+
+func TestUpdateNodeResources_Accelerators(t *testing.T) {
+	config := Config{
+		Resources: Resources{
+			CPU:    "10",
+			Memory: "32Gi",
+			Pods:   "100",
+		},
+	}
+	provider, err := NewProviderConfig(config, "test-node", "v1.0", "linux", "10.0.0.1", 10250, nil)
+	assert.NoError(t, err)
+
+	ctx := context.Background()
+	resources := &types.ResourcesResponse{
+		Accelerators: []types.AcceleratorResponse{
+			{ResourceType: "nvidia.com/gpu", Available: "8"},
+			{ResourceType: "xilinx.com/fpga", Available: "2"},
+		},
+	}
+	provider.updateNodeResources(ctx, resources)
+
+	gpuQty := provider.node.Status.Capacity["nvidia.com/gpu"]
+	assert.Equal(t, int64(8), gpuQty.Value())
+	fpgaQty := provider.node.Status.Capacity["xilinx.com/fpga"]
+	assert.Equal(t, int64(2), fpgaQty.Value())
+}
+
+func TestUpdateNodeResources_InvalidValues(t *testing.T) {
+	config := Config{
+		Resources: Resources{
+			CPU:    "10",
+			Memory: "32Gi",
+			Pods:   "100",
+		},
+	}
+	provider, err := NewProviderConfig(config, "test-node", "v1.0", "linux", "10.0.0.1", 10250, nil)
+	assert.NoError(t, err)
+
+	originalCPU := provider.node.Status.Capacity["cpu"].DeepCopy()
+
+	ctx := context.Background()
+	resources := &types.ResourcesResponse{
+		CPU: "not-a-valid-quantity",
+	}
+	provider.updateNodeResources(ctx, resources)
+
+	// CPU should remain unchanged when invalid value is provided
+	currentCPU := provider.node.Status.Capacity["cpu"]
+	assert.Equal(t, originalCPU.Value(), currentCPU.Value())
+}
+
+func TestUpdateNodeResources_InvalidPodsQuantity(t *testing.T) {
+	config := Config{
+		Resources: Resources{
+			CPU:    "10",
+			Memory: "32Gi",
+			Pods:   "100",
+		},
+	}
+	provider, err := NewProviderConfig(config, "test-node", "v1.0", "linux", "10.0.0.1", 10250, nil)
+	assert.NoError(t, err)
+
+	originalPods := provider.node.Status.Capacity["pods"].DeepCopy()
+
+	for _, pods := range []string{"500m", "-1"} {
+		t.Run(pods, func(t *testing.T) {
+			ctx := context.Background()
+			provider.updateNodeResources(ctx, &types.ResourcesResponse{Pods: pods})
+
+			currentPods := provider.node.Status.Capacity["pods"]
+			assert.Equal(t, originalPods.Value(), currentPods.Value())
+		})
+	}
+}
+
+func TestUpdateNodeResources_InvalidAcceleratorQuantity(t *testing.T) {
+	config := Config{
+		Resources: Resources{
+			CPU:    "10",
+			Memory: "32Gi",
+			Pods:   "100",
+		},
+	}
+	provider, err := NewProviderConfig(config, "test-node", "v1.0", "linux", "10.0.0.1", 10250, nil)
+	assert.NoError(t, err)
+
+	for _, available := range []string{"500m", "-1"} {
+		t.Run(available, func(t *testing.T) {
+			ctx := context.Background()
+			provider.updateNodeResources(ctx, &types.ResourcesResponse{
+				Accelerators: []types.AcceleratorResponse{
+					{ResourceType: "nvidia.com/gpu", Available: available},
+				},
+			})
+
+			_, exists := provider.node.Status.Capacity[v1.ResourceName("nvidia.com/gpu")]
+			assert.False(t, exists)
+		})
+	}
+}
+
+func TestUpdateNodeResources_Nil(t *testing.T) {
+	config := Config{
+		Resources: Resources{
+			CPU:    "10",
+			Memory: "32Gi",
+			Pods:   "100",
+		},
+	}
+	provider, err := NewProviderConfig(config, "test-node", "v1.0", "linux", "10.0.0.1", 10250, nil)
+	assert.NoError(t, err)
+
+	originalCPU := provider.node.Status.Capacity["cpu"].DeepCopy()
+
+	ctx := context.Background()
+	// Passing nil should be a no-op
+	provider.updateNodeResources(ctx, nil)
+
+	currentCPU := provider.node.Status.Capacity["cpu"]
+	assert.Equal(t, originalCPU.Value(), currentCPU.Value())
+}
+
+func TestUpdateNodeResources_PartialUpdate(t *testing.T) {
+	config := Config{
+		Resources: Resources{
+			CPU:    "10",
+			Memory: "32Gi",
+			Pods:   "100",
+		},
+	}
+	provider, err := NewProviderConfig(config, "test-node", "v1.0", "linux", "10.0.0.1", 10250, nil)
+	assert.NoError(t, err)
+
+	originalMemory := provider.node.Status.Capacity["memory"].DeepCopy()
+	originalPods := provider.node.Status.Capacity["pods"].DeepCopy()
+
+	ctx := context.Background()
+	// Only update CPU, leave memory and pods unchanged
+	resources := &types.ResourcesResponse{
+		CPU: "500",
+	}
+	provider.updateNodeResources(ctx, resources)
+
+	cpuQty := provider.node.Status.Capacity["cpu"]
+	assert.Equal(t, int64(500), cpuQty.Value())
+	// Memory and pods should be unchanged
+	currentMemory := provider.node.Status.Capacity["memory"]
+	assert.Equal(t, originalMemory.Value(), currentMemory.Value())
+	currentPods := provider.node.Status.Capacity["pods"]
+	assert.Equal(t, originalPods.Value(), currentPods.Value())
+}
+
+func TestUpdateNodeTaints_ReplacesPluginManagedTaintsAndPreservesSystemTaint(t *testing.T) {
+	config := Config{
+		NodeTaints: []TaintSpec{
+			{Key: "existing", Value: "old", Effect: "NoExecute"},
+		},
+	}
+	provider, err := NewProviderConfig(config, "test-node", "v1.0", "linux", "10.0.0.1", 10250, nil)
+	assert.NoError(t, err)
+
+	taints := []types.TaintResponse{
+		{Key: "virtual-node.interlink/no-schedule", Value: "false", Effect: "NoSchedule"},
+		{Key: "plugin", Value: "new", Effect: "PreferNoSchedule"},
+	}
+	provider.updateNodeTaints(context.Background(), &taints)
+
+	assert.Equal(t, []v1.Taint{
+		{
+			Key:    "virtual-node.interlink/no-schedule",
+			Value:  "true",
+			Effect: v1.TaintEffectNoSchedule,
+		},
+		{
+			Key:    "plugin",
+			Value:  "new",
+			Effect: v1.TaintEffectPreferNoSchedule,
+		},
+	}, provider.node.Spec.Taints)
+}
+
+func TestUpdateNodeTaints_EmptySliceClearsPluginManagedTaints(t *testing.T) {
+	config := Config{
+		NodeTaints: []TaintSpec{
+			{Key: "existing", Value: "old", Effect: "NoExecute"},
+		},
+	}
+	provider, err := NewProviderConfig(config, "test-node", "v1.0", "linux", "10.0.0.1", 10250, nil)
+	assert.NoError(t, err)
+
+	taints := []types.TaintResponse{}
+	provider.updateNodeTaints(context.Background(), &taints)
+
+	assert.Equal(t, []v1.Taint{
+		{
+			Key:    "virtual-node.interlink/no-schedule",
+			Value:  "true",
+			Effect: v1.TaintEffectNoSchedule,
+		},
+	}, provider.node.Spec.Taints)
+}
+
+func TestUpdateNodeTaints_NilLeavesExistingTaintsUnchangedAndUnknownEffectDefaults(t *testing.T) {
+	config := Config{
+		NodeTaints: []TaintSpec{
+			{Key: "existing", Value: "old", Effect: "NoExecute"},
+		},
+	}
+	provider, err := NewProviderConfig(config, "test-node", "v1.0", "linux", "10.0.0.1", 10250, nil)
+	assert.NoError(t, err)
+
+	originalTaints := append([]v1.Taint(nil), provider.node.Spec.Taints...)
+	provider.updateNodeTaints(context.Background(), nil)
+	assert.Equal(t, originalTaints, provider.node.Spec.Taints)
+
+	taints := []types.TaintResponse{
+		{Key: "plugin", Value: "new", Effect: "UnexpectedEffect"},
+	}
+	provider.updateNodeTaints(context.Background(), &taints)
+
+	assert.Equal(t, []v1.Taint{
+		{
+			Key:    "virtual-node.interlink/no-schedule",
+			Value:  "true",
+			Effect: v1.TaintEffectNoSchedule,
+		},
+		{
+			Key:    "plugin",
+			Value:  "new",
+			Effect: v1.TaintEffectNoSchedule,
+		},
+	}, provider.node.Spec.Taints)
 }
