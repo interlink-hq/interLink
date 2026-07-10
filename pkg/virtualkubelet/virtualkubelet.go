@@ -715,11 +715,12 @@ func (p *Provider) updateNodeResources(ctx context.Context, resources *types.Res
 
 	if resources.Pods != "" {
 		q, err := resource.ParseQuantity(resources.Pods)
-		if err != nil {
+		switch {
+		case err != nil:
 			log.G(ctx).Warnf("Invalid pods value %q in ping response: %v", resources.Pods, err)
-		} else if !isNonNegativeIntegerQuantity(q) {
+		case !isNonNegativeIntegerQuantity(q):
 			log.G(ctx).Warnf("Invalid pods value %q in ping response: must be a non-negative integer quantity", resources.Pods)
-		} else {
+		default:
 			capacity[v1.ResourcePods] = q
 			allocatable[v1.ResourcePods] = q
 			log.G(ctx).Infof("Updated node pods capacity to %s", resources.Pods)
