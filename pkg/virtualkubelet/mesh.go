@@ -4,7 +4,9 @@ import (
 	"bytes"
 	"context"
 	"crypto/rand"
+	"crypto/sha256"
 	"encoding/base64"
+	"encoding/hex"
 	"encoding/json"
 	"fmt"
 	"os"
@@ -88,6 +90,17 @@ func sanitizeFullDNSName(fullName string) string {
 	return result
 }
 
+// uniqueTruncate shortens a name and adds an 8-character hash to prevent naming collisions.
+func uniqueTruncate(s string, maxLen int, full string) string {
+	if len(s) <= maxLen {
+		return s
+	}
+	h := sha256.Sum256([]byte(full))
+	suffix := hex.EncodeToString(h[:4])
+	keep := maxLen - len(suffix) - 1
+	return strings.TrimRight(s[:keep], "-") + "-" + suffix
+}
+
 func computeWstunnelResourceNamesForSameNamespace(podName, podNamespace string) (resourceBaseName, namespace string) {
 	// Sanitize namespace and pod name for DNS compliance
 	sanitizedNamespace := sanitizeDNSName(podNamespace)
@@ -99,6 +112,7 @@ func computeWstunnelResourceNamesForSameNamespace(podName, podNamespace string) 
 	// Create a unique resource name to avoid conflicts in the same namespace
 	// Add "wstunnel-" prefix to distinguish shadow pod resources
 	resourceBaseName = "wstunnel-" + sanitizedPodName + "-" + sanitizedNamespace
+	fullBaseName := resourceBaseName
 
 	// Ensure resourceBaseName doesn't exceed 63 characters
 	if len(resourceBaseName) > 63 {
@@ -106,7 +120,7 @@ func computeWstunnelResourceNamesForSameNamespace(podName, podNamespace string) 
 		maxPodNameLen := 28
 		maxNsLen := 28
 		if len(sanitizedPodName) > maxPodNameLen {
-			sanitizedPodName = sanitizedPodName[:maxPodNameLen]
+			sanitizedPodName = uniqueTruncate(sanitizedPodName, maxPodNameLen, fullBaseName)
 		}
 		if len(sanitizedNamespace) > maxNsLen {
 			sanitizedNamespace = sanitizedNamespace[:maxNsLen]
@@ -124,8 +138,7 @@ func computeWstunnelResourceNamesForSameNamespace(podName, podNamespace string) 
 
 		truncatedName := resourceBaseName
 		if len(truncatedName) > maxNameLen {
-			truncatedName = truncatedName[:maxNameLen]
-			truncatedName = strings.TrimRight(truncatedName, "-")
+			truncatedName = uniqueTruncate(truncatedName, maxNameLen, fullBaseName)
 		}
 
 		truncatedNs := namespace
@@ -153,13 +166,14 @@ func computeWstunnelResourceNames(podName, podNamespace string) (resourceBaseNam
 	}
 
 	resourceBaseName = sanitizedPodName + "-" + sanitizedNamespace
+	fullBaseName := resourceBaseName
 	// Ensure resourceBaseName doesn't exceed 63 characters
 	if len(resourceBaseName) > 63 {
 		// Truncate while keeping some of both names
 		maxPodNameLen := 31
 		maxNsLen := 31
 		if len(sanitizedPodName) > maxPodNameLen {
-			sanitizedPodName = sanitizedPodName[:maxPodNameLen]
+			sanitizedPodName = uniqueTruncate(sanitizedPodName, maxPodNameLen, fullBaseName)
 		}
 		if len(sanitizedNamespace) > maxNsLen {
 			sanitizedNamespace = sanitizedNamespace[:maxNsLen]
@@ -177,8 +191,7 @@ func computeWstunnelResourceNames(podName, podNamespace string) (resourceBaseNam
 
 		truncatedName := resourceBaseName
 		if len(truncatedName) > maxNameLen {
-			truncatedName = truncatedName[:maxNameLen]
-			truncatedName = strings.TrimRight(truncatedName, "-")
+			truncatedName = uniqueTruncate(truncatedName, maxNameLen, fullBaseName)
 		}
 
 		truncatedNs := wstunnelNamespace
