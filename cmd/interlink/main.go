@@ -22,6 +22,7 @@ import (
 
 	"github.com/interlink-hq/interlink/pkg/interlink"
 	"github.com/interlink-hq/interlink/pkg/interlink/api"
+	ilpprof "github.com/interlink-hq/interlink/pkg/pprof"
 	"github.com/interlink-hq/interlink/pkg/virtualkubelet"
 	"k8s.io/cri-client/pkg/util"
 )
@@ -111,6 +112,16 @@ func main() {
 	log.L = logruslogger.FromLogrus(logrus.NewEntry(logger))
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
+
+	pprofAddr := interLinkConfig.Pprof.Address
+	if pprofAddr == "" {
+		pprofAddr = "127.0.0.1"
+	}
+	pprofPort := interLinkConfig.Pprof.Port
+	if pprofPort == "" {
+		pprofPort = "6061"
+	}
+	ilpprof.Start(ctx, interLinkConfig.Pprof.Enabled, pprofAddr+":"+pprofPort, "127.0.0.1:6061")
 
 	if os.Getenv("ENABLE_TRACING") == "1" {
 		shutdown, err := interlink.InitTracer(ctx, "InterLink-Plugin-")

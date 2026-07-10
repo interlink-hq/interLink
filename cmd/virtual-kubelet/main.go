@@ -83,6 +83,7 @@ import (
 	"k8s.io/client-go/informers"
 
 	"github.com/interlink-hq/interlink/pkg/interlink"
+	ilpprof "github.com/interlink-hq/interlink/pkg/pprof"
 	commonIL "github.com/interlink-hq/interlink/pkg/virtualkubelet"
 )
 
@@ -464,6 +465,26 @@ func main() {
 	}
 
 	setupLogging(interLinkConfig)
+
+	pprofEnabled := vkConfig.Pprof.Enabled
+	if os.Getenv("ENABLE_PPROF") == "true" {
+		pprofEnabled = true
+	}
+	pprofAddr := vkConfig.Pprof.Address
+	if os.Getenv("PPROF_ADDRESS") != "" {
+		pprofAddr = os.Getenv("PPROF_ADDRESS")
+	}
+	if pprofAddr == "" {
+		pprofAddr = "127.0.0.1"
+	}
+	pprofPort := vkConfig.Pprof.Port
+	if os.Getenv("PPROF_PORT") != "" {
+		pprofPort = os.Getenv("PPROF_PORT")
+	}
+	if pprofPort == "" {
+		pprofPort = "6060"
+	}
+	ilpprof.Start(ctx, pprofEnabled, pprofAddr+":"+pprofPort, "127.0.0.1:6060")
 	log.G(ctx).Info("Config dump", interLinkConfig)
 
 	shutdownTracing := setupTracing(ctx)
