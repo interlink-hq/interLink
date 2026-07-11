@@ -52,7 +52,7 @@ plugin:
     - name: SLURMCONFIGPATH
       value: "/etc/interlink/plugin.yaml"
     - name: SHARED_FS
-      values: "true"
+      value: "true"
   config: |
     #Socket: "unix:///var/run/plugin.sock"
     ImagePrefix: "docker://"
@@ -84,6 +84,15 @@ extraVolumes:
       path: /tmp/test
       type: DirectoryOrCreate
 ```
+
+:::warning
+
+On some Kubernetes distributions (e.g. minikube) `/tmp` on the node is mounted
+with the `noexec` option, so scripts placed in the plugin data folder cannot be
+executed. If that is your case, pick a different host path for the
+`plugin-data` volume, e.g. `/data/interlink`.
+
+:::
 
 Eventually deploy the latest release of the official:
 
@@ -117,3 +126,19 @@ You can find a demo pod to test your setup
 
 To start debugging in case of problems we suggest starting from the pod
 containers logs!
+
+:::note
+
+When the virtual node registers, the virtual kubelet requests a
+`kubelet-serving` certificate. Kubernetes does not auto-approve this kind of
+CSR by default, so on clusters without an external approver the request stays
+`Pending` and commands like `kubectl logs` against pods on the virtual node
+fail with `tls: internal error`. Check for pending requests and approve them
+manually:
+
+```bash
+kubectl get csr
+kubectl certificate approve <csr-name>
+```
+
+:::
