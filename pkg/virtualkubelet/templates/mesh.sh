@@ -75,6 +75,8 @@ WG_IFACE="{{.WGInterfaceName}}"
 echo "=== Inside network namespace ==="
 echo "Using WireGuard interface: $WG_IFACE"
 
+echo $$ > "$TMPDIR/netns.pid"
+
 export WG_SOCKET_DIR="$TMPDIR"
 
 # Override /etc/resolv.conf to avoid issues with read-only filesystems
@@ -122,16 +124,22 @@ wait_for_wstunnel_server() {
         readiness_protocol="https"
     fi
 
+    READINESS_LOG=$TMPDIR/wstunnel-readiness.log
+    : > "$READINESS_LOG"
+
     while [ "$consecutive" -lt 3 ] && [ "$attempt" -lt "$max_attempts" ]; do
         attempt=$((attempt + 1))
-        http_code=$(curl -s -k -o /dev/null -w "%{http_code}" \
+        {
+            echo "=== readiness attempt $attempt @ $(date -u +%FT%TZ) ==="
+        } >> "$READINESS_LOG"
+        http_code=$(curl -s -k -v -o /dev/null -w "%{http_code}" \
             -H "Upgrade: websocket" \
             -H "Connection: Upgrade" \
             -H "Sec-WebSocket-Key: dGhlIHNhbXBsZSBub25jZQ==" \
             -H "Sec-WebSocket-Version: 13" \
             --connect-timeout 2 \
             --max-time 3 \
-            "$readiness_protocol://{{.IngressEndpoint}}:{{.IngressPort}}/{{.RandomPassword}}" 2>/dev/null || echo "000")
+            "$readiness_protocol://{{.IngressEndpoint}}:{{.IngressPort}}/{{.RandomPassword}}" 2>> "$READINESS_LOG" || echo "000")
 
         echo "wstunnel readiness attempt $attempt/$max_attempts: HTTP status=$http_code (stable $consecutive/3)"
         if [ "$http_code" != "000" ] && [ "$http_code" != "503" ]; then
@@ -144,15 +152,30 @@ wait_for_wstunnel_server() {
 
     if [ "$consecutive" -lt 3 ]; then
         echo "ERROR: wstunnel server did not become stable after $attempt attempts"
+        echo "--- last readiness probe transcript ($READINESS_LOG) ---"
+        tail -n 60 "$READINESS_LOG" 2>/dev/null || true
+        echo "--- end readiness probe transcript ---"
         return 1
     fi
 }
 
 start_wstunnel() {
     WSTUNNEL_LOG=$TMPDIR/wstunnel.log
-    ./wstunnel client \
+    echo "wstunnel client version: $(./wstunnel --version 2>&1)"
+
+    WSTUNNEL_PROXY_URL="${WSTUNNEL_HTTP_PROXY:-${https_proxy:-${HTTPS_PROXY:-${http_proxy:-${HTTP_PROXY:-}}}}}"
+    WSTUNNEL_PROXY_ARGS=""
+    if [ -n "$WSTUNNEL_PROXY_URL" ]; then
+        echo "Detected proxy in environment ($WSTUNNEL_PROXY_URL), routing wstunnel through it via --http-proxy"
+        WSTUNNEL_PROXY_ARGS="--http-proxy $WSTUNNEL_PROXY_URL"
+    fi
+
+    WSTUNNEL_CMD="./wstunnel client -L 'udp://127.0.0.1:51821:127.0.0.1:51820?timeout_sec=0' --http-upgrade-path-prefix {{.RandomPassword}} $WSTUNNEL_PROXY_ARGS {{.IngressProtocol}}://{{.IngressEndpoint}}:{{.IngressPort}}"
+    echo "Running: RUST_LOG=${WSTUNNEL_LOG_LEVEL:-debug} $WSTUNNEL_CMD"
+    RUST_LOG="${WSTUNNEL_LOG_LEVEL:-debug}" ./wstunnel client \
         -L 'udp://127.0.0.1:51821:127.0.0.1:51820?timeout_sec=0' \
         --http-upgrade-path-prefix {{.RandomPassword}} \
+        $WSTUNNEL_PROXY_ARGS \
         {{.IngressProtocol}}://{{.IngressEndpoint}}:{{.IngressPort}} > "$WSTUNNEL_LOG" 2>&1 &
     WSTUNNEL_PID=$!
     echo "wstunnel started with PID $WSTUNNEL_PID"
@@ -162,9 +185,15 @@ ensure_wstunnel_running() {
     for attempt in $(seq 1 10); do
         if ! kill -0 "$WSTUNNEL_PID" 2>/dev/null; then
             echo "wstunnel exited, restarting (attempt $attempt)..."
+            echo "--- last wstunnel.log before restart ---"
+            tail -n 60 "$WSTUNNEL_LOG" 2>/dev/null || true
+            echo "--- end wstunnel.log ---"
             start_wstunnel
-        elif grep -q "Invalid status code: 503" "$WSTUNNEL_LOG" 2>/dev/null; then
-            echo "wstunnel received 503, restarting (attempt $attempt)..."
+        elif grep -qE "Invalid status code: 503|Invalid protocol version" "$WSTUNNEL_LOG" 2>/dev/null; then
+            echo "wstunnel reported a protocol/status error, restarting (attempt $attempt)..."
+            echo "--- matching wstunnel.log lines ---"
+            grep -E "Invalid status code: 503|Invalid protocol version" "$WSTUNNEL_LOG" 2>/dev/null || true
+            echo "--- end matching lines ---"
             kill "$WSTUNNEL_PID" 2>/dev/null || true
             : > "$WSTUNNEL_LOG"
             start_wstunnel
@@ -175,6 +204,9 @@ ensure_wstunnel_running() {
     done
 
     echo "ERROR: wstunnel did not stay healthy"
+    echo "--- final wstunnel.log ---"
+    tail -n 100 "$WSTUNNEL_LOG" 2>/dev/null || true
+    echo "--- end final wstunnel.log ---"
     return 1
 }
 
@@ -239,6 +271,37 @@ done
 
 if [ "$ping_success" -ne 1 ]; then
     echo "ERROR: WireGuard server 10.7.0.1 is unreachable"
+    echo "--- wstunnel client status ---"
+    if kill -0 "$WSTUNNEL_PID" 2>/dev/null; then
+        echo "wstunnel client (PID $WSTUNNEL_PID) is still running"
+    else
+        echo "wstunnel client (PID $WSTUNNEL_PID) is NOT running"
+    fi
+    echo "--- full wstunnel.log ($WSTUNNEL_LOG) ---"
+    cat "$WSTUNNEL_LOG" 2>/dev/null || echo "(log not found)"
+    echo "--- end wstunnel.log ---"
+    if grep -q "Cannot connect to tcp endpoint" "$WSTUNNEL_LOG" 2>/dev/null; then
+        echo "wstunnel reported raw TCP connect failures to the ingress endpoint."
+        echo "Running a one-off curl probe against the same endpoint right now for comparison..."
+        diag_protocol="http"
+        if [ "{{.IngressProtocol}}" = "wss" ]; then
+            diag_protocol="https"
+        fi
+        curl -s -k -v -o /dev/null \
+            -w "diag probe result: HTTP status=%{http_code} time_connect=%{time_connect}s time_total=%{time_total}s\n" \
+            --connect-timeout 5 --max-time 8 \
+            "$diag_protocol://{{.IngressEndpoint}}:{{.IngressPort}}/{{.RandomPassword}}" \
+            > "$TMPDIR/wstunnel-tcp-diag.log" 2>&1
+        cat "$TMPDIR/wstunnel-tcp-diag.log"
+        echo "--- end diag probe ---"
+    fi
+    echo "--- wireguard-go status ---"
+    if kill -0 "$WG_PID" 2>/dev/null; then
+        echo "wireguard-go (PID $WG_PID) is still running"
+    else
+        echo "wireguard-go (PID $WG_PID) is NOT running"
+    fi
+    ./wg show "$WG_IFACE" 2>&1 || true
     exit 1
 fi
 
@@ -330,10 +393,40 @@ if ! kill -0 "$JOBPID" 2>/dev/null; then
     exit 1
 fi
 
+# Wait for slirp.sh to report the PID that actually owns the new
+# net/user namespaces. This can differ from $JOBPID: 'unshare
+# --map-root-user'/'--map-user' forks internally to write the uid/gid
+# map before exec'ing into slirp.sh, so '$!' on the outer job is not a
+# reliable handle for slirp4netns to join.
+NETNS_PID_FILE=$TMPDIR/netns.pid
+NETNS_PID=""
+for attempt in $(seq 1 50); do
+    if [ -s "$NETNS_PID_FILE" ]; then
+        NETNS_PID=$(cat "$NETNS_PID_FILE")
+        break
+    fi
+    if ! kill -0 "$JOBPID" 2>/dev/null; then
+        echo "ERROR: unshare job exited before reporting its namespace PID"
+        exit 1
+    fi
+    sleep 0.1
+done
+
+if [ -z "$NETNS_PID" ]; then
+    echo "ERROR: timed out waiting for namespace PID from $NETNS_PID_FILE"
+    exit 1
+fi
+
+echo "unshare wrapper PID=$JOBPID, actual namespace-owning PID=$NETNS_PID"
+
 # Create the tap0 device with slirp4netns
 echo "Starting slirp4netns..."
-SLIRP_SOCKET=/tmp/slirp4netns_$JOBPID.sock
-./slirp4netns --api-socket $SLIRP_SOCKET --configure --mtu=65520 --disable-host-loopback $JOBPID tap0 &
+SLIRP_SOCKET=/tmp/slirp4netns_$NETNS_PID.sock
+SLIRP_USERNS_ARG=""
+if echo "$UNSHARE_FLAGS" | grep -q -- "--user"; then
+    SLIRP_USERNS_ARG="--userns-path /proc/$NETNS_PID/ns/user"
+fi
+./slirp4netns $SLIRP_USERNS_ARG --api-socket $SLIRP_SOCKET --configure --mtu=65520 --disable-host-loopback $NETNS_PID tap0 &
 SLIRPPID=$!
 
 for attempt in $(seq 1 50); do
