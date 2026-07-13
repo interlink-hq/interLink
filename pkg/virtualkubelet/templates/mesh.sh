@@ -89,8 +89,8 @@ HOST_DNS=$(grep "^nameserver" /etc/resolv.conf | head -1 | awk '{print $2}')
 {
   mkdir -p /tmp/etc-override
   echo "search default.svc.cluster.local svc.cluster.local cluster.local" > /tmp/etc-override/resolv.conf
-  echo "nameserver $HOST_DNS" >> /tmp/etc-override/resolv.conf
   echo "nameserver {{.DNSServiceIP}}" >> /tmp/etc-override/resolv.conf
+  echo "nameserver $HOST_DNS" >> /tmp/etc-override/resolv.conf
   echo "nameserver 1.1.1.1" >> /tmp/etc-override/resolv.conf
   echo "nameserver 8.8.8.8" >> /tmp/etc-override/resolv.conf
   mount --bind /tmp/etc-override/resolv.conf /etc/resolv.conf
@@ -106,14 +106,6 @@ mount --make-rprivate / 2>/dev/null || true
 # Create writable /var/run with wireguard subdirectory
 mkdir -p $TMPDIR/var-run/wireguard
 mount --bind $TMPDIR/var-run /var/run
-
-cat > $TMPDIR/resolv.conf <<EOF
-search default.svc.cluster.local svc.cluster.local cluster.local
-nameserver {{.DNSServiceIP}}
-nameserver 1.1.1.1
-EOF
-export LOCALDOMAIN=$TMPDIR/resolv.conf
-
 
 # Start wstunnel in background
 echo "Starting wstunnel..."
