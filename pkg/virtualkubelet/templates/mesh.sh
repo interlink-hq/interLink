@@ -66,6 +66,11 @@ cat <<'EOFSLIRP' > $TMPDIR/slirp.sh
 #!/bin/bash
 set -e
 
+# Derive TMPDIR from this script's own location. This script is written to
+# $TMPDIR/slirp.sh and executed under unshare as a separate process where
+# TMPDIR is not guaranteed to be exported.
+TMPDIR="$(cd "$(dirname "$0")" && pwd)"
+
 # Ensure PATH includes tmpdir
 export PATH=$TMPDIR:$PATH:/usr/sbin:/sbin
 
