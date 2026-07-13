@@ -112,7 +112,8 @@ func computeWstunnelResourceNamesForSameNamespace(podName, podNamespace string) 
 	// Create a unique resource name to avoid conflicts in the same namespace
 	// Add "wstunnel-" prefix to distinguish shadow pod resources
 	resourceBaseName = "wstunnel-" + sanitizedPodName + "-" + sanitizedNamespace
-	fullBaseName := resourceBaseName
+	// Hash on the unsanitized names: sanitizeDNSName truncates to 63 chars, long pods could still collide
+	fullBaseName := "wstunnel-" + podName + "-" + podNamespace
 
 	// Ensure resourceBaseName doesn't exceed 63 characters
 	if len(resourceBaseName) > 63 {
@@ -166,7 +167,7 @@ func computeWstunnelResourceNames(podName, podNamespace string) (resourceBaseNam
 	}
 
 	resourceBaseName = sanitizedPodName + "-" + sanitizedNamespace
-	fullBaseName := resourceBaseName
+	fullBaseName := podName + "-" + podNamespace
 	// Ensure resourceBaseName doesn't exceed 63 characters
 	if len(resourceBaseName) > 63 {
 		// Truncate while keeping some of both names
