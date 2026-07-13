@@ -116,6 +116,18 @@ type Config struct {
 	DataRootFolder string `yaml:"DataRootFolder"`
 	// TLS contains TLS/mTLS configuration for secure communication
 	TLS TLSConfig `yaml:"TLS,omitempty"`
+	// Pprof contains configuration for the pprof profiling server
+	Pprof PprofConfig `yaml:"Pprof,omitempty"`
+}
+
+// PprofConfig holds configuration for the pprof profiling server.
+type PprofConfig struct {
+	// Enabled indicates whether the pprof server is enabled
+	Enabled bool `yaml:"Enabled"`
+	// Address is the listen address for pprof server (default: 127.0.0.1)
+	Address string `yaml:"Address,omitempty"`
+	// Port is the listen port for pprof server (default: 6061)
+	Port string `yaml:"Port,omitempty"`
 }
 
 // TLSConfig holds TLS/mTLS configuration for secure communication.
@@ -371,6 +383,18 @@ func NewInterLinkConfig() (Config, error) {
 
 	if os.Getenv("SIDECARPORT") != "" {
 		interLinkNewConfig.Sidecarport = os.Getenv("SIDECARPORT")
+	}
+
+	if os.Getenv("ENABLE_PPROF") == "true" {
+		interLinkNewConfig.Pprof.Enabled = true
+	}
+
+	if os.Getenv("PPROF_PORT") != "" {
+		interLinkNewConfig.Pprof.Port = os.Getenv("PPROF_PORT")
+	}
+
+	if os.Getenv("PPROF_ADDRESS") != "" {
+		interLinkNewConfig.Pprof.Address = os.Getenv("PPROF_ADDRESS")
 	}
 
 	return interLinkNewConfig, nil

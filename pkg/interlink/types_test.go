@@ -290,3 +290,126 @@ func TestPodStatus_MultipleContainers(t *testing.T) {
 	assert.Equal(t, "container1", decoded.Containers[0].Name)
 	assert.Equal(t, "init1", decoded.InitContainers[0].Name)
 }
+
+func TestPingResponse_JSONSerialization(t *testing.T) {
+	tests := []struct {
+		name     string
+		input    string
+		wantResp PingResponse
+	}{
+		{
+			name:  "status only",
+			input: `{"status":"ok"}`,
+			wantResp: PingResponse{
+				Status:    "ok",
+				Resources: nil,
+			},
+		},
+		{
+			name:  "status with resources",
+			input: `{"status":"ok","resources":{"cpu":"100","memory":"256Gi","pods":"1000"}}`,
+			wantResp: PingResponse{
+				Status: "ok",
+				Resources: &ResourcesResponse{
+					CPU:    "100",
+					Memory: "256Gi",
+					Pods:   "1000",
+				},
+			},
+		},
+		{
+			name:  "status with resources and accelerators",
+			input: `{"status":"ok","resources":{"cpu":"50","memory":"128Gi","pods":"500","accelerators":[{"resourceType":"nvidia.com/gpu","available":"8"},{"resourceType":"xilinx.com/fpga","available":"2"}]}}`,
+			wantResp: PingResponse{
+				Status: "ok",
+				Resources: &ResourcesResponse{
+					CPU:    "50",
+					Memory: "128Gi",
+					Pods:   "500",
+					Accelerators: []AcceleratorResponse{
+						{ResourceType: "nvidia.com/gpu", Available: "8"},
+						{ResourceType: "xilinx.com/fpga", Available: "2"},
+					},
+				},
+			},
+		},
+		{
+			name:     "empty response (backward compat plain text)",
+			input:    ``,
+			wantResp: PingResponse{},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if tt.input == "" {
+				// Plain-text ping responses should fail to unmarshal gracefully
+				var resp PingResponse
+				err := json.Unmarshal([]byte(tt.input), &resp)
+				assert.Error(t, err, "empty string should fail JSON unmarshal")
+				return
+			}
+
+			var resp PingResponse
+			err := json.Unmarshal([]byte(tt.input), &resp)
+			require.NoError(t, err)
+			assert.Equal(t, tt.wantResp.Status, resp.Status)
+			if tt.wantResp.Resources == nil {
+				assert.Nil(t, resp.Resources)
+			} else {
+				require.NotNil(t, resp.Resources)
+				assert.Equal(t, tt.wantResp.Resources.CPU, resp.Resources.CPU)
+				assert.Equal(t, tt.wantResp.Resources.Memory, resp.Resources.Memory)
+				assert.Equal(t, tt.wantResp.Resources.Pods, resp.Resources.Pods)
+				assert.Equal(t, tt.wantResp.Resources.Accelerators, resp.Resources.Accelerators)
+			}
+		})
+	}
+}
+
+func TestPingResponse_RoundTrip(t *testing.T) {
+	original := PingResponse{
+		Status: "ok",
+		Resources: &ResourcesResponse{
+			CPU:    "200",
+			Memory: "512Gi",
+			Pods:   "2000",
+			Accelerators: []AcceleratorResponse{
+				{ResourceType: "nvidia.com/gpu", Available: "16"},
+				{ResourceType: "amd.com/gpu", Available: "4"},
+			},
+		},
+	}
+
+	data, err := json.Marshal(original)
+	require.NoError(t, err)
+
+	var decoded PingResponse
+	err = json.Unmarshal(data, &decoded)
+	require.NoError(t, err)
+
+	assert.Equal(t, original.Status, decoded.Status)
+	require.NotNil(t, decoded.Resources)
+	assert.Equal(t, original.Resources.CPU, decoded.Resources.CPU)
+	assert.Equal(t, original.Resources.Memory, decoded.Resources.Memory)
+	assert.Equal(t, original.Resources.Pods, decoded.Resources.Pods)
+	assert.Equal(t, original.Resources.Accelerators, decoded.Resources.Accelerators)
+}
+
+func TestResourcesResponse_PartialFields(t *testing.T) {
+	// Only CPU is specified; other fields should be empty (omitted)
+	input := `{"cpu":"100"}`
+	var res ResourcesResponse
+	err := json.Unmarshal([]byte(input), &res)
+	require.NoError(t, err)
+	assert.Equal(t, "100", res.CPU)
+	assert.Empty(t, res.Memory)
+	assert.Empty(t, res.Pods)
+	assert.Empty(t, res.Accelerators)
+
+	// Marshal back — memory/pods/accelerators should be omitted
+	data, err := json.Marshal(res)
+	require.NoError(t, err)
+	assert.NotContains(t, string(data), `"memory"`)
+	assert.NotContains(t, string(data), `"pods"`)
+}

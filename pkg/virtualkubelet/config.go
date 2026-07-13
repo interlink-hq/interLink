@@ -58,6 +58,8 @@ type Config struct {
 	SkipDownwardAPIResolution bool `yaml:"SkipDownwardAPIResolution,omitempty"`
 	// DisableCSR disables CSR (CertificateSigningRequest) creation and uses self-signed certificates instead
 	DisableCSR bool `yaml:"DisableCSR,omitempty"`
+	// Pprof configures the pprof profiling server
+	Pprof PprofConfig `yaml:"Pprof,omitempty"`
 }
 
 // TLSConfig holds TLS/mTLS configuration for secure communication with interLink API.
@@ -70,6 +72,16 @@ type TLSConfig struct {
 	KeyFile string `yaml:"KeyFile,omitempty"`
 	// CACertFile is the path to the CA cert file for server verification
 	CACertFile string `yaml:"CACertFile,omitempty"`
+}
+
+// PprofConfig holds configuration for the pprof profiling server.
+type PprofConfig struct {
+	// Enabled indicates whether the pprof server is enabled
+	Enabled bool `yaml:"Enabled"`
+	// Address is the listen address for pprof server (default: 127.0.0.1)
+	Address string `yaml:"Address,omitempty"`
+	// Port is the listen port for pprof server (default: 6060)
+	Port string `yaml:"Port,omitempty"`
 }
 
 // HTTP defines security settings for HTTP connections.

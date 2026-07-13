@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"encoding/base64"
 	"flag"
 	"fmt"
@@ -9,6 +10,7 @@ import (
 	"net"
 	"os"
 
+	ilpprof "github.com/interlink-hq/interlink/pkg/pprof"
 	"golang.org/x/crypto/ssh"
 )
 
@@ -63,7 +65,23 @@ func main() {
 	remotePort := flag.String("rport", "", "remote port for tunnel")
 	localSocket := flag.String("lsock", "", "local socket for tunnel")
 	hostkeyFile := flag.String("hostkeyfile", "", "file with public key for SSH host check")
+	pprofEnabled := flag.Bool("pprof", false, "enable pprof profiling")
+	pprofAddr := flag.String("pprof-address", "127.0.0.1", "pprof listen address")
+	pprofPort := flag.String("pprof-port", "6062", "pprof listen port")
 	flag.Parse()
+
+	enabled := *pprofEnabled
+	if os.Getenv("ENABLE_PPROF") == "true" {
+		enabled = true
+	}
+	pAddr := *pprofAddr
+	if os.Getenv("PPROF_ADDRESS") != "" {
+		pAddr = os.Getenv("PPROF_ADDRESS")
+	}
+	pPort := *pprofPort
+	if os.Getenv("PPROF_PORT") != "" {
+		pPort = os.Getenv("PPROF_PORT")
+	}
 
 	var hostKeyCallback ssh.HostKeyCallback
 
@@ -94,6 +112,11 @@ func main() {
 	if err != nil {
 		log.Fatalf("unable to parse private key: %v", err)
 	}
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	ilpprof.Start(ctx, enabled, pAddr+":"+pPort, "127.0.0.1:6062")
+
 	// An SSH client is represented with a ClientConn.
 	//
 	// To authenticate with the remote server you must pass at least one
