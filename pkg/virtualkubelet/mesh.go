@@ -115,8 +115,12 @@ func computeWstunnelResourceIdentity(pod *v1.Pod) (wstunnelResourceIdentity, err
 		name, namespace = computeWstunnelResourceNames(pod.Name, pod.Namespace)
 	}
 
-	return wstunnelResourceIdentity{Name: name, Namespace: namespace}, nil
-}
+	identity := wstunnelResourceIdentity{Name: name, Namespace: namespace}
+	if len(fmt.Sprintf("%s-%s", identity.Name, identity.Namespace)) > 63 {
+		return wstunnelResourceIdentity{}, fmt.Errorf("wstunnel ingress hostname label %q exceeds 63 characters; shorten pod/namespace or disable interlink.eu/shadow-same-ns", fmt.Sprintf("%s-%s", identity.Name, identity.Namespace))
+	}
+
+	return identity, nil
 
 func computeWstunnelResourceNamesForSameNamespace(podName, podNamespace string) (resourceBaseName, namespace string) {
 	// Sanitize namespace and pod name for DNS compliance
