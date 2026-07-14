@@ -1412,6 +1412,17 @@ func (p *Provider) cleanupWstunnelResources(ctx context.Context, wstunnelName, n
 	} else {
 		log.G(ctx).Infof("Successfully deleted wstunnel configmap %s/%s", namespace, wstunnelName+"-wg-config")
 	}
+
+	// Delete cert-manager-provisioned TLS secret.
+	if p.config.Network.IngressTLS {
+		secretName := wstunnelName + "-tls"
+		err = p.clientSet.CoreV1().Secrets(namespace).Delete(ctx, secretName, metav1.DeleteOptions{})
+		if err != nil {
+			log.G(ctx).Warningf("Failed to delete wstunnel TLS secret %s/%s: %v", namespace, secretName, err)
+		} else {
+			log.G(ctx).Infof("Successfully deleted wstunnel TLS secret %s/%s", namespace, secretName)
+		}
+	}
 }
 
 // cleanupPartialWstunnelResources removes specific resources that were created before a failure
