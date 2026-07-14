@@ -121,6 +121,7 @@ func computeWstunnelResourceIdentity(pod *v1.Pod) (wstunnelResourceIdentity, err
 	}
 
 	return identity, nil
+}
 
 func computeWstunnelResourceNamesForSameNamespace(podName, podNamespace string) (resourceBaseName, namespace string) {
 	// Sanitize namespace and pod name for DNS compliance

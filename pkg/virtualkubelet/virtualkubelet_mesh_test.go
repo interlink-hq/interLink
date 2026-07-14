@@ -9,6 +9,11 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 )
 
+const (
+	testPathPrefix       = "path-prefix"
+	testNamespaceDefault = "default"
+)
+
 func TestIsMeshNetworkingDisabled(t *testing.T) {
 	t.Run("nil pod", func(t *testing.T) {
 		assert.False(t, isMeshNetworkingDisabled(nil))
@@ -56,7 +61,7 @@ func TestExecuteWstunnelTemplateIngressTLS(t *testing.T) {
 	manifest, err := p.executeWstunnelTemplate(t.Context(), WstunnelTemplateData{
 		Name:                 "pod-default",
 		Namespace:            "default-wstunnel",
-		RandomPassword:       "path-prefix",
+		RandomPassword:       testPathPrefix,
 		WildcardDNS:          "tunnel.example.com",
 		IngressTLS:           true,
 		IngressClusterIssuer: "lets-issuer",
@@ -75,7 +80,7 @@ func TestExecuteWstunnelTemplateFullMeshSelectsWireGuardTemplate(t *testing.T) {
 	manifest, err := p.executeWstunnelTemplate(t.Context(), WstunnelTemplateData{
 		Name:            "pod-default",
 		Namespace:       "default-wstunnel",
-		RandomPassword:  "path-prefix",
+		RandomPassword:  testPathPrefix,
 		WildcardDNS:     "tunnel.example.com",
 		FullMesh:        true,
 		WGPrivateKey:    "server-private-key",
@@ -93,7 +98,7 @@ func TestComputeWstunnelResourceIdentityUsesFinalNamespace(t *testing.T) {
 		identity, err := computeWstunnelResourceIdentity(&v1.Pod{
 			ObjectMeta: metav1.ObjectMeta{
 				Name:      "my-pod",
-				Namespace: "default",
+				Namespace: testNamespaceDefault,
 			},
 		})
 
@@ -106,7 +111,7 @@ func TestComputeWstunnelResourceIdentityUsesFinalNamespace(t *testing.T) {
 		identity, err := computeWstunnelResourceIdentity(&v1.Pod{
 			ObjectMeta: metav1.ObjectMeta{
 				Name:      "my-pod",
-				Namespace: "default",
+				Namespace: testNamespaceDefault,
 				Annotations: map[string]string{
 					"interlink.eu/shadow-same-ns": "true",
 				},
@@ -115,7 +120,7 @@ func TestComputeWstunnelResourceIdentityUsesFinalNamespace(t *testing.T) {
 
 		assert.NoError(t, err)
 		assert.Equal(t, "wstunnel-my-pod-default", identity.Name)
-		assert.Equal(t, "default", identity.Namespace)
+		assert.Equal(t, testNamespaceDefault, identity.Namespace)
 	})
 }
 
@@ -132,7 +137,7 @@ func TestGenerateFullMeshScriptIncludesRetryAndReadinessLogic(t *testing.T) {
 	}
 
 	script, err := p.generateFullMeshScript(t.Context(), &WstunnelTemplateData{
-		RandomPassword:   "path-prefix",
+		RandomPassword:   testPathPrefix,
 		WGPrivateKey:     serverPriv,
 		ClientPrivateKey: "client-private-key",
 		WGMTU:            1280,
