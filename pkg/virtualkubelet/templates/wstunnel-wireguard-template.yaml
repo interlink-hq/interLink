@@ -86,6 +86,9 @@ spec:
       - name: wstunnel
         image: ghcr.io/erebe/wstunnel:latest
         imagePullPolicy: IfNotPresent
+        env:
+        - name: TOKIO_WORKER_THREADS
+          value: "1"
         command: ["bash","-c"]
         args:
           - >
