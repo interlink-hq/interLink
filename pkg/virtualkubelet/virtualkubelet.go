@@ -110,6 +110,7 @@ type PortMapping struct {
 
 type MeshScriptTemplateData struct {
 	WGInterfaceName       string
+	MeshContactHost       string
 	WSTunnelExecutableURL string
 	WireguardGoURL        string
 	WgToolURL             string

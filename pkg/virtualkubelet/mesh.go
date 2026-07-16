@@ -476,6 +476,7 @@ PersistentKeepalive = %d
 	// Prepare template data
 	data := MeshScriptTemplateData{
 		WGInterfaceName:       wgInterfaceName,
+		MeshContactHost:       fmt.Sprintf("%s.%s.svc.cluster.local", td.Name, td.Namespace),
 		WSTunnelExecutableURL: WSTunnelExecutableURL,
 		WireguardGoURL:        wireguardGoURL,
 		WgToolURL:             wgToolURL,
