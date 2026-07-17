@@ -1945,16 +1945,17 @@ func (p *Provider) DeletePod(ctx context.Context, pod *v1.Pod) (err error) {
 		p.cleanupWstunnelResources(ctx, resourceBaseName, wstunnelNS)
 	}
 
+	if err = RemoteExecution(ctx, p.config, p, pod, DELETE); err != nil {
+		log.G(ctx).Error(err)
+		return err
+	}
+
 	now := metav1.Now()
 	pod.Status.Reason = "VKProviderPodDeleted"
 
-	go func() {
-		err = RemoteExecution(ctx, p.config, p, pod, DELETE)
-		if err != nil {
-			log.G(ctx).Error(err)
-			return
-		}
-	}()
+	p.podsMu.Lock()
+	delete(p.pods, string(key))
+	p.podsMu.Unlock()
 
 	for idx := range pod.Status.ContainerStatuses {
 		pod.Status.ContainerStatuses[idx].Ready = false
@@ -1982,11 +1983,6 @@ func (p *Provider) DeletePod(ctx context.Context, pod *v1.Pod) (err error) {
 	if err != nil {
 		return err
 	}
-
-	// delete from p.pods
-	p.podsMu.Lock()
-	delete(p.pods, string(key))
-	p.podsMu.Unlock()
 
 	return nil
 }
