@@ -120,11 +120,28 @@ func TestNetwork_Configuration(t *testing.T) {
 		WildcardDNS:          "*.example.com",
 		WstunnelTemplatePath: "/path/to/template",
 		WstunnelCommand:      "wstunnel client --remote-addr %s",
+		IngressTLS:           true,
+		IngressClusterIssuer: "lets-issuer",
 	}
 
 	assert.True(t, network.EnableTunnel)
 	assert.Equal(t, "*.example.com", network.WildcardDNS)
 	assert.NotEmpty(t, network.WstunnelCommand)
+	assert.True(t, network.IngressTLS)
+	assert.Equal(t, "lets-issuer", network.IngressClusterIssuer)
+}
+
+func TestSetDefaultResourceIngressTLS(t *testing.T) {
+	config := Config{
+		Network: Network{
+			IngressTLS: true,
+		},
+	}
+
+	SetDefaultResource(&config)
+
+	assert.Equal(t, DefaultClusterIssuer, config.Network.IngressClusterIssuer)
+	assert.Equal(t, DefaultWstunnelCommandTLS, config.Network.WstunnelCommand)
 }
 
 func TestAccelerator_AvailableIsKubernetesQuantity(t *testing.T) {

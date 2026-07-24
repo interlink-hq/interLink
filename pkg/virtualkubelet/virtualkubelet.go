@@ -44,7 +44,7 @@ import (
 	k8stypes "k8s.io/apimachinery/pkg/types"
 )
 
-//go:embed templates/wstunnel-template.yaml
+//go:embed templates/wstunnel-template.yaml templates/wstunnel-wireguard-template.yaml
 var defaultWstunnelTemplate embed.FS
 
 //go:embed all:templates/mesh.sh
@@ -57,6 +57,7 @@ const (
 	DefaultGPUCapacity         = "0"
 	DefaultFPGACapacity        = "0"
 	DefaultListenPort          = 10250
+	DefaultClusterIssuer       = "lets-issuer"
 	NamespaceKey               = "namespace"
 	NameKey                    = "name"
 	CREATE                     = 0
@@ -69,6 +70,7 @@ const (
 	virtualNodeNoScheduleTaint = "virtual-node.interlink/no-schedule"
 	DefaultProtocol            = "TCP"
 	DefaultWstunnelCommand     = "curl  -L -f -k https://github.com/erebe/wstunnel/releases/download/v10.4.4/wstunnel_10.4.4_linux_amd64.tar.gz -o wstunnel.tar.gz && tar -xzvf wstunnel.tar.gz && chmod +x wstunnel && ./wstunnel client --http-upgrade-path-prefix %s %s ws://%s:80 &"
+	DefaultWstunnelCommandTLS  = "curl  -L -f -k https://github.com/erebe/wstunnel/releases/download/v10.4.4/wstunnel_10.4.4_linux_amd64.tar.gz -o wstunnel.tar.gz && tar -xzvf wstunnel.tar.gz && chmod +x wstunnel && ./wstunnel client --http-upgrade-path-prefix %s %s wss://%s:443 &"
 )
 
 // Annotations for WireGuard and WStunnel configuration
@@ -85,21 +87,24 @@ const (
 )
 
 type WstunnelTemplateData struct {
-	Name                string
-	Namespace           string
-	RandomPassword      string
-	ExposedPorts        []PortMapping
-	WildcardDNS         string
-	WGPrivateKey        string
-	ClientPublicKey     string
-	WGMTU               int
-	KeepaliveSecs       int
-	ClientPrivateKey    string         // only if we generated it
-	LocalContainers     []v1.Container // Keep for backward compatibility
-	LocalInitContainers []v1.Container // Keep for backward compatibility
-	Volumes             []v1.Volume
-	PodLabels           map[string]string // Labels from original pod
-	PodAnnotations      map[string]string // Annotations from original pod
+	Name                 string
+	Namespace            string
+	RandomPassword       string
+	ExposedPorts         []PortMapping
+	WildcardDNS          string
+	WGPrivateKey         string
+	ClientPublicKey      string
+	WGMTU                int
+	KeepaliveSecs        int
+	ClientPrivateKey     string         // only if we generated it
+	LocalContainers      []v1.Container // Keep for backward compatibility
+	LocalInitContainers  []v1.Container // Keep for backward compatibility
+	Volumes              []v1.Volume
+	PodLabels            map[string]string // Labels from original pod
+	PodAnnotations       map[string]string // Annotations from original pod
+	IngressTLS           bool
+	IngressClusterIssuer string
+	FullMesh             bool
 }
 
 type PortMapping struct {
@@ -122,6 +127,8 @@ type MeshScriptTemplateData struct {
 	PodCIDRCluster        string
 	ServiceCIDR           string
 	UnshareMode           string
+	IngressProtocol       string
+	IngressPort           int
 }
 
 // Provider defines the properties of the virtual kubelet provider
@@ -395,10 +402,21 @@ func SetDefaultResource(config *Config) {
 		}
 	}
 
+	if config.Network.IngressTLS && config.Network.IngressClusterIssuer == "" {
+		config.Network.IngressClusterIssuer = DefaultClusterIssuer
+	}
+
 	// Set default WStunnel command if not provided
 	if config.Network.WstunnelCommand == "" {
-		config.Network.WstunnelCommand = DefaultWstunnelCommand
+		config.Network.WstunnelCommand = defaultWstunnelCommand(config.Network.IngressTLS)
 	}
+}
+
+func defaultWstunnelCommand(ingressTLS bool) string {
+	if ingressTLS {
+		return DefaultWstunnelCommandTLS
+	}
+	return DefaultWstunnelCommand
 }
 
 // NewProviderConfig takes user-defined configuration and fills the Virtual Kubelet provider struct
@@ -882,50 +900,36 @@ func (p *Provider) createDummyPod(ctx context.Context, originalPod *v1.Pod) (*v1
 		return nil, nil, fmt.Errorf("pod namespace is empty")
 	}
 
-	isSameNamespace := false
-	if originalPod.Annotations != nil {
-		if val, ok := originalPod.Annotations["interlink.eu/shadow-same-ns"]; ok && val == "true" {
-			isSameNamespace = true
-		}
+	identity, err := computeWstunnelResourceIdentity(originalPod)
+	if err != nil {
+		return nil, nil, err
 	}
-
-	var namespace string
-	if isSameNamespace {
-		namespace = originalPod.Namespace
-		log.G(ctx).Infof("Request from outside configuration detected. Using original pod namespace: %s", namespace)
-	} else {
-		namespace = originalPod.Namespace + "-wstunnel"
+	if isShadowSameNamespace(originalPod) {
+		log.G(ctx).Infof("Request from outside configuration detected. Using original pod namespace: %s", identity.Namespace)
 	}
+	log.G(ctx).Infof("Computed resource names - base: %s, namespace: %s", identity.Name, identity.Namespace)
 
-	_, err := p.clientSet.CoreV1().Namespaces().Get(ctx, namespace, metav1.GetOptions{})
+	_, err = p.clientSet.CoreV1().Namespaces().Get(ctx, identity.Namespace, metav1.GetOptions{})
 	if err != nil {
 		if !apierrors.IsNotFound(err) {
-			return nil, nil, fmt.Errorf("failed to get wstunnel namespace %s: %w", namespace, err)
+			return nil, nil, fmt.Errorf("failed to get wstunnel namespace %s: %w", identity.Namespace, err)
 		}
 		// Create the namespace if it doesn't exist
 		ns := &v1.Namespace{
 			ObjectMeta: metav1.ObjectMeta{
-				Name: namespace,
+				Name: identity.Namespace,
 			},
 		}
 		_, err = p.clientSet.CoreV1().Namespaces().Create(ctx, ns, metav1.CreateOptions{})
 		if err != nil {
-			return nil, nil, fmt.Errorf("failed to create wstunnel namespace %s: %w", namespace, err)
+			return nil, nil, fmt.Errorf("failed to create wstunnel namespace %s: %w", identity.Namespace, err)
 		}
-		log.G(ctx).Infof("Created wstunnel namespace %s", namespace)
+		log.G(ctx).Infof("Created wstunnel namespace %s", identity.Namespace)
 	}
-
-	var resourceBaseName, wstunnelNS string
-	if isSameNamespace {
-		resourceBaseName, wstunnelNS = computeWstunnelResourceNamesForSameNamespace(originalPod.Name, originalPod.Namespace)
-	} else {
-		resourceBaseName, wstunnelNS = computeWstunnelResourceNames(originalPod.Name, originalPod.Namespace)
-	}
-	log.G(ctx).Infof("Computed resource names - base: %s, namespace: %s", resourceBaseName, wstunnelNS)
 
 	// Reuse existing random path prefix if the Deployment already exists, otherwise generate it once
 	pathPrefix := ""
-	if dep, err := p.clientSet.AppsV1().Deployments(wstunnelNS).Get(ctx, resourceBaseName, metav1.GetOptions{}); err == nil {
+	if dep, err := p.clientSet.AppsV1().Deployments(identity.Namespace).Get(ctx, identity.Name, metav1.GetOptions{}); err == nil {
 		if dep.Spec.Template.Annotations != nil {
 			if v, ok := dep.Spec.Template.Annotations["interlink.eu/wstunnel-path-prefix"]; ok && strings.TrimSpace(v) != "" {
 				pathPrefix = v
@@ -939,56 +943,27 @@ func (p *Provider) createDummyPod(ctx context.Context, originalPod *v1.Pod) (*v1
 	// log the path prefix
 	log.G(ctx).Infof("Using wstunnel path prefix %s for %s/%s", pathPrefix, originalPod.Namespace, originalPod.Name)
 
-	ingressFirstLabel := fmt.Sprintf("%s-%s", resourceBaseName, wstunnelNS)
-	if len(ingressFirstLabel) > 63 {
-		// If combined length exceeds 63, we need to truncate
-		// Strategy: keep both parts but truncate proportionally
-		maxNameLen := 31
-		maxNsLen := 31
-
-		truncatedName := resourceBaseName
-		if len(truncatedName) > maxNameLen {
-			truncatedName = truncatedName[:maxNameLen]
-			truncatedName = strings.TrimRight(truncatedName, "-")
-		}
-
-		truncatedNs := wstunnelNS
-		if len(truncatedNs) > maxNsLen {
-			truncatedNs = truncatedNs[:maxNsLen]
-			truncatedNs = strings.TrimRight(truncatedNs, "-")
-		}
-
-		// Reconstruct and verify
-		ingressFirstLabel = fmt.Sprintf("%s-%s", truncatedName, truncatedNs)
-		if len(ingressFirstLabel) > 63 {
-			// Final safety: hard truncate
-			ingressFirstLabel = ingressFirstLabel[:63]
-			ingressFirstLabel = strings.TrimRight(ingressFirstLabel, "-")
-		}
-
-		resourceBaseName = truncatedName
-		wstunnelNS = truncatedNs
-
-		log.G(ctx).Infof("Truncated ingress first label to %d chars: %s", len(ingressFirstLabel), ingressFirstLabel)
-	}
-
 	localContainers := getLocalContainers(originalPod)
 	localInitContainers := getLocalInitContainers(originalPod)
 
 	podLabels, podAnnotations := copyPodLabelsAndAnnotations(originalPod)
 	log.G(ctx).Infof("Copied %d labels and %d annotations from original pod to shadow pod", len(podLabels), len(podAnnotations))
 
+	fullMeshEnabledForPod := p.config.Network.FullMesh && !isMeshNetworkingDisabled(originalPod)
 	templateData := WstunnelTemplateData{
-		Name:                resourceBaseName,
-		Namespace:           wstunnelNS,
-		RandomPassword:      pathPrefix,
-		ExposedPorts:        extractPortMappings(originalPod),
-		WildcardDNS:         p.config.Network.WildcardDNS,
-		LocalContainers:     localContainers,
-		LocalInitContainers: localInitContainers,
-		Volumes:             extractVolumesForLocalContainers(originalPod),
-		PodLabels:           podLabels,
-		PodAnnotations:      podAnnotations,
+		Name:                 identity.Name,
+		Namespace:            identity.Namespace,
+		RandomPassword:       pathPrefix,
+		ExposedPorts:         extractPortMappings(originalPod),
+		WildcardDNS:          p.config.Network.WildcardDNS,
+		LocalContainers:      localContainers,
+		LocalInitContainers:  localInitContainers,
+		Volumes:              extractVolumesForLocalContainers(originalPod),
+		PodLabels:            podLabels,
+		PodAnnotations:       podAnnotations,
+		IngressTLS:           p.config.Network.IngressTLS,
+		IngressClusterIssuer: p.config.Network.IngressClusterIssuer,
+		FullMesh:             fullMeshEnabledForPod,
 	}
 
 	log.G(ctx).Debugf("LocalInitContainers count: %d", len(templateData.LocalInitContainers))
@@ -999,7 +974,7 @@ func (p *Provider) createDummyPod(ctx context.Context, originalPod *v1.Pod) (*v1
 	}
 
 	// if full mesh in the configuration is set to true and not disabled per-pod
-	if p.config.Network.FullMesh && !isMeshNetworkingDisabled(originalPod) {
+	if fullMeshEnabledForPod {
 		if err := p.setupWireGuardConfig(ctx, originalPod, &templateData); err != nil {
 			return nil, nil, err
 		}
@@ -1105,7 +1080,11 @@ func (p *Provider) executeWstunnelTemplate(ctx context.Context, data WstunnelTem
 
 	// Fall back to embedded template
 	if templateContent == "" {
-		content, err := defaultWstunnelTemplate.ReadFile("templates/wstunnel-template.yaml")
+		templatePath := "templates/wstunnel-template.yaml"
+		if data.FullMesh {
+			templatePath = "templates/wstunnel-wireguard-template.yaml"
+		}
+		content, err := defaultWstunnelTemplate.ReadFile(templatePath)
 		if err != nil {
 			return "", fmt.Errorf("failed to read embedded template: %w", err)
 		}
@@ -1433,6 +1412,17 @@ func (p *Provider) cleanupWstunnelResources(ctx context.Context, wstunnelName, n
 	} else {
 		log.G(ctx).Infof("Successfully deleted wstunnel configmap %s/%s", namespace, wstunnelName+"-wg-config")
 	}
+
+	// Delete cert-manager-provisioned TLS secret.
+	if p.config.Network.IngressTLS {
+		secretName := wstunnelName + "-tls"
+		err = p.clientSet.CoreV1().Secrets(namespace).Delete(ctx, secretName, metav1.DeleteOptions{})
+		if err != nil {
+			log.G(ctx).Warningf("Failed to delete wstunnel TLS secret %s/%s: %v", namespace, secretName, err)
+		} else {
+			log.G(ctx).Infof("Successfully deleted wstunnel TLS secret %s/%s", namespace, secretName)
+		}
+	}
 }
 
 // cleanupPartialWstunnelResources removes specific resources that were created before a failure
@@ -1629,14 +1619,17 @@ func isMeshNetworkingDisabled(pod *v1.Pod) bool {
 
 // handleWstunnelCreation creates wstunnel infrastructure and returns the pod IP
 func (p *Provider) handleWstunnelCreation(ctx context.Context, pod *v1.Pod) (string, error) {
-	wstunnelName := pod.Name + "-wstunnel"
+	identity, err := computeWstunnelResourceIdentity(pod)
+	if err != nil {
+		return "", err
+	}
 
 	// Create wstunnel infrastructure outside virtual node for port exposure
 	dummyPod, templateData, err := p.createDummyPod(ctx, pod)
 	if err != nil {
 		log.G(ctx).Errorf("Failed to create wstunnel infrastructure for %s/%s: %v", pod.Namespace, pod.Name, err)
 		// Clean up any partially created resources
-		p.cleanupWstunnelResources(ctx, wstunnelName, pod.Namespace)
+		p.cleanupWstunnelResources(ctx, identity.Name, identity.Namespace)
 		return "", fmt.Errorf("failed to create wstunnel infrastructure for exposed ports: %w", err)
 	}
 
@@ -1648,11 +1641,12 @@ func (p *Provider) handleWstunnelCreation(ctx context.Context, pod *v1.Pod) (str
 		}
 	}
 
-	podIP, err := p.waitForWstunnelPodIP(ctx, dummyPod, timeout, wstunnelName, pod.Namespace)
+	podIP, err := p.waitForWstunnelPodIP(ctx, dummyPod, timeout, wstunnelResourceIdentity{
+		Name:      templateData.Name,
+		Namespace: templateData.Namespace,
+	})
 	if err != nil {
 		log.G(ctx).Errorf("Failed to get wstunnel pod IP for %s/%s: %v", pod.Namespace, pod.Name, err)
-		// Clean up resources since we failed to get a working pod
-		p.cleanupWstunnelResources(ctx, wstunnelName, pod.Namespace)
 		return "", err
 	}
 
@@ -1667,7 +1661,7 @@ func (p *Provider) handleWstunnelCreation(ctx context.Context, pod *v1.Pod) (str
 }
 
 // waitForWstunnelPodIP waits for wstunnel pod to get an IP
-func (p *Provider) waitForWstunnelPodIP(ctx context.Context, dummyPod *v1.Pod, timeout time.Duration, wstunnelName, namespace string) (string, error) {
+func (p *Provider) waitForWstunnelPodIP(ctx context.Context, dummyPod *v1.Pod, timeout time.Duration, identity wstunnelResourceIdentity) (string, error) {
 	log.G(ctx).Infof("Waiting up to %v for wstunnel pod %s/%s to get an IP", timeout, dummyPod.Namespace, dummyPod.Name)
 
 	start := time.Now()
@@ -1681,7 +1675,7 @@ func (p *Provider) waitForWstunnelPodIP(ctx context.Context, dummyPod *v1.Pod, t
 
 		if updatedDummyPod.Status.PodIP != "" {
 			podIP := updatedDummyPod.Status.PodIP
-			log.G(ctx).Infof("Using wstunnel pod IP %s for virtual pod %s/%s", podIP, namespace, dummyPod.Name)
+			log.G(ctx).Infof("Using wstunnel pod IP %s for virtual pod %s/%s", podIP, identity.Namespace, dummyPod.Name)
 			return podIP, nil
 		}
 
@@ -1689,7 +1683,7 @@ func (p *Provider) waitForWstunnelPodIP(ctx context.Context, dummyPod *v1.Pod, t
 	}
 
 	// Clean up the wstunnel infrastructure since it didn't get an IP
-	p.cleanupWstunnelResources(ctx, wstunnelName, namespace)
+	p.cleanupWstunnelResources(ctx, identity.Name, identity.Namespace)
 	return "", fmt.Errorf("wstunnel pod %s/%s failed to get an IP within %v timeout", dummyPod.Namespace, dummyPod.Name, timeout)
 }
 
@@ -1926,23 +1920,14 @@ func (p *Provider) DeletePod(ctx context.Context, pod *v1.Pod) (err error) {
 		return errdefs.NotFound("pod not found")
 	}
 
-	isSameNamespace := false
-	if pod.Annotations != nil {
-		if val, ok := pod.Annotations["interlink.eu/shadow-same-ns"]; ok && val == "true" {
-			isSameNamespace = true
-		}
-	}
-
 	// Clean up wstunnel resources if tunnel is enabled and they exist and no VPN annotation
 	if p.shouldCreateWstunnel(pod) || (p.config.Network.FullMesh && !isMeshNetworkingDisabled(pod)) {
-		// Use the same helper function to compute resource names
-		var resourceBaseName, wstunnelNS string
-		if isSameNamespace {
-			resourceBaseName, wstunnelNS = computeWstunnelResourceNamesForSameNamespace(pod.Name, pod.Namespace)
+		identity, identityErr := computeWstunnelResourceIdentity(pod)
+		if identityErr != nil {
+			log.G(ctx).Warningf("Failed to compute wstunnel resource identity for %s/%s: %v", pod.Namespace, pod.Name, identityErr)
 		} else {
-			resourceBaseName, wstunnelNS = computeWstunnelResourceNames(pod.Name, pod.Namespace)
+			p.cleanupWstunnelResources(ctx, identity.Name, identity.Namespace)
 		}
-		p.cleanupWstunnelResources(ctx, resourceBaseName, wstunnelNS)
 	}
 
 	now := metav1.Now()
