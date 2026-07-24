@@ -93,8 +93,8 @@ HOST_DNS=$(grep "^nameserver" /etc/resolv.conf | head -1 | awk '{print $2}')
 {
   mkdir -p /tmp/etc-override
   echo "search default.svc.cluster.local svc.cluster.local cluster.local" > /tmp/etc-override/resolv.conf
-  echo "nameserver $HOST_DNS" >> /tmp/etc-override/resolv.conf
   echo "nameserver {{.DNSServiceIP}}" >> /tmp/etc-override/resolv.conf
+  echo "nameserver $HOST_DNS" >> /tmp/etc-override/resolv.conf
   echo "nameserver 1.1.1.1" >> /tmp/etc-override/resolv.conf
   echo "nameserver 8.8.8.8" >> /tmp/etc-override/resolv.conf
   mount --bind /tmp/etc-override/resolv.conf /etc/resolv.conf
