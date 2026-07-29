@@ -43,6 +43,8 @@ Network:
   WildcardDNS: "tunnel.example.com"                    # DNS domain for ingress
   WstunnelTemplatePath: "/etc/templates/custom.yaml"   # Optional: custom template path
   WstunnelCommand: "custom-wstunnel-command"           # Optional: custom wstunnel client command
+  IngressTLS: true                                     # Optional: expose tunnel ingress with TLS
+  IngressClusterIssuer: "lets-issuer"                 # Optional: cert-manager ClusterIssuer
 
 # Other configuration...
 Resources:
@@ -59,6 +61,8 @@ Resources:
 | `WildcardDNS` | `string` | Yes* | `""` | DNS domain for ingress hostnames (e.g., `*.tunnel.example.com` or `tunnel.example.com`) |
 | `WstunnelTemplatePath` | `string` | No | `""` | Path to custom wstunnel template |
 | `WstunnelCommand` | `string` | No | `DefaultWstunnelCommand` | Custom wstunnel client command template |
+| `IngressTLS` | `bool` | No | `false` | Adds TLS to generated ingresses and makes the default client command use `wss://...:443` |
+| `IngressClusterIssuer` | `string` | No | `lets-issuer` when TLS is enabled | cert-manager ClusterIssuer used by generated TLS ingresses |
 
 *Required when `EnableTunnel` is `true`
 
@@ -181,7 +185,7 @@ metadata:
     kubernetes.io/ingress.class: "nginx"
 spec:
   rules:
-  - host: ws-{{.Name}}.{{.WildcardDNS}}
+  - host: {{.Name}}-{{.Namespace}}.{{.WildcardDNS}}
     http:
       paths:
       - path: /
@@ -400,12 +404,12 @@ Configure your DNS provider to point wildcard subdomains to your ingress control
 
 For each pod, the system generates hostnames using the pattern:
 ```
-ws-{pod-name}-wstunnel.{WildcardDNS}
+{resource-name}-{wstunnel-namespace}.{WildcardDNS}
 ```
 
 Examples:
-- Pod `web-server` → `ws-web-server-wstunnel.tunnel.example.com`
-- Pod `api-gateway` → `ws-api-gateway-wstunnel.tunnel.example.com`
+- Pod `web-server` in namespace `default` → `web-server-default-default-wstunnel.tunnel.example.com`
+- Pod `api-gateway` in namespace `apps` → `api-gateway-apps-apps-wstunnel.tunnel.example.com`
 
 ---
 
@@ -424,7 +428,7 @@ For a pod with exposed ports, the annotation will contain:
 ```bash
 curl -L https://github.com/erebe/wstunnel/releases/latest/download/wstunnel-linux-x64 -o wstunnel && chmod +x wstunnel
 
-./wstunnel client --http-upgrade-path-prefix a1b2c3d4e5f6 -R tcp://[::]:8080:localhost:8080 -R tcp://[::]:9090:localhost:9090 ws://ws-my-pod-wstunnel.tunnel.example.com:80
+./wstunnel client --http-upgrade-path-prefix a1b2c3d4e5f6 -R tcp://[::]:8080:localhost:8080 -R tcp://[::]:9090:localhost:9090 ws://my-pod-default-default-wstunnel.tunnel.example.com:80
 ```
 
 ### Command Structure
@@ -433,7 +437,7 @@ curl -L https://github.com/erebe/wstunnel/releases/latest/download/wstunnel-linu
 2. **Connect**: Establishes the websocket tunnel with:
    - `--http-upgrade-path-prefix`: Unique random password for authentication
    - `-R tcp://[::]:PORT:localhost:PORT`: Port forwarding rules (one per exposed port)
-   - `ws://ENDPOINT:80`: Websocket endpoint using generated hostname
+   - `ws://ENDPOINT:80`: Websocket endpoint using generated hostname, or `wss://ENDPOINT:443` when `IngressTLS` is enabled
 
 ### Retrieving the Command
 
@@ -455,7 +459,7 @@ When a pod exposes multiple ports, all ports are included in a single command wi
   -R tcp://[::]:8080:localhost:8080 \
   -R tcp://[::]:9090:localhost:9090 \
   -R tcp://[::]:3000:localhost:3000 \
-  ws://ws-my-pod-wstunnel.tunnel.example.com:80
+  ws://my-pod-default-default-wstunnel.tunnel.example.com:80
 ```
 
 ### Custom Client Command
@@ -571,7 +575,7 @@ kubectl logs -l app.kubernetes.io/component=my-pod-wstunnel
 3. **DNS resolution issues**
    ```bash
    # Test DNS resolution
-   nslookup ws-my-pod-wstunnel.tunnel.example.com
+   nslookup my-pod-default-default-wstunnel.tunnel.example.com
    
    # Check ingress configuration
    kubectl get ingress my-pod-wstunnel -o yaml
@@ -605,7 +609,7 @@ kubectl describe deployment my-pod-wstunnel
 # Test websocket connection
 curl -i -N -H "Connection: Upgrade" -H "Upgrade: websocket" \
   -H "Sec-WebSocket-Key: test" -H "Sec-WebSocket-Version: 13" \
-  http://ws-my-pod-wstunnel.tunnel.example.com/your-random-password
+  http://my-pod-default-default-wstunnel.tunnel.example.com/your-random-password
 
 # Check service endpoints
 kubectl get endpoints my-pod-wstunnel
@@ -695,10 +699,10 @@ metadata:
 spec:
   tls:
   - hosts:
-    - ws-{{.Name}}.{{.WildcardDNS}}
+    - {{.Name}}-{{.Namespace}}.{{.WildcardDNS}}
     secretName: {{.Name}}-tls
   rules:
-  - host: ws-{{.Name}}.{{.WildcardDNS}}
+  - host: {{.Name}}-{{.Namespace}}.{{.WildcardDNS}}
     http:
       paths:
       - path: /
@@ -734,7 +738,7 @@ spec:
 # Multiple ingress rules for different services
 spec:
   rules:
-  - host: ws-{{.Name}}.{{.WildcardDNS}}
+  - host: {{.Name}}-{{.Namespace}}.{{.WildcardDNS}}
     http:
       paths:
       - path: /
