@@ -38,12 +38,12 @@ interface and [interLink API plugins spec](./guides/03-api-reference.mdx).
 Plugins will define how the containers will run on the remote system (see
 [Target providers](#providers)).
 
-InterLink API and the plugin can be arranged in three different ways across the
+InterLink API and the plugin can be arranged in two different ways across the
 local cluster and the remote part:
 
 - both deployed remote (**[Edge-node](#edge-node)**)
-- both deployed local (**[In-cluster](#in-cluster)**)
-- API local, plugin remote (**[Tunneled](#tunneled)**)
+- API deployed in the cluster (**[In-cluster](#in-cluster)**), with the plugin
+  either beside it or on the remote system, reached over an SSH tunnel
 
 ```
 +---------------------------+  +----------------------------+
@@ -64,6 +64,9 @@ local cluster and the remote part:
 |                           |  |                            |
 +---------------------------+  +----------------------------+
 ```
+
+The first two rows are both *in-cluster* deployments — the API server sits in the
+cluster either way, and only the plugin moves. The third is the *edge-node* one.
 
 For more information visit the [architecture page](arch)
 
@@ -151,9 +154,13 @@ Get started with edge-node deployment [here](./cookbook/1-edge.mdx)
 ### In-cluster
 
 This scenario involves deploying a Virtual Kubelet along with the interLink API
-server and the plugin to interact with a remote API. This setup allows
-Kubernetes pods to be executed on remote resources while all other components
-sits inside the Kubernetes cluster.
+server inside the Kubernetes cluster, so nothing has to be installed on an edge
+node and no interLink component is exposed to the internet.
+
+The plugin either runs beside them in the cluster, or on the remote system — on a
+login node, for instance — with the API server reaching it through an SSH tunnel.
+That second variant suits multi-user hosts, and sites that allow outbound SSH but
+will not let you expose a port.
 
 <ThemedImage
   alt="Docusaurus themed image"
@@ -169,24 +176,3 @@ Get started with in-cluster deployment [here](./cookbook/2-incluster.mdx)
 
 :::
 
-### Tunneled
-
-This deployment involves the Virtual Kubelet connecting to a remote interLink
-API server and its plugin through a secure tunnel. This setup ensures secure
-communication between the Kubernetes cluster and the remote resources, making it
-suitable for environments with strict security requirements or to host services
-on a multi user host like a login node.
-
-<ThemedImage
-  alt="Docusaurus themed image"
-  sources={{
-    light: useBaseUrl("/img/scenario-3_light.svg"),
-    dark: useBaseUrl("/img/scenario-3_dark.svg"),
-  }}
-/>
-
-:::note
-
-Get started with tunneled deployment [here](./cookbook/3-tunneled.mdx)
-
-:::
