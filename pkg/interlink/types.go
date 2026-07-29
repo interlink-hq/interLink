@@ -42,6 +42,12 @@ type PodStatus struct {
 	PodNamespace string `json:"namespace"`
 	// JobID is the remote system's job identifier (e.g., SLURM job ID, container ID)
 	JobID string `json:"JID"`
+	// NodeName is the remote compute node the pod was allocated on, as the plugin's
+	// site resolves it (typically a fully qualified hostname reachable from the login
+	// node). Plugins report it once the workload is actually running; it is empty
+	// while the job is still queued, and empty for plugins that do not track it.
+	// interLink uses it to point per-pod shadow tunnels at the right host.
+	NodeName string `json:"nodeName,omitempty"`
 	// Containers holds the status of all regular containers in the pod
 	Containers []v1.ContainerStatus `json:"containers"`
 	// InitContainers holds the status of all init containers in the pod
