@@ -105,6 +105,12 @@ type ShadowTemplateData struct {
 	IngressTLS           bool
 	IngressClusterIssuer string
 	FullMesh             bool
+	// NodeConfigMap is the ConfigMap the shadow can mount to learn which remote
+	// compute node the workload landed on. It exists from the moment the shadow is
+	// created but holds an empty NodeNameKey until the plugin reports the node.
+	NodeConfigMap string
+	// NodeNameKey is the key inside NodeConfigMap holding the node name.
+	NodeNameKey string
 }
 
 type PortMapping struct {
@@ -147,6 +153,9 @@ type Provider struct {
 	clientSet            kubernetes.Interface
 	clientHTTPTransport  *http.Transport
 	podIPs               []string
+	// shadowNodeNames caches, per pod UID, the last compute node published to
+	// that pod's shadow, so the status loop only writes on change.
+	shadowNodeNames sync.Map
 }
 
 // Increment the given IP address
@@ -943,6 +952,12 @@ func (p *Provider) createShadowPod(ctx context.Context, originalPod *v1.Pod) (*v
 	// log the path prefix
 	log.G(ctx).Infof("Using wstunnel path prefix %s for %s/%s", pathPrefix, originalPod.Namespace, originalPod.Name)
 
+	// The remote node is unknown at this point - the job has not been submitted, let
+	// alone scheduled - so publish an empty ConfigMap the shadow can already mount.
+	if err := p.resetShadowNodeConfigMap(ctx, identity); err != nil {
+		return nil, nil, err
+	}
+
 	localContainers := getLocalContainers(originalPod)
 	localInitContainers := getLocalInitContainers(originalPod)
 
@@ -964,6 +979,8 @@ func (p *Provider) createShadowPod(ctx context.Context, originalPod *v1.Pod) (*v
 		IngressTLS:           p.config.Network.IngressTLS,
 		IngressClusterIssuer: p.config.Network.IngressClusterIssuer,
 		FullMesh:             fullMeshEnabledForPod,
+		NodeConfigMap:        shadowNodeConfigMapName(identity.Name),
+		NodeNameKey:          shadowNodeNameKey,
 	}
 
 	log.G(ctx).Debugf("LocalInitContainers count: %d", len(templateData.LocalInitContainers))
@@ -1413,6 +1430,15 @@ func (p *Provider) cleanupShadowResources(ctx context.Context, shadowName, names
 		log.G(ctx).Infof("Successfully deleted shadow configmap %s/%s", namespace, shadowName+"-wg-config")
 	}
 
+	// Delete the compute node configmap
+	nodeCM := shadowNodeConfigMapName(shadowName)
+	err = p.clientSet.CoreV1().ConfigMaps(namespace).Delete(ctx, nodeCM, metav1.DeleteOptions{})
+	if err != nil {
+		log.G(ctx).Warningf("Failed to delete shadow configmap %s/%s: %v", namespace, nodeCM, err)
+	} else {
+		log.G(ctx).Infof("Successfully deleted shadow configmap %s/%s", namespace, nodeCM)
+	}
+
 	// Delete cert-manager-provisioned TLS secret.
 	if p.config.Network.IngressTLS {
 		secretName := shadowName + "-tls"
@@ -1831,7 +1857,7 @@ func (p *Provider) CreatePod(ctx context.Context, pod *v1.Pod) error {
 	podIP := "127.0.0.1"
 
 	// Handle shadow creation if needed
-	if p.shouldCreateShadow(pod) || (p.config.Network.FullMesh && !isMeshNetworkingDisabled(pod)) {
+	if p.hasShadow(pod) {
 		var err error
 		podIP, err = p.handleShadowCreation(ctx, pod)
 		if err != nil {
@@ -1921,13 +1947,14 @@ func (p *Provider) DeletePod(ctx context.Context, pod *v1.Pod) (err error) {
 	}
 
 	// Clean up shadow resources if tunnel is enabled and they exist and no VPN annotation
-	if p.shouldCreateShadow(pod) || (p.config.Network.FullMesh && !isMeshNetworkingDisabled(pod)) {
+	if p.hasShadow(pod) {
 		identity, identityErr := computeShadowResourceIdentity(pod)
 		if identityErr != nil {
 			log.G(ctx).Warningf("Failed to compute shadow resource identity for %s/%s: %v", pod.Namespace, pod.Name, identityErr)
 		} else {
 			p.cleanupShadowResources(ctx, identity.Name, identity.Namespace)
 		}
+		p.forgetShadowNodeName(pod)
 	}
 
 	now := metav1.Now()
