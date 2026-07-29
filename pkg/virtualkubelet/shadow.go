@@ -1,12 +1,18 @@
 package virtualkubelet
 
 import (
+	"context"
 	"crypto/sha256"
 	"encoding/hex"
+	"encoding/json"
 	"fmt"
 	"strings"
 
+	"github.com/containerd/containerd/log"
 	v1 "k8s.io/api/core/v1"
+	apierrors "k8s.io/apimachinery/pkg/api/errors"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	k8stypes "k8s.io/apimachinery/pkg/types"
 )
 
 // shadowResourcePrefix is prepended to shadow resource names created in the
@@ -16,6 +22,13 @@ const shadowResourcePrefix = "shadow-"
 // shadowNamespaceSuffix is appended to the offloaded pod's namespace to build
 // the dedicated namespace shadow resources live in by default.
 const shadowNamespaceSuffix = "-shadow"
+
+// shadowNodeConfigMapSuffix names the per-shadow ConfigMap carrying the remote
+// compute node the workload was allocated on.
+const shadowNodeConfigMapSuffix = "-node"
+
+// shadowNodeNameKey is the key inside that ConfigMap holding the node name.
+const shadowNodeNameKey = "compute-node"
 
 func sanitizeDNSName(name string) string {
 	// Convert to lowercase
@@ -225,4 +238,91 @@ func computeShadowResourceNames(podName, podNamespace string) (resourceBaseName,
 	}
 
 	return resourceBaseName, shadowNamespace
+}
+
+// hasShadow reports whether a shadow Deployment is rendered for this pod, either
+// because the pod exposes ports over a tunnel or because mesh networking wraps
+// every offloaded pod.
+func (p *Provider) hasShadow(pod *v1.Pod) bool {
+	return p.shouldCreateShadow(pod) || (p.config.Network.FullMesh && !isMeshNetworkingDisabled(pod))
+}
+
+// shadowNodeConfigMapName returns the ConfigMap carrying the compute node name
+// for the given shadow.
+func shadowNodeConfigMapName(shadowName string) string {
+	return shadowName + shadowNodeConfigMapSuffix
+}
+
+// resetShadowNodeConfigMap creates, or blanks, the per-shadow node ConfigMap.
+// The shadow is rendered before the remote batch system has allocated anything,
+// so the ConfigMap has to exist - and be mountable - while still empty. Blanking
+// an existing one stops a previous run's node from being tunnelled to.
+func (p *Provider) resetShadowNodeConfigMap(ctx context.Context, identity shadowResourceIdentity) error {
+	cm := &v1.ConfigMap{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      shadowNodeConfigMapName(identity.Name),
+			Namespace: identity.Namespace,
+		},
+		Data: map[string]string{shadowNodeNameKey: ""},
+	}
+
+	_, err := p.clientSet.CoreV1().ConfigMaps(identity.Namespace).Create(ctx, cm, metav1.CreateOptions{})
+	if err == nil {
+		return nil
+	}
+	if !apierrors.IsAlreadyExists(err) {
+		return fmt.Errorf("failed to create shadow node configmap %s/%s: %w", identity.Namespace, cm.Name, err)
+	}
+	if _, err := p.clientSet.CoreV1().ConfigMaps(identity.Namespace).Update(ctx, cm, metav1.UpdateOptions{}); err != nil {
+		return fmt.Errorf("failed to reset shadow node configmap %s/%s: %w", identity.Namespace, cm.Name, err)
+	}
+	return nil
+}
+
+// publishShadowNodeName records the remote compute node a pod was allocated on
+// into its shadow's node ConfigMap, so the shadow can direct its tunnel at the
+// right host. The ConfigMap is mounted rather than passed as an env var on
+// purpose: kubelet refreshes it in place, whereas changing the pod spec would
+// restart the shadow and change the pod IP already reported to Kubernetes as the
+// offloaded pod's IP.
+//
+// Repeated calls with an unchanged value are dropped, so the status loop does not
+// write on every poll.
+func (p *Provider) publishShadowNodeName(ctx context.Context, pod *v1.Pod, nodeName string) {
+	if nodeName == "" || !p.hasShadow(pod) {
+		return
+	}
+	if last, ok := p.shadowNodeNames.Load(string(pod.UID)); ok && last == nodeName {
+		return
+	}
+
+	identity, err := computeShadowResourceIdentity(pod)
+	if err != nil {
+		log.G(ctx).Warningf("Failed to compute shadow resource identity for %s/%s: %v", pod.Namespace, pod.Name, err)
+		return
+	}
+
+	patch, err := json.Marshal(map[string]map[string]string{"data": {shadowNodeNameKey: nodeName}})
+	if err != nil {
+		log.G(ctx).Warningf("Failed to marshal shadow node patch for %s/%s: %v", pod.Namespace, pod.Name, err)
+		return
+	}
+
+	name := shadowNodeConfigMapName(identity.Name)
+	_, err = p.clientSet.CoreV1().ConfigMaps(identity.Namespace).Patch(
+		ctx, name, k8stypes.StrategicMergePatchType, patch, metav1.PatchOptions{},
+	)
+	if err != nil {
+		log.G(ctx).Warningf("Failed to publish compute node %q to shadow configmap %s/%s: %v", nodeName, identity.Namespace, name, err)
+		return
+	}
+
+	p.shadowNodeNames.Store(string(pod.UID), nodeName)
+	log.G(ctx).Infof("Published compute node %q for shadow %s/%s", nodeName, identity.Namespace, identity.Name)
+}
+
+// forgetShadowNodeName drops the cached node name for a pod that is going away,
+// so a pod recreated under a new UID starts from a clean slate.
+func (p *Provider) forgetShadowNodeName(pod *v1.Pod) {
+	p.shadowNodeNames.Delete(string(pod.UID))
 }
