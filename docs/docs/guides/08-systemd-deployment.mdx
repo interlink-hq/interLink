@@ -91,6 +91,69 @@ PrivateTmp=true
 WantedBy=multi-user.target
 ```
 
+### SSH Tunnel Service
+
+Only needed for the [in-cluster deployment with a remote plugin](../cookbook/2-incluster.mdx#plugin-on-the-remote-system),
+where the API server reaches its plugin through an SSH tunnel terminating on a
+local Unix socket. Skip this if the plugin runs locally.
+
+```ini title="/etc/systemd/system/interlink-tunnel.service"
+[Unit]
+Description=interLink SSH Tunnel
+After=network.target
+Wants=network.target
+
+[Service]
+Type=simple
+User=interlink
+Group=interlink
+WorkingDirectory=/opt/interlink
+ExecStart=/opt/interlink/bin/ssh-tunnel \
+  -addr "remote-server:22" \
+  -user "interlink" \
+  -keyfile "/opt/interlink/.ssh/id_rsa" \
+  -lsock "/tmp/interlink.sock" \
+  -rport "4000" \
+  -hostkeyfile "/opt/interlink/.ssh/host_key"
+
+Restart=always
+RestartSec=10
+StandardOutput=append:/opt/interlink/logs/ssh-tunnel.log
+StandardError=append:/opt/interlink/logs/ssh-tunnel.log
+
+# Security settings
+NoNewPrivileges=true
+ProtectSystem=strict
+ProtectHome=true
+ReadWritePaths=/opt/interlink/logs /tmp
+PrivateTmp=true
+
+[Install]
+WantedBy=multi-user.target
+```
+
+The SSH key material lives under `/opt/interlink/.ssh` and must be readable only
+by the service user:
+
+```bash
+sudo mkdir -p /opt/interlink/.ssh
+sudo cp ~/.ssh/interlink_rsa /opt/interlink/.ssh/id_rsa
+sudo cp ~/.ssh/interlink_host_key /opt/interlink/.ssh/host_key
+sudo chown -R interlink:interlink /opt/interlink/.ssh
+sudo chmod 700 /opt/interlink/.ssh
+sudo chmod 600 /opt/interlink/.ssh/id_rsa
+sudo chmod 644 /opt/interlink/.ssh/host_key
+```
+
+When the tunnel is in use, make the API server depend on it so systemd starts
+them in the right order and restarts the API server if the tunnel is bounced:
+
+```ini title="/etc/systemd/system/interlink-api.service.d/tunnel.conf"
+[Unit]
+After=interlink-tunnel.service
+Requires=interlink-tunnel.service
+```
+
 ### InterLink API Server Service
 
 Create the InterLink API server systemd service:
