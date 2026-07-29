@@ -1,0 +1,14 @@
+# Image for the SSH port-forward shadow pod (Network.ShadowMode: ssh).
+#
+# It runs `ssh -N -L ...` against an HPC login node, so it needs an ssh client and,
+# for GSSAPI sites, the Kerberos client tools to obtain and renew a ticket from a
+# keytab. Nothing from this repository is installed: the shadow runs no interLink
+# binary, only stock ssh.
+FROM debian:bookworm-slim
+
+RUN apt-get update \
+ && apt-get install -y --no-install-recommends \
+      openssh-client krb5-user ca-certificates \
+ && rm -rf /var/lib/apt/lists/*
+
+CMD ["/bin/sh"]

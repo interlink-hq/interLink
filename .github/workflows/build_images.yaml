@@ -71,7 +71,17 @@ jobs:
             ghcr.io/${{ steps.get_repo_owner.outputs.repo_owner }}/interlink/interlink:latest
           file: ./docker/Dockerfile.interlink
           platforms: linux/amd64, linux/arm64, linux/aarch64
-          
+      - name: Build container base image ssh-tunnel
+        uses: docker/build-push-action@v6
+        with:
+          context: ./
+          outputs: "type=registry,push=true"
+          tags: |
+            ghcr.io/${{ steps.get_repo_owner.outputs.repo_owner }}/interlink/ssh-tunnel:${{ env.RELEASE_VERSION }}
+            ghcr.io/${{ steps.get_repo_owner.outputs.repo_owner }}/interlink/ssh-tunnel:latest
+          file: ./docker/Dockerfile.ssh-tunnel
+          platforms: linux/amd64, linux/arm64, linux/aarch64
+
   virtual-kubelet-refresh-token:
     runs-on: ubuntu-latest
     #env:
