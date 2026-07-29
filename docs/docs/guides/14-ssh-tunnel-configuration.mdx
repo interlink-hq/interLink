@@ -1,0 +1,281 @@
+---
+title: "SSH Tunnel Configuration"
+description: "Reaching services inside offloaded pods on air-gapped HPC sites over an SSH login node"
+sidebar_position: 14
+---
+
+# SSH Tunnel Configuration
+
+Many HPC sites give compute nodes no outbound internet access, and many Kubernetes
+clusters have no publicly reachable ingress. The [wstunnel](./10-wstunnel-configuration.mdx)
+shadow needs both: the workload dials out to an ingress and runs a wstunnel client
+there. On an air-gapped site it cannot.
+
+The SSH shadow inverts the direction. Instead of the compute node dialing out, the
+cluster dials **in** to the site's SSH login node and forwards each exposed port
+from the compute node the job landed on:
+
+```
+browser → Ingress / Service → shadow pod (ssh -L) → HPC login node → compute node (Jupyter)
+```
+
+The only requirement is outbound SSH from the cluster to the login node. The
+offloaded pod runs nothing on its side: no wstunnel client, no WireGuard
+configuration, no pre-exec injection.
+
+:::info
+The SSH shadow replaces **wstunnel**, not [full mesh](./13-mesh-network-configuration.mdx).
+It exposes the offloaded pod's ports to the cluster; it does not give the pod access
+back into the cluster, so an offloaded workload still cannot reach in-cluster object
+storage or message buses. Combining the two is rejected at startup and tracked in
+[#548](https://github.com/interlink-hq/interLink/issues/548).
+:::
+
+---
+
+## Which shadow does what
+
+| | Direction | Trigger | Workload must run |
+| --- | --- | --- | --- |
+| `wstunnel` (default) | cluster → pod | `EnableTunnel` + exposed ports | wstunnel client, dials out |
+| `ssh` | cluster → pod | `EnableTunnel` + exposed ports | nothing |
+| full mesh | bidirectional | `FullMesh: true`, every pod | `mesh.sh` (slirp4netns + WireGuard) |
+
+---
+
+## Configuration
+
+### Virtual Kubelet
+
+```yaml
+# VirtualKubeletConfig.yaml
+Network:
+  EnableTunnel: true
+  ShadowMode: ssh
+  SSH:
+    LoginHost: login.hpc.example.org
+    User: alice
+    KeySecret: hpc-ssh-key
+```
+
+`EnableTunnel` turns shadow pods on for offloaded pods with exposed ports;
+`ShadowMode` picks which shadow is rendered. Both are needed.
+
+### Helm
+
+```yaml
+virtualNode:
+  network:
+    enableTunnel: true
+    shadowMode: ssh
+    ssh:
+      loginHost: login.hpc.example.org
+      user: alice
+      keySecret: hpc-ssh-key
+```
+
+See [`examples/ssh_tunnel.yaml`](https://github.com/interlink-hq/interlink-helm-chart/blob/main/interlink/examples/ssh_tunnel.yaml)
+in the chart repository for a complete deployment.
+
+### Options
+
+| Option | Default | Description |
+| --- | --- | --- |
+| `LoginHost` | — | SSH login node to forward through (**required**) |
+| `User` | — | Login name on that node (**required**) |
+| `Port` | `22` | Login node's SSH port |
+| `Image` | `ghcr.io/interlink-hq/interlink/ssh-tunnel:<version>` | Image the shadow runs. Needs an ssh client, plus `kinit` for Kerberos |
+| `Auth` | `publickey` | `publickey` or `kerberos` |
+| `KeySecret` | — | Secret holding the private key (`publickey`) |
+| `KeySecretKey` | `id_ed25519` | Key inside `KeySecret` |
+| `KeytabSecret` | — | Secret holding the keytab (`kerberos`) |
+| `KeytabSecretKey` | `user.keytab` | Key inside `KeytabSecret` |
+| `Principal` | — | Kerberos principal (`kerberos`) |
+| `Krb5ConfigMap` | — | ConfigMap with a `krb5.conf`, mounted at `/etc/krb5.conf` |
+| `KnownHostsConfigMap` | — | ConfigMap with a `known_hosts` file |
+| `ReplicateCredentials` | `true` | Copy the credential into each shadow's namespace |
+| `NodeWaitTimeout` | `2h` | How long the shadow waits for the compute node |
+| `ExtraOptions` | `[]` | Extra ssh options, each passed as `-o <option>` |
+
+Misconfiguration fails at **startup**, not on the first offloaded pod, so a missing
+`LoginHost` or a `kerberos` block without a `Principal` is caught immediately.
+
+---
+
+## Authentication
+
+### Public key
+
+```bash
+ssh-keygen -t ed25519 -f ./hpc_key -N ''
+ssh-copy-id -i ./hpc_key.pub alice@login.hpc.example.org
+
+kubectl create secret generic hpc-ssh-key -n interlink \
+  --from-file=id_ed25519=./hpc_key
+```
+
+```yaml
+SSH:
+  Auth: publickey
+  KeySecret: hpc-ssh-key
+```
+
+### Kerberos
+
+For GSSAPI sites (`GSSAPIAuthentication yes` on the login node):
+
+```bash
+kubectl create secret generic hpc-keytab -n interlink \
+  --from-file=user.keytab=/path/to/user.keytab
+```
+
+```yaml
+SSH:
+  Auth: kerberos
+  KeytabSecret: hpc-keytab
+  Principal: alice@EXAMPLE.ORG
+  Krb5ConfigMap: krb5-config   # if the image's /etc/krb5.conf lacks your realm
+```
+
+The shadow runs `kinit` in an init container and refreshes the ticket from a
+sidecar for the life of the tunnel, so long-running notebooks survive ticket
+expiry.
+
+### Host key verification
+
+Without `KnownHostsConfigMap` the shadow uses `StrictHostKeyChecking=accept-new`,
+which trusts whatever key the login node presents on first contact. That is a small
+MITM window on every new shadow pod. For production, pin the key:
+
+```bash
+ssh-keyscan login.hpc.example.org > known_hosts
+kubectl create configmap hpc-known-hosts -n interlink --from-file=known_hosts
+```
+
+```yaml
+SSH:
+  KnownHostsConfigMap: hpc-known-hosts
+```
+
+This switches the shadow to `StrictHostKeyChecking=yes`.
+
+---
+
+## How the compute node is discovered
+
+The shadow is created when the pod is, which is long before the batch system has
+scheduled anything — so at creation time there is no node to forward to yet.
+
+1. interLink creates a ConfigMap, `<shadow>-node`, holding an empty `compute-node` key.
+2. The plugin reports the allocated node as `PodStatus.NodeName` once the job runs.
+3. interLink patches that value into the ConfigMap. It is mounted, not injected into
+   the pod spec, so kubelet refreshes it in place — restarting the shadow would
+   change its pod IP, which Kubernetes has already been told is the offloaded pod's IP.
+4. The shadow's `wait-for-node` init container polls the mounted file, then
+   `ssh-forward` starts the tunnel.
+
+While the job is queued the shadow sits in `Init:0/1`. That is the expected state,
+not a failure — it reads as "waiting for the allocation" rather than a crash-looping
+tunnel. After `NodeWaitTimeout` the init container fails with an explicit message.
+
+:::warning
+This requires a plugin that reports `PodStatus.NodeName`. A plugin that does not
+will leave the shadow waiting until the timeout expires.
+:::
+
+---
+
+## Credential replication
+
+Shadow pods follow the offloaded pod. With `interlink.eu/shadow-same-ns: "true"` — the
+usual choice for multi-tenant setups such as Kubeflow notebooks — that means the
+shadow lands in a per-user namespace, where the SSH credential does not exist.
+
+By default interLink copies the credential Secret, and any `Krb5ConfigMap` /
+`KnownHostsConfigMap`, from its own namespace into the shadow's namespace.
+
+:::warning
+Replication makes the credential readable by anyone who can read Secrets in those
+namespaces. If that is not acceptable, set `ReplicateCredentials: false` and
+provision the Secret in each namespace yourself, through a secrets operator or a
+replication controller.
+:::
+
+---
+
+## Pod configuration
+
+Nothing special is required — an offloaded pod that exposes a port gets a shadow:
+
+```yaml
+apiVersion: v1
+kind: Pod
+metadata:
+  name: notebook
+  annotations:
+    # Keep the shadow in this pod's namespace, so it can mount credentials
+    # replicated here rather than into a separate <ns>-shadow namespace.
+    interlink.eu/shadow-same-ns: "true"
+spec:
+  nodeSelector:
+    kubernetes.io/hostname: hpc-vk
+  tolerations:
+  - key: virtual-node.interlink/no-schedule
+    operator: Exists
+    effect: NoSchedule
+  containers:
+  - name: jupyter
+    image: docker://jupyter/scipy-notebook
+    ports:
+    - containerPort: 8888
+      name: notebook
+```
+
+The shadow's Service carries the same ports, so anything that can reach the Service —
+an Ingress, an Istio VirtualService, `kubectl port-forward` — reaches the notebook.
+
+`interlink.eu/wstunnel-extra-ports` works here too, for ports not declared in the
+container spec.
+
+:::note
+`ssh -L` forwards TCP only. UDP ports are skipped, with a warning in the virtual
+kubelet log.
+:::
+
+---
+
+## Troubleshooting
+
+**Shadow stuck in `Init:0/1`.** Normal while the job is queued. If it persists,
+check that the job is actually running and that the plugin reports the node:
+
+```bash
+kubectl get configmap <shadow>-node -o jsonpath='{.data.compute-node}'
+```
+
+Empty means no plugin has reported one yet.
+
+**`ssh-forward` crash-loops with a permission error.** The credential Secret is
+missing from the shadow's namespace, or `KeySecretKey` does not match the key inside
+it. With `ReplicateCredentials: false` the Secret must already exist there.
+
+**Connection refused through the tunnel.** The tunnel reached the compute node but
+nothing is listening on that port. Services often bind `127.0.0.1` by default; bind
+`0.0.0.0` instead — for a notebook, `--ip=0.0.0.0`.
+
+**Host key verification failed.** `KnownHostsConfigMap` does not contain the login
+node's current key. Re-run `ssh-keyscan` and update the ConfigMap.
+
+**An nginx wstunnel Deployment appears instead of the SSH shadow.** A custom template
+file is overriding the built-in one. The virtual kubelet prefers
+`Network.WstunnelTemplatePath` over its own templates; the Helm chart stops mounting
+it in `ssh` mode, but a hand-written config may still point at one.
+
+---
+
+## References
+
+- [Discussion #535](https://github.com/interlink-hq/interLink/discussions/535) — the original proposal
+- [Issue #545](https://github.com/interlink-hq/interLink/issues/545) — in-cluster SSH deployment
+- [Wstunnel Configuration](./10-wstunnel-configuration.mdx)
+- [Mesh Network Configuration](./13-mesh-network-configuration.mdx)
