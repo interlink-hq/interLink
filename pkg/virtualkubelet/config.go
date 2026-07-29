@@ -173,4 +173,77 @@ type Network struct {
 	Slirp4netnsURL string `yaml:"Slirp4netnsURL,omitempty"`
 	// UnsharedMode is the flag for unshared network mode in slirp4netns
 	UnshareMode string `yaml:"UnshareMode,omitempty"`
+	// ShadowMode selects which shadow implementation is rendered for offloaded pods
+	// with exposed ports: "wstunnel" (default) or "ssh".
+	ShadowMode string `yaml:"ShadowMode,omitempty"`
+	// SSH configures the SSH port-forward shadow, used when ShadowMode is "ssh"
+	SSH SSHTunnel `yaml:"SSH,omitempty"`
+}
+
+// Shadow implementations selectable through Network.ShadowMode.
+const (
+	// ShadowModeWstunnel exposes the offloaded pod's ports by having the workload
+	// dial out to a public ingress and run a wstunnel client. This is the default.
+	ShadowModeWstunnel = "wstunnel"
+	// ShadowModeSSH exposes them the other way round: the shadow dials in to an SSH
+	// login node and forwards each port to the compute node the job landed on. The
+	// workload runs nothing, and no compute node needs outbound internet access.
+	ShadowModeSSH = "ssh"
+)
+
+// SSH authentication methods selectable through SSHTunnel.Auth.
+const (
+	// SSHAuthPublicKey authenticates with a private key from KeySecret.
+	SSHAuthPublicKey = "publickey"
+	// SSHAuthKerberos authenticates with GSSAPI, using a keytab from KeytabSecret.
+	SSHAuthKerberos = "kerberos"
+)
+
+// SSHTunnel configures the SSH port-forward shadow.
+//
+// The shadow runs `ssh -N -L <port>:<compute node>:<port>` against the site's login
+// node, one -L per exposed port, so cluster traffic reaches services inside an
+// offloaded pod without the compute node needing any outbound connectivity. It
+// covers the same ground as the wstunnel shadow, in the opposite direction; it does
+// not give the offloaded pod access back into the cluster (see Network.FullMesh).
+type SSHTunnel struct {
+	// LoginHost is the SSH login node to forward through (required)
+	LoginHost string `yaml:"LoginHost,omitempty"`
+	// Port is the login node's SSH port (default 22)
+	Port int `yaml:"Port,omitempty"`
+	// User is the login name on the login node (required)
+	User string `yaml:"User,omitempty"`
+	// Image is the container image running in the shadow. It must provide an ssh
+	// client, and kinit/klist when Auth is "kerberos".
+	Image string `yaml:"Image,omitempty"`
+	// Auth selects the authentication method: "publickey" (default) or "kerberos"
+	Auth string `yaml:"Auth,omitempty"`
+	// KeySecret is the Secret holding the SSH private key ("publickey" auth)
+	KeySecret string `yaml:"KeySecret,omitempty"`
+	// KeySecretKey is the key inside KeySecret holding the private key (default "id_ed25519")
+	KeySecretKey string `yaml:"KeySecretKey,omitempty"`
+	// KeytabSecret is the Secret holding the Kerberos keytab ("kerberos" auth)
+	KeytabSecret string `yaml:"KeytabSecret,omitempty"`
+	// KeytabSecretKey is the key inside KeytabSecret holding the keytab (default "user.keytab")
+	KeytabSecretKey string `yaml:"KeytabSecretKey,omitempty"`
+	// Principal is the Kerberos principal to obtain a ticket for ("kerberos" auth)
+	Principal string `yaml:"Principal,omitempty"`
+	// Krb5ConfigMap is an optional ConfigMap holding a krb5.conf to mount at /etc/krb5.conf
+	Krb5ConfigMap string `yaml:"Krb5ConfigMap,omitempty"`
+	// KnownHostsConfigMap is an optional ConfigMap holding a known_hosts file. When
+	// unset the shadow falls back to StrictHostKeyChecking=accept-new, which trusts
+	// whatever key the login node presents on first contact.
+	KnownHostsConfigMap string `yaml:"KnownHostsConfigMap,omitempty"`
+	// ReplicateCredentials copies the referenced Secret and ConfigMaps from the
+	// virtual kubelet's own namespace into the shadow's namespace, so offloaded pods
+	// in arbitrary (e.g. per-user) namespaces work without pre-seeding credentials
+	// everywhere. Defaults to true. Note this makes the credential readable by anyone
+	// who can read Secrets in those namespaces.
+	ReplicateCredentials *bool `yaml:"ReplicateCredentials,omitempty"`
+	// NodeWaitTimeout bounds how long the shadow waits for the plugin to report the
+	// compute node before failing (default "2h"). Queue waits are normal, so this is
+	// generous by design.
+	NodeWaitTimeout string `yaml:"NodeWaitTimeout,omitempty"`
+	// ExtraOptions are additional ssh client options, each passed verbatim as -o <opt>
+	ExtraOptions []string `yaml:"ExtraOptions,omitempty"`
 }

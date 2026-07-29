@@ -1,0 +1,248 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{.Name}}
+  namespace: {{.Namespace}}
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app.kubernetes.io/component: {{.Name}}
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/component: {{.Name}}
+    spec:
+      # Never schedule the shadow onto the virtual node it shadows: real nodes are
+      # kubernetes.io/os=linux, the virtual one is kubernetes.io/os=virtual-kubelet.
+      nodeSelector:
+        kubernetes.io/os: linux
+      tolerations: []
+      initContainers:
+      # The remote job is usually still queued when the shadow starts, so the pod
+      # sits in Init until the plugin reports which node it landed on. That is the
+      # expected path, not a failure: it reads as "waiting for the allocation"
+      # instead of a crash-looping tunnel.
+      - name: wait-for-node
+        image: {{.SSH.Image}}
+        command: ["/bin/sh", "-c"]
+        args:
+          - |
+            set -eu
+            deadline=$(( $(date +%s) + {{.SSHNodeWaitSeconds}} ))
+            while :; do
+              node=$(tr -d '[:space:]' < /interlink/node/{{.NodeNameKey}} 2>/dev/null || true)
+              [ -n "$node" ] && break
+              if [ "$(date +%s)" -ge "$deadline" ]; then
+                echo "timed out after {{.SSH.NodeWaitTimeout}} waiting for the plugin to report a compute node." >&2
+                echo "The plugin must return PodStatus.NodeName once the job runs; plugins that do not are unsupported by the ssh shadow." >&2
+                exit 1
+              fi
+              sleep 5
+            done
+            echo "compute node: $node"
+        volumeMounts:
+        - name: shadow-node
+          mountPath: /interlink/node
+          readOnly: true
+        securityContext:
+          allowPrivilegeEscalation: false
+          capabilities:
+            drop: ["ALL"]
+      {{- if eq .SSH.Auth "kerberos" }}
+      # Runs after the node is known so the ticket is fresh when ssh starts, however
+      # long the job waited in the queue.
+      - name: kinit
+        image: {{.SSH.Image}}
+        command: ["/bin/sh", "-c"]
+        args:
+          - kinit -k -t /interlink/keytab/{{.SSH.KeytabSecretKey}} {{.SSH.Principal}}
+        env:
+        - name: KRB5CCNAME
+          value: FILE:/interlink/krb5cc/ccache
+        volumeMounts:
+        - name: shadow-keytab
+          mountPath: /interlink/keytab
+          readOnly: true
+        - name: shadow-krb5cc
+          mountPath: /interlink/krb5cc
+        {{- if .SSH.Krb5ConfigMap }}
+        - name: shadow-krb5-config
+          mountPath: /etc/krb5.conf
+          subPath: krb5.conf
+          readOnly: true
+        {{- end }}
+        securityContext:
+          allowPrivilegeEscalation: false
+          capabilities:
+            drop: ["ALL"]
+      {{- end }}
+      containers:
+      {{- if eq .SSH.Auth "kerberos" }}
+      - name: kinit-renew
+        image: {{.SSH.Image}}
+        command: ["/bin/sh", "-c"]
+        args:
+          - |
+            set -u
+            while :; do
+              sleep 21600
+              kinit -k -t /interlink/keytab/{{.SSH.KeytabSecretKey}} {{.SSH.Principal}} || true
+            done
+        env:
+        - name: KRB5CCNAME
+          value: FILE:/interlink/krb5cc/ccache
+        volumeMounts:
+        - name: shadow-keytab
+          mountPath: /interlink/keytab
+          readOnly: true
+        - name: shadow-krb5cc
+          mountPath: /interlink/krb5cc
+        {{- if .SSH.Krb5ConfigMap }}
+        - name: shadow-krb5-config
+          mountPath: /etc/krb5.conf
+          subPath: krb5.conf
+          readOnly: true
+        {{- end }}
+        resources:
+          requests:
+            cpu: 10m
+            memory: 32Mi
+        securityContext:
+          allowPrivilegeEscalation: false
+          capabilities:
+            drop: ["ALL"]
+      {{- end }}
+      - name: ssh-forward
+        image: {{.SSH.Image}}
+        command: ["/bin/sh", "-c"]
+        args:
+          - |
+            set -eu
+            node=$(tr -d '[:space:]' < /interlink/node/{{.NodeNameKey}})
+            [ -n "$node" ] || { echo "no compute node recorded" >&2; exit 1; }
+            echo "forwarding{{range .ExposedPorts}}{{if ne .Protocol "UDP"}} {{.Port}}{{end}}{{end}} to $node via {{.SSH.LoginHost}}"
+            exec ssh -N \
+              -p {{.SSH.Port}} \
+              -o BatchMode=yes \
+              -o ExitOnForwardFailure=yes \
+              -o ServerAliveInterval=30 \
+              -o ServerAliveCountMax=3 \
+            {{- if eq .SSH.Auth "kerberos" }}
+              -o GSSAPIAuthentication=yes \
+              -o GSSAPIDelegateCredentials=yes \
+              -o PreferredAuthentications=gssapi-with-mic \
+            {{- else }}
+              -i /interlink/ssh/{{.SSH.KeySecretKey}} \
+              -o IdentitiesOnly=yes \
+              -o PreferredAuthentications=publickey \
+            {{- end }}
+            {{- if .SSH.KnownHostsConfigMap }}
+              -o StrictHostKeyChecking=yes \
+              -o UserKnownHostsFile=/interlink/known-hosts/known_hosts \
+            {{- else }}
+              -o StrictHostKeyChecking=accept-new \
+            {{- end }}
+            {{- range .SSH.ExtraOptions }}
+              -o {{.}} \
+            {{- end }}
+            {{- range .ExposedPorts }}
+            {{- if ne .Protocol "UDP" }}
+              -L 0.0.0.0:{{.Port}}:$node:{{.Port}} \
+            {{- end }}
+            {{- end }}
+              {{.SSH.User}}@{{.SSH.LoginHost}}
+        {{- if eq .SSH.Auth "kerberos" }}
+        env:
+        - name: KRB5CCNAME
+          value: FILE:/interlink/krb5cc/ccache
+        {{- end }}
+        ports:
+        {{- range .ExposedPorts }}
+        {{- if ne .Protocol "UDP" }}
+        - containerPort: {{.Port}}
+          name: {{if .Name}}{{.Name}}{{else}}port-{{.Port}}{{end}}
+          protocol: {{.Protocol}}
+        {{- end }}
+        {{- end }}
+        volumeMounts:
+        - name: shadow-node
+          mountPath: /interlink/node
+          readOnly: true
+        {{- if eq .SSH.Auth "kerberos" }}
+        - name: shadow-krb5cc
+          mountPath: /interlink/krb5cc
+          readOnly: true
+        {{- if .SSH.Krb5ConfigMap }}
+        - name: shadow-krb5-config
+          mountPath: /etc/krb5.conf
+          subPath: krb5.conf
+          readOnly: true
+        {{- end }}
+        {{- else }}
+        - name: shadow-ssh-key
+          mountPath: /interlink/ssh
+          readOnly: true
+        {{- end }}
+        {{- if .SSH.KnownHostsConfigMap }}
+        - name: shadow-known-hosts
+          mountPath: /interlink/known-hosts
+          readOnly: true
+        {{- end }}
+        resources:
+          requests:
+            cpu: 100m
+            memory: 64Mi
+        securityContext:
+          allowPrivilegeEscalation: false
+          capabilities:
+            drop: ["ALL"]
+      volumes:
+      # Mounted as a directory, not subPath: only directory mounts are refreshed in
+      # place when the VK writes the compute node into this ConfigMap.
+      - name: shadow-node
+        configMap:
+          name: {{.NodeConfigMap}}
+      {{- if eq .SSH.Auth "kerberos" }}
+      - name: shadow-keytab
+        secret:
+          secretName: {{.SSH.KeytabSecret}}
+          defaultMode: 0400
+      - name: shadow-krb5cc
+        emptyDir:
+          medium: Memory
+      {{- if .SSH.Krb5ConfigMap }}
+      - name: shadow-krb5-config
+        configMap:
+          name: {{.SSH.Krb5ConfigMap}}
+      {{- end }}
+      {{- else }}
+      - name: shadow-ssh-key
+        secret:
+          secretName: {{.SSH.KeySecret}}
+          defaultMode: 0400
+      {{- end }}
+      {{- if .SSH.KnownHostsConfigMap }}
+      - name: shadow-known-hosts
+        configMap:
+          name: {{.SSH.KnownHostsConfigMap}}
+      {{- end }}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{.Name}}
+  namespace: {{.Namespace}}
+spec:
+  type: ClusterIP
+  selector:
+    app.kubernetes.io/component: {{.Name}}
+  ports:
+  {{- range .ExposedPorts }}
+  {{- if ne .Protocol "UDP" }}
+  - port: {{.Port}}
+    targetPort: {{.Port}}
+    name: {{if .Name}}{{.Name}}{{else}}port-{{.Port}}{{end}}
+    protocol: {{.Protocol}}
+  {{- end }}
+  {{- end }}
