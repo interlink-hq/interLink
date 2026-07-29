@@ -44,7 +44,7 @@ import (
 	k8stypes "k8s.io/apimachinery/pkg/types"
 )
 
-//go:embed templates/wstunnel-template.yaml templates/wstunnel-wireguard-template.yaml
+//go:embed templates/wstunnel-template.yaml templates/wstunnel-wireguard-template.yaml templates/shadow-ssh-template.yaml
 var defaultShadowTemplates embed.FS
 
 //go:embed all:templates/mesh.sh
@@ -111,6 +111,11 @@ type ShadowTemplateData struct {
 	NodeConfigMap string
 	// NodeNameKey is the key inside NodeConfigMap holding the node name.
 	NodeNameKey string
+	// SSH carries the SSH port-forward settings, used by the ssh shadow template.
+	SSH SSHTunnel
+	// SSHNodeWaitSeconds is SSH.NodeWaitTimeout in whole seconds, for the shell loop
+	// that waits on NodeConfigMap.
+	SSHNodeWaitSeconds int
 }
 
 type PortMapping struct {
@@ -589,6 +594,10 @@ func LoadConfig(ctx context.Context, providerConfig string) (config Config, err 
 	// config = configMap
 	SetDefaultResource(&config)
 
+	if err = NormalizeShadowConfig(&config); err != nil {
+		return config, err
+	}
+
 	if _, err = resource.ParseQuantity(config.Resources.CPU); err != nil {
 		return config, fmt.Errorf("invalid CPU value %v", config.Resources.CPU)
 	}
@@ -958,6 +967,12 @@ func (p *Provider) createShadowPod(ctx context.Context, originalPod *v1.Pod) (*v
 		return nil, nil, err
 	}
 
+	if p.isSSHShadow() {
+		if err := p.replicateShadowCredentials(ctx, identity); err != nil {
+			return nil, nil, err
+		}
+	}
+
 	localContainers := getLocalContainers(originalPod)
 	localInitContainers := getLocalInitContainers(originalPod)
 
@@ -981,6 +996,12 @@ func (p *Provider) createShadowPod(ctx context.Context, originalPod *v1.Pod) (*v
 		FullMesh:             fullMeshEnabledForPod,
 		NodeConfigMap:        shadowNodeConfigMapName(identity.Name),
 		NodeNameKey:          shadowNodeNameKey,
+		SSH:                  p.config.Network.SSH,
+		SSHNodeWaitSeconds:   p.sshNodeWaitSeconds(),
+	}
+
+	if p.isSSHShadow() {
+		warnOnUDPPorts(ctx, templateData.ExposedPorts)
 	}
 
 	log.G(ctx).Debugf("LocalInitContainers count: %d", len(templateData.LocalInitContainers))
@@ -1098,7 +1119,10 @@ func (p *Provider) executeShadowTemplate(ctx context.Context, data ShadowTemplat
 	// Fall back to embedded template
 	if templateContent == "" {
 		templatePath := "templates/wstunnel-template.yaml"
-		if data.FullMesh {
+		switch {
+		case p.isSSHShadow():
+			templatePath = "templates/shadow-ssh-template.yaml"
+		case data.FullMesh:
 			templatePath = "templates/wstunnel-wireguard-template.yaml"
 		}
 		content, err := defaultShadowTemplates.ReadFile(templatePath)
@@ -1676,11 +1700,15 @@ func (p *Provider) handleShadowCreation(ctx context.Context, pod *v1.Pod) (strin
 		return "", err
 	}
 
-	// Add wstunnel client command annotation to the original pod
-	if err := p.addWstunnelClientAnnotation(ctx, pod, templateData); err != nil {
-		log.G(ctx).Warningf("Failed to add wstunnel client annotation to pod %s/%s: %v", pod.Namespace, pod.Name, err)
-		// Note: We don't clean up here since the shadow infrastructure is working,
-		// just the annotation failed (non-critical)
+	// The SSH shadow dials in to the login node, so the workload has nothing to set
+	// up on its side: no wstunnel client to launch, no WireGuard config to apply.
+	if !p.isSSHShadow() {
+		// Add wstunnel client command annotation to the original pod
+		if err := p.addWstunnelClientAnnotation(ctx, pod, templateData); err != nil {
+			log.G(ctx).Warningf("Failed to add wstunnel client annotation to pod %s/%s: %v", pod.Namespace, pod.Name, err)
+			// Note: We don't clean up here since the shadow infrastructure is working,
+			// just the annotation failed (non-critical)
+		}
 	}
 
 	return podIP, nil
