@@ -15,8 +15,10 @@ func VersionHandler(version string) http.HandlerFunc {
 		}
 
 		w.Header().Set("Content-Type", "application/json")
-		_ = json.NewEncoder(w).Encode(struct {
+		if err := json.NewEncoder(w).Encode(struct {
 			Version string `json:"version"`
-		}{Version: version})
+		}{Version: version}); err != nil {
+			return
+		}
 	}
 }
