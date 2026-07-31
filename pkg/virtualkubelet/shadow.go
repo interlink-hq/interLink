@@ -6,6 +6,7 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
+	"regexp"
 	"strings"
 
 	"github.com/containerd/containerd/log"
@@ -29,6 +30,24 @@ const shadowNodeConfigMapSuffix = "-node"
 
 // shadowNodeNameKey is the key inside that ConfigMap holding the node name.
 const shadowNodeNameKey = "compute-node"
+
+// maxComputeNodeNameLen is the longest DNS name, and so the longest thing a plugin
+// can legitimately report as a compute node.
+const maxComputeNodeNameLen = 253
+
+// computeNodeNamePattern matches a hostname or an IP literal and nothing else. The
+// shadow interpolates the reported node into a shell command, both locally and on
+// the login node, so anything outside this set has to be refused rather than
+// escaped: a name containing a space injects an extra ssh argument
+// (`-oProxyCommand=...` runs a command in the shadow), and one containing a quote
+// or `$(` breaks out of the relay command in exec mode.
+var computeNodeNamePattern = regexp.MustCompile(`^[A-Za-z0-9]([A-Za-z0-9._:-]*[A-Za-z0-9])?$`)
+
+// isValidComputeNodeName reports whether a plugin-supplied node name is safe to put
+// in front of ssh.
+func isValidComputeNodeName(nodeName string) bool {
+	return len(nodeName) <= maxComputeNodeNameLen && computeNodeNamePattern.MatchString(nodeName)
+}
 
 func sanitizeDNSName(name string) string {
 	// Convert to lowercase
@@ -290,6 +309,12 @@ func (p *Provider) resetShadowNodeConfigMap(ctx context.Context, identity shadow
 // write on every poll.
 func (p *Provider) publishShadowNodeName(ctx context.Context, pod *v1.Pod, nodeName string) {
 	if nodeName == "" || !p.hasShadow(pod) {
+		return
+	}
+	if !isValidComputeNodeName(nodeName) {
+		log.G(ctx).Errorf(
+			"Refusing to publish compute node %q for %s/%s: not a hostname or IP address. The shadow passes this to ssh, so it is rejected rather than escaped.",
+			nodeName, pod.Namespace, pod.Name)
 		return
 	}
 	if last, ok := p.shadowNodeNames.Load(string(pod.UID)); ok && last == nodeName {
