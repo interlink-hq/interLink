@@ -278,10 +278,37 @@ While the job is queued the shadow sits in `Init:0/1`. That is the expected stat
 not a failure — it reads as "waiting for the allocation" rather than a crash-looping
 tunnel. After `NodeWaitTimeout` the init container fails with an explicit message.
 
+If the job is later requeued onto a different host, the plugin reports the new one,
+interLink republishes it, and the shadow rebuilds its forwarders **in place**:
+
+```
+compute node changed from node07.hpc.example.org to node11.hpc.example.org, rebuilding the tunnel
+```
+
+The container is not restarted, so the shadow keeps its pod IP — the one Kubernetes
+has already been told is the offloaded pod's IP.
+
 :::warning
 This requires a plugin that reports `PodStatus.NodeName`. A plugin that does not
 will leave the shadow waiting until the timeout expires.
 :::
+
+### What a plugin may report
+
+The reported name ends up as an argument to `ssh`, so interLink accepts only an
+RFC 1123 hostname or an IP literal and refuses anything else rather than trying to
+escape it:
+
+```
+Refusing to publish compute node "node07 -oProxyCommand=..." for ns/pod:
+not a hostname or IP address. The shadow passes this to ssh, so it is rejected
+rather than escaped.
+```
+
+A name carrying whitespace would otherwise split into an extra ssh option, and one
+carrying a quote or `$(` would break out of the relay command in `exec` mode. Plugins
+should report what the node calls itself — `hostname -f` for the Slurm plugin — and
+nothing else.
 
 ---
 
@@ -293,6 +320,20 @@ shadow lands in a per-user namespace, where the SSH credential does not exist.
 
 By default interLink copies the credential Secret, and any `Krb5ConfigMap` /
 `KnownHostsConfigMap`, from its own namespace into the shadow's namespace.
+
+Copies are marked with `interlink.eu/replicated-from`, and only objects carrying
+that annotation are overwritten on a later pass. If an object of the same name is
+already there and holds something else, pod creation fails rather than replacing it:
+
+```
+refusing to overwrite secret alice/hpc-ssh-key: it already exists, holds different
+content and was not created by interLink
+```
+
+That matters with `shadow-same-ns`, where the target is somebody's own namespace and
+a name collision would otherwise destroy their Secret. An unmarked copy whose content
+already matches is adopted instead of refused, so upgrading from a version that
+predates the marker does not break existing deployments.
 
 :::warning
 Replication makes the credential readable by anyone who can read Secrets in those
@@ -369,6 +410,16 @@ have the site allow it, or switch to [`ForwardMode: exec`](#forward-modes).
 
 **Host key verification failed.** `KnownHostsConfigMap` does not contain the login
 node's current key. Re-run `ssh-keyscan` and update the ConfigMap.
+
+**`Refusing to publish compute node ...` in the virtual kubelet log, and the shadow
+stays in `Init:0/1`.** The plugin reported something that is not a hostname or an IP
+address, so it was not passed to ssh. See
+[what a plugin may report](#what-a-plugin-may-report); the plugin needs fixing, and
+the value it produced is quoted in the message.
+
+**Pod creation fails with `refusing to overwrite secret ...`.** The shadow's namespace
+already contains a different object under the credential's name. Rename the
+credential, or set `ReplicateCredentials: false` and provision it yourself.
 
 **An nginx wstunnel Deployment appears instead of the SSH shadow.** A custom template
 file is overriding the built-in one. The virtual kubelet prefers
