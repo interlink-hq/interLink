@@ -57,8 +57,9 @@ login node's `sshd_config`.
    channel 1: open failed: administratively prohibited: open failed
    ```
 
-   There is no way around it from the cluster side; ask the site to allow TCP
-   forwarding for the account, optionally narrowed with `PermitOpen`.
+   If the site will not allow it, switch to
+   [`ForwardMode: exec`](#forward-modes), which relays through a command on the
+   login node instead and needs no forwarding privilege.
 
 2. **A route from the login node to the compute nodes**, on the ports the pod
    exposes. `ssh -L` resolves and connects to the compute node *from the login
@@ -132,6 +133,8 @@ in the chart repository for a complete deployment.
 | `Port` | `22` | Login node's SSH port |
 | `Image` | `ghcr.io/interlink-hq/interlink/ssh-tunnel:<version>` | Image the shadow runs. Needs an ssh client, plus `kinit` for Kerberos |
 | `Auth` | `publickey` | `publickey` or `kerberos` |
+| `ForwardMode` | `portforward` | `portforward` (`ssh -L`) or `exec` (relay through a command on the login node) |
+| `ExecConnectCommand` | `nc` | Command run on the login node in `exec` mode, invoked as `<command> <node> <port>` |
 | `KeySecret` | — | Secret holding the private key (`publickey`) |
 | `KeySecretKey` | `id_ed25519` | Key inside `KeySecret` |
 | `KeytabSecret` | — | Secret holding the keytab (`kerberos`) |
@@ -145,6 +148,57 @@ in the chart repository for a complete deployment.
 
 Misconfiguration fails at **startup**, not on the first offloaded pod, so a missing
 `LoginHost` or a `kerberos` block without a `Principal` is caught immediately.
+
+---
+
+## Forward modes
+
+The default, `portforward`, is one `ssh -L` per exposed port. It is the cheapest
+option and depends on nothing but the ssh client, but it requires
+[`AllowTcpForwarding yes`](#before-you-start-what-the-login-node-has-to-allow) on
+the login node.
+
+`exec` is for sites that do not grant it. It gives each exposed port a local
+listener in the shadow and relays every accepted connection through a command run
+on the login node — by default `nc <compute node> <port>`. Nothing asks sshd to
+forward anything, so the only privileges involved are the ones the shadow already
+uses to log in.
+
+```yaml
+Network:
+  ShadowMode: "ssh"
+  SSH:
+    LoginHost: "login.hpc.example.org"
+    User: "alice"
+    KeySecret: "hpc-ssh-key"
+    ForwardMode: "exec"
+    ExecConnectCommand: "nc"   # ncat, or "nc -q 1" on a netcat that does not half-close
+```
+
+The two are interchangeable above the socket: the Service still fronts the same
+container port, and the offloaded workload still only binds `0.0.0.0`. Nothing on
+either side can tell them apart.
+
+| | `portforward` | `exec` |
+| --- | --- | --- |
+| Login node must allow | TCP forwarding | running a command, and have a netcat |
+| Connections | one long-lived ssh | one ssh channel per TCP connection |
+| Cost per connection | none | one multiplexed channel open |
+| Failure surfaces | at connect time | at connect time |
+
+The relays share a single SSH connection, opened as a control master before the
+listeners start. Without it every connection would pay a full handshake — a
+notebook UI opens dozens — and the login node would see a session per connection.
+Because they share one TCP connection they also share its head-of-line blocking,
+which is fine for a UI and less so for bulk transfer.
+
+Two things to check when picking `exec`:
+
+- **Which netcat.** `nc` varies. `netcat-traditional` does not propagate a
+  half-close, so a client that closes its write side can leave the connection
+  hanging; `nc -q 1` or `ncat` avoids it. Set `ExecConnectCommand` accordingly.
+- **Process limits.** Even multiplexed, the login node runs a netcat per
+  connection. Sites with per-user process caps will notice a busy shadow.
 
 ---
 
@@ -310,9 +364,8 @@ nothing is listening on that port. Services often bind `127.0.0.1` by default; b
 `0.0.0.0` instead — for a notebook, `--ip=0.0.0.0`.
 
 **Connection reset, and `channel N: open failed: administratively prohibited` in the
-`ssh-forward` log.** The login node refuses port forwarding for this account. See
-[what the login node has to allow](#before-you-start-what-the-login-node-has-to-allow);
-this is a site policy and cannot be worked around from the cluster.
+`ssh-forward` log.** The login node refuses port forwarding for this account. Either
+have the site allow it, or switch to [`ForwardMode: exec`](#forward-modes).
 
 **Host key verification failed.** `KnownHostsConfigMap` does not contain the login
 node's current key. Re-run `ssh-keyscan` and update the ConfigMap.
