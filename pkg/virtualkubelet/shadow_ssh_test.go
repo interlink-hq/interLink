@@ -373,3 +373,66 @@ func TestDefaultSSHNodeWaitMatchesTimeout(t *testing.T) {
 	assert.NoError(t, err)
 	assert.Equal(t, parsed, defaultSSHNodeWait)
 }
+
+// TestReplicateCredentialsRefusesToClobber covers the multi-tenant case: with
+// interlink.eu/shadow-same-ns the shadow lands in the offloaded pod's own
+// namespace, so a Secret the owner already has under the credential's name must
+// not be silently replaced with the HPC key.
+func TestReplicateCredentialsRefusesToClobber(t *testing.T) {
+	const source = "interlink"
+	const target = "alice"
+
+	config := normalized(t, sshConfig())
+	credential := &v1.Secret{
+		ObjectMeta: metav1.ObjectMeta{Name: "hpc-ssh-key", Namespace: source},
+		Data:       map[string][]byte{DefaultSSHKeySecretKey: []byte("hpc-private-key")},
+	}
+
+	t.Run("a secret the user already owns is left alone", func(t *testing.T) {
+		theirs := &v1.Secret{
+			ObjectMeta: metav1.ObjectMeta{Name: "hpc-ssh-key", Namespace: target},
+			Data:       map[string][]byte{"theirs": []byte("do not lose me")},
+		}
+		client := fake.NewSimpleClientset(credential, theirs)
+		p := &Provider{clientSet: client, config: config}
+
+		err := p.replicateShadowCredentials(t.Context(), shadowResourceIdentity{Name: "shadow-nb", Namespace: target})
+
+		assert.ErrorContains(t, err, "refusing to overwrite")
+		kept, getErr := client.CoreV1().Secrets(target).Get(t.Context(), "hpc-ssh-key", metav1.GetOptions{})
+		assert.NoError(t, getErr)
+		assert.Equal(t, []byte("do not lose me"), kept.Data["theirs"])
+	})
+
+	// A copy made by a version that predates the marker has no annotation, but its
+	// content matches, so upgrading must not start failing every offloaded pod.
+	t.Run("an unmarked copy with identical content is adopted", func(t *testing.T) {
+		unmarked := &v1.Secret{
+			ObjectMeta: metav1.ObjectMeta{Name: "hpc-ssh-key", Namespace: target},
+			Data:       map[string][]byte{DefaultSSHKeySecretKey: []byte("hpc-private-key")},
+		}
+		client := fake.NewSimpleClientset(credential, unmarked)
+		p := &Provider{clientSet: client, config: config}
+
+		err := p.replicateShadowCredentials(t.Context(), shadowResourceIdentity{Name: "shadow-nb", Namespace: target})
+
+		assert.NoError(t, err, "an identical copy loses nothing by being rewritten")
+		adopted, getErr := client.CoreV1().Secrets(target).Get(t.Context(), "hpc-ssh-key", metav1.GetOptions{})
+		assert.NoError(t, getErr)
+		assert.Equal(t, source, adopted.Annotations[shadowReplicatedFromAnnotation])
+	})
+
+	t.Run("a copy interLink made earlier is refreshed", func(t *testing.T) {
+		client := fake.NewSimpleClientset(credential)
+		p := &Provider{clientSet: client, config: config}
+		identity := shadowResourceIdentity{Name: "shadow-nb", Namespace: target}
+
+		assert.NoError(t, p.replicateShadowCredentials(t.Context(), identity))
+		first, err := client.CoreV1().Secrets(target).Get(t.Context(), "hpc-ssh-key", metav1.GetOptions{})
+		assert.NoError(t, err)
+		assert.Equal(t, source, first.Annotations[shadowReplicatedFromAnnotation])
+
+		// a second offloaded pod in the same namespace must not trip the guard
+		assert.NoError(t, p.replicateShadowCredentials(t.Context(), identity))
+	})
+}
