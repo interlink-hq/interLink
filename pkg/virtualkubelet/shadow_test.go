@@ -1,6 +1,7 @@
 package virtualkubelet
 
 import (
+	"strings"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -153,4 +154,66 @@ func TestCleanupShadowResourcesRemovesNodeConfigMap(t *testing.T) {
 
 	_, err := client.CoreV1().ConfigMaps(ns).Get(t.Context(), shadowNodeConfigMapName(name), metav1.GetOptions{})
 	assert.True(t, apierrors.IsNotFound(err), "the node configmap should be deleted with the rest of the shadow")
+}
+
+// TestIsValidComputeNodeName pins what a plugin is allowed to report. The shadow
+// puts this in front of ssh, so the interesting cases are the ones that would
+// change the meaning of a command rather than merely look odd.
+func TestIsValidComputeNodeName(t *testing.T) {
+	valid := []string{
+		"j18n3",
+		"j18n3.liza.surf.nl",
+		"hpc-cloud-test001.cern.ch",
+		"as01r2b14",
+		"10.0.0.7",
+		"fe80::1",
+		"node_7",
+	}
+	for _, name := range valid {
+		assert.True(t, isValidComputeNodeName(name), "expected %q to be accepted", name)
+	}
+
+	hostile := map[string]string{
+		"whitespace injects an ssh option": "h -oProxyCommand=touch",
+		"tab does the same":                "h\t-oProxyCommand=touch",
+		"newline":                          "h\nsecond",
+		"quote breaks the relay command":   `x" ; touch /tmp/pwned ; echo "`,
+		"command substitution":             "x$(id)y",
+		"backticks":                        "x`id`y",
+		"semicolon":                        "h;id",
+		"glob":                             "h*",
+		"leading hyphen reads as a flag":   "-oProxyCommand=touch",
+		"empty":                            "",
+	}
+	for why, name := range hostile {
+		assert.False(t, isValidComputeNodeName(name), "expected %q to be refused (%s)", name, why)
+	}
+
+	assert.False(t, isValidComputeNodeName(strings.Repeat("a", maxComputeNodeNameLen+1)),
+		"a name longer than a DNS name is not one")
+}
+
+// TestPublishShadowNodeNameRefusesHostileNames makes sure a bad value never reaches
+// the ConfigMap the shadow mounts, so neither forward mode can be made to run
+// something other than ssh.
+func TestPublishShadowNodeNameRefusesHostileNames(t *testing.T) {
+	pod := podWithPort("nb", testNamespaceDefault, "uid-hostile")
+	identity, err := computeShadowResourceIdentity(pod)
+	assert.NoError(t, err)
+	cmName := shadowNodeConfigMapName(identity.Name)
+
+	for _, nodeName := range []string{"h -oProxyCommand=touch", `x" ; id ; echo "`, "x$(id)y"} {
+		client := fake.NewSimpleClientset(&v1.ConfigMap{
+			ObjectMeta: metav1.ObjectMeta{Name: cmName, Namespace: identity.Namespace},
+			Data:       map[string]string{shadowNodeNameKey: ""},
+		})
+		p := tunnelProvider(client)
+
+		p.publishShadowNodeName(t.Context(), pod, nodeName)
+
+		assert.Empty(t, configMapPatches(client), "must not patch for %q", nodeName)
+		cm, err := client.CoreV1().ConfigMaps(identity.Namespace).Get(t.Context(), cmName, metav1.GetOptions{})
+		assert.NoError(t, err)
+		assert.Equal(t, "", cm.Data[shadowNodeNameKey])
+	}
 }

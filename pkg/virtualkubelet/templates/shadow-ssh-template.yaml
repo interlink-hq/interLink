@@ -168,6 +168,9 @@ spec:
               ssh -M -N -o ControlMaster=yes -o ControlPath="$control" -o ControlPersist=no $ssh_opts "$target" &
               pids=$!
 
+              # Quoted for the login node's shell, which re-parses whatever ssh sends it.
+              remote_cmd="$connect_cmd '$node'"
+
               waited=0
               # shellcheck disable=SC2086
               until ssh -O check -o ControlPath="$control" $ssh_opts "$target" >/dev/null 2>&1; do
@@ -181,8 +184,8 @@ spec:
               {{- range .ExposedPorts }}
               {{- if ne .Protocol "UDP" }}
 
-              printf '#!/bin/sh\nexec ssh -q -o ControlMaster=auto -o ControlPath=%s %s %s "%s %s {{.Port}}"\n' \
-                "$control" "$ssh_opts" "$target" "$connect_cmd" "$node" > "$forward_dir/{{.Port}}"
+              printf '#!/bin/sh\nexec ssh -q -o ControlMaster=auto -o ControlPath=%s %s %s "%s {{.Port}}"\n' \
+                "$control" "$ssh_opts" "$target" "$remote_cmd" > "$forward_dir/{{.Port}}"
               chmod +x "$forward_dir/{{.Port}}"
               socat TCP-LISTEN:{{.Port}},fork,reuseaddr,bind=0.0.0.0 EXEC:"$forward_dir/{{.Port}}" &
               pids="$pids $!"
@@ -197,7 +200,7 @@ spec:
               ssh -N -o ExitOnForwardFailure=yes $ssh_opts \
               {{- range .ExposedPorts }}
               {{- if ne .Protocol "UDP" }}
-                -L 0.0.0.0:{{.Port}}:$node:{{.Port}} \
+                -L "0.0.0.0:{{.Port}}:$node:{{.Port}}" \
               {{- end }}
               {{- end }}
                 "$target" &
