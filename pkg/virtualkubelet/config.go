@@ -191,6 +191,19 @@ const (
 	ShadowModeSSH = "ssh"
 )
 
+// Traffic-forwarding strategies selectable through SSHTunnel.ForwardMode.
+const (
+	// SSHForwardModePortForward uses `ssh -L`, and needs AllowTcpForwarding on the
+	// login node. This is the default.
+	SSHForwardModePortForward = "portforward"
+	// SSHForwardModeExec pipes each connection through a command run on the login
+	// node, for sites that do not grant TCP forwarding.
+	SSHForwardModeExec = "exec"
+)
+
+// DefaultSSHExecConnectCommand relays a connection on stdin/stdout in "exec" mode.
+const DefaultSSHExecConnectCommand = "nc"
+
 // SSH authentication methods selectable through SSHTunnel.Auth.
 const (
 	// SSHAuthPublicKey authenticates with a private key from KeySecret.
@@ -218,6 +231,20 @@ type SSHTunnel struct {
 	Image string `yaml:"Image,omitempty"`
 	// Auth selects the authentication method: "publickey" (default) or "kerberos"
 	Auth string `yaml:"Auth,omitempty"`
+	// ForwardMode selects how traffic reaches the compute node:
+	//
+	//   "portforward" (default) — one `ssh -L` per exposed port. Cheapest and most
+	//     direct, but the login node must set AllowTcpForwarding yes for this
+	//     account. Sites that disable it refuse every channel with
+	//     "administratively prohibited".
+	//   "exec" — a local listener per exposed port, each connection piped through a
+	//     command run on the login node (see ExecConnectCommand). Needs no
+	//     forwarding privilege at all, at the cost of one ssh process per connection.
+	ForwardMode string `yaml:"ForwardMode,omitempty"`
+	// ExecConnectCommand is the command run on the login node in "exec" mode. It is
+	// invoked as `<command> <compute node> <port>` and must relay the connection on
+	// its stdin and stdout. Defaults to "nc".
+	ExecConnectCommand string `yaml:"ExecConnectCommand,omitempty"`
 	// KeySecret is the Secret holding the SSH private key ("publickey" auth)
 	KeySecret string `yaml:"KeySecret,omitempty"`
 	// KeySecretKey is the key inside KeySecret holding the private key (default "id_ed25519")
