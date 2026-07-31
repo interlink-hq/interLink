@@ -3,11 +3,13 @@ package virtualkubelet
 import (
 	"context"
 	"fmt"
+	"reflect"
 	"strings"
 	"time"
 
 	"github.com/containerd/containerd/log"
 	v1 "k8s.io/api/core/v1"
+	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 )
 
@@ -182,13 +184,65 @@ func (p *Provider) replicateShadowCredentials(ctx context.Context, identity shad
 	return nil
 }
 
+// shadowReplicatedFromAnnotation marks an object as a copy this provider made into
+// a shadow namespace. Replication only overwrites objects carrying it, so a Secret
+// the namespace's owner already had under the same name is never destroyed.
+const shadowReplicatedFromAnnotation = "interlink.eu/replicated-from"
+
+// replicationTarget describes an object already present in the target namespace.
+type replicationTarget struct {
+	exists      bool
+	annotations map[string]string
+	sameContent bool
+}
+
+// checkReplicationTarget refuses to overwrite an object that interLink did not put
+// there. With interlink.eu/shadow-same-ns the target is the offloaded pod's own
+// namespace, which for a multi-tenant cluster is somebody's personal namespace, so
+// a name collision would otherwise silently replace their data.
+//
+// An unmarked object whose content already matches is adopted rather than refused:
+// that is what a copy made by a version predating the marker looks like, and
+// rewriting it with identical content loses nothing.
+func checkReplicationTarget(kind, target, name string, found replicationTarget) error {
+	if !found.exists || found.annotations[shadowReplicatedFromAnnotation] != "" || found.sameContent {
+		return nil
+	}
+	return fmt.Errorf(
+		"refusing to overwrite %s %s/%s: it already exists, holds different content and was not created by interLink. "+
+			"Rename the credential, or set Network.SSH.ReplicateCredentials to false and provision it yourself",
+		kind, target, name)
+}
+
+func replicatedMeta(name, target, source string) metav1.ObjectMeta {
+	return metav1.ObjectMeta{
+		Name:        name,
+		Namespace:   target,
+		Annotations: map[string]string{shadowReplicatedFromAnnotation: source},
+	}
+}
+
 func (p *Provider) replicateSecret(ctx context.Context, source, target, name string) error {
 	src, err := p.clientSet.CoreV1().Secrets(source).Get(ctx, name, metav1.GetOptions{})
 	if err != nil {
 		return fmt.Errorf("failed to read SSH credential secret %s/%s: %w", source, name, err)
 	}
+
+	existing, err := p.clientSet.CoreV1().Secrets(target).Get(ctx, name, metav1.GetOptions{})
+	if err != nil && !apierrors.IsNotFound(err) {
+		return fmt.Errorf("failed to inspect secret %s/%s: %w", target, name, err)
+	}
+	found := replicationTarget{exists: err == nil}
+	if found.exists {
+		found.annotations = existing.Annotations
+		found.sameContent = existing.Type == src.Type && reflect.DeepEqual(existing.Data, src.Data)
+	}
+	if err := checkReplicationTarget("secret", target, name, found); err != nil {
+		return err
+	}
+
 	copied := &v1.Secret{
-		ObjectMeta: metav1.ObjectMeta{Name: name, Namespace: target},
+		ObjectMeta: replicatedMeta(name, target, source),
 		Type:       src.Type,
 		Data:       src.Data,
 	}
@@ -204,8 +258,23 @@ func (p *Provider) replicateConfigMap(ctx context.Context, source, target, name 
 	if err != nil {
 		return fmt.Errorf("failed to read configmap %s/%s: %w", source, name, err)
 	}
+
+	existing, err := p.clientSet.CoreV1().ConfigMaps(target).Get(ctx, name, metav1.GetOptions{})
+	if err != nil && !apierrors.IsNotFound(err) {
+		return fmt.Errorf("failed to inspect configmap %s/%s: %w", target, name, err)
+	}
+	found := replicationTarget{exists: err == nil}
+	if found.exists {
+		found.annotations = existing.Annotations
+		found.sameContent = reflect.DeepEqual(existing.Data, src.Data) &&
+			reflect.DeepEqual(existing.BinaryData, src.BinaryData)
+	}
+	if err := checkReplicationTarget("configmap", target, name, found); err != nil {
+		return err
+	}
+
 	copied := &v1.ConfigMap{
-		ObjectMeta: metav1.ObjectMeta{Name: name, Namespace: target},
+		ObjectMeta: replicatedMeta(name, target, source),
 		Data:       src.Data,
 		BinaryData: src.BinaryData,
 	}
