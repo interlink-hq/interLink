@@ -121,65 +121,140 @@ spec:
             set -u
             read_node() { tr -d '[:space:]' < /interlink/node/{{.NodeNameKey}} 2>/dev/null || true; }
 
-            node=$(read_node)
-            [ -n "$node" ] || { echo "no compute node recorded" >&2; exit 1; }
+            target={{.SSH.User}}@{{.SSH.LoginHost}}
+            ssh_opts="\
+              -p {{.SSH.Port}} \
+              -o BatchMode=yes \
+              -o ServerAliveInterval=30 \
+              -o ServerAliveCountMax=3 \
+            {{- if eq .SSH.Auth "kerberos" }}
+              -o GSSAPIAuthentication=yes \
+              -o GSSAPIDelegateCredentials=yes \
+              -o PreferredAuthentications=gssapi-with-mic \
+            {{- else }}
+              -i /interlink/ssh/{{.SSH.KeySecretKey}} \
+              -o IdentitiesOnly=yes \
+              -o PreferredAuthentications=publickey \
+            {{- end }}
+            {{- if .SSH.KnownHostsConfigMap }}
+              -o StrictHostKeyChecking=yes \
+              -o UserKnownHostsFile=/interlink/known-hosts/known_hosts \
+            {{- else }}
+              -o StrictHostKeyChecking=accept-new \
+            {{- end }}
+            {{- range .SSH.ExtraOptions }}
+              -o {{.}} \
+            {{- end }}
+              "
 
-            # A requeued job comes back on a different host, and the virtual kubelet
-            # republishes it into the mounted ConfigMap. ssh has the old name baked
-            # into its -L arguments, so watch for the change and rebuild the tunnel.
-            while :; do
-              echo "forwarding{{range .ExposedPorts}}{{if ne .Protocol "UDP"}} {{.Port}}{{end}}{{end}} to $node via {{.SSH.LoginHost}} (the login node must allow TCP forwarding)"
-              ssh -N \
-                -p {{.SSH.Port}} \
-                -o BatchMode=yes \
-                -o ExitOnForwardFailure=yes \
-                -o ServerAliveInterval=30 \
-                -o ServerAliveCountMax=3 \
-              {{- if eq .SSH.Auth "kerberos" }}
-                -o GSSAPIAuthentication=yes \
-                -o GSSAPIDelegateCredentials=yes \
-                -o PreferredAuthentications=gssapi-with-mic \
-              {{- else }}
-                -i /interlink/ssh/{{.SSH.KeySecretKey}} \
-                -o IdentitiesOnly=yes \
-                -o PreferredAuthentications=publickey \
+            pids=
+
+            {{- if eq .SSH.ForwardMode "exec" }}
+            # One local listener per port, each accepted connection relayed by a
+            # command run on the login node. Nothing here asks sshd to forward
+            # anything, which is the point: it works where AllowTcpForwarding is off.
+            forward_dir=/tmp/interlink-forward
+            control="$forward_dir/master"
+            connect_cmd='{{.SSH.ExecConnectCommand}}'
+
+            start_forwarders() {
+              mkdir -p "$forward_dir"
+              rm -f "$control"
+
+              # Every relayed stream rides one multiplexed SSH connection, so opening a
+              # connection costs a channel rather than a full handshake, and the login
+              # node sees a single session instead of one per connection.
+              # shellcheck disable=SC2086
+              ssh -M -N -o ControlMaster=yes -o ControlPath="$control" -o ControlPersist=no $ssh_opts "$target" &
+              pids=$!
+
+              waited=0
+              # shellcheck disable=SC2086
+              until ssh -O check -o ControlPath="$control" $ssh_opts "$target" >/dev/null 2>&1; do
+                waited=$((waited + 1))
+                if [ "$waited" -ge 30 ]; then
+                  echo "the ssh control master did not come up" >&2
+                  return 1
+                fi
+                sleep 1
+              done
+              {{- range .ExposedPorts }}
+              {{- if ne .Protocol "UDP" }}
+
+              printf '#!/bin/sh\nexec ssh -q -o ControlMaster=auto -o ControlPath=%s %s %s "%s %s {{.Port}}"\n' \
+                "$control" "$ssh_opts" "$target" "$connect_cmd" "$node" > "$forward_dir/{{.Port}}"
+              chmod +x "$forward_dir/{{.Port}}"
+              socat TCP-LISTEN:{{.Port}},fork,reuseaddr,bind=0.0.0.0 EXEC:"$forward_dir/{{.Port}}" &
+              pids="$pids $!"
               {{- end }}
-              {{- if .SSH.KnownHostsConfigMap }}
-                -o StrictHostKeyChecking=yes \
-                -o UserKnownHostsFile=/interlink/known-hosts/known_hosts \
-              {{- else }}
-                -o StrictHostKeyChecking=accept-new \
               {{- end }}
-              {{- range .SSH.ExtraOptions }}
-                -o {{.}} \
-              {{- end }}
+            }
+            {{- else }}
+            # One -L per port. The login node must set AllowTcpForwarding yes for this
+            # account, or every channel is refused with "administratively prohibited".
+            start_forwarders() {
+              # shellcheck disable=SC2086
+              ssh -N -o ExitOnForwardFailure=yes $ssh_opts \
               {{- range .ExposedPorts }}
               {{- if ne .Protocol "UDP" }}
                 -L 0.0.0.0:{{.Port}}:$node:{{.Port}} \
               {{- end }}
               {{- end }}
-                {{.SSH.User}}@{{.SSH.LoginHost}} &
-              sshpid=$!
+                "$target" &
+              pids=$!
+            }
+            {{- end }}
 
-              while kill -0 "$sshpid" 2>/dev/null; do
+            all_alive() {
+              for pid in $pids; do
+                kill -0 "$pid" 2>/dev/null || return 1
+              done
+              return 0
+            }
+
+            stop_forwarders() {
+              for pid in $pids; do
+                kill "$pid" 2>/dev/null || true
+              done
+              wait 2>/dev/null || true
+              pids=
+            }
+
+            node=$(read_node)
+            [ -n "$node" ] || { echo "no compute node recorded" >&2; exit 1; }
+
+            # A requeued job comes back on a different host and the virtual kubelet
+            # republishes it into the mounted ConfigMap, but the running forwarders
+            # still hold the old name. Watch for the change and rebuild them.
+            while :; do
+              echo "forwarding{{range .ExposedPorts}}{{if ne .Protocol "UDP"}} {{.Port}}{{end}}{{end}} to $node via {{.SSH.LoginHost}} ({{.SSH.ForwardMode}} mode)"
+              if ! start_forwarders; then
+                stop_forwarders
+                exit 1
+              fi
+
+              changed=false
+              while all_alive; do
                 current=$(read_node)
                 if [ -n "$current" ] && [ "$current" != "$node" ]; then
                   echo "compute node changed from $node to $current, rebuilding the tunnel"
-                  kill "$sshpid" 2>/dev/null || true
+                  node=$current
+                  changed=true
                   break
                 fi
                 sleep 10
               done
 
-              wait "$sshpid"
-              rc=$?
+              stop_forwarders
+              $changed && continue
+
               current=$(read_node)
               if [ -n "$current" ] && [ "$current" != "$node" ]; then
                 node=$current
                 continue
               fi
-              echo "ssh exited with status $rc" >&2
-              exit "$rc"
+              echo "the tunnel exited; letting Kubernetes restart the container" >&2
+              exit 1
             done
         {{- if eq .SSH.Auth "kerberos" }}
         env:

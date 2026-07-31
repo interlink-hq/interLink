@@ -55,9 +55,19 @@ func TestNormalizeShadowConfigDefaults(t *testing.T) {
 		assert.Equal(t, SSHAuthPublicKey, s.Auth)
 		assert.Equal(t, DefaultSSHKeySecretKey, s.KeySecretKey)
 		assert.Equal(t, DefaultSSHNodeWaitTimeout, s.NodeWaitTimeout)
+		assert.Equal(t, SSHForwardModePortForward, s.ForwardMode)
 		assert.Contains(t, s.Image, "ssh-tunnel")
 		assert.NotNil(t, s.ReplicateCredentials)
 		assert.True(t, *s.ReplicateCredentials, "credentials replicate by default so per-user namespaces work")
+	})
+
+	t.Run("exec forward mode gets a relay command", func(t *testing.T) {
+		config := sshConfig()
+		config.Network.SSH.ForwardMode = "EXEC"
+
+		config = normalized(t, config)
+		assert.Equal(t, SSHForwardModeExec, config.Network.SSH.ForwardMode)
+		assert.Equal(t, DefaultSSHExecConnectCommand, config.Network.SSH.ExecConnectCommand)
 	})
 
 	t.Run("kerberos defaults", func(t *testing.T) {
@@ -131,6 +141,11 @@ func TestNormalizeShadowConfigRejects(t *testing.T) {
 			name:    "unparseable node wait timeout",
 			mutate:  func(c *Config) { c.Network.SSH.NodeWaitTimeout = "forever" },
 			wantErr: "invalid Network.SSH.NodeWaitTimeout",
+		},
+		{
+			name:    "unknown forward mode",
+			mutate:  func(c *Config) { c.Network.SSH.ForwardMode = "smoke-signal" },
+			wantErr: "unknown Network.SSH.ForwardMode",
 		},
 	}
 
@@ -235,6 +250,28 @@ func TestSSHShadowTemplate(t *testing.T) {
 		// and the renewer keeps it alive for the life of the tunnel.
 		assert.Equal(t, []string{"wait-for-node", "kinit"}, initNames)
 		assert.Contains(t, names, "kinit-renew")
+	})
+
+	t.Run("exec mode relays through the login node instead of forwarding", func(t *testing.T) {
+		config := sshConfig()
+		config.Network.SSH.ForwardMode = SSHForwardModeExec
+
+		manifest, deployment := renderSSHShadow(t, config, tcp)
+
+		// No -L anywhere: sites running the exec mode are exactly the ones whose sshd
+		// refuses to open a forwarded channel at all.
+		assert.NotContains(t, manifest, "-L 0.0.0.0:")
+		assert.Contains(t, manifest, "socat TCP-LISTEN:8888,fork,reuseaddr,bind=0.0.0.0")
+		assert.Contains(t, manifest, `"$connect_cmd" "$node"`)
+		// One multiplexed connection, or every request would pay an SSH handshake and
+		// the login node would see a session per connection.
+		assert.Contains(t, manifest, "ssh -M -N -o ControlMaster=yes")
+		assert.Contains(t, manifest, "ControlPath=%s")
+
+		// The Service still fronts the same containerPort, so nothing above the socket
+		// can tell the two modes apart.
+		container := deployment.Spec.Template.Spec.Containers[0]
+		assert.Equal(t, int32(8888), container.Ports[0].ContainerPort)
 	})
 
 	t.Run("skips UDP ports, which ssh -L cannot carry", func(t *testing.T) {
