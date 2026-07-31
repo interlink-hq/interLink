@@ -33,6 +33,52 @@ storage or message buses. Combining the two is rejected at startup and tracked i
 
 ---
 
+## Before you start: what the login node has to allow
+
+The shadow is an ordinary SSH client, so everything it needs is decided by the
+login node's `sshd_config`.
+
+1. **`AllowTcpForwarding yes`** for the account the shadow logs in as. This is the
+   one that catches people out: plenty of HPC sites set `AllowTcpForwarding no`
+   globally and re-enable it only for a subset of users, often only those who
+   authenticate with MFA. Check it before anything else:
+
+   ```bash
+   # from your own machine, with the same key/principal the shadow will use
+   ssh -N -L 19999:<login node>:22 <user>@<login node> &
+   nc -z 127.0.0.1 19999 && head -c 40 < /dev/tcp/127.0.0.1/19999
+   ```
+
+   If the site refuses, the shadow still starts and still reports Ready — the
+   failure only shows up when traffic arrives, as a connection reset at the client
+   and this line in `kubectl logs <shadow pod> -c ssh-forward`:
+
+   ```
+   channel 1: open failed: administratively prohibited: open failed
+   ```
+
+   There is no way around it from the cluster side; ask the site to allow TCP
+   forwarding for the account, optionally narrowed with `PermitOpen`.
+
+2. **A route from the login node to the compute nodes**, on the ports the pod
+   exposes. `ssh -L` resolves and connects to the compute node *from the login
+   node*, using whatever name the plugin reported. Verify with the name the plugin
+   actually reports (`hostname -f` on the compute node for the Slurm plugin), not
+   the short name:
+
+   ```bash
+   ssh <user>@<login node> "curl -sv http://<compute node fqdn>:<port>/"
+   ```
+
+3. **Outbound SSH from the cluster** to the login node's port, from the namespaces
+   shadows are created in. Network policies that restrict pod egress have to allow
+   it.
+
+`ssh -L` carries TCP only. UDP ports on the offloaded pod are skipped, with a
+warning in the virtual kubelet log.
+
+---
+
 ## Which shadow does what
 
 | | Direction | Trigger | Workload must run |
@@ -262,6 +308,11 @@ it. With `ReplicateCredentials: false` the Secret must already exist there.
 **Connection refused through the tunnel.** The tunnel reached the compute node but
 nothing is listening on that port. Services often bind `127.0.0.1` by default; bind
 `0.0.0.0` instead — for a notebook, `--ip=0.0.0.0`.
+
+**Connection reset, and `channel N: open failed: administratively prohibited` in the
+`ssh-forward` log.** The login node refuses port forwarding for this account. See
+[what the login node has to allow](#before-you-start-what-the-login-node-has-to-allow);
+this is a site policy and cannot be worked around from the cluster.
 
 **Host key verification failed.** `KnownHostsConfigMap` does not contain the login
 node's current key. Re-run `ssh-keyscan` and update the ConfigMap.
