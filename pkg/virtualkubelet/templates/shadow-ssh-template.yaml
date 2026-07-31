@@ -118,40 +118,69 @@ spec:
         command: ["/bin/sh", "-c"]
         args:
           - |
-            set -eu
-            node=$(tr -d '[:space:]' < /interlink/node/{{.NodeNameKey}})
+            set -u
+            read_node() { tr -d '[:space:]' < /interlink/node/{{.NodeNameKey}} 2>/dev/null || true; }
+
+            node=$(read_node)
             [ -n "$node" ] || { echo "no compute node recorded" >&2; exit 1; }
-            echo "forwarding{{range .ExposedPorts}}{{if ne .Protocol "UDP"}} {{.Port}}{{end}}{{end}} to $node via {{.SSH.LoginHost}}"
-            exec ssh -N \
-              -p {{.SSH.Port}} \
-              -o BatchMode=yes \
-              -o ExitOnForwardFailure=yes \
-              -o ServerAliveInterval=30 \
-              -o ServerAliveCountMax=3 \
-            {{- if eq .SSH.Auth "kerberos" }}
-              -o GSSAPIAuthentication=yes \
-              -o GSSAPIDelegateCredentials=yes \
-              -o PreferredAuthentications=gssapi-with-mic \
-            {{- else }}
-              -i /interlink/ssh/{{.SSH.KeySecretKey}} \
-              -o IdentitiesOnly=yes \
-              -o PreferredAuthentications=publickey \
-            {{- end }}
-            {{- if .SSH.KnownHostsConfigMap }}
-              -o StrictHostKeyChecking=yes \
-              -o UserKnownHostsFile=/interlink/known-hosts/known_hosts \
-            {{- else }}
-              -o StrictHostKeyChecking=accept-new \
-            {{- end }}
-            {{- range .SSH.ExtraOptions }}
-              -o {{.}} \
-            {{- end }}
-            {{- range .ExposedPorts }}
-            {{- if ne .Protocol "UDP" }}
-              -L 0.0.0.0:{{.Port}}:$node:{{.Port}} \
-            {{- end }}
-            {{- end }}
-              {{.SSH.User}}@{{.SSH.LoginHost}}
+
+            # A requeued job comes back on a different host, and the virtual kubelet
+            # republishes it into the mounted ConfigMap. ssh has the old name baked
+            # into its -L arguments, so watch for the change and rebuild the tunnel.
+            while :; do
+              echo "forwarding{{range .ExposedPorts}}{{if ne .Protocol "UDP"}} {{.Port}}{{end}}{{end}} to $node via {{.SSH.LoginHost}} (the login node must allow TCP forwarding)"
+              ssh -N \
+                -p {{.SSH.Port}} \
+                -o BatchMode=yes \
+                -o ExitOnForwardFailure=yes \
+                -o ServerAliveInterval=30 \
+                -o ServerAliveCountMax=3 \
+              {{- if eq .SSH.Auth "kerberos" }}
+                -o GSSAPIAuthentication=yes \
+                -o GSSAPIDelegateCredentials=yes \
+                -o PreferredAuthentications=gssapi-with-mic \
+              {{- else }}
+                -i /interlink/ssh/{{.SSH.KeySecretKey}} \
+                -o IdentitiesOnly=yes \
+                -o PreferredAuthentications=publickey \
+              {{- end }}
+              {{- if .SSH.KnownHostsConfigMap }}
+                -o StrictHostKeyChecking=yes \
+                -o UserKnownHostsFile=/interlink/known-hosts/known_hosts \
+              {{- else }}
+                -o StrictHostKeyChecking=accept-new \
+              {{- end }}
+              {{- range .SSH.ExtraOptions }}
+                -o {{.}} \
+              {{- end }}
+              {{- range .ExposedPorts }}
+              {{- if ne .Protocol "UDP" }}
+                -L 0.0.0.0:{{.Port}}:$node:{{.Port}} \
+              {{- end }}
+              {{- end }}
+                {{.SSH.User}}@{{.SSH.LoginHost}} &
+              sshpid=$!
+
+              while kill -0 "$sshpid" 2>/dev/null; do
+                current=$(read_node)
+                if [ -n "$current" ] && [ "$current" != "$node" ]; then
+                  echo "compute node changed from $node to $current, rebuilding the tunnel"
+                  kill "$sshpid" 2>/dev/null || true
+                  break
+                fi
+                sleep 10
+              done
+
+              wait "$sshpid"
+              rc=$?
+              current=$(read_node)
+              if [ -n "$current" ] && [ "$current" != "$node" ]; then
+                node=$current
+                continue
+              fi
+              echo "ssh exited with status $rc" >&2
+              exit "$rc"
+            done
         {{- if eq .SSH.Auth "kerberos" }}
         env:
         - name: KRB5CCNAME
