@@ -202,7 +202,7 @@ func TestSSHShadowTemplate(t *testing.T) {
 	t.Run("forwards each exposed port to the node the plugin reported", func(t *testing.T) {
 		manifest, deployment := renderSSHShadow(t, sshConfig(), tcp)
 
-		assert.Contains(t, manifest, "-L 0.0.0.0:8888:$node:8888")
+		assert.Contains(t, manifest, `-L "0.0.0.0:8888:$node:8888"`)
 		assert.Contains(t, manifest, "alice@login.hpc.example.org")
 		assert.Contains(t, manifest, "-i /interlink/ssh/"+DefaultSSHKeySecretKey)
 		// The node arrives through a mounted ConfigMap, not the pod spec: restarting
@@ -260,9 +260,10 @@ func TestSSHShadowTemplate(t *testing.T) {
 
 		// No -L anywhere: sites running the exec mode are exactly the ones whose sshd
 		// refuses to open a forwarded channel at all.
-		assert.NotContains(t, manifest, "-L 0.0.0.0:")
+		assert.NotContains(t, manifest, "-L \"0.0.0.0:")
 		assert.Contains(t, manifest, "socat TCP-LISTEN:8888,fork,reuseaddr,bind=0.0.0.0")
-		assert.Contains(t, manifest, `"$connect_cmd" "$node"`)
+		// the node is single-quoted for the login node's shell, which re-parses it
+		assert.Contains(t, manifest, `remote_cmd="$connect_cmd '$node'"`)
 		// One multiplexed connection, or every request would pay an SSH handshake and
 		// the login node would see a session per connection.
 		assert.Contains(t, manifest, "ssh -M -N -o ControlMaster=yes")
@@ -280,7 +281,7 @@ func TestSSHShadowTemplate(t *testing.T) {
 			{Port: 9999, Name: "telemetry", Protocol: "UDP"},
 		})
 
-		assert.Contains(t, manifest, "-L 0.0.0.0:8888:$node:8888")
+		assert.Contains(t, manifest, `-L "0.0.0.0:8888:$node:8888"`)
 		assert.NotContains(t, manifest, "9999")
 	})
 
