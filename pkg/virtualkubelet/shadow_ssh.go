@@ -88,6 +88,19 @@ func NormalizeShadowConfig(config *Config) error {
 		s.ReplicateCredentials = &replicate
 	}
 
+	s.ForwardMode = strings.ToLower(strings.TrimSpace(s.ForwardMode))
+	switch s.ForwardMode {
+	case "":
+		s.ForwardMode = SSHForwardModePortForward
+	case SSHForwardModePortForward:
+	case SSHForwardModeExec:
+		if strings.TrimSpace(s.ExecConnectCommand) == "" {
+			s.ExecConnectCommand = DefaultSSHExecConnectCommand
+		}
+	default:
+		return fmt.Errorf("unknown Network.SSH.ForwardMode %q: expected %q or %q", s.ForwardMode, SSHForwardModePortForward, SSHForwardModeExec)
+	}
+
 	s.Auth = strings.ToLower(strings.TrimSpace(s.Auth))
 	switch s.Auth {
 	case "":
