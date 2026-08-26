@@ -83,6 +83,7 @@ echo "Using WireGuard interface: $WG_IFACE"
 echo $$ > "$TMPDIR/netns.pid"
 
 export WG_SOCKET_DIR="$TMPDIR"
+export INTERLINK_MESH_CONTACT_HOST="{{.MeshContactHost}}"
 
 # Override /etc/resolv.conf to avoid issues with read-only filesystems
 # Not all environments support this; ignore errors
