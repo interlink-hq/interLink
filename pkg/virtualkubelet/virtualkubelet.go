@@ -73,6 +73,13 @@ const (
 	DefaultWstunnelCommandTLS  = "curl  -L -f -k https://github.com/erebe/wstunnel/releases/download/v10.4.4/wstunnel_10.4.4_linux_amd64.tar.gz -o wstunnel.tar.gz && tar -xzvf wstunnel.tar.gz && chmod +x wstunnel && ./wstunnel client --http-upgrade-path-prefix %s %s wss://%s:443 &"
 )
 
+// Pacing of the pending-deletion reconciliation sweep.
+const (
+	deleteSweepInterval    = 10 * time.Second
+	deleteRetryBaseBackoff = 5 * time.Second
+	deleteRetryMaxBackoff  = 5 * time.Minute
+)
+
 // Annotations for WireGuard and WStunnel configuration
 const (
 	annWGPrivateKey                 = "interlink.eu/wg-private-key"       // base64 or plain (your choice)
@@ -147,6 +154,20 @@ type Provider struct {
 	clientSet            kubernetes.Interface
 	clientHTTPTransport  *http.Transport
 	podIPs               []string
+	pendingDeletes       map[string]*pendingDelete
+	pendingDeletesMu     sync.Mutex
+	deleteLoopOnce       sync.Once
+}
+
+// pendingDelete tracks a pod whose remote deletion has not been confirmed by the
+// plugin yet. Entries live until /delete returns success, so that a pod is never
+// dropped from p.pods (leaving its remote job running) because of a transient
+// plugin outage.
+type pendingDelete struct {
+	pod      *v1.Pod
+	attempts int
+	nextTry  time.Time
+	inFlight bool
 }
 
 // Increment the given IP address
@@ -527,6 +548,7 @@ func NewProviderConfig(
 		internalIP:          internalIP,
 		daemonEndpointPort:  daemonEndpointPort,
 		pods:                make(map[string]*v1.Pod),
+		pendingDeletes:      make(map[string]*pendingDelete),
 		config:              config,
 		startTime:           time.Now(),
 		clientHTTPTransport: clientHTTPTransport,
@@ -1906,6 +1928,12 @@ func (p *Provider) UpdatePod(ctx context.Context, pod *v1.Pod) error {
 }
 
 // DeletePod deletes the specified pod and drops it out of p.pods
+//
+// The pod is registered as pending deletion before the remote call is attempted,
+// and is only dropped from p.pods once the plugin confirms the deletion. A failed
+// attempt is returned to the pod controller so it requeues, and the pod also stays
+// on the reconciliation sweep (deleteLoop) which keeps retrying after the
+// controller has given up. See issue #540.
 func (p *Provider) DeletePod(ctx context.Context, pod *v1.Pod) (err error) {
 	TracerUpdate(&ctx, "DeletePodVK", pod)
 
@@ -1930,16 +1958,39 @@ func (p *Provider) DeletePod(ctx context.Context, pod *v1.Pod) (err error) {
 		}
 	}
 
+	p.markDeletePending(pod)
+
+	if err = p.deletePodRemote(ctx, pod); err != nil {
+		log.G(ctx).Error(err)
+		return err
+	}
+
+	return nil
+}
+
+// deletePodRemote asks the plugin to delete pod and, once it confirms, drops the
+// pod from p.pods and from the pending-deletion set and reports the terminated
+// status to Kubernetes. The remote error is returned untouched so callers can
+// retry; the pod stays tracked until the deletion is confirmed.
+func (p *Provider) deletePodRemote(ctx context.Context, pod *v1.Pod) error {
+	key := string(pod.UID)
+
+	if !p.beginDeleteAttempt(key) {
+		return fmt.Errorf("remote deletion of pod %s/%s is already in progress", pod.Namespace, pod.Name)
+	}
+
+	err := RemoteExecution(ctx, p.config, p, pod, DELETE)
+	p.finishDeleteAttempt(key, err)
+	if err != nil {
+		return err
+	}
+
+	p.podsMu.Lock()
+	delete(p.pods, key)
+	p.podsMu.Unlock()
+
 	now := metav1.Now()
 	pod.Status.Reason = "VKProviderPodDeleted"
-
-	go func() {
-		err = RemoteExecution(ctx, p.config, p, pod, DELETE)
-		if err != nil {
-			log.G(ctx).Error(err)
-			return
-		}
-	}()
 
 	for idx := range pod.Status.ContainerStatuses {
 		pod.Status.ContainerStatuses[idx].Ready = false
@@ -1963,17 +2014,143 @@ func (p *Provider) DeletePod(ctx context.Context, pod *v1.Pod) (err error) {
 	}
 
 	// tell k8s it's terminated
-	err = p.UpdatePod(ctx, pod)
-	if err != nil {
-		return err
+	return p.UpdatePod(ctx, pod)
+}
+
+// markDeletePending registers pod as awaiting confirmation of its remote deletion.
+// Calling it again for a pod already pending keeps the existing attempt count and
+// backoff, so repeated DeletePod calls from the pod controller do not reset it.
+func (p *Provider) markDeletePending(pod *v1.Pod) {
+	p.pendingDeletesMu.Lock()
+	defer p.pendingDeletesMu.Unlock()
+
+	if p.pendingDeletes == nil {
+		p.pendingDeletes = make(map[string]*pendingDelete)
+	}
+	if _, ok := p.pendingDeletes[string(pod.UID)]; !ok {
+		p.pendingDeletes[string(pod.UID)] = &pendingDelete{pod: pod.DeepCopy()}
+	}
+}
+
+// beginDeleteAttempt claims the right to issue a remote deletion for key. It
+// returns false when another attempt is already in flight, which keeps the
+// controller-driven retries and the sweep from issuing duplicate /delete calls.
+func (p *Provider) beginDeleteAttempt(key string) bool {
+	p.pendingDeletesMu.Lock()
+	defer p.pendingDeletesMu.Unlock()
+
+	entry, ok := p.pendingDeletes[key]
+	if !ok {
+		// Not tracked (e.g. a direct call): nothing to serialise against.
+		return true
+	}
+	if entry.inFlight {
+		return false
+	}
+	entry.inFlight = true
+	entry.attempts++
+	return true
+}
+
+// finishDeleteAttempt records the outcome of an attempt: on success the pod stops
+// being tracked, on failure the next attempt is pushed out by an exponential
+// backoff capped at deleteRetryMaxBackoff.
+func (p *Provider) finishDeleteAttempt(key string, err error) {
+	p.pendingDeletesMu.Lock()
+	defer p.pendingDeletesMu.Unlock()
+
+	entry, ok := p.pendingDeletes[key]
+	if !ok {
+		return
+	}
+	if err == nil {
+		delete(p.pendingDeletes, key)
+		return
 	}
 
-	// delete from p.pods
-	p.podsMu.Lock()
-	delete(p.pods, string(key))
-	p.podsMu.Unlock()
+	entry.inFlight = false
+	entry.nextTry = time.Now().Add(deleteRetryBackoff(entry.attempts))
+}
 
-	return nil
+// deleteRetryBackoff returns the delay before the given attempt number is retried.
+func deleteRetryBackoff(attempts int) time.Duration {
+	backoff := deleteRetryBaseBackoff
+	for i := 1; i < attempts; i++ {
+		backoff *= 2
+		if backoff >= deleteRetryMaxBackoff {
+			return deleteRetryMaxBackoff
+		}
+	}
+	return backoff
+}
+
+// deleteLoop periodically retries remote deletions that the plugin has not
+// confirmed yet.
+//
+// The pod controller alone is not enough to guarantee delivery: it abandons a pod
+// after queue.MaxRetries, and it stops calling DeletePod entirely once the pod is
+// no longer running (it force-deletes it from the API server instead). Either way
+// the pod would stay in p.pods forever with its remote job still alive, which is
+// the leak described in issue #540. This sweep keeps retrying until /delete
+// succeeds.
+func (p *Provider) deleteLoop(ctx context.Context) {
+	ticker := time.NewTicker(deleteSweepInterval)
+	defer ticker.Stop()
+
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-ticker.C:
+		}
+
+		p.reconcilePendingDeletes(ctx, time.Now())
+	}
+}
+
+// reconcilePendingDeletes retries every pending deletion whose backoff has elapsed
+// at the given time.
+func (p *Provider) reconcilePendingDeletes(ctx context.Context, now time.Time) {
+	for _, pod := range p.pendingDeletesDue(now) {
+		log.G(ctx).Infof("retrying unconfirmed remote deletion of pod %s/%s", pod.Namespace, pod.Name)
+
+		if err := p.deletePodRemote(ctx, pod); err != nil {
+			log.G(ctx).Errorf("remote deletion of pod %s/%s still failing, will retry: %v", pod.Namespace, pod.Name, err)
+			continue
+		}
+
+		log.G(ctx).Infof("remote deletion of pod %s/%s confirmed by the plugin", pod.Namespace, pod.Name)
+	}
+}
+
+// pendingDeletesDue returns the pods whose remote deletion should be retried now.
+// The canonical pod from p.pods is preferred over the copy taken at DeletePod time
+// so that the status reported to Kubernetes on success is the current one.
+func (p *Provider) pendingDeletesDue(now time.Time) []*v1.Pod {
+	p.pendingDeletesMu.Lock()
+	due := make([]string, 0, len(p.pendingDeletes))
+	fallbacks := make(map[string]*v1.Pod, len(p.pendingDeletes))
+	for key, entry := range p.pendingDeletes {
+		if entry.inFlight || now.Before(entry.nextTry) {
+			continue
+		}
+		due = append(due, key)
+		fallbacks[key] = entry.pod
+	}
+	p.pendingDeletesMu.Unlock()
+
+	pods := make([]*v1.Pod, 0, len(due))
+	p.podsMu.RLock()
+	for _, key := range due {
+		if canonical, ok := p.pods[key]; ok {
+			pods = append(pods, canonical.DeepCopy())
+			continue
+		}
+		pods = append(pods, fallbacks[key].DeepCopy())
+	}
+	p.podsMu.RUnlock()
+
+	return pods
 }
 
 func (p *Provider) GetPod(_ context.Context, _ string, _ string) (*v1.Pod, error) {
@@ -2051,6 +2228,10 @@ func (p *Provider) GetPods(ctx context.Context) ([]*v1.Pod, error) {
 	p.podsMu.RUnlock()
 
 	go p.statusLoop(ctx)
+	p.deleteLoopOnce.Do(func() {
+		go p.deleteLoop(ctx)
+	})
+
 	return pods, nil
 }
 
