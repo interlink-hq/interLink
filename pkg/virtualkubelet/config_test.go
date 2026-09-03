@@ -232,6 +232,54 @@ func TestUpdateNodeResources_CPUMemoryPods(t *testing.T) {
 	assert.Equal(t, 0, podsQty.Cmp(allocPods), "allocatable pods should match capacity pods")
 }
 
+func TestUpdateNodeResources_IgnoresNonPositiveCPUMemory(t *testing.T) {
+	tests := []struct {
+		name   string
+		cpu    string
+		memory string
+	}{
+		// exactly what the SLURM plugin reports when it cannot determine capacity
+		{"zero", "0", "0Mi"},
+		{"zero with unit", "0m", "0Gi"},
+		{"negative", "-4", "-8Gi"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			config := Config{
+				Resources: Resources{
+					CPU:    "10",
+					Memory: "32Gi",
+					Pods:   "100",
+				},
+			}
+			provider, err := NewProviderConfig(config, "test-node", "v1.0", "linux", "10.0.0.1", 10250, nil)
+			assert.NoError(t, err)
+
+			ctx := context.Background()
+			provider.updateNodeResources(ctx, &types.ResourcesResponse{
+				CPU:    tt.cpu,
+				Memory: tt.memory,
+				Pods:   "2000",
+			})
+
+			// A bogus zero must not drain the node: the configured capacity is kept
+			cpuQty := provider.node.Status.Capacity["cpu"]
+			assert.Equal(t, int64(10), cpuQty.Value(), "CPU capacity should be unchanged")
+			memQty := provider.node.Status.Capacity["memory"]
+			assert.Equal(t, "32Gi", memQty.String(), "memory capacity should be unchanged")
+			allocCPU := provider.node.Status.Allocatable["cpu"]
+			assert.Equal(t, int64(10), allocCPU.Value(), "allocatable CPU should be unchanged")
+			allocMem := provider.node.Status.Allocatable["memory"]
+			assert.Equal(t, "32Gi", allocMem.String(), "allocatable memory should be unchanged")
+
+			// Other fields in the same response are still applied
+			podsQty := provider.node.Status.Capacity["pods"]
+			assert.Equal(t, int64(2000), podsQty.Value())
+		})
+	}
+}
+
 func TestUpdateNodeResources_Accelerators(t *testing.T) {
 	config := Config{
 		Resources: Resources{

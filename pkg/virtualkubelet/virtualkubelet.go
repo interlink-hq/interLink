@@ -703,7 +703,10 @@ func (p *Provider) Ping(_ context.Context) error {
 
 // updateNodeResources updates the node's Capacity and Allocatable based on the resource
 // information reported by the plugin in a ping response. Only fields explicitly set in
-// the response are updated; omitted fields retain their current values.
+// the response are updated; omitted fields retain their current values. A non-positive CPU
+// or memory value is treated as "no data" and ignored: a plugin that cannot determine its
+// capacity is expected to omit the field rather than report zero, and applying a zero would
+// silently make the node unschedulable.
 func (p *Provider) updateNodeResources(ctx context.Context, resources *types.ResourcesResponse) {
 	if resources == nil {
 		return
@@ -714,9 +717,13 @@ func (p *Provider) updateNodeResources(ctx context.Context, resources *types.Res
 
 	if resources.CPU != "" {
 		q, err := resource.ParseQuantity(resources.CPU)
-		if err != nil {
+		current := capacity[v1.ResourceCPU]
+		switch {
+		case err != nil:
 			log.G(ctx).Warnf("Invalid CPU value %q in ping response: %v", resources.CPU, err)
-		} else {
+		case q.Sign() <= 0:
+			log.G(ctx).Warnf("Ignoring non-positive CPU value %q in ping response: keeping current node CPU capacity %s", resources.CPU, current.String())
+		default:
 			capacity[v1.ResourceCPU] = q
 			allocatable[v1.ResourceCPU] = q
 			log.G(ctx).Infof("Updated node CPU capacity to %s", resources.CPU)
@@ -725,9 +732,13 @@ func (p *Provider) updateNodeResources(ctx context.Context, resources *types.Res
 
 	if resources.Memory != "" {
 		q, err := resource.ParseQuantity(resources.Memory)
-		if err != nil {
+		current := capacity[v1.ResourceMemory]
+		switch {
+		case err != nil:
 			log.G(ctx).Warnf("Invalid memory value %q in ping response: %v", resources.Memory, err)
-		} else {
+		case q.Sign() <= 0:
+			log.G(ctx).Warnf("Ignoring non-positive memory value %q in ping response: keeping current node memory capacity %s", resources.Memory, current.String())
+		default:
 			capacity[v1.ResourceMemory] = q
 			allocatable[v1.ResourceMemory] = q
 			log.G(ctx).Infof("Updated node memory capacity to %s", resources.Memory)
