@@ -47,13 +47,13 @@ func (h *InterLinkHandler) Ping(w http.ResponseWriter, r *http.Request) {
 	req.Header.Set("Content-Type", "application/json")
 	log.G(h.Ctx).Debug(req)
 
-	// ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
-	// defer cancel()
-	// respPlugin, err := http.DefaultClient.Do(req)
-	//  respPlugin, err := DoReq(req.WithContext(ctx))
 	sessionContext := GetSessionContext(req)
 	_, err = ReqWithError(h.Ctx, req, w, start, span, true, false, sessionContext, h.ClientHTTP)
 	if err != nil {
+		// ReqWithError has already marked the span as failed and recorded the
+		// code it sent to the client. The WriteHeader below is superfluous —
+		// a header has necessarily been written already — so the span keeps the
+		// code the client actually observed rather than this one.
 		log.G(h.Ctx).Error(err)
 		w.WriteHeader(http.StatusServiceUnavailable)
 		_, err = w.Write([]byte(strconv.Itoa(http.StatusServiceUnavailable)))
@@ -62,24 +62,8 @@ func (h *InterLinkHandler) Ping(w http.ResponseWriter, r *http.Request) {
 		}
 		return
 	}
-	// defer respPlugin.Body.Close()
-	//
-	// if respPlugin.StatusCode != http.StatusOK {
-	// 	log.G(h.Ctx).Error("error pinging plugin")
-	// 	w.WriteHeader(respPlugin.StatusCode)
-	// 	_, err = w.Write([]byte(strconv.Itoa(http.StatusServiceUnavailable)))
-	// 	if err != nil {
-	// 		log.G(h.Ctx).Error(errors.New("Failed to write to http buffer"))
-	// 	}
-	//
-	// 	return
-	// }
-	//
-	// types.SetDurationSpan(start, span, types.WithHTTPReturnCode(respPlugin.StatusCode))
-	//
-	// w.WriteHeader(http.StatusOK)
-	// _, err = w.Write([]byte("0"))
-	// if err != nil {
-	// 	log.G(h.Ctx).Error(errors.New("Failed to write to http buffer"))
-	// }
+
+	// The return code was already recorded by ReqWithError, so only the outcome
+	// is set here.
+	types.SetSpanOK(span, 0)
 }

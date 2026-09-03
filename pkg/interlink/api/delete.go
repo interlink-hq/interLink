@@ -73,6 +73,7 @@ func (h *InterLinkHandler) DeleteHandler(w http.ResponseWriter, r *http.Request)
 		statusCode = http.StatusInternalServerError
 		w.WriteHeader(statusCode)
 		log.G(h.Ctx).Error(err)
+		types.SetSpanError(span, statusCode, err)
 		return
 	}
 
@@ -81,7 +82,12 @@ func (h *InterLinkHandler) DeleteHandler(w http.ResponseWriter, r *http.Request)
 	sessionContext := GetSessionContext(r)
 	_, err = ReqWithError(h.Ctx, req, w, start, span, true, false, sessionContext, h.ClientHTTP)
 	if err != nil {
+		// ReqWithError has already marked the span as failed.
 		log.L.Error(err)
 		return
 	}
+
+	// The return code was already recorded by ReqWithError, so only the outcome
+	// is set here.
+	types.SetSpanOK(span, 0)
 }

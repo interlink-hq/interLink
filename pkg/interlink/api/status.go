@@ -99,6 +99,7 @@ func (h *InterLinkHandler) StatusHandler(w http.ResponseWriter, r *http.Request)
 		sessionContext := GetSessionContext(r)
 		bodyBytes, err = ReqWithError(h.Ctx, req, w, start, span, false, true, sessionContext, h.ClientHTTP)
 		if err != nil {
+			// ReqWithError has already marked the span as failed.
 			log.L.Error(err)
 			return
 		}
@@ -109,12 +110,11 @@ func (h *InterLinkHandler) StatusHandler(w http.ResponseWriter, r *http.Request)
 			w.WriteHeader(statusCode)
 			errWithContext := fmt.Errorf("error doing Unmarshal() in StatusHandler() of req %s error detail: %s error: %w", fmt.Sprintf("%#v", req), fmt.Sprintf("%#v", err), err)
 			log.G(h.Ctx).Error(errWithContext)
+			types.SetSpanError(span, statusCode, errWithContext)
 			return
 		}
 
 		updateStatuses(returnedStatuses)
-		types.SetDurationSpan(start, span, types.WithHTTPReturnCode(statusCode))
-
 	}
 
 	if len(pods) > 0 {
@@ -141,12 +141,20 @@ func (h *InterLinkHandler) StatusHandler(w http.ResponseWriter, r *http.Request)
 		statusCode = http.StatusInternalServerError
 		w.WriteHeader(statusCode)
 		log.G(h.Ctx).Error(err)
+		types.SetSpanError(span, statusCode, err)
 		return
 	}
 
 	w.WriteHeader(statusCode)
 	_, err = w.Write(returnValue)
 	if err != nil {
-		log.G(h.Ctx).Error(errors.New("failed to write to http buffer"))
+		errWrite := errors.New("failed to write to http buffer")
+		log.G(h.Ctx).Error(errWrite)
+		types.SetSpanError(span, statusCode, errWrite)
+		return
 	}
+
+	// Recorded here rather than inside the "pods to be checked" branch above, so
+	// that a request served entirely from cache also carries its return code.
+	types.SetSpanOK(span, statusCode)
 }

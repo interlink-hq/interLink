@@ -88,6 +88,7 @@ func (h *InterLinkHandler) GetLogsHandler(w http.ResponseWriter, r *http.Request
 			log.G(h.Ctx).Error(errors.New(sessionContextMessage + "Failed to write to http buffer"))
 		}
 		log.G(h.Ctx).Error(sessionContextMessage, err)
+		types.SetSpanError(span, http.StatusBadRequest, err)
 		return
 	}
 
@@ -110,22 +111,27 @@ func (h *InterLinkHandler) GetLogsHandler(w http.ResponseWriter, r *http.Request
 		if _, werr := w.Write([]byte(err.Error())); werr != nil {
 			log.G(h.Ctx).Error(errors.New(sessionContextMessage + "Failed to write to http buffer"))
 		}
+		types.SetSpanError(span, http.StatusBadRequest, err)
 		return
 	}
 
 	if req2.Opts.Tail != 0 && req2.Opts.LimitBytes != 0 {
 		w.WriteHeader(http.StatusBadRequest)
+		errOpts := errors.New("both Tail and LimitBytes set. Set only one of them")
 		if _, werr := w.Write([]byte("Both Tail and LimitBytes set. Set only one of them")); werr != nil {
 			log.G(h.Ctx).Error(errors.New(sessionContextMessage + "Failed to write to http buffer"))
 		}
+		types.SetSpanError(span, http.StatusBadRequest, errOpts)
 		return
 	}
 
 	if req2.Opts.SinceSeconds != 0 && !req2.Opts.SinceTime.IsZero() {
 		w.WriteHeader(http.StatusBadRequest)
+		errOpts := errors.New("both SinceSeconds and SinceTime set. Set only one of them")
 		if _, werr := w.Write([]byte("Both SinceSeconds and SinceTime set. Set only one of them")); werr != nil {
 			log.G(h.Ctx).Error(errors.New(sessionContextMessage + "Failed to write to http buffer"))
 		}
+		types.SetSpanError(span, http.StatusBadRequest, errOpts)
 		return
 	}
 
@@ -135,6 +141,7 @@ func (h *InterLinkHandler) GetLogsHandler(w http.ResponseWriter, r *http.Request
 	if err != nil {
 		w.WriteHeader(http.StatusInternalServerError)
 		log.G(h.Ctx).Error(err)
+		types.SetSpanError(span, http.StatusInternalServerError, err)
 		return
 	}
 	reader := bytes.NewReader(bodyBytes)
@@ -143,6 +150,7 @@ func (h *InterLinkHandler) GetLogsHandler(w http.ResponseWriter, r *http.Request
 	if err != nil {
 		w.WriteHeader(http.StatusInternalServerError)
 		log.G(h.Ctx).Error(sessionContextMessage, err)
+		types.SetSpanError(span, http.StatusInternalServerError, err)
 		return
 	}
 
@@ -151,7 +159,12 @@ func (h *InterLinkHandler) GetLogsHandler(w http.ResponseWriter, r *http.Request
 	log.G(h.Ctx).Info(sessionContextMessage, "InterLink: forwarding GetLogs call to sidecar")
 	_, err = ReqWithError(h.Ctx, req, w, start, span, true, false, sessionContext, h.ClientHTTP)
 	if err != nil {
+		// ReqWithError has already marked the span as failed.
 		log.L.Error(sessionContextMessage, err)
 		return
 	}
+
+	// The return code was already recorded by ReqWithError, so only the outcome
+	// is set here.
+	types.SetSpanOK(span, 0)
 }

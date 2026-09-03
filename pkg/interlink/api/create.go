@@ -52,6 +52,7 @@ func (h *InterLinkHandler) CreateHandler(w http.ResponseWriter, r *http.Request)
 		statusCode = http.StatusInternalServerError
 		w.WriteHeader(statusCode)
 		log.G(h.Ctx).Error(err)
+		types.SetSpanError(span, statusCode, err)
 		return
 	}
 
@@ -62,6 +63,7 @@ func (h *InterLinkHandler) CreateHandler(w http.ResponseWriter, r *http.Request)
 		statusCode = http.StatusInternalServerError
 		log.G(h.Ctx).Error(err)
 		w.WriteHeader(statusCode)
+		types.SetSpanError(span, statusCode, err)
 		return
 	}
 
@@ -76,6 +78,7 @@ func (h *InterLinkHandler) CreateHandler(w http.ResponseWriter, r *http.Request)
 		statusCode = http.StatusInternalServerError
 		log.G(h.Ctx).Error(err)
 		w.WriteHeader(statusCode)
+		types.SetSpanError(span, statusCode, err)
 		return
 	}
 
@@ -95,7 +98,11 @@ func (h *InterLinkHandler) CreateHandler(w http.ResponseWriter, r *http.Request)
 	case pod.JobScriptBuilderURL != "":
 		log.G(h.Ctx).Info("JobScriptBuilderURL: ", pod.JobScriptBuilderURL)
 		if h.Config.JobScriptBuildConfig == nil {
-			log.L.Error(fmt.Errorf("JobScript URL requested, but interlink does not have any Script build config set"))
+			statusCode = http.StatusInternalServerError
+			errNoBuildConfig := fmt.Errorf("JobScript URL requested, but interlink does not have any Script build config set")
+			log.L.Error(errNoBuildConfig)
+			w.WriteHeader(statusCode)
+			types.SetSpanError(span, statusCode, errNoBuildConfig)
 			return
 		}
 		log.G(h.Ctx).Info("InterLink: asking JobScriptURL for job.sh")
@@ -104,8 +111,10 @@ func (h *InterLinkHandler) CreateHandler(w http.ResponseWriter, r *http.Request)
 
 		bodyBytes, err = json.Marshal(data)
 		if err != nil {
+			statusCode = http.StatusInternalServerError
 			log.G(h.Ctx).Errorf("Failed to marshal job data: %v | data: %+v", err, data)
-			w.WriteHeader(http.StatusInternalServerError)
+			w.WriteHeader(statusCode)
+			types.SetSpanError(span, statusCode, err)
 			return
 		}
 		log.G(h.Ctx).Debugf("Marshalled job data: %s", string(bodyBytes))
@@ -114,7 +123,10 @@ func (h *InterLinkHandler) CreateHandler(w http.ResponseWriter, r *http.Request)
 		reader := bytes.NewReader(bodyBytes)
 		req, err = http.NewRequest(http.MethodPost, pod.JobScriptBuilderURL, reader)
 		if err != nil {
+			statusCode = http.StatusInternalServerError
 			log.G(h.Ctx).Errorf("Failed to create POST request to JobScriptBuilder: %v | URL: %s", err, pod.JobScriptBuilderURL)
+			w.WriteHeader(statusCode)
+			types.SetSpanError(span, statusCode, err)
 			return
 		}
 
@@ -125,6 +137,7 @@ func (h *InterLinkHandler) CreateHandler(w http.ResponseWriter, r *http.Request)
 
 		bodyBytesResp, err := ReqWithError(h.Ctx, req, w, start, span, false, true, sessionContext, http.DefaultClient)
 		if err != nil {
+			// ReqWithError has already marked the span as failed.
 			log.G(h.Ctx).Errorf("JobScriptBuilder request failed: %v", err)
 			return
 		}
@@ -141,6 +154,7 @@ func (h *InterLinkHandler) CreateHandler(w http.ResponseWriter, r *http.Request)
 			statusCode = http.StatusInternalServerError
 			log.G(h.Ctx).Error(err)
 			w.WriteHeader(statusCode)
+			types.SetSpanError(span, statusCode, err)
 			return
 		}
 
@@ -150,6 +164,7 @@ func (h *InterLinkHandler) CreateHandler(w http.ResponseWriter, r *http.Request)
 			statusCode = http.StatusInternalServerError
 			log.G(h.Ctx).Error(err)
 			w.WriteHeader(statusCode)
+			types.SetSpanError(span, statusCode, err)
 			return
 		}
 
@@ -165,8 +180,10 @@ func (h *InterLinkHandler) CreateHandler(w http.ResponseWriter, r *http.Request)
 	}
 	bodyBytes, err = json.Marshal(retrievedData)
 	if err != nil {
-		w.WriteHeader(http.StatusInternalServerError)
+		statusCode = http.StatusInternalServerError
+		w.WriteHeader(statusCode)
 		log.G(h.Ctx).Error(err)
+		types.SetSpanError(span, statusCode, err)
 		return
 	}
 	log.G(h.Ctx).Debug(string(bodyBytes))
@@ -178,6 +195,7 @@ func (h *InterLinkHandler) CreateHandler(w http.ResponseWriter, r *http.Request)
 		statusCode = http.StatusInternalServerError
 		w.WriteHeader(statusCode)
 		log.G(h.Ctx).Error(err)
+		types.SetSpanError(span, statusCode, err)
 		return
 	}
 
@@ -186,7 +204,12 @@ func (h *InterLinkHandler) CreateHandler(w http.ResponseWriter, r *http.Request)
 	sessionContext := GetSessionContext(r)
 	_, err = ReqWithError(h.Ctx, req, w, start, span, true, false, sessionContext, h.ClientHTTP)
 	if err != nil {
+		// ReqWithError has already marked the span as failed.
 		log.L.Error(err)
 		return
 	}
+
+	// The return code was already recorded by ReqWithError, so only the outcome
+	// is set here.
+	types.SetSpanOK(span, 0)
 }

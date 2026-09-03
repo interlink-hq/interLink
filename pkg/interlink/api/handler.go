@@ -122,7 +122,11 @@ func ReqWithError(
 	AddSessionContext(req, sessionContext)
 
 	if !isSafeURL(req.URL.String()) {
-		return nil, fmt.Errorf("potential SSRF detected: %s", req.URL.String())
+		statusCode := http.StatusInternalServerError
+		errWithContext := fmt.Errorf("potential SSRF detected: %s", req.URL.String())
+		w.WriteHeader(statusCode)
+		interlink.SetSpanError(span, statusCode, errWithContext)
+		return nil, errWithContext
 	}
 	resp, err := clientHTTP.Do(req) // #nosec G704
 	if err != nil {
@@ -131,6 +135,7 @@ func ReqWithError(
 		w.WriteHeader(statusCode)
 		errWithContext := fmt.Errorf(sessionContextMessage+
 			"error doing DoReq() of ReqWithErrorWithSessionNumber error %w", err)
+		interlink.SetSpanError(span, statusCode, errWithContext)
 		return nil, errWithContext
 	}
 	defer func() {
@@ -143,6 +148,12 @@ func ReqWithError(
 	// Always write the response code to client
 	log.G(ctx).Debugf("%s Writing response header: %d", sessionContextMessage, resp.StatusCode)
 	w.WriteHeader(resp.StatusCode)
+
+	// Record the sidecar's return code as soon as it is known, so that it is
+	// present on the failure paths below too and not only on the success path.
+	// This is the code the client actually observes: the WriteHeader calls that
+	// follow are superfluous and ignored by net/http.
+	interlink.SetDurationSpan(start, span, interlink.WithHTTPReturnCode(resp.StatusCode))
 
 	// Flush headers immediately
 	if f, ok := w.(http.Flusher); ok {
@@ -163,8 +174,10 @@ func ReqWithError(
 
 		ret, err := io.ReadAll(resp.Body)
 		if err != nil {
-			return nil, fmt.Errorf(sessionContextMessage+
+			errWithContext := fmt.Errorf(sessionContextMessage+
 				"HTTP request in error and could not read body response error: %w", err)
+			interlink.SetSpanError(span, resp.StatusCode, errWithContext)
+			return nil, errWithContext
 		}
 
 		errHTTP := fmt.Errorf("%s call exit status: %d. Body: %s", sessionContextMessage, statusCode, ret)
@@ -174,14 +187,15 @@ func ReqWithError(
 		safeErr := html.EscapeString(errHTTP.Error())
 		_, err = w.Write([]byte(safeErr))
 		if err != nil {
-			return nil, fmt.Errorf(sessionContextMessage+
+			errWithContext := fmt.Errorf(sessionContextMessage+
 				"HTTP request in error and could not write all body response to InterLink Node error: %w", err)
+			interlink.SetSpanError(span, resp.StatusCode, errWithContext)
+			return nil, errWithContext
 		}
 
+		interlink.SetSpanError(span, resp.StatusCode, errHTTP)
 		return nil, errHTTP
 	}
-
-	interlink.SetDurationSpan(start, span, interlink.WithHTTPReturnCode(resp.StatusCode))
 
 	// ---------------------------
 	// CASE: respondWithReturn == true
@@ -193,8 +207,10 @@ func ReqWithError(
 		if err != nil {
 			w.WriteHeader(http.StatusInternalServerError)
 			log.G(ctx).Errorf("%s Error reading response body: %v", sessionContextMessage, err)
-			return nil, fmt.Errorf(sessionContextMessage+
+			errWithContext := fmt.Errorf(sessionContextMessage+
 				"error doing ReadAll() of ReqWithErrorComplex see error %w", err)
+			interlink.SetSpanError(span, resp.StatusCode, errWithContext)
+			return nil, errWithContext
 		}
 
 		log.G(ctx).Debugf("%s Response body (len=%d): %.500s", sessionContextMessage, len(returnValue), string(returnValue))
@@ -205,8 +221,10 @@ func ReqWithError(
 			if err != nil {
 				w.WriteHeader(http.StatusInternalServerError)
 				log.G(ctx).Errorf("%s Error writing response body to client: %v", sessionContextMessage, err)
-				return nil, fmt.Errorf(sessionContextMessage+
+				errWithContext := fmt.Errorf(sessionContextMessage+
 					"error doing Write() of ReqWithErrorComplex see error %w", err)
+				interlink.SetSpanError(span, resp.StatusCode, errWithContext)
+				return nil, errWithContext
 			}
 		}
 
@@ -232,8 +250,10 @@ func ReqWithError(
 						_, err = w.Write(bufferBytes[:n])
 						if err != nil {
 							w.WriteHeader(http.StatusInternalServerError)
-							return nil, fmt.Errorf(sessionContextMessage+
+							errWithContext := fmt.Errorf(sessionContextMessage+
 								"could not write during ReqWithError() error: %w", err)
+							interlink.SetSpanError(span, resp.StatusCode, errWithContext)
+							return nil, errWithContext
 						}
 					}
 					log.G(ctx).Infof("%s Completed request successfully (stream mode)", sessionContextMessage)
@@ -241,8 +261,10 @@ func ReqWithError(
 				}
 				w.WriteHeader(http.StatusInternalServerError)
 				log.G(ctx).Errorf("%s Error reading HTTP body: %v", sessionContextMessage, err)
-				return nil, fmt.Errorf(sessionContextMessage+
+				errWithContext := fmt.Errorf(sessionContextMessage+
 					"could not read HTTP body: see error %w", err)
+				interlink.SetSpanError(span, resp.StatusCode, errWithContext)
+				return nil, errWithContext
 			}
 
 			log.G(ctx).Debugf("%s Read %d bytes from response", sessionContextMessage, n)
@@ -250,8 +272,10 @@ func ReqWithError(
 			if err != nil {
 				w.WriteHeader(http.StatusInternalServerError)
 				log.G(ctx).Errorf("%s Error writing response chunk: %v", sessionContextMessage, err)
-				return nil, fmt.Errorf(sessionContextMessage+
+				errWithContext := fmt.Errorf(sessionContextMessage+
 					"could not write during ReqWithError() error: %w", err)
+				interlink.SetSpanError(span, resp.StatusCode, errWithContext)
+				return nil, errWithContext
 			}
 
 			if f, ok := w.(http.Flusher); ok {
