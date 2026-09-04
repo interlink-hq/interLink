@@ -80,6 +80,25 @@ WG_IFACE="{{.WGInterfaceName}}"
 echo "=== Inside network namespace ==="
 echo "Using WireGuard interface: $WG_IFACE"
 
+# A fresh network namespace has `lo` DOWN, so binding the local wstunnel
+# listener to 127.0.0.1 fails with EADDRNOTAVAIL ("Address not available",
+# os error 99) and the client panics on startup. slirp4netns --configure
+# brings `lo` up from outside the namespace, but that runs concurrently with
+# this script, so whether the bind succeeds is a race. Bring it up here, before
+# anything binds, so the race cannot be lost.
+for _ in $(seq 1 50); do
+    if ip link show lo 2>/dev/null | head -1 | grep -qE '[<,]UP[,>]'; then
+        break
+    fi
+    ip link set lo up 2>/dev/null || true
+    sleep 0.1
+done
+if ip link show lo 2>/dev/null | head -1 | grep -qE '[<,]UP[,>]'; then
+    echo "Loopback is up in the namespace"
+else
+    echo "WARNING: loopback is still down; wstunnel may fail to bind 127.0.0.1"
+fi
+
 echo $$ > "$TMPDIR/netns.pid"
 
 export WG_SOCKET_DIR="$TMPDIR"
@@ -144,7 +163,16 @@ wait_for_wstunnel_server() {
             -H "Sec-WebSocket-Version: 13" \
             --connect-timeout 2 \
             --max-time 3 \
-            "$readiness_protocol://{{.IngressEndpoint}}:{{.IngressPort}}/{{.RandomPassword}}" 2>> "$READINESS_LOG" || echo "000")
+            "$readiness_protocol://{{.IngressEndpoint}}:{{.IngressPort}}/{{.RandomPassword}}" 2>> "$READINESS_LOG") || http_code=""
+
+        # curl already writes "000" to stdout when it cannot connect, so the old
+        # `|| echo "000"` appended a second one and produced "000000", which is
+        # != "000" and was therefore counted as a healthy probe. Normalise
+        # anything that is not a three-digit status to "000".
+        case "$http_code" in
+            [0-9][0-9][0-9]) ;;
+            *) http_code="000" ;;
+        esac
 
         echo "wstunnel readiness attempt $attempt/$max_attempts: HTTP status=$http_code (stable $consecutive/3)"
         if [ "$http_code" != "000" ] && [ "$http_code" != "503" ]; then
@@ -187,17 +215,26 @@ start_wstunnel() {
 }
 
 ensure_wstunnel_running() {
-    for attempt in $(seq 1 10); do
+    max_attempts=10
+    # Back off exponentially between restarts: a tunnel that keeps dying is
+    # usually waiting on the server side coming up, and hammering it with a
+    # restart every second only reopens the same failing connection. The
+    # delay only applies to the restart path, so a healthy tunnel still
+    # returns immediately.
+    delay=1
+    max_delay=8
+
+    for attempt in $(seq 1 "$max_attempts"); do
         if ! kill -0 "$WSTUNNEL_PID" 2>/dev/null; then
-            echo "wstunnel exited, restarting (attempt $attempt)..."
+            echo "wstunnel exited, restarting (attempt $attempt/$max_attempts)..."
             echo "--- last wstunnel.log before restart ---"
             tail -n 60 "$WSTUNNEL_LOG" 2>/dev/null || true
             echo "--- end wstunnel.log ---"
             start_wstunnel
-        elif grep -qE "Invalid status code: 503|Invalid protocol version" "$WSTUNNEL_LOG" 2>/dev/null; then
-            echo "wstunnel reported a protocol/status error, restarting (attempt $attempt)..."
+        elif grep -qE "Invalid status code: 503|Invalid protocol version|panicked at|Address not available|Cannot start UDP server" "$WSTUNNEL_LOG" 2>/dev/null; then
+            echo "wstunnel reported a protocol/status error, restarting (attempt $attempt/$max_attempts)..."
             echo "--- matching wstunnel.log lines ---"
-            grep -E "Invalid status code: 503|Invalid protocol version" "$WSTUNNEL_LOG" 2>/dev/null || true
+            grep -E "Invalid status code: 503|Invalid protocol version|panicked at|Address not available|Cannot start UDP server" "$WSTUNNEL_LOG" 2>/dev/null || true
             echo "--- end matching lines ---"
             kill "$WSTUNNEL_PID" 2>/dev/null || true
             : > "$WSTUNNEL_LOG"
@@ -205,7 +242,13 @@ ensure_wstunnel_running() {
         else
             return 0
         fi
-        sleep 1
+
+        echo "Waiting ${delay}s before re-checking wstunnel health..."
+        sleep "$delay"
+        delay=$((delay * 2))
+        if [ "$delay" -gt "$max_delay" ]; then
+            delay=$max_delay
+        fi
     done
 
     echo "ERROR: wstunnel did not stay healthy"
