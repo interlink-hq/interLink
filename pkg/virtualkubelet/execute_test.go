@@ -12,12 +12,34 @@ import (
 	types "github.com/interlink-hq/interlink/pkg/interlink"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+	"go.opentelemetry.io/otel"
+	"go.opentelemetry.io/otel/propagation"
+	oteltrace "go.opentelemetry.io/otel/trace"
 	v1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/client-go/kubernetes/fake"
 )
 
 const testNamespace = "test-ns"
+
+func TestInjectTraceContext(t *testing.T) {
+	previousPropagator := otel.GetTextMapPropagator()
+	otel.SetTextMapPropagator(propagation.TraceContext{})
+	t.Cleanup(func() { otel.SetTextMapPropagator(previousPropagator) })
+
+	spanContext := oteltrace.NewSpanContext(oteltrace.SpanContextConfig{
+		TraceID:    oteltrace.TraceID{1, 2, 3},
+		SpanID:     oteltrace.SpanID{4, 5, 6},
+		TraceFlags: oteltrace.FlagsSampled,
+	})
+	ctx := oteltrace.ContextWithSpanContext(context.Background(), spanContext)
+	req := httptest.NewRequest(http.MethodPost, "/create", nil)
+
+	req = injectTraceContext(ctx, req)
+
+	assert.Equal(t, "00-"+spanContext.TraceID().String()+"-"+spanContext.SpanID().String()+"-01", req.Header.Get("traceparent"))
+	assert.Equal(t, spanContext, oteltrace.SpanContextFromContext(req.Context()))
+}
 
 // unixSocketRoundTripper rewrites http+unix URLs to http://unix so the underlying
 // transport can dial the configured unix socket.

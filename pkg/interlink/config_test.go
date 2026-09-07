@@ -73,6 +73,29 @@ TLS:
 			wantErr: false,
 		},
 		{
+			name: "config with detailed tracing enabled",
+			yamlContent: `
+InterlinkAddress: "http://0.0.0.0"
+InterlinkPort: "3000"
+SidecarURL: "http://localhost"
+SidecarPort: "4000"
+Tracing:
+  Enabled: true
+  Detailed: true
+`,
+			want: Config{
+				InterlinkAddress: "http://0.0.0.0",
+				Interlinkport:    "3000",
+				Sidecarurl:       "http://localhost",
+				Sidecarport:      "4000",
+				Tracing: TracingConfig{
+					Enabled:  true,
+					Detailed: true,
+				},
+			},
+			wantErr: false,
+		},
+		{
 			name: "config with job script build config",
 			yamlContent: `
 InterlinkAddress: "http://0.0.0.0"
@@ -162,6 +185,7 @@ JobScriptBuildConfig:
 			assert.Equal(t, tt.want.ErrorsOnlyLogging, got.ErrorsOnlyLogging)
 			assert.Equal(t, tt.want.DataRootFolder, got.DataRootFolder)
 			assert.Equal(t, tt.want.TLS, got.TLS)
+			assert.Equal(t, tt.want.Tracing, got.Tracing)
 
 			if tt.want.JobScriptBuildConfig != nil {
 				require.NotNil(t, got.JobScriptBuildConfig)
@@ -171,6 +195,31 @@ JobScriptBuildConfig:
 			}
 		})
 	}
+}
+
+func TestOptionalEnvBool(t *testing.T) {
+	t.Run("true accepts legacy numeric value", func(t *testing.T) {
+		t.Setenv("ENABLE_TRACING", "1")
+		value, set, err := optionalEnvBool("ENABLE_TRACING")
+		require.NoError(t, err)
+		assert.True(t, set)
+		assert.True(t, value)
+	})
+
+	t.Run("false overrides yaml", func(t *testing.T) {
+		t.Setenv("ENABLE_DETAILED_TRACING", "false")
+		value, set, err := optionalEnvBool("ENABLE_DETAILED_TRACING")
+		require.NoError(t, err)
+		assert.True(t, set)
+		assert.False(t, value)
+	})
+
+	t.Run("invalid value is rejected", func(t *testing.T) {
+		t.Setenv("ENABLE_DETAILED_TRACING", "sometimes")
+		_, set, err := optionalEnvBool("ENABLE_DETAILED_TRACING")
+		assert.True(t, set)
+		assert.Error(t, err)
+	})
 }
 
 func TestConfig_EnvironmentOverrides(t *testing.T) {

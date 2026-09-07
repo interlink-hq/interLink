@@ -12,10 +12,6 @@ import (
 	"github.com/containerd/containerd/log"
 
 	types "github.com/interlink-hq/interlink/pkg/interlink"
-
-	"go.opentelemetry.io/otel"
-	"go.opentelemetry.io/otel/attribute"
-	trace "go.opentelemetry.io/otel/trace"
 )
 
 // CreateHandler handles HTTP POST requests to create pods on remote systems.
@@ -35,10 +31,7 @@ import (
 //   - 500: Internal server error (configuration issues, sidecar communication failures)
 func (h *InterLinkHandler) CreateHandler(w http.ResponseWriter, r *http.Request) {
 	start := time.Now().UnixMicro()
-	tracer := otel.Tracer("interlink-API")
-	_, span := tracer.Start(h.Ctx, "CreateAPI", trace.WithAttributes(
-		attribute.Int64("start.timestamp", start),
-	))
+	ctx, span, sessionContext := h.startAPITrace(r, "CreateAPI", "/create", start)
 	defer span.End()
 	defer types.SetDurationSpan(start, span)
 	defer types.SetInfoFromHeaders(span, &r.Header)
@@ -55,6 +48,7 @@ func (h *InterLinkHandler) CreateHandler(w http.ResponseWriter, r *http.Request)
 		types.SetSpanError(span, statusCode, err)
 		return
 	}
+	setRequestBodySize(span, bodyBytes)
 
 	var req *http.Request           // request to forward to sidecar
 	var pod types.PodCreateRequests // request for interlink
@@ -67,13 +61,9 @@ func (h *InterLinkHandler) CreateHandler(w http.ResponseWriter, r *http.Request)
 		return
 	}
 
-	span.SetAttributes(
-		attribute.String("pod.name", pod.Pod.Name),
-		attribute.String("pod.namespace", pod.Pod.Namespace),
-		attribute.String("pod.uid", string(pod.Pod.UID)),
-	)
+	setCreateRequestSpanAttributes(span, pod, h.Config.Tracing.Detailed)
 
-	data, err := getData(h.Ctx, h.Config, pod, span)
+	data, err := getData(ctx, h.Config, pod, span)
 	if err != nil {
 		statusCode = http.StatusInternalServerError
 		log.G(h.Ctx).Error(err)
@@ -121,7 +111,7 @@ func (h *InterLinkHandler) CreateHandler(w http.ResponseWriter, r *http.Request)
 		log.G(h.Ctx).Infof("POST payload to JobScriptBuilder: %s", string(bodyBytes))
 
 		reader := bytes.NewReader(bodyBytes)
-		req, err = http.NewRequest(http.MethodPost, pod.JobScriptBuilderURL, reader)
+		req, err = http.NewRequestWithContext(ctx, http.MethodPost, pod.JobScriptBuilderURL, reader)
 		if err != nil {
 			statusCode = http.StatusInternalServerError
 			log.G(h.Ctx).Errorf("Failed to create POST request to JobScriptBuilder: %v | URL: %s", err, pod.JobScriptBuilderURL)
@@ -130,12 +120,11 @@ func (h *InterLinkHandler) CreateHandler(w http.ResponseWriter, r *http.Request)
 			return
 		}
 
-		sessionContext := GetSessionContext(r)
 		req.Header.Set("Content-Type", "application/json")
 
 		log.G(h.Ctx).Infof("Sending POST to JobScriptBuilder at %s with session: %+v", pod.JobScriptBuilderURL, sessionContext)
 
-		bodyBytesResp, err := ReqWithError(h.Ctx, req, w, start, span, false, true, sessionContext, http.DefaultClient)
+		bodyBytesResp, err := ReqWithError(ctx, req, w, start, span, false, true, sessionContext, http.DefaultClient)
 		if err != nil {
 			// ReqWithError has already marked the span as failed.
 			log.G(h.Ctx).Errorf("JobScriptBuilder request failed: %v", err)
@@ -190,7 +179,7 @@ func (h *InterLinkHandler) CreateHandler(w http.ResponseWriter, r *http.Request)
 	reader := bytes.NewReader(bodyBytes)
 
 	log.G(h.Ctx).Info(req)
-	req, err = http.NewRequest(http.MethodPost, h.SidecarEndpoint+"/create", reader)
+	req, err = http.NewRequestWithContext(ctx, http.MethodPost, h.SidecarEndpoint+"/create", reader)
 	if err != nil {
 		statusCode = http.StatusInternalServerError
 		w.WriteHeader(statusCode)
@@ -201,8 +190,7 @@ func (h *InterLinkHandler) CreateHandler(w http.ResponseWriter, r *http.Request)
 
 	log.G(h.Ctx).Info("InterLink: forwarding Create call to sidecar")
 
-	sessionContext := GetSessionContext(r)
-	_, err = ReqWithError(h.Ctx, req, w, start, span, true, false, sessionContext, h.ClientHTTP)
+	_, err = ReqWithError(ctx, req, w, start, span, true, false, sessionContext, h.ClientHTTP)
 	if err != nil {
 		// ReqWithError has already marked the span as failed.
 		log.L.Error(err)

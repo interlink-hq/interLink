@@ -1,7 +1,10 @@
 package api
 
 import (
+	"bytes"
 	"context"
+	"encoding/json"
+	"fmt"
 	"io"
 	"net"
 	"net/http"
@@ -14,14 +17,185 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"go.opentelemetry.io/otel"
+	"go.opentelemetry.io/otel/attribute"
+	"go.opentelemetry.io/otel/propagation"
 	"go.opentelemetry.io/otel/sdk/trace"
 	"go.opentelemetry.io/otel/sdk/trace/tracetest"
+	oteltrace "go.opentelemetry.io/otel/trace"
+	v1 "k8s.io/api/core/v1"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+
+	types "github.com/interlink-hq/interlink/pkg/interlink"
 )
 
 // unixSocketRoundTripper rewrites http+unix URLs to http://unix so the underlying
 // transport can dial the configured unix socket.
 type unixSocketRoundTripper struct {
 	transport http.RoundTripper
+}
+
+func tracingSpanRecorder(t *testing.T) *tracetest.InMemoryExporter {
+	t.Helper()
+	exporter := tracetest.NewInMemoryExporter()
+	tp := trace.NewTracerProvider(trace.WithSyncer(exporter))
+	otel.SetTracerProvider(tp)
+	t.Cleanup(func() { require.NoError(t, tp.Shutdown(context.Background())) })
+	return exporter
+}
+
+func findTracingSpan(t *testing.T, exporter *tracetest.InMemoryExporter, name string) tracetest.SpanStub {
+	t.Helper()
+	for _, span := range exporter.GetSpans() {
+		if span.Name == name {
+			return span
+		}
+	}
+	t.Fatalf("no span named %q was exported", name)
+	return tracetest.SpanStub{}
+}
+
+func tracingAttrValue(attrs []attribute.KeyValue, key string) (attribute.Value, bool) {
+	for _, attr := range attrs {
+		if string(attr.Key) == key {
+			return attr.Value, true
+		}
+	}
+	return attribute.Value{}, false
+}
+
+func tracingTestHandler(t *testing.T, status int) *InterLinkHandler {
+	t.Helper()
+	server, _, client := newUnixTestServer(t, http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.WriteHeader(status)
+		_, _ = io.WriteString(w, `[]`)
+	}))
+	t.Cleanup(server.Close)
+	return &InterLinkHandler{Ctx: context.Background(), SidecarEndpoint: "http+unix://", ClientHTTP: client}
+}
+
+func tracingJSON(t *testing.T, value any) *bytes.Reader {
+	t.Helper()
+	data, err := json.Marshal(value)
+	require.NoError(t, err)
+	return bytes.NewReader(data)
+}
+
+func TestAPITracingCreatesServerAndClientSpans(t *testing.T) {
+	exporter := tracingSpanRecorder(t)
+	previousPropagator := otel.GetTextMapPropagator()
+	otel.SetTextMapPropagator(propagation.TraceContext{})
+	t.Cleanup(func() { otel.SetTextMapPropagator(previousPropagator) })
+
+	var receivedSession string
+	var receivedTraceparent string
+	server, _, client := newUnixTestServer(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		receivedSession = r.Header.Get("InterLink-Http-Session")
+		receivedTraceparent = r.Header.Get("traceparent")
+		w.WriteHeader(http.StatusOK)
+		_, _ = io.WriteString(w, `[]`)
+	}))
+	defer server.Close()
+
+	h := &InterLinkHandler{Ctx: context.Background(), SidecarEndpoint: "http+unix://", ClientHTTP: client}
+	remoteParent := oteltrace.NewSpanContext(oteltrace.SpanContextConfig{
+		TraceID:    oteltrace.TraceID{1, 2, 3},
+		SpanID:     oteltrace.SpanID{4, 5, 6},
+		TraceFlags: oteltrace.FlagsSampled,
+		Remote:     true,
+	})
+	req := httptest.NewRequest(http.MethodGet, "/pinglink", nil)
+	req.Header.Set("InterLink-Http-Session", "Request-test-session")
+	req.Header.Set("traceparent", fmt.Sprintf("00-%s-%s-01", remoteParent.TraceID(), remoteParent.SpanID()))
+
+	h.Ping(httptest.NewRecorder(), req)
+
+	serverSpan := findTracingSpan(t, exporter, "PingAPI")
+	clientSpan := findTracingSpan(t, exporter, "HTTP GET")
+	assert.Equal(t, oteltrace.SpanKindServer, serverSpan.SpanKind)
+	assert.Equal(t, remoteParent.SpanID(), serverSpan.Parent.SpanID())
+	assert.Equal(t, oteltrace.SpanKindClient, clientSpan.SpanKind)
+	assert.Equal(t, serverSpan.SpanContext.SpanID(), clientSpan.Parent.SpanID())
+	assert.Equal(t, "Request-test-session", receivedSession)
+	assert.NotEmpty(t, receivedTraceparent)
+
+	method, ok := tracingAttrValue(serverSpan.Attributes, "http.request.method")
+	require.True(t, ok)
+	assert.Equal(t, http.MethodGet, method.AsString())
+	status, ok := tracingAttrValue(serverSpan.Attributes, "http.response.status_code")
+	require.True(t, ok)
+	assert.Equal(t, int64(http.StatusOK), status.AsInt64())
+}
+
+func TestDetailedTracingAddsMetadataWithoutValues(t *testing.T) {
+	exporter := tracingSpanRecorder(t)
+	h := tracingTestHandler(t, http.StatusOK)
+	h.Config.Tracing.Detailed = true
+
+	const sensitiveValue = "must-not-appear-in-tracing"
+	podRequest := types.PodCreateRequests{
+		Pod: v1.Pod{
+			ObjectMeta: metav1.ObjectMeta{
+				Name:        "trace-pod",
+				Namespace:   "trace-ns",
+				UID:         "trace-uid",
+				Labels:      map[string]string{"team": sensitiveValue},
+				Annotations: map[string]string{"example.org/token": sensitiveValue},
+			},
+			Spec: v1.PodSpec{Containers: []v1.Container{{
+				Name:  "worker",
+				Image: "registry.example/worker:v1",
+				Env:   []v1.EnvVar{{Name: "ACCESS_TOKEN", Value: sensitiveValue}},
+			}}},
+		},
+		Secrets: []v1.Secret{{
+			ObjectMeta: metav1.ObjectMeta{Name: "runtime-secret"},
+			Data:       map[string][]byte{"token": []byte(sensitiveValue)},
+		}},
+	}
+
+	w := httptest.NewRecorder()
+	h.CreateHandler(w, httptest.NewRequest(http.MethodPost, "/create", tracingJSON(t, podRequest)))
+	require.Equal(t, http.StatusOK, w.Code)
+
+	span := findTracingSpan(t, exporter, "CreateAPI")
+	detailed, ok := tracingAttrValue(span.Attributes, "interlink.tracing.detailed")
+	require.True(t, ok)
+	assert.True(t, detailed.AsBool())
+	containerNames, ok := tracingAttrValue(span.Attributes, "interlink.pod.container.names")
+	require.True(t, ok)
+	assert.Equal(t, []string{"worker"}, containerNames.AsStringSlice())
+	labelKeys, ok := tracingAttrValue(span.Attributes, "interlink.pod.label.keys")
+	require.True(t, ok)
+	assert.Equal(t, []string{"team"}, labelKeys.AsStringSlice())
+	secretNames, ok := tracingAttrValue(span.Attributes, "interlink.create.secret.names")
+	require.True(t, ok)
+	assert.Equal(t, []string{"runtime-secret"}, secretNames.AsStringSlice())
+
+	for _, attr := range span.Attributes {
+		assert.NotContains(t, fmt.Sprint(attr.Value.AsInterface()), sensitiveValue)
+	}
+	for _, event := range span.Events {
+		for _, attr := range event.Attributes {
+			assert.NotContains(t, fmt.Sprint(attr.Value.AsInterface()), sensitiveValue)
+		}
+	}
+}
+
+func TestDefaultTracingOmitsDetailedMetadata(t *testing.T) {
+	exporter := tracingSpanRecorder(t)
+	h := tracingTestHandler(t, http.StatusOK)
+	pod := &v1.Pod{
+		ObjectMeta: metav1.ObjectMeta{Name: "span-pod", Namespace: "ns", UID: "span-pod-uid"},
+		Spec:       v1.PodSpec{Containers: []v1.Container{{Name: "worker", Image: "private.example/worker:v1"}}},
+	}
+	h.DeleteHandler(httptest.NewRecorder(), httptest.NewRequest(http.MethodPost, "/delete", tracingJSON(t, pod)))
+
+	span := findTracingSpan(t, exporter, "DeleteAPI")
+	_, hasContainerNames := tracingAttrValue(span.Attributes, "interlink.pod.container.names")
+	assert.False(t, hasContainerNames)
+	for _, attr := range span.Attributes {
+		assert.NotContains(t, fmt.Sprint(attr.Value.AsInterface()), "private.example")
+	}
 }
 
 func (rt *unixSocketRoundTripper) RoundTrip(req *http.Request) (*http.Response, error) {

@@ -14,7 +14,6 @@ import (
 
 	types "github.com/interlink-hq/interlink/pkg/interlink"
 
-	"go.opentelemetry.io/otel"
 	"go.opentelemetry.io/otel/attribute"
 	trace "go.opentelemetry.io/otel/trace"
 )
@@ -35,10 +34,7 @@ import (
 //   - 500: Internal server error (sidecar communication failures, JSON marshalling errors)
 func (h *InterLinkHandler) StatusHandler(w http.ResponseWriter, r *http.Request) {
 	start := time.Now().UnixMicro()
-	tracer := otel.Tracer("interlink-API")
-	_, span := tracer.Start(h.Ctx, "StatusAPI", trace.WithAttributes(
-		attribute.Int64("start.timestamp", start),
-	))
+	ctx, span, sessionContext := h.startAPITrace(r, "StatusAPI", "/status", start)
 	defer span.End()
 	defer types.SetDurationSpan(start, span)
 	defer types.SetInfoFromHeaders(span, &r.Header)
@@ -48,13 +44,22 @@ func (h *InterLinkHandler) StatusHandler(w http.ResponseWriter, r *http.Request)
 
 	bodyBytes, err := io.ReadAll(r.Body)
 	if err != nil {
-		log.G(h.Ctx).Fatal(err)
+		statusCode = http.StatusInternalServerError
+		w.WriteHeader(statusCode)
+		log.G(h.Ctx).Error(err)
+		types.SetSpanError(span, statusCode, err)
+		return
 	}
+	setRequestBodySize(span, bodyBytes)
 
 	err = json.Unmarshal(bodyBytes, &pods)
 	if err != nil {
 		errWithContext := fmt.Errorf("error doing fisrt Unmarshal() in StatusHandler() error detail: %s error: %w", fmt.Sprintf("%#v", err), err)
 		log.G(h.Ctx).Error(errWithContext)
+		statusCode = http.StatusBadRequest
+		w.WriteHeader(statusCode)
+		types.SetSpanError(span, statusCode, errWithContext)
+		return
 	}
 
 	span.SetAttributes(
@@ -64,40 +69,59 @@ func (h *InterLinkHandler) StatusHandler(w http.ResponseWriter, r *http.Request)
 	var podsToBeChecked []*v1.Pod
 	var returnedStatuses []types.PodStatus // returned from the query to the sidecar
 	var returnPods []types.PodStatus       // returned to the vk
+	cacheHits := 0
 
 	PodStatuses.mu.Lock()
 	for _, pod := range pods {
 		cached := checkIfCached(string(pod.UID))
+		if cached {
+			cacheHits++
+		}
 		if pod.Status.Phase == v1.PodRunning || pod.Status.Phase == v1.PodPending || !cached {
 			podsToBeChecked = append(podsToBeChecked, pod)
 		}
-		span.AddEvent("Pod "+pod.Name+" is cached", trace.WithAttributes(
-			attribute.String("pod.name", pod.Name),
-			attribute.String("pod.namespace", pod.Namespace),
-			attribute.String("pod.uid", string(pod.UID)),
-			attribute.String("pod.phase", string(pod.Status.Phase)),
-		))
+		if h.Config.Tracing.Detailed {
+			span.AddEvent("Evaluated pod status cache", trace.WithAttributes(
+				attribute.String("pod.name", pod.Name),
+				attribute.String("pod.namespace", pod.Namespace),
+				attribute.String("pod.uid", string(pod.UID)),
+				attribute.String("pod.phase", string(pod.Status.Phase)),
+				attribute.Bool("interlink.status.cache.hit", cached),
+			))
+		}
 	}
 	PodStatuses.mu.Unlock()
+	span.SetAttributes(
+		attribute.Int("interlink.status.cache.hit_count", cacheHits),
+		attribute.Int("interlink.status.cache.miss_count", len(pods)-cacheHits),
+		attribute.Int("interlink.status.plugin_query.count", len(podsToBeChecked)),
+	)
 
 	if len(podsToBeChecked) > 0 {
 
 		bodyBytes, err = json.Marshal(podsToBeChecked)
 		if err != nil {
-			log.G(h.Ctx).Fatal(err)
+			statusCode = http.StatusInternalServerError
+			w.WriteHeader(statusCode)
+			log.G(h.Ctx).Error(err)
+			types.SetSpanError(span, statusCode, err)
+			return
 		}
 
 		reader := bytes.NewReader(bodyBytes)
-		req, err := http.NewRequest(http.MethodGet, h.SidecarEndpoint+"/status", reader)
+		req, err := http.NewRequestWithContext(ctx, http.MethodGet, h.SidecarEndpoint+"/status", reader)
 		if err != nil {
-			log.G(h.Ctx).Fatal(err)
+			statusCode = http.StatusInternalServerError
+			w.WriteHeader(statusCode)
+			log.G(h.Ctx).Error(err)
+			types.SetSpanError(span, statusCode, err)
+			return
 		}
 
 		log.G(h.Ctx).Info("InterLink: forwarding GetStatus call to sidecar")
 		req.Header.Set("Content-Type", "application/json")
 
-		sessionContext := GetSessionContext(r)
-		bodyBytes, err = ReqWithError(h.Ctx, req, w, start, span, false, true, sessionContext, h.ClientHTTP)
+		bodyBytes, err = ReqWithError(ctx, req, w, start, span, false, true, sessionContext, h.ClientHTTP)
 		if err != nil {
 			// ReqWithError has already marked the span as failed.
 			log.L.Error(err)
@@ -144,6 +168,10 @@ func (h *InterLinkHandler) StatusHandler(w http.ResponseWriter, r *http.Request)
 		types.SetSpanError(span, statusCode, err)
 		return
 	}
+	span.SetAttributes(
+		attribute.Int("interlink.status.returned.count", len(returnPods)),
+		attribute.Int("http.response.body.size", len(returnValue)),
+	)
 
 	w.WriteHeader(statusCode)
 	_, err = w.Write(returnValue)

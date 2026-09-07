@@ -38,6 +38,11 @@ DataRootFolder: "/tmp/interlink" # Root directory for temporary data
 VerboseLogging: false # Enable debug level logging
 ErrorsOnlyLogging: false # Only log errors (overrides verbose)
 
+# OpenTelemetry tracing
+Tracing:
+  Enabled: false # Export API server traces
+  Detailed: false # Add opt-in high-cardinality diagnostic attributes
+
 # TLS Configuration (optional)
 TLS:
   Enabled: true # Enable TLS/mTLS
@@ -95,6 +100,19 @@ JobScriptTemplate: |
 | ------------------- | ---- | ------- | ----------------------------------------------- |
 | `VerboseLogging`    | bool | `false` | Enable debug level logging for detailed output  |
 | `ErrorsOnlyLogging` | bool | `false` | Only log errors (takes precedence over verbose) |
+
+### Tracing Configuration
+
+| Field      | Type | Default | Description |
+| ---------- | ---- | ------- | ----------- |
+| `Enabled`  | bool | `false` | Export OpenTelemetry traces from the interLink API server |
+| `Detailed` | bool | `false` | Add container/image names, Kubernetes metadata keys, referenced ConfigMap/Secret names, cache decisions, client details, and response-mode diagnostics |
+
+`Tracing.Detailed` intentionally does not export HTTP bodies, Secret contents,
+ConfigMap contents, environment variable values, container commands, or
+arguments. Because detailed attributes can still have high cardinality and may
+contain workload identifiers, enable this mode temporarily or only where the
+telemetry backend has appropriate access controls.
 
 ### TLS Configuration
 
@@ -186,6 +204,8 @@ The following environment variables can override configuration file values:
 | `INTERLINKPORT`       | `InterlinkPort`    | Override interLink server port                                              |
 | `SIDECARURL`          | `SidecarURL`       | Override InterLink plugin URL                                               |
 | `SIDECARPORT`         | `SidecarPort`      | Override InterLink plugin port                                              |
+| `ENABLE_TRACING`      | `Tracing.Enabled`  | Enable or disable API server tracing (`true`, `false`, `1`, or `0`)          |
+| `ENABLE_DETAILED_TRACING` | `Tracing.Detailed` | Override detailed diagnostic attributes (`true`, `false`, `1`, or `0`)   |
 
 ## Telemetry Configuration
 
@@ -199,6 +219,13 @@ OpenTelemetry tracing is configured through environment variables:
 | `TELEMETRY_CLIENT_CRT_FILEPATH`  | -                  | Client certificate for mTLS                   |
 | `TELEMETRY_CLIENT_KEY_FILEPATH`  | -                  | Client private key for mTLS                   |
 | `TELEMETRY_INSECURE_SKIP_VERIFY` | `"false"`          | Skip TLS certificate verification             |
+
+The API server accepts and propagates W3C `traceparent` headers. Handler spans
+are server spans, and calls to the configured plugin or job-script builder are
+recorded as child client spans. Standard HTTP attributes such as
+`http.request.method`, `http.route`, `http.response.status_code`, request/response
+body sizes, network endpoint information, and `error.type` are included alongside
+the legacy `exit.code` field.
 
 ## Command Line Options
 
@@ -315,4 +342,3 @@ export VERBOSE_LOGGING=true
 - [mTLS Deployment Guide](./07-mtls-deployment.mdx)
 - [Monitoring Guide](./05-monitoring.md)
 - [API Reference](./03-api-reference.mdx)
-

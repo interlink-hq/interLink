@@ -3,6 +3,7 @@ package api
 import (
 	"bytes"
 	"encoding/json"
+	"errors"
 	"io"
 	"net/http"
 	"time"
@@ -11,10 +12,6 @@ import (
 	v1 "k8s.io/api/core/v1"
 
 	types "github.com/interlink-hq/interlink/pkg/interlink"
-
-	"go.opentelemetry.io/otel"
-	"go.opentelemetry.io/otel/attribute"
-	trace "go.opentelemetry.io/otel/trace"
 )
 
 // DeleteHandler handles HTTP DELETE requests to remove pods from remote systems.
@@ -32,10 +29,7 @@ import (
 //   - 500: Internal server error (sidecar communication failures, JSON unmarshalling errors)
 func (h *InterLinkHandler) DeleteHandler(w http.ResponseWriter, r *http.Request) {
 	start := time.Now().UnixMicro()
-	tracer := otel.Tracer("interlink-API")
-	_, span := tracer.Start(h.Ctx, "DeleteAPI", trace.WithAttributes(
-		attribute.Int64("start.timestamp", start),
-	))
+	ctx, span, sessionContext := h.startAPITrace(r, "DeleteAPI", "/delete", start)
 	defer span.End()
 	defer types.SetDurationSpan(start, span)
 	defer types.SetInfoFromHeaders(span, &r.Header)
@@ -48,27 +42,36 @@ func (h *InterLinkHandler) DeleteHandler(w http.ResponseWriter, r *http.Request)
 	if err != nil {
 		statusCode = http.StatusInternalServerError
 		w.WriteHeader(statusCode)
-		log.G(h.Ctx).Fatal(err)
+		log.G(h.Ctx).Error(err)
+		types.SetSpanError(span, statusCode, err)
+		return
 	}
+	setRequestBodySize(span, bodyBytes)
 
 	var req *http.Request
 	var pod *v1.Pod
 	reader := bytes.NewReader(bodyBytes)
 	err = json.Unmarshal(bodyBytes, &pod)
 	if err != nil {
-		statusCode = http.StatusInternalServerError
+		statusCode = http.StatusBadRequest
 		w.WriteHeader(statusCode)
-		log.G(h.Ctx).Fatal(err)
+		log.G(h.Ctx).Error(err)
+		types.SetSpanError(span, statusCode, err)
+		return
+	}
+	if pod == nil {
+		statusCode = http.StatusBadRequest
+		err = errors.New("request body must contain a pod")
+		w.WriteHeader(statusCode)
+		log.G(h.Ctx).Error(err)
+		types.SetSpanError(span, statusCode, err)
+		return
 	}
 
-	span.SetAttributes(
-		attribute.String("pod.name", pod.Name),
-		attribute.String("pod.namespace", pod.Namespace),
-		attribute.String("pod.uid", string(pod.UID)),
-	)
+	setPodSpanAttributes(span, pod, h.Config.Tracing.Detailed)
 
 	deleteCachedStatus(string(pod.UID))
-	req, err = http.NewRequest(http.MethodPost, h.SidecarEndpoint+"/delete", reader)
+	req, err = http.NewRequestWithContext(ctx, http.MethodPost, h.SidecarEndpoint+"/delete", reader)
 	if err != nil {
 		statusCode = http.StatusInternalServerError
 		w.WriteHeader(statusCode)
@@ -79,8 +82,7 @@ func (h *InterLinkHandler) DeleteHandler(w http.ResponseWriter, r *http.Request)
 
 	req.Header.Set("Content-Type", "application/json")
 	log.G(h.Ctx).Info("InterLink: forwarding Delete call to sidecar")
-	sessionContext := GetSessionContext(r)
-	_, err = ReqWithError(h.Ctx, req, w, start, span, true, false, sessionContext, h.ClientHTTP)
+	_, err = ReqWithError(ctx, req, w, start, span, true, false, sessionContext, h.ClientHTTP)
 	if err != nil {
 		// ReqWithError has already marked the span as failed.
 		log.L.Error(err)

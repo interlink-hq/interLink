@@ -1,6 +1,7 @@
 package interlink
 
 import (
+	"fmt"
 	"net/http"
 	"time"
 
@@ -33,7 +34,7 @@ func SetDurationSpan(startTime int64, span trace.Span, opts ...SpanOption) {
 		attribute.Int64("duration", duration))
 
 	if config.SetHTTPCode {
-		span.SetAttributes(attribute.Int("exit.code", config.HTTPReturnCode))
+		SetHTTPReturnCode(span, config.HTTPReturnCode)
 	}
 }
 
@@ -41,7 +42,11 @@ func SetDurationSpan(startTime int64, span trace.Span, opts ...SpanOption) {
 // span, without touching timing information. Use it when the code becomes known
 // at a different moment from the end of the operation.
 func SetHTTPReturnCode(span trace.Span, statusCode int) {
-	span.SetAttributes(attribute.Int("exit.code", statusCode))
+	span.SetAttributes(
+		// Keep exit.code for compatibility with existing dashboards.
+		attribute.Int("exit.code", statusCode),
+		attribute.Int("http.response.status_code", statusCode),
+	)
 }
 
 // SetSpanError marks the span as failed, records err on it, and — when
@@ -61,10 +66,12 @@ func SetSpanError(span trace.Span, statusCode int, err error) {
 		SetHTTPReturnCode(span, statusCode)
 	}
 	if err != nil {
+		span.SetAttributes(attribute.String("error.type", fmt.Sprintf("%T", err)))
 		span.RecordError(err)
 		span.SetStatus(codes.Error, err.Error())
 		return
 	}
+	span.SetAttributes(attribute.String("error.type", http.StatusText(statusCode)))
 	span.SetStatus(codes.Error, http.StatusText(statusCode))
 }
 

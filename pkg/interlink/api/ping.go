@@ -12,19 +12,12 @@ import (
 	v1 "k8s.io/api/core/v1"
 
 	types "github.com/interlink-hq/interlink/pkg/interlink"
-
-	"go.opentelemetry.io/otel"
-	"go.opentelemetry.io/otel/attribute"
-	trace "go.opentelemetry.io/otel/trace"
 )
 
 // Ping is just a very basic Ping function
 func (h *InterLinkHandler) Ping(w http.ResponseWriter, r *http.Request) {
 	start := time.Now().UnixMicro()
-	tracer := otel.Tracer("interlink-API")
-	_, span := tracer.Start(h.Ctx, "PingAPI", trace.WithAttributes(
-		attribute.Int64("start.timestamp", start),
-	))
+	ctx, span, sessionContext := h.startAPITrace(r, "PingAPI", "/pinglink", start)
 	defer span.End()
 	defer types.SetDurationSpan(start, span)
 	defer types.SetInfoFromHeaders(span, &r.Header)
@@ -35,20 +28,24 @@ func (h *InterLinkHandler) Ping(w http.ResponseWriter, r *http.Request) {
 	bodyBytes, err := json.Marshal(podsToBeChecked)
 	if err != nil {
 		log.G(h.Ctx).Error(err)
+		w.WriteHeader(http.StatusInternalServerError)
+		types.SetSpanError(span, http.StatusInternalServerError, err)
+		return
 	}
-
 	reader := bytes.NewReader(bodyBytes)
-	req, err := http.NewRequest(http.MethodGet, h.SidecarEndpoint+"/status", reader)
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, h.SidecarEndpoint+"/status", reader)
 	if err != nil {
 		log.G(h.Ctx).Error(err)
+		w.WriteHeader(http.StatusInternalServerError)
+		types.SetSpanError(span, http.StatusInternalServerError, err)
+		return
 	}
 
 	log.G(h.Ctx).Info("InterLink: forwarding GetStatus call to sidecar")
 	req.Header.Set("Content-Type", "application/json")
 	log.G(h.Ctx).Debug(req)
 
-	sessionContext := GetSessionContext(req)
-	_, err = ReqWithError(h.Ctx, req, w, start, span, true, false, sessionContext, h.ClientHTTP)
+	_, err = ReqWithError(ctx, req, w, start, span, true, false, sessionContext, h.ClientHTTP)
 	if err != nil {
 		// ReqWithError has already marked the span as failed and recorded the
 		// code it sent to the client. The WriteHeader below is superfluous —
