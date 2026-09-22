@@ -1,0 +1,56 @@
+---
+title: "Serve Several Models Behind One Endpoint"
+description: "Put an OpenAI-compatible gateway in front of offloaded inference servers so clients use one URL and a list of model names"
+sidebar_position: 15
+---
+
+# Serve Several Models Behind One Endpoint
+
+One vLLM process serves one model. Several models mean several Deployments and
+several Services, and most clients accept only one base URL.
+
+A gateway in Kubernetes solves this. Clients get one URL and a list of model
+names, and the gateway also holds the API keys and rate limits, which an
+offloaded Pod cannot do.
+
+The example uses LiteLLM. Any gateway that forwards OpenAI-compatible traffic
+works the same way. For installation, keys and budgets see the
+[LiteLLM documentation](https://docs.litellm.ai/).
+
+## Configuration
+
+Each entry points at the Service of one Deployment, as created in
+[Run an Inference Server on Offloaded GPUs](./14-inference-server.mdx):
+
+```yaml
+model_list:
+  - model_name: big
+    litellm_params:
+      model: openai/gemma-4-31b
+      api_base: http://vllm.default.svc.cluster.local:8000/v1
+      api_key: unused
+  - model_name: fast
+    litellm_params:
+      model: openai/gemma-4-e4b
+      api_base: http://vllm-small.default.svc.cluster.local:8000/v1
+      api_key: unused
+```
+
+- **`openai/` is a protocol prefix, not a provider.** It means an
+  OpenAI-compatible server at `api_base`.
+- **The name after the prefix must match `--served-model-name`**, not the
+  Hugging Face repository id.
+- **`api_key` must not be empty**, although vLLM ignores it when started
+  without authentication.
+- **`model_name` is the alias clients use.** Keep it stable and change what is
+  behind it.
+
+## Notes
+
+- **Name Services after the role**, for example `vllm-chat`, not after the
+  model. A model change then leaves the gateway configuration unchanged.
+- **The alias stays up, the backend does not.** While a Slurm job is being
+  resubmitted, the gateway returns errors for that alias until the new job is
+  serving.
+- **Run the gateway in Kubernetes**, not as another offloaded Pod. An offloaded
+  Pod never receives its Secrets, so it would have no keys.
