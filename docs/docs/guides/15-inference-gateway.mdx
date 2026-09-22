@@ -1,0 +1,53 @@
+---
+title: "Give an Inference Server a Stable Address"
+description: "Put an OpenAI-compatible gateway in front of an offloaded inference server"
+sidebar_position: 15
+---
+
+# Give an Inference Server a Stable Address
+
+[The previous guide](./14-inference-server.mdx) ends with a server that is
+reachable in the cluster, but the address is not stable. interLink names the
+mesh resources after the Pod, so `vllm-gemma` in `default` becomes
+`vllm-gemma-default` in `default-wstunnel`. Rename the Pod and the address
+changes. The Slurm job ends and the address is gone.
+
+A gateway in Kubernetes fixes this. Clients get one URL and a list of model
+names, and only the gateway knows the interLink-side address.
+
+The example uses LiteLLM. Any gateway that forwards OpenAI-compatible traffic
+works the same way. For installation, keys and budgets see the
+[LiteLLM documentation](https://docs.litellm.ai/).
+
+## Configuration
+
+```yaml
+model_list:
+  - model_name: big
+    litellm_params:
+      model: openai/gemma-4-31b
+      api_base: http://vllm-gemma-default.default-wstunnel.svc.cluster.local:8000/v1
+      api_key: unused
+```
+
+- **`openai/` is a protocol prefix, not a provider.** It means an
+  OpenAI-compatible server at `api_base`.
+- **The name after the prefix must match `--served-model-name`**, not the
+  Hugging Face repository id.
+- **`api_key` must not be empty**, although vLLM ignores it when started
+  without authentication.
+- **`model_name` is the alias clients use.** Keep it stable and change what is
+  behind it.
+
+One vLLM process serves one model. For a second model, start another Pod and
+add another entry pointing at its Service.
+
+## Notes
+
+- **Name Pods after the role**, for example `vllm-chat`, not after the model.
+  The Service name follows the Pod name, so a model change then leaves the
+  gateway configuration unchanged.
+- **Nothing here resubmits Slurm jobs.** When the walltime ends the gateway
+  returns errors for that alias.
+- **Run the gateway in Kubernetes**, not as another offloaded Pod. An offloaded
+  Pod never receives its Secrets, so it would have no keys.

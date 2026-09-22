@@ -1,0 +1,184 @@
+---
+title: "Run an Inference Server on Offloaded GPUs"
+description: "Serve a model on HPC GPUs from Kubernetes using interLink offloading and mesh networking"
+sidebar_position: 14
+---
+
+# Run an Inference Server on Offloaded GPUs
+
+This guide runs vLLM on an HPC GPU as a Slurm job, and makes it reachable from
+Kubernetes as a normal ClusterIP Service.
+
+Tested with interLink `0.6.3-pre1`, RKE2 1.36, vLLM 0.29.0, one NVIDIA H100 80GB.
+
+## Prerequisites
+
+- A ready virtual node with the Slurm plugin. If interLink is not installed
+  yet, start with [Deploy your plugin](./01-deploy-interlink.mdx).
+- Mesh networking enabled (`EnableTunnel` and `FullMesh`). Without it the Pod
+  has no address the cluster can reach. See
+  [Mesh Network Configuration](./13-mesh-network-configuration.mdx).
+- Apptainer on the compute nodes, and a vLLM `.sif` image on a shared
+  filesystem.
+- Permission to hold a GPU for the whole walltime.
+- A privileged `<namespace>-wstunnel` namespace, if the cluster sets a
+  `baseline` or `restricted` Pod Security default. The mesh pods are
+  privileged and are rejected otherwise, which leaves the Pod `Pending` with no
+  clear error. interLink creates the namespace itself, but unlabelled, so
+  create it first:
+
+  ```yaml
+  apiVersion: v1
+  kind: Namespace
+  metadata:
+    name: default-wstunnel
+    labels:
+      pod-security.kubernetes.io/enforce: privileged
+      pod-security.kubernetes.io/audit: privileged
+      pod-security.kubernetes.io/warn: privileged
+  ```
+
+  RKE2 is unrestricted by default and needs nothing here. Clusters using the
+  CIS profile, or a custom admission configuration, do.
+
+## Step 1: Download the Model Weights
+
+Compute nodes run offline, so the serving container uses `HF_HUB_OFFLINE=1` and
+every weight file has to be in the cache before it starts. Stage the weights
+with a separate offloaded Pod. No GPU is needed for a download, so this Pod asks
+for no `--gres` and no `--nv`:
+
+```yaml
+apiVersion: v1
+kind: Pod
+metadata:
+  name: hf-download
+  namespace: default
+  annotations:
+    slurm-job.vk.io/flags: "--partition=gpu --time=02:00:00 --mem=8G --cpus-per-task=4"
+    slurm-job.vk.io/pre-exec: "module load apptainer;"
+    slurm-job.vk.io/singularity-options: "--bind /home/myusername/vllm-work:/vllm-work"
+spec:
+  restartPolicy: Never
+  nodeSelector:
+    kubernetes.io/hostname: my-node
+  tolerations:
+    - key: virtual-node.interlink/no-schedule
+      operator: Exists
+  containers:
+    - name: download
+      image: /home/myusername/vllm-work/vllm.sif
+      env:
+        - name: HF_HOME
+          value: "/vllm-work/hf-cache"
+      command: ["bash", "-lc"]
+      args:
+        - hf download google/gemma-4-31B-it
+```
+
+```bash
+kubectl apply -f hf-download.yaml
+kubectl get pod hf-download -w           # wait for Completed
+kubectl logs hf-download | tail -5
+```
+
+The compute nodes need outbound network for this, and the walltime has to be
+long enough to finish the download.
+
+## Step 2: Create the Pod
+
+```yaml
+apiVersion: v1
+kind: Pod
+metadata:
+  name: vllm-gemma
+  namespace: default
+  annotations:
+    slurm-job.vk.io/flags: "--partition=gpu --gres=gpu:1 --cpus-per-task=24 --mem=200G --time=04:00:00"
+    slurm-job.vk.io/pre-exec: "module load apptainer;"
+    slurm-job.vk.io/singularity-options: "--nv --bind /home/myusername/vllm-work:/vllm-work"
+spec:
+  restartPolicy: Never
+  nodeSelector:
+    kubernetes.io/hostname: my-node         # your virtual node
+  tolerations:
+    - key: virtual-node.interlink/no-schedule
+      operator: Exists
+  containers:
+    - name: gemma
+      image: /home/myusername/vllm-work/vllm.sif
+      args:
+        - "--model=google/gemma-4-31B-it"
+        - "--served-model-name=gemma-4-31b"
+        - "--host=0.0.0.0"
+        - "--port=8000"
+        - "--max-model-len=32768"
+        - "--quantization=fp8"
+        - "--kv-cache-memory-bytes=24000000000"
+      env:
+        - name: HF_HOME
+          value: "/vllm-work/hf-cache"
+        - name: HF_HUB_OFFLINE
+          value: "1"
+        - name: VLLM_CACHE_ROOT
+          value: "/tmp/vllm-cache"
+      ports:
+        - containerPort: 8000
+          name: http
+      resources:
+        requests: { cpu: "4", memory: 16Gi }
+```
+
+All available annotations are listed in the
+[Pod Annotations Reference](./09-pod-annotations.mdx). These are easy to get
+wrong:
+
+- **`image` is a file path**, not a registry reference. The Slurm plugin passes
+  it to Apptainer.
+- **`pre-exec` must end with `;`**. The plugin joins it with the job script path
+  on one line. Without the `;` Lmod reports an unknown module.
+- **`--nv` gives the container the GPU.** Without it vLLM starts and finds no
+  device.
+- **Cache paths must not be under `$HOME`.** The container runs in a user
+  namespace, so writes there fail with `OSError: [Errno 38]`.
+- **`--quantization=fp8` keeps the model inside the card.** At bf16 the weights
+  alone need about 59 GiB on an 80 GB GPU, which leaves no room for the KV
+  cache. `--kv-cache-memory-bytes` then sets the cache size explicitly.
+
+## Step 3: Apply and Check
+
+```bash
+kubectl apply -f vllm-gemma.yaml
+kubectl get pod vllm-gemma -w
+kubectl logs vllm-gemma -f
+```
+
+## Step 4: Test the Server
+
+interLink creates a Service named `<pod-name>-<pod-namespace>` in
+`<namespace>-wstunnel`. The naming rules are described in
+[Wstunnel Configuration](./10-wstunnel-configuration.mdx).
+
+```bash
+kubectl get deploy,svc,ing -n default-wstunnel
+
+SVC=http://vllm-gemma-default.default-wstunnel.svc.cluster.local:8000
+
+kubectl run curl --rm -i -q --image=curlimages/curl --restart=Never -- \
+  curl -s $SVC/v1/models
+```
+
+## Stable Addressing
+
+The Service name follows the Pod name, and the job ends at walltime, so a client
+pointed at that URL breaks on the next recreation. Put a gateway in front of it:
+see [Give an Inference Server a Stable Address](./15-inference-gateway.mdx).
+
+## Limitations
+
+interLink is not designed for long-running services:
+
+- **No self-healing.** The job stops at walltime and nothing restarts it.
+- **Cold start of about ten minutes.**
+- **One GPU held for the whole walltime**, also when no requests arrive.
+- **Service names follow Pod names**, so Pod names are part of the interface.
