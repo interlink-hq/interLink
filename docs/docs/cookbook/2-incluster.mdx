@@ -1,5 +1,5 @@
 ---
-sidebar_position: 3
+sidebar_position: 2
 ---
 
 import Tabs from "@theme/Tabs";
@@ -9,7 +9,9 @@ import useBaseUrl from "@docusaurus/useBaseUrl";
 
 # In-cluster deployment
 
-Deploy interLink in the local K8S cluster.
+The interLink API server runs inside your Kubernetes cluster, next to the virtual
+kubelet. Nothing has to be installed on an edge node, and no interLink component
+is exposed to the internet.
 
 <ThemedImage
   alt="Docusaurus themed image"
@@ -19,13 +21,27 @@ Deploy interLink in the local K8S cluster.
   }}
 />
 
-## Install interLink
+The remaining choice is where the **plugin** runs, and how the API server reaches
+it:
+
+| | Plugin runs | API to plugin link | Use when |
+| --- | --- | --- | --- |
+| [In the cluster](#plugin-in-the-cluster) | as a container in the same pod | localhost | the plugin can reach the remote system on its own — a shared filesystem, an SSH shim, a REST API |
+| [On the remote system](#plugin-on-the-remote-system) | on the login node or an edge host | SSH tunnel over a Unix socket | the plugin has to run where the batch system is, and you cannot expose a port for it |
+
+If instead you want the API server *and* the plugin to run on the remote side, see
+the [edge node deployment](./1-edge.mdx).
+
+---
+
+## Plugin in the cluster
+
+Everything runs in one pod: virtual kubelet, interLink API server and plugin.
 
 ### Deploy Kubernetes components
 
-The deployment of the Kubernetes components are managed by the official
-[HELM chart](https://github.com/interlink-hq/interlink-helm-chart). Depending on
-the scenario you selected, there might be additional operations to be done.
+The deployment of the Kubernetes components is managed by the official
+[HELM chart](https://github.com/interlink-hq/interlink-helm-chart).
 
 - Create an helm values file:
 
@@ -127,6 +143,205 @@ You can find a demo pod to test your setup
 To start debugging in case of problems we suggest starting from the pod
 containers logs!
 
+### Reaching the batch system from inside the cluster
+
+The plugin still has to submit jobs somewhere. Which mechanism it uses is a
+plugin concern rather than an interLink one, but the common ones are:
+
+- **Shared filesystem plus SSH shims.** Mount the remote scratch area into the
+  plugin container, and point the plugin's `SbatchPath` / `SqueuePath` /
+  `ScancelPath` at small wrappers that `exec ssh user@login /usr/bin/<cmd>`. The
+  plugin never has to know it is not running on the login node.
+- **A plugin that speaks a remote API** — Kubernetes, a cloud batch service, a
+  site REST endpoint.
+
+If neither fits, run the plugin on the remote system instead.
+
+---
+
+## Plugin on the remote system
+
+Some sites will not let you expose a port for the plugin, but do allow outbound
+SSH. In that case the plugin runs on the login node and the API server reaches it
+through an SSH tunnel terminating on a local Unix socket.
+
+<ThemedImage
+  alt="Docusaurus themed image"
+  sources={{
+    light: useBaseUrl("/img/scenario-3_light.svg"),
+    dark: useBaseUrl("/img/scenario-3_dark.svg"),
+  }}
+/>
+
+```
+[Virtual Kubelet] -> [interLink API] -> [Unix socket] -> [SSH tunnel] -> [Plugin]
+     (local)             (local)          (local)        (ssh bridge)   (remote)
+```
+
+:::info
+
+This tunnel carries interLink's **control plane** — the API server talking to its
+plugin. It is unrelated to the
+[SSH shadow](../guides/14-ssh-tunnel-configuration.mdx), which carries traffic
+*into* an already-running offloaded pod. A deployment can use either, both, or
+neither.
+
+:::
+
+### Prerequisites
+
+1. **SSH access** to the remote system where the plugin runs
+2. **SSH key pair** for authentication
+3. **Network connectivity** from the local system to the remote SSH server
+4. **interLink binary** built with the ssh-tunnel command (`make ssh-tunnel`)
+
+#### SSH key setup
+
+```bash
+# Generate SSH key pair
+ssh-keygen -t rsa -b 4096 -f ~/.ssh/interlink_rsa
+
+# Copy public key to remote server
+ssh-copy-id -i ~/.ssh/interlink_rsa.pub user@remote-server
+
+# Test SSH connection
+ssh -i ~/.ssh/interlink_rsa user@remote-server
+```
+
+#### Optional: host key verification
+
+```bash
+# Extract host public key from remote server
+ssh-keyscan -t rsa remote-server > ~/.ssh/interlink_host_key
+
+# Or get it from known_hosts
+ssh-keygen -F remote-server -f ~/.ssh/known_hosts | grep -o 'ssh-rsa.*' > ~/.ssh/interlink_host_key
+```
+
+### Step 1: point the API server at a Unix socket
+
+```yaml title="InterLinkConfig.yaml"
+# Use Unix socket for local communication
+InterlinkAddress: "unix:///tmp/interlink.sock"
+InterlinkPort: ""  # Not used for Unix sockets
+
+# Remote plugin configuration
+SidecarURL: "http://remote-plugin"
+SidecarPort: "4000"
+
+VerboseLogging: true
+ErrorsOnlyLogging: false
+DataRootFolder: "/tmp/interlink"
+```
+
+### Step 2: point the virtual kubelet at the same socket
+
+```yaml title="VirtualKubeletConfig.yaml"
+InterlinkURL: "unix:///tmp/interlink.sock"
+InterlinkPort: ""  # Not used for Unix sockets
+
+VerboseLogging: true
+ErrorsOnlyLogging: false
+
+NodeName: "my-interlink-node"
+NodeLabels:
+  "interlink.cern.ch/provider": "remote-hpc"
+```
+
+### Step 3: start the tunnel
+
+```bash
+./bin/ssh-tunnel \
+  -addr "remote-server:22" \
+  -user "username" \
+  -keyfile "~/.ssh/interlink_rsa" \
+  -lsock "/tmp/interlink.sock" \
+  -rport "4000" \
+  -hostkeyfile "~/.ssh/interlink_host_key"   # optional, but recommended
+```
+
+| Option | Description | Required |
+| --- | --- | --- |
+| `-addr` | SSH server address as `hostname:port` | Yes |
+| `-user` | Username for SSH authentication | Yes |
+| `-keyfile` | Path to private key file | Yes |
+| `-lsock` | Path to local Unix socket | Yes |
+| `-rport` | Remote port where the plugin listens | Yes |
+| `-hostkeyfile` | Path to host public key for verification | No |
+
+Start the components in dependency order: tunnel, then API server, then virtual
+kubelet.
+
+:::note
+
+To run these as managed services, see the
+[systemd deployment guide](../guides/08-systemd-deployment.mdx), which includes
+the SSH tunnel unit and the ordering constraints between the three.
+
+:::
+
+### Hardening the tunnel account
+
+Restrict what the tunnel key is allowed to do on the remote side:
+
+```bash title="~/.ssh/authorized_keys (remote)"
+command="/usr/bin/false",no-pty,no-X11-forwarding,no-agent-forwarding ssh-rsa AAAAB3... interlink-tunnel-key
+```
+
+```bash title="/etc/ssh/sshd_config.d/interlink.conf"
+Match User interlink
+    AllowTcpForwarding yes
+    AllowStreamLocalForwarding yes
+    PermitTunnel no
+    X11Forwarding no
+    AllowAgentForwarding no
+    PermitTTY no
+    ForceCommand /bin/false
+```
+
+### Troubleshooting
+
+```bash
+# Is the tunnel process alive?
+ps aux | grep ssh-tunnel
+
+# Does the socket answer?
+curl -s --unix-socket /tmp/interlink.sock http://unix/pinglink
+
+# Is the plugin listening on the remote side?
+ssh user@remote-server 'netstat -tlnp | grep :4000'
+```
+
+---
+
+## Verify the setup
+
+```bash
+# Check if node appears in Kubernetes
+kubectl get nodes
+
+# Deploy a test pod
+kubectl apply -f - <<EOF
+apiVersion: v1
+kind: Pod
+metadata:
+  name: test-incluster
+spec:
+  nodeSelector:
+    kubernetes.io/hostname: interlink-in-cluster
+  tolerations:
+    - key: virtual-node.interlink/no-schedule
+      operator: Exists
+  containers:
+  - name: test
+    image: busybox
+    command: ["sleep", "3600"]
+EOF
+
+kubectl get pod test-incluster -o wide
+kubectl logs test-incluster
+```
+
 :::note
 
 When the virtual node registers, the virtual kubelet requests a
@@ -140,5 +355,29 @@ manually:
 kubectl get csr
 kubectl certificate approve <csr-name>
 ```
+
+:::
+
+---
+
+## Reaching services inside offloaded pods
+
+Everything above gets *jobs* onto the remote system. Reaching a service that runs
+inside an offloaded pod — a notebook, a dashboard — is a separate concern, handled
+by a shadow pod that interLink creates for any offloaded pod with exposed ports.
+
+| | Direction | Requires | Guide |
+| --- | --- | --- | --- |
+| wstunnel | cluster to pod | outbound internet from the compute node, and a public ingress on the cluster | [Wstunnel](../guides/10-wstunnel-configuration.mdx) |
+| SSH | cluster to pod | outbound SSH from the cluster to a login node | [SSH tunnel](../guides/14-ssh-tunnel-configuration.mdx) |
+| Full mesh | bidirectional | same as wstunnel, plus an unprivileged network namespace on the compute node | [Mesh network](../guides/13-mesh-network-configuration.mdx) |
+
+Air-gapped sites — compute nodes with no route out, clusters with no public
+ingress — generally want the SSH one.
+
+:::note
+
+For additional case studies and advanced configurations, reach out to the
+interLink community through the Slack channel.
 
 :::
