@@ -1352,26 +1352,21 @@ func (p *Provider) applyWstunnelManifests(ctx context.Context, manifestYAML stri
 	return nil, fmt.Errorf("no deployment found in manifests")
 }
 
-// waitForDeploymentPod waits for a deployment to create a pod and returns the first one
+// waitForDeploymentPod waits for a deployment to create a pod and returns the
+// one currently serving it
 func (p *Provider) waitForDeploymentPod(ctx context.Context, deploymentName, namespace string) (*v1.Pod, error) {
 	timeout := 30 * time.Second
 	start := time.Now()
 
 	for time.Since(start) < timeout {
-		pods, err := p.clientSet.CoreV1().Pods(namespace).List(ctx, metav1.ListOptions{
-			LabelSelector: fmt.Sprintf("app.kubernetes.io/component=%s", deploymentName),
-		})
+		pod, err := p.currentDeploymentPod(ctx, deploymentName, namespace)
 		if err != nil {
-			log.G(ctx).Warningf("Failed to list pods for deployment %s: %v", deploymentName, err)
+			log.G(ctx).Debugf("No pod yet for deployment %s/%s: %v", namespace, deploymentName, err)
 			time.Sleep(1 * time.Second)
 			continue
 		}
 
-		if len(pods.Items) > 0 {
-			return &pods.Items[0], nil
-		}
-
-		time.Sleep(1 * time.Second)
+		return pod, nil
 	}
 
 	return nil, fmt.Errorf("no pod found for deployment %s within timeout", deploymentName)
@@ -1641,13 +1636,25 @@ func (p *Provider) handleWstunnelCreation(ctx context.Context, pod *v1.Pod) (str
 		}
 	}
 
-	podIP, err := p.waitForWstunnelPodIP(ctx, dummyPod, timeout, wstunnelResourceIdentity{
+	wstunnelIdentity := wstunnelResourceIdentity{
 		Name:      templateData.Name,
 		Namespace: templateData.Namespace,
-	})
-	if err != nil {
-		log.G(ctx).Errorf("Failed to get wstunnel pod IP for %s/%s: %v", pod.Namespace, pod.Name, err)
-		return "", err
+	}
+
+	// The service address is the one to hand out: it stays valid for as long as
+	// the service exists, while the gateway pod IP changes whenever the pod is
+	// replaced (a new session, a rescheduling) and is never updated on the
+	// virtual pod afterwards, leaving whoever connects to it talking to nothing.
+	podIP := p.wstunnelServiceIP(ctx, wstunnelIdentity)
+	if podIP == "" {
+		var err error
+		podIP, err = p.waitForWstunnelPodIP(ctx, dummyPod, timeout, wstunnelIdentity)
+		if err != nil {
+			log.G(ctx).Errorf("Failed to get wstunnel pod IP for %s/%s: %v", pod.Namespace, pod.Name, err)
+			return "", err
+		}
+	} else {
+		log.G(ctx).Infof("Using wstunnel service IP %s for virtual pod %s/%s", podIP, pod.Namespace, pod.Name)
 	}
 
 	// Add wstunnel client command annotation to the original pod
@@ -1660,22 +1667,75 @@ func (p *Provider) handleWstunnelCreation(ctx context.Context, pod *v1.Pod) (str
 	return podIP, nil
 }
 
+// wstunnelServiceIP returns the ClusterIP of the wstunnel service, or "" when
+// the service has none (a headless service, or one that could not be read), in
+// which case the caller falls back to the gateway pod IP.
+func (p *Provider) wstunnelServiceIP(ctx context.Context, identity wstunnelResourceIdentity) string {
+	service, err := p.clientSet.CoreV1().Services(identity.Namespace).Get(ctx, identity.Name, metav1.GetOptions{})
+	if err != nil {
+		log.G(ctx).Warningf("Failed to get wstunnel service %s/%s, falling back to the gateway pod IP: %v",
+			identity.Namespace, identity.Name, err)
+		return ""
+	}
+
+	if service.Spec.ClusterIP == "" || service.Spec.ClusterIP == v1.ClusterIPNone {
+		log.G(ctx).Warningf("wstunnel service %s/%s has no ClusterIP (%q), falling back to the gateway pod IP",
+			identity.Namespace, identity.Name, service.Spec.ClusterIP)
+		return ""
+	}
+
+	return service.Spec.ClusterIP
+}
+
+// currentDeploymentPod returns the pod of a wstunnel deployment that is meant to
+// serve traffic: the most recently created one that is not terminating. Pods
+// being deleted have to be skipped, otherwise a pod created while a previous
+// deployment is still going away is served the address of that old pod, which
+// stops answering seconds later.
+func (p *Provider) currentDeploymentPod(ctx context.Context, deploymentName, namespace string) (*v1.Pod, error) {
+	pods, err := p.clientSet.CoreV1().Pods(namespace).List(ctx, metav1.ListOptions{
+		LabelSelector: fmt.Sprintf("app.kubernetes.io/component=%s", deploymentName),
+	})
+	if err != nil {
+		return nil, err
+	}
+
+	var current *v1.Pod
+	for i := range pods.Items {
+		pod := &pods.Items[i]
+		if pod.DeletionTimestamp != nil || pod.Status.Phase == v1.PodSucceeded || pod.Status.Phase == v1.PodFailed {
+			continue
+		}
+		if current == nil || pod.CreationTimestamp.After(current.CreationTimestamp.Time) {
+			current = pod
+		}
+	}
+
+	if current == nil {
+		return nil, fmt.Errorf("no pod found for deployment %s/%s", namespace, deploymentName)
+	}
+	return current, nil
+}
+
 // waitForWstunnelPodIP waits for wstunnel pod to get an IP
 func (p *Provider) waitForWstunnelPodIP(ctx context.Context, dummyPod *v1.Pod, timeout time.Duration, identity wstunnelResourceIdentity) (string, error) {
-	log.G(ctx).Infof("Waiting up to %v for wstunnel pod %s/%s to get an IP", timeout, dummyPod.Namespace, dummyPod.Name)
+	log.G(ctx).Infof("Waiting up to %v for a wstunnel pod of %s/%s to get an IP", timeout, identity.Namespace, identity.Name)
 
 	start := time.Now()
 	for time.Since(start) < timeout {
-		updatedDummyPod, err := p.clientSet.CoreV1().Pods(dummyPod.Namespace).Get(ctx, dummyPod.Name, metav1.GetOptions{})
+		// Selected again on every attempt: the pod that serves the deployment
+		// can change while we wait, and dummyPod may be the one going away.
+		currentPod, err := p.currentDeploymentPod(ctx, identity.Name, identity.Namespace)
 		if err != nil {
 			log.G(ctx).Warningf("Failed to get wstunnel pod status: %v", err)
 			time.Sleep(1 * time.Second)
 			continue
 		}
 
-		if updatedDummyPod.Status.PodIP != "" {
-			podIP := updatedDummyPod.Status.PodIP
-			log.G(ctx).Infof("Using wstunnel pod IP %s for virtual pod %s/%s", podIP, identity.Namespace, dummyPod.Name)
+		if currentPod.Status.PodIP != "" {
+			podIP := currentPod.Status.PodIP
+			log.G(ctx).Infof("Using wstunnel pod IP %s (pod %s/%s) for virtual pod %s/%s",
+				podIP, currentPod.Namespace, currentPod.Name, identity.Namespace, identity.Name)
 			return podIP, nil
 		}
 
