@@ -1531,6 +1531,10 @@ func checkPodsStatus(ctx context.Context, p *Provider, pod *v1.Pod, token string
 
 		// if the PodUID match with the one in etcd we are talking of the same thing. GOOD
 		if podRemoteStatus.PodUID == string(podRefInCluster.UID) {
+			// The plugin reports the remote compute node only once the job is actually
+			// running, so this stays a no-op for as long as the job sits in the queue.
+			p.publishShadowNodeName(ctx, podRefInCluster, podRemoteStatus.NodeName)
+
 			// check if the pod is already in a terminal state (Failed or Succeeded)
 			if currentPhase, terminal := p.podTerminalPhase(podRemoteStatus.PodUID); terminal {
 				if podRefInCluster.Status.Phase == currentPhase {

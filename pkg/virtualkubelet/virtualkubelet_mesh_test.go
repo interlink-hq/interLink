@@ -61,11 +61,11 @@ func TestIsMeshNetworkingDisabled(t *testing.T) {
 	}
 }
 
-func TestExecuteWstunnelTemplateIngressTLS(t *testing.T) {
+func TestExecuteShadowTemplateIngressTLS(t *testing.T) {
 	p := &Provider{}
-	manifest, err := p.executeWstunnelTemplate(t.Context(), WstunnelTemplateData{
+	manifest, err := p.executeShadowTemplate(t.Context(), ShadowTemplateData{
 		Name:                 "pod-default",
-		Namespace:            "default-wstunnel",
+		Namespace:            "default-shadow",
 		RandomPassword:       testPathPrefix,
 		WildcardDNS:          "tunnel.example.com",
 		IngressTLS:           true,
@@ -74,17 +74,17 @@ func TestExecuteWstunnelTemplateIngressTLS(t *testing.T) {
 
 	assert.NoError(t, err)
 	assert.Contains(t, manifest, "cert-manager.io/cluster-issuer: lets-issuer")
-	assert.Contains(t, manifest, "- pod-default-default-wstunnel.tunnel.example.com")
-	assert.Contains(t, manifest, "host: pod-default-default-wstunnel.tunnel.example.com")
+	assert.Contains(t, manifest, "- pod-default-default-shadow.tunnel.example.com")
+	assert.Contains(t, manifest, "host: pod-default-default-shadow.tunnel.example.com")
 	assert.NotContains(t, manifest, "host: ws-pod-default.tunnel.example.com")
 	assert.Equal(t, 1, strings.Count(manifest, "secretName: pod-default-tls"))
 }
 
-func TestExecuteWstunnelTemplateFullMeshSelectsWireGuardTemplate(t *testing.T) {
+func TestExecuteShadowTemplateFullMeshSelectsWireGuardTemplate(t *testing.T) {
 	p := &Provider{}
-	manifest, err := p.executeWstunnelTemplate(t.Context(), WstunnelTemplateData{
+	manifest, err := p.executeShadowTemplate(t.Context(), ShadowTemplateData{
 		Name:            "pod-default",
-		Namespace:       "default-wstunnel",
+		Namespace:       "default-shadow",
 		RandomPassword:  testPathPrefix,
 		WildcardDNS:     "tunnel.example.com",
 		FullMesh:        true,
@@ -98,9 +98,9 @@ func TestExecuteWstunnelTemplateFullMeshSelectsWireGuardTemplate(t *testing.T) {
 	assert.Contains(t, manifest, "number: 28080")
 }
 
-func TestComputeWstunnelResourceIdentityUsesFinalNamespace(t *testing.T) {
+func TestComputeShadowResourceIdentityUsesFinalNamespace(t *testing.T) {
 	t.Run("default shadow namespace", func(t *testing.T) {
-		identity, err := computeWstunnelResourceIdentity(&v1.Pod{
+		identity, err := computeShadowResourceIdentity(&v1.Pod{
 			ObjectMeta: metav1.ObjectMeta{
 				Name:      "my-pod",
 				Namespace: testNamespaceDefault,
@@ -109,11 +109,11 @@ func TestComputeWstunnelResourceIdentityUsesFinalNamespace(t *testing.T) {
 
 		assert.NoError(t, err)
 		assert.Equal(t, "my-pod-default", identity.Name)
-		assert.Equal(t, "default-wstunnel", identity.Namespace)
+		assert.Equal(t, "default-shadow", identity.Namespace)
 	})
 
 	t.Run("same namespace keeps original namespace", func(t *testing.T) {
-		identity, err := computeWstunnelResourceIdentity(&v1.Pod{
+		identity, err := computeShadowResourceIdentity(&v1.Pod{
 			ObjectMeta: metav1.ObjectMeta{
 				Name:      "my-pod",
 				Namespace: testNamespaceDefault,
@@ -124,19 +124,19 @@ func TestComputeWstunnelResourceIdentityUsesFinalNamespace(t *testing.T) {
 		})
 
 		assert.NoError(t, err)
-		assert.Equal(t, "wstunnel-my-pod-default", identity.Name)
+		assert.Equal(t, "shadow-my-pod-default", identity.Name)
 		assert.Equal(t, testNamespaceDefault, identity.Namespace)
 	})
 }
 
-func TestComputeWstunnelResourceIdentitySameNamespaceLongNames(t *testing.T) {
+func TestComputeShadowResourceIdentitySameNamespaceLongNames(t *testing.T) {
 	t.Run("long pod name preserves full namespace and stays within 63 chars", func(t *testing.T) {
 		// A real, long-lived namespace that must never be truncated in same-namespace
 		// mode (resources are created in the pod's actual namespace).
 		namespace := strings.Repeat("a", 40)
 		podName := strings.Repeat("b", 80)
 
-		identity, err := computeWstunnelResourceIdentity(&v1.Pod{
+		identity, err := computeShadowResourceIdentity(&v1.Pod{
 			ObjectMeta: metav1.ObjectMeta{
 				Name:      podName,
 				Namespace: namespace,
@@ -160,7 +160,7 @@ func TestComputeWstunnelResourceIdentitySameNamespaceLongNames(t *testing.T) {
 		// label, so the identity must error rather than silently truncate the namespace.
 		namespace := strings.Repeat("a", 62)
 
-		identity, err := computeWstunnelResourceIdentity(&v1.Pod{
+		identity, err := computeShadowResourceIdentity(&v1.Pod{
 			ObjectMeta: metav1.ObjectMeta{
 				Name:      "web",
 				Namespace: namespace,
@@ -188,13 +188,13 @@ func TestGenerateFullMeshScriptIncludesRetryAndReadinessLogic(t *testing.T) {
 		},
 	}
 
-	script, err := p.generateFullMeshScript(t.Context(), &WstunnelTemplateData{
+	script, err := p.generateFullMeshScript(t.Context(), &ShadowTemplateData{
 		RandomPassword:   testPathPrefix,
 		WGPrivateKey:     serverPriv,
 		ClientPrivateKey: "client-private-key",
 		WGMTU:            1280,
 		KeepaliveSecs:    25,
-	}, "pod-default-default-wstunnel.tunnel.example.com", "1234567890abcdef")
+	}, "pod-default-default-shadow.tunnel.example.com", "1234567890abcdef")
 
 	assert.NoError(t, err)
 	assert.Contains(t, script, "download_with_retry")
@@ -202,11 +202,11 @@ func TestGenerateFullMeshScriptIncludesRetryAndReadinessLogic(t *testing.T) {
 	assert.Contains(t, script, "ensure_wstunnel_running")
 	assert.Contains(t, script, "wait_for_wireguard_interface")
 	assert.Contains(t, script, `readiness_protocol="https"`)
-	assert.Contains(t, script, "$readiness_protocol://pod-default-default-wstunnel.tunnel.example.com:443/path-prefix")
-	assert.Contains(t, script, "wss://pod-default-default-wstunnel.tunnel.example.com:443")
+	assert.Contains(t, script, "$readiness_protocol://pod-default-default-shadow.tunnel.example.com:443/path-prefix")
+	assert.Contains(t, script, "wss://pod-default-default-shadow.tunnel.example.com:443")
 }
 
-func TestShouldCreateWstunnel(t *testing.T) {
+func TestShouldCreateShadow(t *testing.T) {
 	basePod := &v1.Pod{
 		Spec: v1.PodSpec{
 			Containers: []v1.Container{
@@ -251,7 +251,7 @@ func TestShouldCreateWstunnel(t *testing.T) {
 			expected: true,
 		},
 		{
-			name:    "pod vpn annotation disables wstunnel",
+			name:    "pod vpn annotation disables the shadow",
 			network: Network{EnableTunnel: true},
 			pod: &v1.Pod{
 				ObjectMeta: metav1.ObjectMeta{
@@ -285,12 +285,12 @@ func TestShouldCreateWstunnel(t *testing.T) {
 					Network: tt.network,
 				},
 			}
-			assert.Equal(t, tt.expected, p.shouldCreateWstunnel(tt.pod))
+			assert.Equal(t, tt.expected, p.shouldCreateShadow(tt.pod))
 		})
 	}
 }
 
-func TestCleanupWstunnelResources(t *testing.T) {
+func TestCleanupShadowResources(t *testing.T) {
 	const (
 		name = "pod-default"
 		ns   = testNamespaceDefault
@@ -312,7 +312,7 @@ func TestCleanupWstunnelResources(t *testing.T) {
 		client := newClient()
 		p := &Provider{clientSet: client, config: Config{Network: Network{IngressTLS: true}}}
 
-		p.cleanupWstunnelResources(t.Context(), name, ns)
+		p.cleanupShadowResources(t.Context(), name, ns)
 
 		_, err := client.AppsV1().Deployments(ns).Get(t.Context(), name, metav1.GetOptions{})
 		assert.True(t, apierrors.IsNotFound(err), "deployment should be deleted")
@@ -330,7 +330,7 @@ func TestCleanupWstunnelResources(t *testing.T) {
 		client := newClient()
 		p := &Provider{clientSet: client, config: Config{Network: Network{IngressTLS: false}}}
 
-		p.cleanupWstunnelResources(t.Context(), name, ns)
+		p.cleanupShadowResources(t.Context(), name, ns)
 
 		// Core resources are still removed regardless of TLS...
 		_, err := client.AppsV1().Deployments(ns).Get(t.Context(), name, metav1.GetOptions{})
