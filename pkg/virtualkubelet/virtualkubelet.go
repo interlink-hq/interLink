@@ -1352,12 +1352,24 @@ func (p *Provider) applyWstunnelManifests(ctx context.Context, manifestYAML stri
 	return nil, fmt.Errorf("no deployment found in manifests")
 }
 
-// waitForDeploymentPod waits for a deployment to create a pod and returns the first one
+// waitForDeploymentPod waits for a deployment to create a pod and returns it.
+//
+// A pod recreated under the same name (a StatefulSet replica) gets a Deployment with the
+// same name, labels and pod-template hash as the one just deleted, and the garbage
+// collector removes that one's pods asynchronously. Pods that are terminating, or older
+// than the current Deployment, belong to the previous one and are skipped.
 func (p *Provider) waitForDeploymentPod(ctx context.Context, deploymentName, namespace string) (*v1.Pod, error) {
 	timeout := 30 * time.Second
 	start := time.Now()
 
 	for time.Since(start) < timeout {
+		deployment, err := p.clientSet.AppsV1().Deployments(namespace).Get(ctx, deploymentName, metav1.GetOptions{})
+		if err != nil {
+			log.G(ctx).Warningf("Failed to get deployment %s: %v", deploymentName, err)
+			time.Sleep(1 * time.Second)
+			continue
+		}
+
 		pods, err := p.clientSet.CoreV1().Pods(namespace).List(ctx, metav1.ListOptions{
 			LabelSelector: fmt.Sprintf("app.kubernetes.io/component=%s", deploymentName),
 		})
@@ -1367,8 +1379,12 @@ func (p *Provider) waitForDeploymentPod(ctx context.Context, deploymentName, nam
 			continue
 		}
 
-		if len(pods.Items) > 0 {
-			return &pods.Items[0], nil
+		for i := range pods.Items {
+			pod := &pods.Items[i]
+			if pod.DeletionTimestamp != nil || pod.CreationTimestamp.Before(&deployment.CreationTimestamp) {
+				continue
+			}
+			return pod, nil
 		}
 
 		time.Sleep(1 * time.Second)
