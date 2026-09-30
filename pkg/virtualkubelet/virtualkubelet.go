@@ -161,6 +161,9 @@ type Provider struct {
 	// shadowNodeNames caches, per pod UID, the last compute node published to
 	// that pod's shadow, so the status loop only writes on change.
 	shadowNodeNames sync.Map
+	// shadowsReleased marks, per pod UID, shadows already removed because their
+	// pod ended, so the status loop removes each one once.
+	shadowsReleased sync.Map
 }
 
 // Increment the given IP address
@@ -1976,11 +1979,13 @@ func (p *Provider) DeletePod(ctx context.Context, pod *v1.Pod) (err error) {
 
 	// Clean up shadow resources if tunnel is enabled and they exist and no VPN annotation
 	if p.hasShadow(pod) {
-		identity, identityErr := computeShadowResourceIdentity(pod)
-		if identityErr != nil {
-			log.G(ctx).Warningf("Failed to compute shadow resource identity for %s/%s: %v", pod.Namespace, pod.Name, identityErr)
-		} else {
-			p.cleanupShadowResources(ctx, identity.Name, identity.Namespace)
+		if _, released := p.shadowsReleased.LoadAndDelete(string(pod.UID)); !released {
+			identity, identityErr := computeShadowResourceIdentity(pod)
+			if identityErr != nil {
+				log.G(ctx).Warningf("Failed to compute shadow resource identity for %s/%s: %v", pod.Namespace, pod.Name, identityErr)
+			} else {
+				p.cleanupShadowResources(ctx, identity.Name, identity.Namespace)
+			}
 		}
 		p.forgetShadowNodeName(pod)
 	}
@@ -2169,6 +2174,7 @@ func (p *Provider) statusLoop(ctx context.Context) {
 			if pod.Status.Phase != "Initializing" {
 				// Skip re-querying remote for pods already in a terminal state.
 				if pod.Status.Phase == v1.PodFailed || pod.Status.Phase == v1.PodSucceeded {
+					p.releaseShadowOfEndedPod(ctx, pod)
 					continue
 				}
 				_, err := checkPodsStatus(ctx, p, pod, token, p.config)
@@ -2186,6 +2192,7 @@ func (p *Provider) statusLoop(ctx context.Context) {
 				}
 				p.podsMu.RUnlock()
 				if notifyPod != nil {
+					p.releaseShadowOfEndedPod(ctx, notifyPod)
 					p.asyncUpdate(ctx, notifyPod)
 				}
 			}

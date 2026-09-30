@@ -346,6 +346,31 @@ func (p *Provider) publishShadowNodeName(ctx context.Context, pod *v1.Pod, nodeN
 	log.G(ctx).Infof("Published compute node %q for shadow %s/%s", nodeName, identity.Namespace, identity.Name)
 }
 
+// releaseShadowOfEndedPod removes the shadow of a pod whose remote job ended.
+// Kubernetes keeps a Failed or Succeeded pod until something deletes it, and the
+// shadow used to go only in DeletePod. Until then it stayed Ready, matched the
+// pod's Services and tunnelled to a compute node where nothing listens any more,
+// so requests balanced onto it were reset.
+func (p *Provider) releaseShadowOfEndedPod(ctx context.Context, pod *v1.Pod) {
+	if pod.Status.Phase != v1.PodFailed && pod.Status.Phase != v1.PodSucceeded {
+		return
+	}
+	if !p.hasShadow(pod) {
+		return
+	}
+	if _, done := p.shadowsReleased.LoadOrStore(string(pod.UID), true); done {
+		return
+	}
+	identity, err := computeShadowResourceIdentity(pod)
+	if err != nil {
+		log.G(ctx).Warningf("Failed to compute shadow resource identity for %s/%s: %v", pod.Namespace, pod.Name, err)
+		return
+	}
+	log.G(ctx).Infof("Pod %s/%s is %s: removing its shadow", pod.Namespace, pod.Name, pod.Status.Phase)
+	p.cleanupShadowResources(ctx, identity.Name, identity.Namespace)
+	p.forgetShadowNodeName(pod)
+}
+
 // forgetShadowNodeName drops the cached node name for a pod that is going away,
 // so a pod recreated under a new UID starts from a clean slate.
 func (p *Provider) forgetShadowNodeName(pod *v1.Pod) {

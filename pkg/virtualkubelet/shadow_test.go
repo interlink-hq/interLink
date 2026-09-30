@@ -5,6 +5,8 @@ import (
 	"testing"
 
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
+	appsv1 "k8s.io/api/apps/v1"
 	v1 "k8s.io/api/core/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -216,4 +218,81 @@ func TestPublishShadowNodeNameRefusesHostileNames(t *testing.T) {
 		assert.NoError(t, err)
 		assert.Equal(t, "", cm.Data[shadowNodeNameKey])
 	}
+}
+
+// endedPodWithShadow is an offloaded pod in the given phase together with the shadow
+// Deployment and Service the VK rendered for it.
+func endedPodWithShadow(t *testing.T, phase v1.PodPhase) (*v1.Pod, shadowResourceIdentity, *fake.Clientset) {
+	t.Helper()
+	pod := podWithPort("vllm", testNamespaceDefault, "uid-1")
+	pod.Status.Phase = phase
+	identity, err := computeShadowResourceIdentity(pod)
+	require.NoError(t, err)
+	meta := metav1.ObjectMeta{Name: identity.Name, Namespace: identity.Namespace}
+	return pod, identity, fake.NewSimpleClientset(&appsv1.Deployment{ObjectMeta: meta}, &v1.Service{ObjectMeta: meta})
+}
+
+func deletes(client *fake.Clientset) int {
+	n := 0
+	for _, a := range client.Actions() {
+		if a.GetVerb() == "delete" {
+			n++
+		}
+	}
+	return n
+}
+
+// A pod whose remote job ended stays in the API until someone deletes it, and so did
+// its shadow: still Ready, still matching the pod's Services, and tunnelling to a
+// compute node where nothing listens any more. Requests balanced onto it were reset.
+func TestReleaseShadowOfEndedPod(t *testing.T) {
+	for _, phase := range []v1.PodPhase{v1.PodFailed, v1.PodSucceeded} {
+		t.Run(string(phase), func(t *testing.T) {
+			pod, identity, client := endedPodWithShadow(t, phase)
+			p := tunnelProvider(client)
+
+			p.releaseShadowOfEndedPod(t.Context(), pod)
+
+			_, err := client.AppsV1().Deployments(identity.Namespace).Get(t.Context(), identity.Name, metav1.GetOptions{})
+			assert.True(t, apierrors.IsNotFound(err), "the shadow deployment of an ended pod should be deleted")
+			_, err = client.CoreV1().Services(identity.Namespace).Get(t.Context(), identity.Name, metav1.GetOptions{})
+			assert.True(t, apierrors.IsNotFound(err), "the shadow service of an ended pod should be deleted")
+		})
+	}
+}
+
+func TestReleaseShadowOfEndedPodOnlyOnce(t *testing.T) {
+	pod, _, client := endedPodWithShadow(t, v1.PodFailed)
+	p := tunnelProvider(client)
+
+	p.releaseShadowOfEndedPod(t.Context(), pod)
+	after := len(client.Actions())
+	p.releaseShadowOfEndedPod(t.Context(), pod)
+
+	assert.Equal(t, after, len(client.Actions()), "the status loop sees an ended pod every few seconds; it must not delete again")
+}
+
+func TestReleaseShadowKeepsTheShadowOfALivePod(t *testing.T) {
+	for _, phase := range []v1.PodPhase{v1.PodPending, v1.PodRunning, ""} {
+		t.Run(string(phase), func(t *testing.T) {
+			pod, identity, client := endedPodWithShadow(t, phase)
+			p := tunnelProvider(client)
+
+			p.releaseShadowOfEndedPod(t.Context(), pod)
+
+			assert.Zero(t, deletes(client))
+			_, err := client.AppsV1().Deployments(identity.Namespace).Get(t.Context(), identity.Name, metav1.GetOptions{})
+			assert.NoError(t, err)
+		})
+	}
+}
+
+func TestReleaseShadowIgnoresPodsWithoutAShadow(t *testing.T) {
+	pod, _, client := endedPodWithShadow(t, v1.PodFailed)
+	pod.Spec.Containers[0].Ports = nil
+	p := tunnelProvider(client)
+
+	p.releaseShadowOfEndedPod(t.Context(), pod)
+
+	assert.Zero(t, deletes(client))
 }
