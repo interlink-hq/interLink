@@ -8,4 +8,9 @@ var (
 	KubeletVersion = "$KUBELET_VERSION"
 )
 EOF
+cat << EOF > pkg/interlink/version.go
+package interlink
+
+var Version = "$KUBELET_VERSION"
+EOF
 fi

@@ -193,6 +193,7 @@ func main() {
 	mutex.HandleFunc("/pinglink", interLinkAPIs.Ping)
 	mutex.HandleFunc("/getLogs", interLinkAPIs.GetLogsHandler)
 	mutex.HandleFunc("/updateCache", interLinkAPIs.UpdateCacheHandler)
+	mutex.HandleFunc("/version", api.VersionHandler(interlink.Version))
 
 	interLinkEndpoint := ""
 	switch {
