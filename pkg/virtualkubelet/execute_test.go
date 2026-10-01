@@ -8,6 +8,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	types "github.com/interlink-hq/interlink/pkg/interlink"
 	"github.com/stretchr/testify/assert"
@@ -237,6 +238,30 @@ func TestDoRequestWithClient(t *testing.T) {
 			resp.Body.Close()
 		})
 	}
+}
+
+func TestDeleteRequestHonoursContextCancellation(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		<-r.Context().Done()
+	}))
+	defer server.Close()
+
+	host, port, err := net.SplitHostPort(strings.TrimPrefix(server.URL, "http://"))
+	require.NoError(t, err)
+
+	pod := &v1.Pod{ObjectMeta: metav1.ObjectMeta{UID: "test-pod-uid"}}
+	ctx, cancel := context.WithCancel(context.Background())
+	go func() {
+		time.Sleep(10 * time.Millisecond)
+		cancel()
+	}()
+
+	_, err = deleteRequest(ctx, Config{
+		InterlinkURL:  "http://" + host,
+		InterlinkPort: port,
+	}, pod, "")
+	require.Error(t, err)
+	assert.ErrorIs(t, err, context.Canceled)
 }
 
 func TestAddSessionContext(t *testing.T) {

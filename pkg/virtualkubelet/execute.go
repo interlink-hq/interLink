@@ -461,6 +461,8 @@ func createRequest(ctx context.Context, config Config, pod types.PodCreateReques
 // deleteRequest performs a REST call to the InterLink API when a Pod is deleted from the VK. It Marshals the standard v1.Pod struct and sends it to InterLink.
 // Returns the call response expressed in bytes and/or the first encountered error
 func deleteRequest(ctx context.Context, config Config, pod *v1.Pod, token string) ([]byte, error) {
+	const requestTimeout = 30 * time.Second
+
 	interLinkEndpoint := getSidecarEndpoint(ctx, config.InterlinkURL, config.InterlinkPort)
 	var returnValue []byte
 	bodyBytes, err := json.Marshal(pod)
@@ -469,7 +471,9 @@ func deleteRequest(ctx context.Context, config Config, pod *v1.Pod, token string
 		return nil, err
 	}
 	reader := bytes.NewReader(bodyBytes)
-	req, err := http.NewRequest(http.MethodDelete, interLinkEndpoint+"/delete", reader)
+	requestCtx, cancel := context.WithTimeout(ctx, requestTimeout)
+	defer cancel()
+	req, err := http.NewRequestWithContext(requestCtx, http.MethodDelete, interLinkEndpoint+"/delete", reader)
 	if err != nil {
 		log.G(context.Background()).Error(err)
 		return nil, err
@@ -488,7 +492,9 @@ func deleteRequest(ctx context.Context, config Config, pod *v1.Pod, token string
 		return nil, err
 	}
 
-	resp, err := doRequestWithClient(req, token, httpClient)
+	requestClient := *httpClient
+	requestClient.Timeout = requestTimeout
+	resp, err := doRequestWithClient(req, token, &requestClient)
 	if err != nil {
 		log.G(context.Background()).Error(err)
 		return nil, err
