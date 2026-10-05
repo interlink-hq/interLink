@@ -2,6 +2,7 @@ package virtualkubelet
 
 import (
 	"context"
+	"io"
 	"net"
 	"net/http"
 	"net/http/httptest"
@@ -241,8 +242,20 @@ func TestDoRequestWithClient(t *testing.T) {
 }
 
 func TestDeleteRequestHonoursContextCancellation(t *testing.T) {
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		<-r.Context().Done()
+	server := httptest.NewServer(http.HandlerFunc(func(_ http.ResponseWriter, r *http.Request) {
+		// The request body has to be drained before waiting. net/http starts the
+		// background read that notices a disconnected client only once the body has
+		// been consumed, so a handler blocking on an unread body never sees its
+		// context cancelled, never returns, and the server.Close() below waits for
+		// it until the whole package times out.
+		_, _ = io.Copy(io.Discard, r.Body)
+
+		select {
+		case <-r.Context().Done():
+		// Never reached unless the cancellation stops propagating again: it is here
+		// so that such a regression fails this test instead of hanging the suite.
+		case <-time.After(10 * time.Second):
+		}
 	}))
 	defer server.Close()
 
