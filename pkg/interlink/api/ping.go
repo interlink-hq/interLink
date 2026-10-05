@@ -45,6 +45,7 @@ func (h *InterLinkHandler) Ping(w http.ResponseWriter, r *http.Request) {
 
 	log.G(h.Ctx).Info("InterLink: forwarding GetStatus call to sidecar")
 	req.Header.Set("Content-Type", "application/json")
+	ForwardAccessToken(r, req)
 	log.G(h.Ctx).Debug(req)
 
 	// ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)

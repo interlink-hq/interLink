@@ -62,6 +62,38 @@ func AddSessionContext(req *http.Request, sessionContext string) {
 	req.Header.Set("InterLink-Http-Session", sessionContext)
 }
 
+// accessTokenHeader carries the caller's OIDC access token as handed over by
+// the authenticating proxy that fronts interLink (oauth2-proxy's
+// pass_access_token option, or the equivalent in another proxy).
+const accessTokenHeader = "X-Forwarded-Access-Token"
+
+// ForwardAccessToken copies the caller's access token from the inbound request
+// onto an outbound request to the sidecar plugin, so that the plugin can act
+// on behalf of the identity that made the call. It is a no-op when the header
+// is absent, which is the case for any deployment that does not put an
+// authenticating proxy in front of interLink.
+//
+// The token is only trustworthy because the proxy verified it and, by default,
+// strips any client-supplied copy of this header before setting its own.
+// interLink does not re-verify it.
+//
+// Only ever call this for requests to the sidecar plugin. Sending it anywhere
+// outside the deployment's trust boundary hands a live bearer credential to
+// the other end.
+func ForwardAccessToken(in *http.Request, out *http.Request) {
+	if in == nil || out == nil {
+		return
+	}
+
+	token := in.Header.Get(accessTokenHeader)
+	if token == "" {
+		log.G(in.Context()).Debug("ForwardAccessToken: no " + accessTokenHeader + " on the inbound request, nothing to forward")
+		return
+	}
+
+	out.Header.Set(accessTokenHeader, token)
+}
+
 // GetSessionContext retrieves or generates a session context identifier for request tracing.
 // If no session context exists in the request headers, a new UUID-based identifier is generated.
 // Returns the session context string for use in logging and tracing.

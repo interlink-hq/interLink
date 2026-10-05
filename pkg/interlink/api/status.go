@@ -95,6 +95,7 @@ func (h *InterLinkHandler) StatusHandler(w http.ResponseWriter, r *http.Request)
 
 		log.G(h.Ctx).Info("InterLink: forwarding GetStatus call to sidecar")
 		req.Header.Set("Content-Type", "application/json")
+		ForwardAccessToken(r, req)
 
 		sessionContext := GetSessionContext(r)
 		bodyBytes, err = ReqWithError(h.Ctx, req, w, start, span, false, true, sessionContext, h.ClientHTTP)
