@@ -1732,13 +1732,27 @@ func (p *Provider) handleShadowCreation(ctx context.Context, pod *v1.Pod) (strin
 		}
 	}
 
-	podIP, err := p.waitForShadowPodIP(ctx, shadowPod, timeout, shadowResourceIdentity{
+	shadowIdentity := shadowResourceIdentity{
 		Name:      templateData.Name,
 		Namespace: templateData.Namespace,
-	})
+	}
+
+	// Waited for first even when the service address is the one handed out: it is
+	// the only signal that the shadow is actually coming up, and the failure path
+	// cleans up the shadow resources.
+	podIP, err := p.waitForShadowPodIP(ctx, shadowPod, timeout, shadowIdentity)
 	if err != nil {
 		log.G(ctx).Errorf("Failed to get shadow pod IP for %s/%s: %v", pod.Namespace, pod.Name, err)
 		return "", err
+	}
+
+	// Prefer the service address: it stays valid for as long as the service
+	// exists, while the shadow pod IP changes whenever the pod is replaced (a new
+	// session, a rescheduling) and is never updated on the virtual pod afterwards,
+	// leaving whoever connects to it talking to nothing.
+	if serviceIP := p.shadowServiceIP(ctx, shadowIdentity); serviceIP != "" {
+		log.G(ctx).Infof("Using shadow service IP %s for virtual pod %s/%s", serviceIP, pod.Namespace, pod.Name)
+		podIP = serviceIP
 	}
 
 	// The SSH shadow dials in to the login node, so the workload has nothing to set
@@ -1753,6 +1767,33 @@ func (p *Provider) handleShadowCreation(ctx context.Context, pod *v1.Pod) (strin
 	}
 
 	return podIP, nil
+}
+
+// shadowServiceIP returns the ClusterIP of the shadow service, or "" when there
+// is no usable one (no service, a headless service, or a service exposing no
+// port, as happens when a pod exposes UDP ports only), in which case the caller
+// keeps the shadow pod IP.
+func (p *Provider) shadowServiceIP(ctx context.Context, identity shadowResourceIdentity) string {
+	service, err := p.clientSet.CoreV1().Services(identity.Namespace).Get(ctx, identity.Name, metav1.GetOptions{})
+	if err != nil {
+		log.G(ctx).Warningf("Failed to get shadow service %s/%s, falling back to the shadow pod IP: %v",
+			identity.Namespace, identity.Name, err)
+		return ""
+	}
+
+	if service.Spec.ClusterIP == "" || service.Spec.ClusterIP == v1.ClusterIPNone {
+		log.G(ctx).Warningf("Shadow service %s/%s has no ClusterIP (%q), falling back to the shadow pod IP",
+			identity.Namespace, identity.Name, service.Spec.ClusterIP)
+		return ""
+	}
+
+	if len(service.Spec.Ports) == 0 {
+		log.G(ctx).Warningf("Shadow service %s/%s exposes no port, falling back to the shadow pod IP",
+			identity.Namespace, identity.Name)
+		return ""
+	}
+
+	return service.Spec.ClusterIP
 }
 
 // waitForShadowPodIP waits for shadow pod to get an IP
