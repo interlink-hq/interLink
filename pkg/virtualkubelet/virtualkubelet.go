@@ -44,8 +44,8 @@ import (
 	k8stypes "k8s.io/apimachinery/pkg/types"
 )
 
-//go:embed templates/wstunnel-template.yaml templates/wstunnel-wireguard-template.yaml
-var defaultWstunnelTemplate embed.FS
+//go:embed templates/wstunnel-template.yaml templates/wstunnel-wireguard-template.yaml templates/shadow-ssh-template.yaml
+var defaultShadowTemplates embed.FS
 
 //go:embed all:templates/mesh.sh
 var meshScriptTemplate embed.FS
@@ -73,6 +73,13 @@ const (
 	DefaultWstunnelCommandTLS  = "curl  -L -f -k https://github.com/erebe/wstunnel/releases/download/v10.4.4/wstunnel_10.4.4_linux_amd64.tar.gz -o wstunnel.tar.gz && tar -xzvf wstunnel.tar.gz && chmod +x wstunnel && ./wstunnel client --http-upgrade-path-prefix %s %s wss://%s:443 &"
 )
 
+// Pacing of the pending-deletion reconciliation sweep.
+const (
+	deleteSweepInterval    = 10 * time.Second
+	deleteRetryBaseBackoff = 5 * time.Second
+	deleteRetryMaxBackoff  = 5 * time.Minute
+)
+
 // Annotations for WireGuard and WStunnel configuration
 const (
 	annWGPrivateKey                 = "interlink.eu/wg-private-key"       // base64 or plain (your choice)
@@ -86,7 +93,7 @@ const (
 	annMeshNetworkDisabled          = "interlink.eu/mesh-network"                    // set to "disabled" to opt out of mesh networking
 )
 
-type WstunnelTemplateData struct {
+type ShadowTemplateData struct {
 	Name                 string
 	Namespace            string
 	RandomPassword       string
@@ -105,6 +112,17 @@ type WstunnelTemplateData struct {
 	IngressTLS           bool
 	IngressClusterIssuer string
 	FullMesh             bool
+	// NodeConfigMap is the ConfigMap the shadow can mount to learn which remote
+	// compute node the workload landed on. It exists from the moment the shadow is
+	// created but holds an empty NodeNameKey until the plugin reports the node.
+	NodeConfigMap string
+	// NodeNameKey is the key inside NodeConfigMap holding the node name.
+	NodeNameKey string
+	// SSH carries the SSH port-forward settings, used by the ssh shadow template.
+	SSH SSHTunnel
+	// SSHNodeWaitSeconds is SSH.NodeWaitTimeout in whole seconds, for the shell loop
+	// that waits on NodeConfigMap.
+	SSHNodeWaitSeconds int
 }
 
 type PortMapping struct {
@@ -147,6 +165,26 @@ type Provider struct {
 	clientSet            kubernetes.Interface
 	clientHTTPTransport  *http.Transport
 	podIPs               []string
+	// shadowNodeNames caches, per pod UID, the last compute node published to
+	// that pod's shadow, so the status loop only writes on change.
+	shadowNodeNames sync.Map
+	// shadowsReleased marks, per pod UID, shadows already removed because their
+	// pod ended, so the status loop removes each one once.
+	shadowsReleased  sync.Map
+	pendingDeletes   map[string]*pendingDelete
+	pendingDeletesMu sync.Mutex
+	deleteLoopOnce   sync.Once
+}
+
+// pendingDelete tracks a pod whose remote deletion has not been confirmed by the
+// plugin yet. Entries live until /delete returns success, so that a pod is never
+// dropped from p.pods (leaving its remote job running) because of a transient
+// plugin outage.
+type pendingDelete struct {
+	pod      *v1.Pod
+	attempts int
+	nextTry  time.Time
+	inFlight bool
 }
 
 // Increment the given IP address
@@ -527,6 +565,7 @@ func NewProviderConfig(
 		internalIP:          internalIP,
 		daemonEndpointPort:  daemonEndpointPort,
 		pods:                make(map[string]*v1.Pod),
+		pendingDeletes:      make(map[string]*pendingDelete),
 		config:              config,
 		startTime:           time.Now(),
 		clientHTTPTransport: clientHTTPTransport,
@@ -579,6 +618,10 @@ func LoadConfig(ctx context.Context, providerConfig string) (config Config, err 
 
 	// config = configMap
 	SetDefaultResource(&config)
+
+	if err = NormalizeShadowConfig(&config); err != nil {
+		return config, err
+	}
 
 	if _, err = resource.ParseQuantity(config.Resources.CPU); err != nil {
 		return config, fmt.Errorf("invalid CPU value %v", config.Resources.CPU)
@@ -891,16 +934,16 @@ func copyPodLabelsAndAnnotations(pod *v1.Pod) (map[string]string, map[string]str
 	return labels, annotations
 }
 
-// createDummyPod creates wstunnel infrastructure from template for containers with exposed ports
-func (p *Provider) createDummyPod(ctx context.Context, originalPod *v1.Pod) (*v1.Pod, *WstunnelTemplateData, error) {
-	log.G(ctx).Infof("Creating wstunnel infrastructure for %s/%s with exposed ports", originalPod.Namespace, originalPod.Name)
+// createShadowPod creates shadow infrastructure from template for containers with exposed ports
+func (p *Provider) createShadowPod(ctx context.Context, originalPod *v1.Pod) (*v1.Pod, *ShadowTemplateData, error) {
+	log.G(ctx).Infof("Creating shadow infrastructure for %s/%s with exposed ports", originalPod.Namespace, originalPod.Name)
 
-	// If not exists, create the namespace for wstunnel
+	// If not exists, create the namespace for the shadow
 	if originalPod.Namespace == "" {
 		return nil, nil, fmt.Errorf("pod namespace is empty")
 	}
 
-	identity, err := computeWstunnelResourceIdentity(originalPod)
+	identity, err := computeShadowResourceIdentity(originalPod)
 	if err != nil {
 		return nil, nil, err
 	}
@@ -912,7 +955,7 @@ func (p *Provider) createDummyPod(ctx context.Context, originalPod *v1.Pod) (*v1
 	_, err = p.clientSet.CoreV1().Namespaces().Get(ctx, identity.Namespace, metav1.GetOptions{})
 	if err != nil {
 		if !apierrors.IsNotFound(err) {
-			return nil, nil, fmt.Errorf("failed to get wstunnel namespace %s: %w", identity.Namespace, err)
+			return nil, nil, fmt.Errorf("failed to get shadow namespace %s: %w", identity.Namespace, err)
 		}
 		// Create the namespace if it doesn't exist
 		ns := &v1.Namespace{
@@ -922,9 +965,9 @@ func (p *Provider) createDummyPod(ctx context.Context, originalPod *v1.Pod) (*v1
 		}
 		_, err = p.clientSet.CoreV1().Namespaces().Create(ctx, ns, metav1.CreateOptions{})
 		if err != nil {
-			return nil, nil, fmt.Errorf("failed to create wstunnel namespace %s: %w", identity.Namespace, err)
+			return nil, nil, fmt.Errorf("failed to create shadow namespace %s: %w", identity.Namespace, err)
 		}
-		log.G(ctx).Infof("Created wstunnel namespace %s", identity.Namespace)
+		log.G(ctx).Infof("Created shadow namespace %s", identity.Namespace)
 	}
 
 	// Reuse existing random path prefix if the Deployment already exists, otherwise generate it once
@@ -943,6 +986,18 @@ func (p *Provider) createDummyPod(ctx context.Context, originalPod *v1.Pod) (*v1
 	// log the path prefix
 	log.G(ctx).Infof("Using wstunnel path prefix %s for %s/%s", pathPrefix, originalPod.Namespace, originalPod.Name)
 
+	// The remote node is unknown at this point - the job has not been submitted, let
+	// alone scheduled - so publish an empty ConfigMap the shadow can already mount.
+	if err := p.resetShadowNodeConfigMap(ctx, identity); err != nil {
+		return nil, nil, err
+	}
+
+	if p.isSSHShadow() {
+		if err := p.replicateShadowCredentials(ctx, identity); err != nil {
+			return nil, nil, err
+		}
+	}
+
 	localContainers := getLocalContainers(originalPod)
 	localInitContainers := getLocalInitContainers(originalPod)
 
@@ -950,7 +1005,7 @@ func (p *Provider) createDummyPod(ctx context.Context, originalPod *v1.Pod) (*v1
 	log.G(ctx).Infof("Copied %d labels and %d annotations from original pod to shadow pod", len(podLabels), len(podAnnotations))
 
 	fullMeshEnabledForPod := p.config.Network.FullMesh && !isMeshNetworkingDisabled(originalPod)
-	templateData := WstunnelTemplateData{
+	templateData := ShadowTemplateData{
 		Name:                 identity.Name,
 		Namespace:            identity.Namespace,
 		RandomPassword:       pathPrefix,
@@ -964,6 +1019,14 @@ func (p *Provider) createDummyPod(ctx context.Context, originalPod *v1.Pod) (*v1
 		IngressTLS:           p.config.Network.IngressTLS,
 		IngressClusterIssuer: p.config.Network.IngressClusterIssuer,
 		FullMesh:             fullMeshEnabledForPod,
+		NodeConfigMap:        shadowNodeConfigMapName(identity.Name),
+		NodeNameKey:          shadowNodeNameKey,
+		SSH:                  p.config.Network.SSH,
+		SSHNodeWaitSeconds:   p.sshNodeWaitSeconds(),
+	}
+
+	if p.isSSHShadow() {
+		warnOnUDPPorts(ctx, templateData.ExposedPorts)
 	}
 
 	log.G(ctx).Debugf("LocalInitContainers count: %d", len(templateData.LocalInitContainers))
@@ -980,22 +1043,22 @@ func (p *Provider) createDummyPod(ctx context.Context, originalPod *v1.Pod) (*v1
 		}
 	}
 
-	manifestYAML, err := p.executeWstunnelTemplate(ctx, templateData)
+	manifestYAML, err := p.executeShadowTemplate(ctx, templateData)
 	if err != nil {
-		return nil, nil, fmt.Errorf("failed to execute wstunnel template: %w", err)
+		return nil, nil, fmt.Errorf("failed to execute shadow template: %w", err)
 	}
 
-	createdPod, err := p.applyWstunnelManifests(ctx, manifestYAML, &templateData)
+	createdPod, err := p.applyShadowManifests(ctx, manifestYAML, &templateData)
 	if err != nil {
-		return nil, nil, fmt.Errorf("failed to apply wstunnel manifests: %w", err)
+		return nil, nil, fmt.Errorf("failed to apply shadow manifests: %w", err)
 	}
 
-	log.G(ctx).Infof("Created wstunnel infrastructure for %s/%s", originalPod.Namespace, originalPod.Name)
+	log.G(ctx).Infof("Created shadow infrastructure for %s/%s", originalPod.Namespace, originalPod.Name)
 	return createdPod, &templateData, nil
 }
 
 // setupWireGuardConfig populates WireGuard-related fields on templateData using annotations from the original pod.
-func (p *Provider) setupWireGuardConfig(ctx context.Context, originalPod *v1.Pod, templateData *WstunnelTemplateData) error {
+func (p *Provider) setupWireGuardConfig(ctx context.Context, originalPod *v1.Pod, templateData *ShadowTemplateData) error {
 	wgMTU := 1280
 	if v := strings.TrimSpace(originalPod.Annotations[annWGMTU]); v != "" {
 		if n, err := strconv.Atoi(v); err == nil && n > 0 {
@@ -1064,8 +1127,8 @@ func mergeMaps(dst, src map[string]string) map[string]string {
 	return dst
 }
 
-// executeWstunnelTemplate loads and executes the wstunnel template
-func (p *Provider) executeWstunnelTemplate(ctx context.Context, data WstunnelTemplateData) (string, error) {
+// executeShadowTemplate loads and executes the shadow template
+func (p *Provider) executeShadowTemplate(ctx context.Context, data ShadowTemplateData) (string, error) {
 	var templateContent string
 
 	// Try to load from custom path first
@@ -1081,10 +1144,13 @@ func (p *Provider) executeWstunnelTemplate(ctx context.Context, data WstunnelTem
 	// Fall back to embedded template
 	if templateContent == "" {
 		templatePath := "templates/wstunnel-template.yaml"
-		if data.FullMesh {
+		switch {
+		case p.isSSHShadow():
+			templatePath = "templates/shadow-ssh-template.yaml"
+		case data.FullMesh:
 			templatePath = "templates/wstunnel-wireguard-template.yaml"
 		}
-		content, err := defaultWstunnelTemplate.ReadFile(templatePath)
+		content, err := defaultShadowTemplates.ReadFile(templatePath)
 		if err != nil {
 			return "", fmt.Errorf("failed to read embedded template: %w", err)
 		}
@@ -1092,7 +1158,7 @@ func (p *Provider) executeWstunnelTemplate(ctx context.Context, data WstunnelTem
 	}
 
 	// Parse and execute template
-	tmpl, err := template.New("wstunnel").Parse(templateContent)
+	tmpl, err := template.New("shadow").Parse(templateContent)
 	if err != nil {
 		return "", fmt.Errorf("failed to parse template: %w", err)
 	}
@@ -1144,7 +1210,7 @@ func prependContainers(dst []v1.Container, add []v1.Container) []v1.Container {
 }
 
 // applyOrUpdateDeployment creates or updates a Deployment, returning its name and namespace.
-func (p *Provider) applyOrUpdateDeployment(ctx context.Context, o *appsv1.Deployment, td *WstunnelTemplateData) (string, string, error) {
+func (p *Provider) applyOrUpdateDeployment(ctx context.Context, o *appsv1.Deployment, td *ShadowTemplateData) (string, string, error) {
 	if td != nil {
 		ps := &o.Spec.Template.Spec
 		ps.Volumes = mergeVolumes(ps.Volumes, td.Volumes)
@@ -1281,8 +1347,8 @@ func (p *Provider) applyOrUpdateSecret(ctx context.Context, o *v1.Secret) error 
 	return nil
 }
 
-// applyWstunnelManifests applies the generated manifests and returns the first created pod
-func (p *Provider) applyWstunnelManifests(ctx context.Context, manifestYAML string, td *WstunnelTemplateData) (*v1.Pod, error) {
+// applyShadowManifests applies the generated manifests and returns the first created pod
+func (p *Provider) applyShadowManifests(ctx context.Context, manifestYAML string, td *ShadowTemplateData) (*v1.Pod, error) {
 	resources := strings.Split(manifestYAML, "---")
 	decoder := serializer.NewCodecFactory(scheme.Scheme).UniversalDeserializer()
 	var deploymentName string
@@ -1305,7 +1371,7 @@ func (p *Provider) applyWstunnelManifests(ctx context.Context, manifestYAML stri
 		case *appsv1.Deployment:
 			name, ns, err := p.applyOrUpdateDeployment(ctx, o, td)
 			if err != nil {
-				p.cleanupPartialWstunnelResources(ctx, createdResources, o.Namespace)
+				p.cleanupPartialShadowResources(ctx, createdResources, o.Namespace)
 				return nil, err
 			}
 			deploymentName = name
@@ -1314,28 +1380,28 @@ func (p *Provider) applyWstunnelManifests(ctx context.Context, manifestYAML stri
 
 		case *v1.Service:
 			if err := p.applyOrUpdateService(ctx, o); err != nil {
-				p.cleanupPartialWstunnelResources(ctx, createdResources, o.Namespace)
+				p.cleanupPartialShadowResources(ctx, createdResources, o.Namespace)
 				return nil, err
 			}
 			createdResources = append(createdResources, "service:"+o.Name)
 
 		case *networkingv1.Ingress:
 			if err := p.applyOrUpdateIngress(ctx, o); err != nil {
-				p.cleanupPartialWstunnelResources(ctx, createdResources, o.Namespace)
+				p.cleanupPartialShadowResources(ctx, createdResources, o.Namespace)
 				return nil, err
 			}
 			createdResources = append(createdResources, "ingress:"+o.Name)
 
 		case *v1.ConfigMap:
 			if err := p.applyOrUpdateConfigMap(ctx, o); err != nil {
-				p.cleanupPartialWstunnelResources(ctx, createdResources, o.Namespace)
+				p.cleanupPartialShadowResources(ctx, createdResources, o.Namespace)
 				return nil, err
 			}
 			createdResources = append(createdResources, "configmap:"+o.Name)
 
 		case *v1.Secret:
 			if err := p.applyOrUpdateSecret(ctx, o); err != nil {
-				p.cleanupPartialWstunnelResources(ctx, createdResources, o.Namespace)
+				p.cleanupPartialShadowResources(ctx, createdResources, o.Namespace)
 				return nil, err
 			}
 			createdResources = append(createdResources, "secret:"+o.Name)
@@ -1352,77 +1418,107 @@ func (p *Provider) applyWstunnelManifests(ctx context.Context, manifestYAML stri
 	return nil, fmt.Errorf("no deployment found in manifests")
 }
 
-// waitForDeploymentPod waits for a deployment to create a pod and returns the
-// one currently serving it
+// waitForDeploymentPod waits for a deployment to create a pod and returns it.
+//
+// A pod recreated under the same name (a StatefulSet replica) gets a Deployment with the
+// same name, labels and pod-template hash as the one just deleted, and the garbage
+// collector removes that one's pods asynchronously. Pods that are terminating, or older
+// than the current Deployment, belong to the previous one and are skipped.
 func (p *Provider) waitForDeploymentPod(ctx context.Context, deploymentName, namespace string) (*v1.Pod, error) {
 	timeout := 30 * time.Second
 	start := time.Now()
 
 	for time.Since(start) < timeout {
-		pod, err := p.currentDeploymentPod(ctx, deploymentName, namespace)
+		deployment, err := p.clientSet.AppsV1().Deployments(namespace).Get(ctx, deploymentName, metav1.GetOptions{})
+		if err != nil {
+			log.G(ctx).Warningf("Failed to get deployment %s: %v", deploymentName, err)
+			time.Sleep(1 * time.Second)
+			continue
+		}
+
+		pods, err := p.clientSet.CoreV1().Pods(namespace).List(ctx, metav1.ListOptions{
+			LabelSelector: fmt.Sprintf("app.kubernetes.io/component=%s", deploymentName),
+		})
 		if err != nil {
 			log.G(ctx).Debugf("No pod yet for deployment %s/%s: %v", namespace, deploymentName, err)
 			time.Sleep(1 * time.Second)
 			continue
 		}
 
-		return pod, nil
+		for i := range pods.Items {
+			pod := &pods.Items[i]
+			if pod.DeletionTimestamp != nil || pod.CreationTimestamp.Before(&deployment.CreationTimestamp) {
+				continue
+			}
+			return pod, nil
+		}
+
+		time.Sleep(1 * time.Second)
 	}
 
 	return nil, fmt.Errorf("no pod found for deployment %s within timeout", deploymentName)
 }
 
-// cleanupWstunnelResources removes all wstunnel resources for a given name and namespace
-func (p *Provider) cleanupWstunnelResources(ctx context.Context, wstunnelName, namespace string) {
-	log.G(ctx).Infof("Cleaning up wstunnel resources for %s/%s", namespace, wstunnelName)
+// cleanupShadowResources removes all shadow resources for a given name and namespace
+func (p *Provider) cleanupShadowResources(ctx context.Context, shadowName, namespace string) {
+	log.G(ctx).Infof("Cleaning up shadow resources for %s/%s", namespace, shadowName)
 
 	// Delete deployment
-	err := p.clientSet.AppsV1().Deployments(namespace).Delete(ctx, wstunnelName, metav1.DeleteOptions{})
+	err := p.clientSet.AppsV1().Deployments(namespace).Delete(ctx, shadowName, metav1.DeleteOptions{})
 	if err != nil {
-		log.G(ctx).Warningf("Failed to delete wstunnel deployment %s/%s: %v", namespace, wstunnelName, err)
+		log.G(ctx).Warningf("Failed to delete shadow deployment %s/%s: %v", namespace, shadowName, err)
 	} else {
-		log.G(ctx).Infof("Successfully deleted wstunnel deployment %s/%s", namespace, wstunnelName)
+		log.G(ctx).Infof("Successfully deleted shadow deployment %s/%s", namespace, shadowName)
 	}
 
 	// Delete service
-	err = p.clientSet.CoreV1().Services(namespace).Delete(ctx, wstunnelName, metav1.DeleteOptions{})
+	err = p.clientSet.CoreV1().Services(namespace).Delete(ctx, shadowName, metav1.DeleteOptions{})
 	if err != nil {
-		log.G(ctx).Warningf("Failed to delete wstunnel service %s/%s: %v", namespace, wstunnelName, err)
+		log.G(ctx).Warningf("Failed to delete shadow service %s/%s: %v", namespace, shadowName, err)
 	} else {
-		log.G(ctx).Infof("Successfully deleted wstunnel service %s/%s", namespace, wstunnelName)
+		log.G(ctx).Infof("Successfully deleted shadow service %s/%s", namespace, shadowName)
 	}
 
 	// Delete ingress
-	err = p.clientSet.NetworkingV1().Ingresses(namespace).Delete(ctx, wstunnelName, metav1.DeleteOptions{})
+	err = p.clientSet.NetworkingV1().Ingresses(namespace).Delete(ctx, shadowName, metav1.DeleteOptions{})
 	if err != nil {
-		log.G(ctx).Warningf("Failed to delete wstunnel ingress %s/%s: %v", namespace, wstunnelName, err)
+		log.G(ctx).Warningf("Failed to delete shadow ingress %s/%s: %v", namespace, shadowName, err)
 	} else {
-		log.G(ctx).Infof("Successfully deleted wstunnel ingress %s/%s", namespace, wstunnelName)
+		log.G(ctx).Infof("Successfully deleted shadow ingress %s/%s", namespace, shadowName)
 	}
 
 	// Delete configmap
-	err = p.clientSet.CoreV1().ConfigMaps(namespace).Delete(ctx, wstunnelName+"-wg-config", metav1.DeleteOptions{})
+	err = p.clientSet.CoreV1().ConfigMaps(namespace).Delete(ctx, shadowName+"-wg-config", metav1.DeleteOptions{})
 	if err != nil {
-		log.G(ctx).Warningf("Failed to delete wstunnel configmap %s/%s: %v", namespace, wstunnelName+"-wg-config", err)
+		log.G(ctx).Warningf("Failed to delete shadow configmap %s/%s: %v", namespace, shadowName+"-wg-config", err)
 	} else {
-		log.G(ctx).Infof("Successfully deleted wstunnel configmap %s/%s", namespace, wstunnelName+"-wg-config")
+		log.G(ctx).Infof("Successfully deleted shadow configmap %s/%s", namespace, shadowName+"-wg-config")
+	}
+
+	// Delete the compute node configmap
+	nodeCM := shadowNodeConfigMapName(shadowName)
+	err = p.clientSet.CoreV1().ConfigMaps(namespace).Delete(ctx, nodeCM, metav1.DeleteOptions{})
+	if err != nil {
+		log.G(ctx).Warningf("Failed to delete shadow configmap %s/%s: %v", namespace, nodeCM, err)
+	} else {
+		log.G(ctx).Infof("Successfully deleted shadow configmap %s/%s", namespace, nodeCM)
 	}
 
 	// Delete cert-manager-provisioned TLS secret.
 	if p.config.Network.IngressTLS {
-		secretName := wstunnelName + "-tls"
+		secretName := shadowName + "-tls"
 		err = p.clientSet.CoreV1().Secrets(namespace).Delete(ctx, secretName, metav1.DeleteOptions{})
 		if err != nil {
-			log.G(ctx).Warningf("Failed to delete wstunnel TLS secret %s/%s: %v", namespace, secretName, err)
+			log.G(ctx).Warningf("Failed to delete shadow TLS secret %s/%s: %v", namespace, secretName, err)
 		} else {
-			log.G(ctx).Infof("Successfully deleted wstunnel TLS secret %s/%s", namespace, secretName)
+			log.G(ctx).Infof("Successfully deleted shadow TLS secret %s/%s", namespace, secretName)
 		}
 	}
 }
 
-// cleanupPartialWstunnelResources removes specific resources that were created before a failure
-func (p *Provider) cleanupPartialWstunnelResources(ctx context.Context, createdResources []string, namespace string) {
-	log.G(ctx).Infof("Cleaning up partial wstunnel resources in namespace %s", namespace)
+// cleanupPartialShadowResources removes specific resources that were created before a failure
+func (p *Provider) cleanupPartialShadowResources(ctx context.Context, createdResources []string, namespace string) {
+	log.G(ctx).Infof("Cleaning up partial shadow resources in namespace %s", namespace)
 
 	for _, resource := range createdResources {
 		parts := strings.Split(resource, ":")
@@ -1597,8 +1693,8 @@ func hasExtraPortsAnnotation(pod *v1.Pod) bool {
 	return exists && strings.TrimSpace(extraPorts) != ""
 }
 
-// shouldCreateWstunnel checks if wstunnel infrastructure should be created
-func (p *Provider) shouldCreateWstunnel(pod *v1.Pod) bool {
+// shouldCreateShadow checks if shadow infrastructure should be created
+func (p *Provider) shouldCreateShadow(pod *v1.Pod) bool {
 	return p.config.Network.EnableTunnel && (hasExposedPorts(pod) || hasExtraPortsAnnotation(pod)) &&
 		pod.Annotations["interlink.eu/pod-vpn"] == ""
 }
@@ -1612,23 +1708,23 @@ func isMeshNetworkingDisabled(pod *v1.Pod) bool {
 	return strings.EqualFold(strings.TrimSpace(pod.Annotations[annMeshNetworkDisabled]), "disabled")
 }
 
-// handleWstunnelCreation creates wstunnel infrastructure and returns the pod IP
-func (p *Provider) handleWstunnelCreation(ctx context.Context, pod *v1.Pod) (string, error) {
-	identity, err := computeWstunnelResourceIdentity(pod)
+// handleShadowCreation creates shadow infrastructure and returns the pod IP
+func (p *Provider) handleShadowCreation(ctx context.Context, pod *v1.Pod) (string, error) {
+	identity, err := computeShadowResourceIdentity(pod)
 	if err != nil {
 		return "", err
 	}
 
-	// Create wstunnel infrastructure outside virtual node for port exposure
-	dummyPod, templateData, err := p.createDummyPod(ctx, pod)
+	// Create shadow infrastructure outside virtual node for port exposure
+	shadowPod, templateData, err := p.createShadowPod(ctx, pod)
 	if err != nil {
-		log.G(ctx).Errorf("Failed to create wstunnel infrastructure for %s/%s: %v", pod.Namespace, pod.Name, err)
+		log.G(ctx).Errorf("Failed to create shadow infrastructure for %s/%s: %v", pod.Namespace, pod.Name, err)
 		// Clean up any partially created resources
-		p.cleanupWstunnelResources(ctx, identity.Name, identity.Namespace)
-		return "", fmt.Errorf("failed to create wstunnel infrastructure for exposed ports: %w", err)
+		p.cleanupShadowResources(ctx, identity.Name, identity.Namespace)
+		return "", fmt.Errorf("failed to create shadow infrastructure for exposed ports: %w", err)
 	}
 
-	// Wait for wstunnel pod to get an IP with timeout
+	// Wait for shadow pod to get an IP with timeout
 	timeout := 30 * time.Second // Configurable timeout
 	if timeoutStr := pod.Annotations["interlink.virtual-kubelet.io/wstunnel-timeout"]; timeoutStr != "" {
 		if parsedTimeout, err := time.ParseDuration(timeoutStr); err == nil {
@@ -1636,115 +1732,54 @@ func (p *Provider) handleWstunnelCreation(ctx context.Context, pod *v1.Pod) (str
 		}
 	}
 
-	wstunnelIdentity := wstunnelResourceIdentity{
+	podIP, err := p.waitForShadowPodIP(ctx, shadowPod, timeout, shadowResourceIdentity{
 		Name:      templateData.Name,
 		Namespace: templateData.Namespace,
+	})
+	if err != nil {
+		log.G(ctx).Errorf("Failed to get shadow pod IP for %s/%s: %v", pod.Namespace, pod.Name, err)
+		return "", err
 	}
 
-	// The service address is the one to hand out: it stays valid for as long as
-	// the service exists, while the gateway pod IP changes whenever the pod is
-	// replaced (a new session, a rescheduling) and is never updated on the
-	// virtual pod afterwards, leaving whoever connects to it talking to nothing.
-	podIP := p.wstunnelServiceIP(ctx, wstunnelIdentity)
-	if podIP == "" {
-		var err error
-		podIP, err = p.waitForWstunnelPodIP(ctx, dummyPod, timeout, wstunnelIdentity)
-		if err != nil {
-			log.G(ctx).Errorf("Failed to get wstunnel pod IP for %s/%s: %v", pod.Namespace, pod.Name, err)
-			return "", err
+	// The SSH shadow dials in to the login node, so the workload has nothing to set
+	// up on its side: no wstunnel client to launch, no WireGuard config to apply.
+	if !p.isSSHShadow() {
+		// Add wstunnel client command annotation to the original pod
+		if err := p.addWstunnelClientAnnotation(ctx, pod, templateData); err != nil {
+			log.G(ctx).Warningf("Failed to add wstunnel client annotation to pod %s/%s: %v", pod.Namespace, pod.Name, err)
+			// Note: We don't clean up here since the shadow infrastructure is working,
+			// just the annotation failed (non-critical)
 		}
-	} else {
-		log.G(ctx).Infof("Using wstunnel service IP %s for virtual pod %s/%s", podIP, pod.Namespace, pod.Name)
-	}
-
-	// Add wstunnel client command annotation to the original pod
-	if err := p.addWstunnelClientAnnotation(ctx, pod, templateData); err != nil {
-		log.G(ctx).Warningf("Failed to add wstunnel client annotation to pod %s/%s: %v", pod.Namespace, pod.Name, err)
-		// Note: We don't clean up here since the wstunnel infrastructure is working,
-		// just the annotation failed (non-critical)
 	}
 
 	return podIP, nil
 }
 
-// wstunnelServiceIP returns the ClusterIP of the wstunnel service, or "" when
-// the service has none (a headless service, or one that could not be read), in
-// which case the caller falls back to the gateway pod IP.
-func (p *Provider) wstunnelServiceIP(ctx context.Context, identity wstunnelResourceIdentity) string {
-	service, err := p.clientSet.CoreV1().Services(identity.Namespace).Get(ctx, identity.Name, metav1.GetOptions{})
-	if err != nil {
-		log.G(ctx).Warningf("Failed to get wstunnel service %s/%s, falling back to the gateway pod IP: %v",
-			identity.Namespace, identity.Name, err)
-		return ""
-	}
-
-	if service.Spec.ClusterIP == "" || service.Spec.ClusterIP == v1.ClusterIPNone {
-		log.G(ctx).Warningf("wstunnel service %s/%s has no ClusterIP (%q), falling back to the gateway pod IP",
-			identity.Namespace, identity.Name, service.Spec.ClusterIP)
-		return ""
-	}
-
-	return service.Spec.ClusterIP
-}
-
-// currentDeploymentPod returns the pod of a wstunnel deployment that is meant to
-// serve traffic: the most recently created one that is not terminating. Pods
-// being deleted have to be skipped, otherwise a pod created while a previous
-// deployment is still going away is served the address of that old pod, which
-// stops answering seconds later.
-func (p *Provider) currentDeploymentPod(ctx context.Context, deploymentName, namespace string) (*v1.Pod, error) {
-	pods, err := p.clientSet.CoreV1().Pods(namespace).List(ctx, metav1.ListOptions{
-		LabelSelector: fmt.Sprintf("app.kubernetes.io/component=%s", deploymentName),
-	})
-	if err != nil {
-		return nil, err
-	}
-
-	var current *v1.Pod
-	for i := range pods.Items {
-		pod := &pods.Items[i]
-		if pod.DeletionTimestamp != nil || pod.Status.Phase == v1.PodSucceeded || pod.Status.Phase == v1.PodFailed {
-			continue
-		}
-		if current == nil || pod.CreationTimestamp.After(current.CreationTimestamp.Time) {
-			current = pod
-		}
-	}
-
-	if current == nil {
-		return nil, fmt.Errorf("no pod found for deployment %s/%s", namespace, deploymentName)
-	}
-	return current, nil
-}
-
-// waitForWstunnelPodIP waits for wstunnel pod to get an IP
-func (p *Provider) waitForWstunnelPodIP(ctx context.Context, dummyPod *v1.Pod, timeout time.Duration, identity wstunnelResourceIdentity) (string, error) {
-	log.G(ctx).Infof("Waiting up to %v for a wstunnel pod of %s/%s to get an IP", timeout, identity.Namespace, identity.Name)
+// waitForShadowPodIP waits for shadow pod to get an IP
+func (p *Provider) waitForShadowPodIP(ctx context.Context, shadowPod *v1.Pod, timeout time.Duration, identity shadowResourceIdentity) (string, error) {
+	log.G(ctx).Infof("Waiting up to %v for shadow pod %s/%s to get an IP", timeout, shadowPod.Namespace, shadowPod.Name)
 
 	start := time.Now()
 	for time.Since(start) < timeout {
-		// Selected again on every attempt: the pod that serves the deployment
-		// can change while we wait, and dummyPod may be the one going away.
-		currentPod, err := p.currentDeploymentPod(ctx, identity.Name, identity.Namespace)
+		updatedDummyPod, err := p.clientSet.CoreV1().Pods(shadowPod.Namespace).Get(ctx, shadowPod.Name, metav1.GetOptions{})
 		if err != nil {
-			log.G(ctx).Warningf("Failed to get wstunnel pod status: %v", err)
+			log.G(ctx).Warningf("Failed to get shadow pod status: %v", err)
 			time.Sleep(1 * time.Second)
 			continue
 		}
 
-		if currentPod.Status.PodIP != "" {
-			podIP := currentPod.Status.PodIP
-			log.G(ctx).Infof("Using wstunnel pod IP %s (pod %s/%s) for virtual pod %s/%s",
-				podIP, currentPod.Namespace, currentPod.Name, identity.Namespace, identity.Name)
+		if updatedDummyPod.Status.PodIP != "" {
+			podIP := updatedDummyPod.Status.PodIP
+			log.G(ctx).Infof("Using shadow pod IP %s for virtual pod %s/%s", podIP, identity.Namespace, shadowPod.Name)
 			return podIP, nil
 		}
 
 		time.Sleep(1 * time.Second)
 	}
 
-	// Clean up the wstunnel infrastructure since it didn't get an IP
-	p.cleanupWstunnelResources(ctx, identity.Name, identity.Namespace)
-	return "", fmt.Errorf("wstunnel pod %s/%s failed to get an IP within %v timeout", dummyPod.Namespace, dummyPod.Name, timeout)
+	// Clean up the shadow infrastructure since it didn't get an IP
+	p.cleanupShadowResources(ctx, identity.Name, identity.Namespace)
+	return "", fmt.Errorf("shadow pod %s/%s failed to get an IP within %v timeout", shadowPod.Namespace, shadowPod.Name, timeout)
 }
 
 // buildTerminatedContainerStatuses builds a slice of ContainerStatus entries where
@@ -1890,10 +1925,10 @@ func (p *Provider) CreatePod(ctx context.Context, pod *v1.Pod) error {
 
 	podIP := "127.0.0.1"
 
-	// Handle wstunnel creation if needed
-	if p.shouldCreateWstunnel(pod) || (p.config.Network.FullMesh && !isMeshNetworkingDisabled(pod)) {
+	// Handle shadow creation if needed
+	if p.hasShadow(pod) {
 		var err error
-		podIP, err = p.handleWstunnelCreation(ctx, pod)
+		podIP, err = p.handleShadowCreation(ctx, pod)
 		if err != nil {
 			return err
 		}
@@ -1966,6 +2001,12 @@ func (p *Provider) UpdatePod(ctx context.Context, pod *v1.Pod) error {
 }
 
 // DeletePod deletes the specified pod and drops it out of p.pods
+//
+// The pod is registered as pending deletion before the remote call is attempted,
+// and is only dropped from p.pods once the plugin confirms the deletion. A failed
+// attempt is returned to the pod controller so it requeues, and the pod also stays
+// on the reconciliation sweep (deleteLoop) which keeps retrying after the
+// controller has given up. See issue #540.
 func (p *Provider) DeletePod(ctx context.Context, pod *v1.Pod) (err error) {
 	TracerUpdate(&ctx, "DeletePodVK", pod)
 
@@ -1980,26 +2021,52 @@ func (p *Provider) DeletePod(ctx context.Context, pod *v1.Pod) (err error) {
 		return errdefs.NotFound("pod not found")
 	}
 
-	// Clean up wstunnel resources if tunnel is enabled and they exist and no VPN annotation
-	if p.shouldCreateWstunnel(pod) || (p.config.Network.FullMesh && !isMeshNetworkingDisabled(pod)) {
-		identity, identityErr := computeWstunnelResourceIdentity(pod)
-		if identityErr != nil {
-			log.G(ctx).Warningf("Failed to compute wstunnel resource identity for %s/%s: %v", pod.Namespace, pod.Name, identityErr)
-		} else {
-			p.cleanupWstunnelResources(ctx, identity.Name, identity.Namespace)
+	// Clean up shadow resources if tunnel is enabled and they exist and no VPN annotation
+	if p.hasShadow(pod) {
+		if _, released := p.shadowsReleased.LoadAndDelete(string(pod.UID)); !released {
+			identity, identityErr := computeShadowResourceIdentity(pod)
+			if identityErr != nil {
+				log.G(ctx).Warningf("Failed to compute shadow resource identity for %s/%s: %v", pod.Namespace, pod.Name, identityErr)
+			} else {
+				p.cleanupShadowResources(ctx, identity.Name, identity.Namespace)
+			}
 		}
+		p.forgetShadowNodeName(pod)
 	}
+
+	p.markDeletePending(pod)
+
+	if err = p.deletePodRemote(ctx, pod); err != nil {
+		log.G(ctx).Error(err)
+		return err
+	}
+
+	return nil
+}
+
+// deletePodRemote asks the plugin to delete pod and, once it confirms, drops the
+// pod from p.pods and from the pending-deletion set and reports the terminated
+// status to Kubernetes. The remote error is returned untouched so callers can
+// retry; the pod stays tracked until the deletion is confirmed.
+func (p *Provider) deletePodRemote(ctx context.Context, pod *v1.Pod) error {
+	key := string(pod.UID)
+
+	if !p.beginDeleteAttempt(key) {
+		return fmt.Errorf("remote deletion of pod %s/%s is already in progress", pod.Namespace, pod.Name)
+	}
+
+	err := RemoteExecution(ctx, p.config, p, pod, DELETE)
+	p.finishDeleteAttempt(key, err)
+	if err != nil {
+		return err
+	}
+
+	p.podsMu.Lock()
+	delete(p.pods, key)
+	p.podsMu.Unlock()
 
 	now := metav1.Now()
 	pod.Status.Reason = "VKProviderPodDeleted"
-
-	go func() {
-		err = RemoteExecution(ctx, p.config, p, pod, DELETE)
-		if err != nil {
-			log.G(ctx).Error(err)
-			return
-		}
-	}()
 
 	for idx := range pod.Status.ContainerStatuses {
 		pod.Status.ContainerStatuses[idx].Ready = false
@@ -2023,17 +2090,143 @@ func (p *Provider) DeletePod(ctx context.Context, pod *v1.Pod) (err error) {
 	}
 
 	// tell k8s it's terminated
-	err = p.UpdatePod(ctx, pod)
-	if err != nil {
-		return err
+	return p.UpdatePod(ctx, pod)
+}
+
+// markDeletePending registers pod as awaiting confirmation of its remote deletion.
+// Calling it again for a pod already pending keeps the existing attempt count and
+// backoff, so repeated DeletePod calls from the pod controller do not reset it.
+func (p *Provider) markDeletePending(pod *v1.Pod) {
+	p.pendingDeletesMu.Lock()
+	defer p.pendingDeletesMu.Unlock()
+
+	if p.pendingDeletes == nil {
+		p.pendingDeletes = make(map[string]*pendingDelete)
+	}
+	if _, ok := p.pendingDeletes[string(pod.UID)]; !ok {
+		p.pendingDeletes[string(pod.UID)] = &pendingDelete{pod: pod.DeepCopy()}
+	}
+}
+
+// beginDeleteAttempt claims the right to issue a remote deletion for key. It
+// returns false when another attempt is already in flight, which keeps the
+// controller-driven retries and the sweep from issuing duplicate /delete calls.
+func (p *Provider) beginDeleteAttempt(key string) bool {
+	p.pendingDeletesMu.Lock()
+	defer p.pendingDeletesMu.Unlock()
+
+	entry, ok := p.pendingDeletes[key]
+	if !ok {
+		// Not tracked (e.g. a direct call): nothing to serialise against.
+		return true
+	}
+	if entry.inFlight {
+		return false
+	}
+	entry.inFlight = true
+	entry.attempts++
+	return true
+}
+
+// finishDeleteAttempt records the outcome of an attempt: on success the pod stops
+// being tracked, on failure the next attempt is pushed out by an exponential
+// backoff capped at deleteRetryMaxBackoff.
+func (p *Provider) finishDeleteAttempt(key string, err error) {
+	p.pendingDeletesMu.Lock()
+	defer p.pendingDeletesMu.Unlock()
+
+	entry, ok := p.pendingDeletes[key]
+	if !ok {
+		return
+	}
+	if err == nil {
+		delete(p.pendingDeletes, key)
+		return
 	}
 
-	// delete from p.pods
-	p.podsMu.Lock()
-	delete(p.pods, string(key))
-	p.podsMu.Unlock()
+	entry.inFlight = false
+	entry.nextTry = time.Now().Add(deleteRetryBackoff(entry.attempts))
+}
 
-	return nil
+// deleteRetryBackoff returns the delay before the given attempt number is retried.
+func deleteRetryBackoff(attempts int) time.Duration {
+	backoff := deleteRetryBaseBackoff
+	for i := 1; i < attempts; i++ {
+		backoff *= 2
+		if backoff >= deleteRetryMaxBackoff {
+			return deleteRetryMaxBackoff
+		}
+	}
+	return backoff
+}
+
+// deleteLoop periodically retries remote deletions that the plugin has not
+// confirmed yet.
+//
+// The pod controller alone is not enough to guarantee delivery: it abandons a pod
+// after queue.MaxRetries, and it stops calling DeletePod entirely once the pod is
+// no longer running (it force-deletes it from the API server instead). Either way
+// the pod would stay in p.pods forever with its remote job still alive, which is
+// the leak described in issue #540. This sweep keeps retrying until /delete
+// succeeds.
+func (p *Provider) deleteLoop(ctx context.Context) {
+	ticker := time.NewTicker(deleteSweepInterval)
+	defer ticker.Stop()
+
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-ticker.C:
+		}
+
+		p.reconcilePendingDeletes(ctx, time.Now())
+	}
+}
+
+// reconcilePendingDeletes retries every pending deletion whose backoff has elapsed
+// at the given time.
+func (p *Provider) reconcilePendingDeletes(ctx context.Context, now time.Time) {
+	for _, pod := range p.pendingDeletesDue(now) {
+		log.G(ctx).Infof("retrying unconfirmed remote deletion of pod %s/%s", pod.Namespace, pod.Name)
+
+		if err := p.deletePodRemote(ctx, pod); err != nil {
+			log.G(ctx).Errorf("remote deletion of pod %s/%s still failing, will retry: %v", pod.Namespace, pod.Name, err)
+			continue
+		}
+
+		log.G(ctx).Infof("remote deletion of pod %s/%s confirmed by the plugin", pod.Namespace, pod.Name)
+	}
+}
+
+// pendingDeletesDue returns the pods whose remote deletion should be retried now.
+// The canonical pod from p.pods is preferred over the copy taken at DeletePod time
+// so that the status reported to Kubernetes on success is the current one.
+func (p *Provider) pendingDeletesDue(now time.Time) []*v1.Pod {
+	p.pendingDeletesMu.Lock()
+	due := make([]string, 0, len(p.pendingDeletes))
+	fallbacks := make(map[string]*v1.Pod, len(p.pendingDeletes))
+	for key, entry := range p.pendingDeletes {
+		if entry.inFlight || now.Before(entry.nextTry) {
+			continue
+		}
+		due = append(due, key)
+		fallbacks[key] = entry.pod
+	}
+	p.pendingDeletesMu.Unlock()
+
+	pods := make([]*v1.Pod, 0, len(due))
+	p.podsMu.RLock()
+	for _, key := range due {
+		if canonical, ok := p.pods[key]; ok {
+			pods = append(pods, canonical.DeepCopy())
+			continue
+		}
+		pods = append(pods, fallbacks[key].DeepCopy())
+	}
+	p.podsMu.RUnlock()
+
+	return pods
 }
 
 func (p *Provider) GetPod(_ context.Context, _ string, _ string) (*v1.Pod, error) {
@@ -2111,6 +2304,10 @@ func (p *Provider) GetPods(ctx context.Context) ([]*v1.Pod, error) {
 	p.podsMu.RUnlock()
 
 	go p.statusLoop(ctx)
+	p.deleteLoopOnce.Do(func() {
+		go p.deleteLoop(ctx)
+	})
+
 	return pods, nil
 }
 
@@ -2174,6 +2371,7 @@ func (p *Provider) statusLoop(ctx context.Context) {
 			if pod.Status.Phase != "Initializing" {
 				// Skip re-querying remote for pods already in a terminal state.
 				if pod.Status.Phase == v1.PodFailed || pod.Status.Phase == v1.PodSucceeded {
+					p.releaseShadowOfEndedPod(ctx, pod)
 					continue
 				}
 				_, err := checkPodsStatus(ctx, p, pod, token, p.config)
@@ -2191,6 +2389,7 @@ func (p *Provider) statusLoop(ctx context.Context) {
 				}
 				p.podsMu.RUnlock()
 				if notifyPod != nil {
+					p.releaseShadowOfEndedPod(ctx, notifyPod)
 					p.asyncUpdate(ctx, notifyPod)
 				}
 			}

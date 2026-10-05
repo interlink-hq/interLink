@@ -1,0 +1,355 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{.Name}}
+  namespace: {{.Namespace}}
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app.kubernetes.io/component: {{.Name}}
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/component: {{.Name}}
+    spec:
+      # Never schedule the shadow onto the virtual node it shadows: real nodes are
+      # kubernetes.io/os=linux, the virtual one is kubernetes.io/os=virtual-kubelet.
+      nodeSelector:
+        kubernetes.io/os: linux
+      tolerations: []
+      initContainers:
+      # The remote job is usually still queued when the shadow starts, so the pod
+      # sits in Init until the plugin reports which node it landed on. That is the
+      # expected path, not a failure: it reads as "waiting for the allocation"
+      # instead of a crash-looping tunnel.
+      - name: wait-for-node
+        image: {{.SSH.Image}}
+        command: ["/bin/sh", "-c"]
+        args:
+          - |
+            set -eu
+            deadline=$(( $(date +%s) + {{.SSHNodeWaitSeconds}} ))
+            while :; do
+              node=$(tr -d '[:space:]' < /interlink/node/{{.NodeNameKey}} 2>/dev/null || true)
+              [ -n "$node" ] && break
+              if [ "$(date +%s)" -ge "$deadline" ]; then
+                echo "timed out after {{.SSH.NodeWaitTimeout}} waiting for the plugin to report a compute node." >&2
+                echo "The plugin must return PodStatus.NodeName once the job runs; plugins that do not are unsupported by the ssh shadow." >&2
+                exit 1
+              fi
+              sleep 5
+            done
+            echo "compute node: $node"
+        volumeMounts:
+        - name: shadow-node
+          mountPath: /interlink/node
+          readOnly: true
+        securityContext:
+          allowPrivilegeEscalation: false
+          capabilities:
+            drop: ["ALL"]
+      {{- if eq .SSH.Auth "kerberos" }}
+      # Runs after the node is known so the ticket is fresh when ssh starts, however
+      # long the job waited in the queue.
+      - name: kinit
+        image: {{.SSH.Image}}
+        command: ["/bin/sh", "-c"]
+        args:
+          - kinit -k -t /interlink/keytab/{{.SSH.KeytabSecretKey}} {{.SSH.Principal}}
+        env:
+        - name: KRB5CCNAME
+          value: FILE:/interlink/krb5cc/ccache
+        volumeMounts:
+        - name: shadow-keytab
+          mountPath: /interlink/keytab
+          readOnly: true
+        - name: shadow-krb5cc
+          mountPath: /interlink/krb5cc
+        {{- if .SSH.Krb5ConfigMap }}
+        - name: shadow-krb5-config
+          mountPath: /etc/krb5.conf
+          subPath: krb5.conf
+          readOnly: true
+        {{- end }}
+        securityContext:
+          allowPrivilegeEscalation: false
+          capabilities:
+            drop: ["ALL"]
+      {{- end }}
+      containers:
+      {{- if eq .SSH.Auth "kerberos" }}
+      - name: kinit-renew
+        image: {{.SSH.Image}}
+        command: ["/bin/sh", "-c"]
+        args:
+          - |
+            set -u
+            while :; do
+              sleep 21600
+              kinit -k -t /interlink/keytab/{{.SSH.KeytabSecretKey}} {{.SSH.Principal}} || true
+            done
+        env:
+        - name: KRB5CCNAME
+          value: FILE:/interlink/krb5cc/ccache
+        volumeMounts:
+        - name: shadow-keytab
+          mountPath: /interlink/keytab
+          readOnly: true
+        - name: shadow-krb5cc
+          mountPath: /interlink/krb5cc
+        {{- if .SSH.Krb5ConfigMap }}
+        - name: shadow-krb5-config
+          mountPath: /etc/krb5.conf
+          subPath: krb5.conf
+          readOnly: true
+        {{- end }}
+        resources:
+          requests:
+            cpu: 10m
+            memory: 32Mi
+        securityContext:
+          allowPrivilegeEscalation: false
+          capabilities:
+            drop: ["ALL"]
+      {{- end }}
+      - name: ssh-forward
+        image: {{.SSH.Image}}
+        command: ["/bin/sh", "-c"]
+        args:
+          - |
+            set -u
+            read_node() { tr -d '[:space:]' < /interlink/node/{{.NodeNameKey}} 2>/dev/null || true; }
+
+            target={{.SSH.User}}@{{.SSH.LoginHost}}
+            ssh_opts="\
+              -p {{.SSH.Port}} \
+              -o BatchMode=yes \
+              -o ServerAliveInterval=30 \
+              -o ServerAliveCountMax=3 \
+            {{- if eq .SSH.Auth "kerberos" }}
+              -o GSSAPIAuthentication=yes \
+              -o GSSAPIDelegateCredentials=yes \
+              -o PreferredAuthentications=gssapi-with-mic \
+            {{- else }}
+              -i /interlink/ssh/{{.SSH.KeySecretKey}} \
+              -o IdentitiesOnly=yes \
+              -o PreferredAuthentications=publickey \
+            {{- end }}
+            {{- if .SSH.KnownHostsConfigMap }}
+              -o StrictHostKeyChecking=yes \
+              -o UserKnownHostsFile=/interlink/known-hosts/known_hosts \
+            {{- else }}
+              -o StrictHostKeyChecking=accept-new \
+            {{- end }}
+            {{- range .SSH.ExtraOptions }}
+              -o {{.}} \
+            {{- end }}
+              "
+
+            pids=
+
+            {{- if eq .SSH.ForwardMode "exec" }}
+            # One local listener per port, each accepted connection relayed by a
+            # command run on the login node. Nothing here asks sshd to forward
+            # anything, which is the point: it works where AllowTcpForwarding is off.
+            forward_dir=/tmp/interlink-forward
+            control="$forward_dir/master"
+            connect_cmd='{{.SSH.ExecConnectCommand}}'
+
+            start_forwarders() {
+              mkdir -p "$forward_dir"
+              rm -f "$control"
+
+              # Every relayed stream rides one multiplexed SSH connection, so opening a
+              # connection costs a channel rather than a full handshake, and the login
+              # node sees a single session instead of one per connection.
+              # shellcheck disable=SC2086
+              ssh -M -N -o ControlMaster=yes -o ControlPath="$control" -o ControlPersist=no $ssh_opts "$target" &
+              pids=$!
+
+              # Quoted for the login node's shell, which re-parses whatever ssh sends it.
+              remote_cmd="$connect_cmd '$node'"
+
+              waited=0
+              # shellcheck disable=SC2086
+              until ssh -O check -o ControlPath="$control" $ssh_opts "$target" >/dev/null 2>&1; do
+                waited=$((waited + 1))
+                if [ "$waited" -ge 30 ]; then
+                  echo "the ssh control master did not come up" >&2
+                  return 1
+                fi
+                sleep 1
+              done
+              {{- range .ExposedPorts }}
+              {{- if ne .Protocol "UDP" }}
+
+              printf '#!/bin/sh\nexec ssh -q -o ControlMaster=auto -o ControlPath=%s %s %s "%s {{.Port}}"\n' \
+                "$control" "$ssh_opts" "$target" "$remote_cmd" > "$forward_dir/{{.Port}}"
+              chmod +x "$forward_dir/{{.Port}}"
+              socat TCP-LISTEN:{{.Port}},fork,reuseaddr,bind=0.0.0.0 EXEC:"$forward_dir/{{.Port}}" &
+              pids="$pids $!"
+              {{- end }}
+              {{- end }}
+            }
+            {{- else }}
+            # One -L per port. The login node must set AllowTcpForwarding yes for this
+            # account, or every channel is refused with "administratively prohibited".
+            start_forwarders() {
+              # shellcheck disable=SC2086
+              ssh -N -o ExitOnForwardFailure=yes $ssh_opts \
+              {{- range .ExposedPorts }}
+              {{- if ne .Protocol "UDP" }}
+                -L "0.0.0.0:{{.Port}}:$node:{{.Port}}" \
+              {{- end }}
+              {{- end }}
+                "$target" &
+              pids=$!
+            }
+            {{- end }}
+
+            all_alive() {
+              for pid in $pids; do
+                kill -0 "$pid" 2>/dev/null || return 1
+              done
+              return 0
+            }
+
+            stop_forwarders() {
+              for pid in $pids; do
+                kill "$pid" 2>/dev/null || true
+              done
+              wait 2>/dev/null || true
+              pids=
+            }
+
+            node=$(read_node)
+            [ -n "$node" ] || { echo "no compute node recorded" >&2; exit 1; }
+
+            # A requeued job comes back on a different host and the virtual kubelet
+            # republishes it into the mounted ConfigMap, but the running forwarders
+            # still hold the old name. Watch for the change and rebuild them.
+            while :; do
+              echo "forwarding{{range .ExposedPorts}}{{if ne .Protocol "UDP"}} {{.Port}}{{end}}{{end}} to $node via {{.SSH.LoginHost}} ({{.SSH.ForwardMode}} mode)"
+              if ! start_forwarders; then
+                stop_forwarders
+                exit 1
+              fi
+
+              changed=false
+              while all_alive; do
+                current=$(read_node)
+                if [ -n "$current" ] && [ "$current" != "$node" ]; then
+                  echo "compute node changed from $node to $current, rebuilding the tunnel"
+                  node=$current
+                  changed=true
+                  break
+                fi
+                sleep 10
+              done
+
+              stop_forwarders
+              $changed && continue
+
+              current=$(read_node)
+              if [ -n "$current" ] && [ "$current" != "$node" ]; then
+                node=$current
+                continue
+              fi
+              echo "the tunnel exited; letting Kubernetes restart the container" >&2
+              exit 1
+            done
+        {{- if eq .SSH.Auth "kerberos" }}
+        env:
+        - name: KRB5CCNAME
+          value: FILE:/interlink/krb5cc/ccache
+        {{- end }}
+        ports:
+        {{- range .ExposedPorts }}
+        {{- if ne .Protocol "UDP" }}
+        - containerPort: {{.Port}}
+          name: {{if .Name}}{{.Name}}{{else}}port-{{.Port}}{{end}}
+          protocol: {{.Protocol}}
+        {{- end }}
+        {{- end }}
+        volumeMounts:
+        - name: shadow-node
+          mountPath: /interlink/node
+          readOnly: true
+        {{- if eq .SSH.Auth "kerberos" }}
+        - name: shadow-krb5cc
+          mountPath: /interlink/krb5cc
+          readOnly: true
+        {{- if .SSH.Krb5ConfigMap }}
+        - name: shadow-krb5-config
+          mountPath: /etc/krb5.conf
+          subPath: krb5.conf
+          readOnly: true
+        {{- end }}
+        {{- else }}
+        - name: shadow-ssh-key
+          mountPath: /interlink/ssh
+          readOnly: true
+        {{- end }}
+        {{- if .SSH.KnownHostsConfigMap }}
+        - name: shadow-known-hosts
+          mountPath: /interlink/known-hosts
+          readOnly: true
+        {{- end }}
+        resources:
+          requests:
+            cpu: 100m
+            memory: 64Mi
+        securityContext:
+          allowPrivilegeEscalation: false
+          capabilities:
+            drop: ["ALL"]
+      volumes:
+      # Mounted as a directory, not subPath: only directory mounts are refreshed in
+      # place when the VK writes the compute node into this ConfigMap.
+      - name: shadow-node
+        configMap:
+          name: {{.NodeConfigMap}}
+      {{- if eq .SSH.Auth "kerberos" }}
+      - name: shadow-keytab
+        secret:
+          secretName: {{.SSH.KeytabSecret}}
+          defaultMode: 0400
+      - name: shadow-krb5cc
+        emptyDir:
+          medium: Memory
+      {{- if .SSH.Krb5ConfigMap }}
+      - name: shadow-krb5-config
+        configMap:
+          name: {{.SSH.Krb5ConfigMap}}
+      {{- end }}
+      {{- else }}
+      - name: shadow-ssh-key
+        secret:
+          secretName: {{.SSH.KeySecret}}
+          defaultMode: 0400
+      {{- end }}
+      {{- if .SSH.KnownHostsConfigMap }}
+      - name: shadow-known-hosts
+        configMap:
+          name: {{.SSH.KnownHostsConfigMap}}
+      {{- end }}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{.Name}}
+  namespace: {{.Namespace}}
+spec:
+  type: ClusterIP
+  selector:
+    app.kubernetes.io/component: {{.Name}}
+  ports:
+  {{- range .ExposedPorts }}
+  {{- if ne .Protocol "UDP" }}
+  - port: {{.Port}}
+    targetPort: {{.Port}}
+    name: {{if .Name}}{{.Name}}{{else}}port-{{.Port}}{{end}}
+    protocol: {{.Protocol}}
+  {{- end }}
+  {{- end }}
