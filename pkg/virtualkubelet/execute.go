@@ -351,7 +351,7 @@ func PingInterLink(ctx context.Context, config Config) (bool, int, string, error
 		return false, retVal, "", err
 	}
 
-	if resp.StatusCode != http.StatusOK {
+	if !types.IsSuccessStatus(resp.StatusCode) {
 		log.G(ctx).Error("server error: " + fmt.Sprint(resp.StatusCode))
 		return false, retVal, string(respBody), nil
 	}
@@ -404,7 +404,7 @@ func updateCacheRequest(ctx context.Context, config Config, pod v1.Pod, token st
 	defer resp.Body.Close()
 
 	types.SetDurationSpan(startHTTPCall, spanHTTP, types.WithHTTPReturnCode(resp.StatusCode))
-	if resp.StatusCode != http.StatusOK {
+	if !types.IsSuccessStatus(resp.StatusCode) {
 		return errors.New("Unexpected error occured while updating InterLink cache. Status code: " + strconv.Itoa(resp.StatusCode) + ". Check InterLink's logs for further informations")
 	}
 
@@ -466,7 +466,7 @@ func createRequest(ctx context.Context, config Config, pod types.PodCreateReques
 		return nil, fmt.Errorf("error doing ReadAll() in createRequest() log request: %s error: %w", fmt.Sprintf("%#v", req), err)
 	}
 
-	if resp.StatusCode != http.StatusOK {
+	if !types.IsSuccessStatus(resp.StatusCode) {
 		return nil, fmt.Errorf("error creating pod (HTTP %d): %s", resp.StatusCode, string(returnValue))
 	}
 
@@ -588,7 +588,7 @@ func statusRequest(ctx context.Context, config Config, podsList []*v1.Pod, token
 	defer resp.Body.Close()
 
 	types.SetDurationSpan(startHTTPCall, spanHTTP, types.WithHTTPReturnCode(resp.StatusCode))
-	if resp.StatusCode != http.StatusOK {
+	if !types.IsSuccessStatus(resp.StatusCode) {
 		returnValue, err := io.ReadAll(resp.Body)
 		if err != nil {
 			log.L.Error(err)
@@ -677,7 +677,7 @@ func LogRetrieval(
 	log.G(ctx).Debug(sessionContextMessage, "after doRequestWithClient()")
 
 	types.SetDurationSpan(startHTTPCall, spanHTTP, types.WithHTTPReturnCode(resp.StatusCode))
-	if resp.StatusCode != http.StatusOK {
+	if !types.IsSuccessStatus(resp.StatusCode) {
 		err = errors.New(sessionContextMessage + "Unexpected error occured while getting logs. Status code: " + strconv.Itoa(resp.StatusCode) + ". Check InterLink's logs for further informations")
 	}
 

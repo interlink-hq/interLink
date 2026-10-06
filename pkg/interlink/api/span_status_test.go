@@ -355,3 +355,53 @@ func TestUpdateCacheHandlerKeepsTheRawBodyOffTheSpan(t *testing.T) {
 	assert.True(t, ok, "the pod identity must still be recorded")
 	assert.Equal(t, string(pod.UID), uid)
 }
+
+// 201 and 204 are legal answers from a plugin. Comparing against 200 exactly
+// rejected them: the client got an error body over the status it had already
+// been sent, and the span recorded a failure for a call that worked.
+func TestSuccessfulNon200PluginStatusIsNotAFailure(t *testing.T) {
+	for _, status := range []int{http.StatusOK, http.StatusCreated, http.StatusAccepted, http.StatusNoContent} {
+		t.Run(http.StatusText(status), func(t *testing.T) {
+			exporter := newSpanRecorder(t)
+
+			// The body is written only when the status allows one: a body after
+			// 204 is illegal and makes net/http drop the connection, which would
+			// fail this test for a reason that has nothing to do with the status.
+			server, _, client := newUnixTestServer(t, http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+				w.WriteHeader(status)
+				if status != http.StatusNoContent {
+					writeTestResponse(t, w, `[]`)
+				}
+			}))
+			t.Cleanup(server.Close)
+			h := &InterLinkHandler{Ctx: context.Background(), SidecarEndpoint: testUnixEndpoint, ClientHTTP: client}
+
+			w := httptest.NewRecorder()
+			h.DeleteHandler(w, httptest.NewRequest(http.MethodDelete, "/delete", mustJSON(t, testPod())))
+
+			assert.Equal(t, status, w.Code, "the client must get the status the plugin returned")
+			assert.NotContains(t, w.Body.String(), "call exit status")
+
+			span := exportedSpan(t, exporter, "DeleteAPI")
+			assert.Equal(t, codes.Ok, span.Status.Code)
+			code, ok := spanAttrInt(span, "exit.code")
+			require.True(t, ok)
+			assert.Equal(t, int64(status), code)
+		})
+	}
+}
+
+// Anything outside 2xx stays a failure.
+func TestErrorPluginStatusIsStillAFailure(t *testing.T) {
+	exporter := newSpanRecorder(t)
+	h := newSidecarHandler(t, http.StatusInternalServerError)
+
+	w := httptest.NewRecorder()
+	h.DeleteHandler(w, httptest.NewRequest(http.MethodDelete, "/delete", mustJSON(t, testPod())))
+
+	span := exportedSpan(t, exporter, "DeleteAPI")
+	assert.Equal(t, codes.Error, span.Status.Code)
+	code, ok := spanAttrInt(span, "exit.code")
+	require.True(t, ok)
+	assert.Equal(t, int64(http.StatusInternalServerError), code)
+}

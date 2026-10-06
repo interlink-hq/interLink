@@ -114,7 +114,14 @@ image names, metadata keys, referenced object names, cache decisions, and
 client information. The trace does not include HTTP bodies, Secret/ConfigMap
 contents, environment variable values, container commands, or arguments. The
 legacy `ENABLE_TRACING=1` environment variable remains supported, and
-`ENABLE_DETAILED_TRACING=1` overrides the detailed setting.
+`ENABLE_DETAILED_TRACING=1` overrides the detailed setting. A value that is
+neither a boolean nor `1`/`0` turns the switch off and logs a warning.
+
+This block configures the **interLink API server** only. The Virtual Kubelet is
+enabled separately, with `ENABLE_TRACING=1` on its own process, and accepts only
+that exact value. Enable both to get one trace per pod operation: the Virtual
+Kubelet starts the trace and the API server continues it, so with only the API
+server enabled its spans are the roots of their own traces.
 
 ## Installation
 

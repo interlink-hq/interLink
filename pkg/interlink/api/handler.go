@@ -485,8 +485,8 @@ func ReqWithError(
 		log.G(ctx).Warn(sessionContextMessage, "Server does not support Flusher.")
 	}
 
-	if resp.StatusCode != http.StatusOK {
-		log.G(ctx).Errorf("%s Non-OK status from JobScriptBuilder: %d", sessionContextMessage, resp.StatusCode)
+	if !interlink.IsSuccessStatus(resp.StatusCode) {
+		log.G(ctx).Errorf("%s Non-success status from the upstream call: %d", sessionContextMessage, resp.StatusCode)
 		statusCode := http.StatusInternalServerError
 
 		// ❗This is likely the cause of “superfluous WriteHeader” (double call)

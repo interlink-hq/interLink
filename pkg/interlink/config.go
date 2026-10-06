@@ -412,19 +412,30 @@ func NewInterLinkConfig() (Config, error) {
 		interLinkNewConfig.Pprof.Address = os.Getenv("PPROF_ADDRESS")
 	}
 
-	if value, ok, err := optionalEnvBool("ENABLE_TRACING"); err != nil {
-		return Config{}, err
-	} else if ok {
-		interLinkNewConfig.Tracing.Enabled = value
-	}
-
-	if value, ok, err := optionalEnvBool("ENABLE_DETAILED_TRACING"); err != nil {
-		return Config{}, err
-	} else if ok {
-		interLinkNewConfig.Tracing.Detailed = value
-	}
+	interLinkNewConfig.Tracing.Enabled = tracingEnvOverride("ENABLE_TRACING", interLinkNewConfig.Tracing.Enabled)
+	interLinkNewConfig.Tracing.Detailed = tracingEnvOverride("ENABLE_DETAILED_TRACING", interLinkNewConfig.Tracing.Detailed)
 
 	return interLinkNewConfig, nil
+}
+
+// tracingEnvOverride applies the environment override for a tracing switch,
+// returning current when the variable is unset.
+//
+// A value that is not a boolean turns tracing off and logs a warning, which is
+// what the previous `os.Getenv("ENABLE_TRACING") == "1"` check did for anything
+// but "1". Failing to start over an unreadable telemetry flag would take down a
+// server that was running fine before the upgrade.
+func tracingEnvOverride(name string, current bool) bool {
+	value, set, err := optionalEnvBool(name)
+	if err != nil {
+		log.G(context.Background()).Warningf(
+			"%s, tracing switch treated as disabled; use true/false or 1/0", err)
+		return false
+	}
+	if !set {
+		return current
+	}
+	return value
 }
 
 func optionalEnvBool(name string) (value bool, set bool, err error) {

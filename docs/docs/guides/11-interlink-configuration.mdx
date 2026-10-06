@@ -207,6 +207,24 @@ The following environment variables can override configuration file values:
 | `ENABLE_TRACING`      | `Tracing.Enabled`  | Enable or disable API server tracing (`true`, `false`, `1`, or `0`)          |
 | `ENABLE_DETAILED_TRACING` | `Tracing.Detailed` | Override detailed diagnostic attributes (`true`, `false`, `1`, or `0`)   |
 
+:::note
+
+`Tracing.Enabled` and `ENABLE_TRACING` above switch tracing for the **interLink
+API server**. The Virtual Kubelet is a separate process with its own switch: it
+reads `ENABLE_TRACING` and accepts only the exact value `1`, and it has no
+configuration-file equivalent.
+
+The two are independent on purpose, so that the API server can be traced on its
+own. Enabling both is what produces a single trace per pod operation, from the
+Virtual Kubelet down to the plugin call: the Virtual Kubelet is the one that
+starts the trace and passes it on, so with tracing enabled on the API server
+only, its spans are the roots of their own traces.
+
+A value that is not a boolean turns the switch off and logs a warning, rather
+than stopping the server.
+
+:::
+
 ## Telemetry Configuration
 
 OpenTelemetry tracing is configured through environment variables:

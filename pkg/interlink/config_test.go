@@ -353,3 +353,27 @@ func TestTLSConfig_Validation(t *testing.T) {
 		})
 	}
 }
+
+// An unreadable value used to be ignored (the check was `== "1"`). It must not
+// stop the server from starting: tracing is turned off and a warning is logged.
+func TestTracingEnvOverride(t *testing.T) {
+	t.Run("unset keeps the configured value", func(t *testing.T) {
+		assert.True(t, tracingEnvOverride("ENABLE_TRACING", true))
+		assert.False(t, tracingEnvOverride("ENABLE_TRACING", false))
+	})
+
+	t.Run("a valid value overrides the configured one", func(t *testing.T) {
+		t.Setenv("ENABLE_TRACING", "false")
+		assert.False(t, tracingEnvOverride("ENABLE_TRACING", true))
+	})
+
+	t.Run("legacy numeric value still works", func(t *testing.T) {
+		t.Setenv("ENABLE_TRACING", "1")
+		assert.True(t, tracingEnvOverride("ENABLE_TRACING", false))
+	})
+
+	t.Run("an invalid value disables tracing instead of failing", func(t *testing.T) {
+		t.Setenv("ENABLE_TRACING", "yes")
+		assert.False(t, tracingEnvOverride("ENABLE_TRACING", true))
+	})
+}
