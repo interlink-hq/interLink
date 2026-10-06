@@ -7,6 +7,7 @@ import (
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -48,6 +49,15 @@ func exportedSpan(t *testing.T, exporter *tracetest.InMemoryExporter, name strin
 	}
 	t.Fatalf("no span named %q was exported, got %v", name, names)
 	return tracetest.SpanStub{}
+}
+
+func spanAttrString(stub tracetest.SpanStub, key string) (string, bool) {
+	for _, a := range stub.Attributes {
+		if string(a.Key) == key {
+			return a.Value.AsString(), true
+		}
+	}
+	return "", false
 }
 
 func spanAttrInt(stub tracetest.SpanStub, key string) (int64, bool) {
@@ -296,4 +306,52 @@ func TestReqWithErrorRecordsOutcomeOnBothPaths(t *testing.T) {
 			assert.Equal(t, int64(tc.sidecar), code)
 		})
 	}
+}
+
+// A JSON null inside the pod array used to panic the handler: net/http recovers
+// it, so the only visible trace of the failure was a span exported Unset and
+// without a return code.
+func TestStatusHandlerRejectsNullPodInTheArray(t *testing.T) {
+	exporter := newSpanRecorder(t)
+	h := newSidecarHandler(t, http.StatusOK)
+
+	w := httptest.NewRecorder()
+	h.StatusHandler(w, httptest.NewRequest(http.MethodPost, "/status", bytes.NewReader([]byte(`[null]`))))
+
+	require.Equal(t, http.StatusBadRequest, w.Code)
+
+	span := exportedSpan(t, exporter, "StatusAPI")
+	assert.Equal(t, codes.Error, span.Status.Code)
+	code, ok := spanAttrInt(span, "exit.code")
+	assert.True(t, ok, "a rejected body must still record its return code")
+	assert.Equal(t, int64(http.StatusBadRequest), code)
+}
+
+// The VK posts the whole pod as JSON to /updateCache. Copying the body into an
+// attribute put tens of kilobytes of client-supplied content on the span, large
+// enough for one request to break the OTLP export of a whole batch.
+func TestUpdateCacheHandlerKeepsTheRawBodyOffTheSpan(t *testing.T) {
+	exporter := newSpanRecorder(t)
+	h := newSidecarHandler(t, http.StatusOK)
+
+	pod := testPod()
+	pod.Annotations = map[string]string{"padding": strings.Repeat("x", 4096)}
+
+	w := httptest.NewRecorder()
+	h.UpdateCacheHandler(w, httptest.NewRequest(http.MethodPost, "/updateCache", mustJSON(t, pod)))
+
+	require.Equal(t, http.StatusOK, w.Code)
+
+	span := exportedSpan(t, exporter, "UpdateCacheAPI")
+	assert.Equal(t, codes.Ok, span.Status.Code)
+
+	for _, attr := range span.Attributes {
+		value := attr.Value.Emit()
+		assert.NotContains(t, value, "padding", "attribute %s carries the request body", attr.Key)
+		assert.Less(t, len(value), 256, "attribute %s is too large to be an identifier", attr.Key)
+	}
+
+	uid, ok := spanAttrString(span, "pod.uid")
+	assert.True(t, ok, "the pod identity must still be recorded")
+	assert.Equal(t, string(pod.UID), uid)
 }

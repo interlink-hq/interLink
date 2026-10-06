@@ -218,6 +218,13 @@ func traceExecute(ctx context.Context, pod *v1.Pod, name string, startHTTPCall i
 	), trace.WithSpanKind(trace.SpanKindClient))
 }
 
+// injectTraceContext puts the trace context of ctx into the request headers, so
+// that the API server can continue the trace instead of starting a new one.
+//
+// It also makes ctx the request context, which REPLACES whatever context the
+// request was built with. A caller that needs a deadline or a cancellation on
+// the request has to derive ctx from it, not the other way round, or it is
+// silently dropped here.
 func injectTraceContext(ctx context.Context, req *http.Request) *http.Request {
 	req = req.WithContext(ctx)
 	otel.GetTextMapPropagator().Inject(ctx, propagation.HeaderCarrier(req.Header))
@@ -479,7 +486,18 @@ func deleteRequest(ctx context.Context, config Config, pod *v1.Pod, token string
 		return nil, err
 	}
 	reader := bytes.NewReader(bodyBytes)
-	requestCtx, cancel := context.WithTimeout(ctx, requestTimeout)
+
+	startHTTPCall := time.Now().UnixMicro()
+	spanCtx, spanHTTP := traceExecute(ctx, pod, "DeleteHttpCall", startHTTPCall)
+	defer spanHTTP.End()
+	defer types.SetDurationSpan(startHTTPCall, spanHTTP)
+
+	// The deadline is derived from the span context, and the request is built
+	// with the result: injectTraceContext below replaces the request context, so
+	// a deadline taken from a context that is not an ancestor of spanCtx would be
+	// dropped and the call would be left bounded only by the client timeout set
+	// further down.
+	requestCtx, cancel := context.WithTimeout(spanCtx, requestTimeout)
 	defer cancel()
 	req, err := http.NewRequestWithContext(requestCtx, http.MethodDelete, interLinkEndpoint+"/delete", reader)
 	if err != nil {
@@ -487,14 +505,9 @@ func deleteRequest(ctx context.Context, config Config, pod *v1.Pod, token string
 		return nil, err
 	}
 
-	startHTTPCall := time.Now().UnixMicro()
-	spanCtx, spanHTTP := traceExecute(ctx, pod, "DeleteHttpCall", startHTTPCall)
-	defer spanHTTP.End()
-	defer types.SetDurationSpan(startHTTPCall, spanHTTP)
-
 	// Add session number for end-to-end from VK to API to InterLink plugin (eg interlink-slurm-plugin)
 	AddSessionContext(req, "DeletePod#"+strconv.Itoa(rand.Intn(100000)))
-	req = injectTraceContext(spanCtx, req)
+	req = injectTraceContext(requestCtx, req)
 
 	// Create TLS-enabled HTTP client
 	httpClient, err := createTLSHTTPClient(ctx, config.TLS)

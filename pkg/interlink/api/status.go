@@ -62,6 +62,21 @@ func (h *InterLinkHandler) StatusHandler(w http.ResponseWriter, r *http.Request)
 		return
 	}
 
+	// A JSON null inside the array unmarshals into a nil element, and every use
+	// of it below dereferences the pod. Letting it through panics the handler:
+	// net/http recovers, but the span is then exported Unset and without a
+	// return code, which is the very outcome this handler reports on.
+	for i, pod := range pods {
+		if pod == nil {
+			errWithContext := fmt.Errorf("pod at index %d of the request body is null", i)
+			log.G(h.Ctx).Error(errWithContext)
+			statusCode = http.StatusBadRequest
+			w.WriteHeader(statusCode)
+			types.SetSpanError(span, statusCode, errWithContext)
+			return
+		}
+	}
+
 	span.SetAttributes(
 		attribute.Int("pods.count", len(pods)),
 	)

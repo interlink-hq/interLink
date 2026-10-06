@@ -1,6 +1,7 @@
 package api
 
 import (
+	"encoding/json"
 	"errors"
 	"io"
 	"net/http"
@@ -8,6 +9,7 @@ import (
 
 	"github.com/containerd/containerd/log"
 	"go.opentelemetry.io/otel/attribute"
+	v1 "k8s.io/api/core/v1"
 
 	types "github.com/interlink-hq/interlink/pkg/interlink"
 )
@@ -32,7 +34,19 @@ func (h *InterLinkHandler) UpdateCacheHandler(w http.ResponseWriter, r *http.Req
 		return
 	}
 	setRequestBodySize(span, bodyBytes)
-	span.SetAttributes(attribute.String("pod.uid", string(bodyBytes)))
+
+	// The body is never recorded verbatim. The VK posts the whole pod as JSON
+	// here, so copying it into an attribute put tens of kilobytes of
+	// client-supplied content on the span: enough for a large body to push the
+	// OTLP export past its message size limit and have the batch processor drop
+	// every span batched with it. Only the pod identity is recorded, and only
+	// when the body really is a pod.
+	var pod *v1.Pod
+	if err := json.Unmarshal(bodyBytes, &pod); err == nil && pod != nil {
+		setPodSpanAttributes(span, pod, h.Config.Tracing.Detailed)
+	} else {
+		span.SetAttributes(attribute.Bool("interlink.update_cache.body.is_pod", false))
+	}
 
 	deleteCachedStatus(string(bodyBytes))
 
