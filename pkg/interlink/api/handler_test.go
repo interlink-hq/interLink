@@ -28,10 +28,26 @@ import (
 	types "github.com/interlink-hq/interlink/pkg/interlink"
 )
 
+const (
+	// testUnixEndpoint is the sidecar endpoint handed to the handler under test;
+	// unixSocketRoundTripper rewrites it to the test unix socket.
+	testUnixEndpoint  = "http+unix://"
+	testContainerName = "worker"
+)
+
 // unixSocketRoundTripper rewrites http+unix URLs to http://unix so the underlying
 // transport can dial the configured unix socket.
 type unixSocketRoundTripper struct {
 	transport http.RoundTripper
+}
+
+// writeTestResponse writes a canned body from a test HTTP handler, failing the
+// test instead of dropping the error.
+func writeTestResponse(t *testing.T, w io.Writer, body string) {
+	t.Helper()
+	if _, err := io.WriteString(w, body); err != nil {
+		t.Errorf("writing the test response failed: %v", err)
+	}
 }
 
 func tracingSpanRecorder(t *testing.T) *tracetest.InMemoryExporter {
@@ -67,10 +83,10 @@ func tracingTestHandler(t *testing.T, status int) *InterLinkHandler {
 	t.Helper()
 	server, _, client := newUnixTestServer(t, http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		w.WriteHeader(status)
-		_, _ = io.WriteString(w, `[]`)
+		writeTestResponse(t, w, `[]`)
 	}))
 	t.Cleanup(server.Close)
-	return &InterLinkHandler{Ctx: context.Background(), SidecarEndpoint: "http+unix://", ClientHTTP: client}
+	return &InterLinkHandler{Ctx: context.Background(), SidecarEndpoint: testUnixEndpoint, ClientHTTP: client}
 }
 
 func tracingJSON(t *testing.T, value any) *bytes.Reader {
@@ -92,11 +108,11 @@ func TestAPITracingCreatesServerAndClientSpans(t *testing.T) {
 		receivedSession = r.Header.Get("InterLink-Http-Session")
 		receivedTraceparent = r.Header.Get("traceparent")
 		w.WriteHeader(http.StatusOK)
-		_, _ = io.WriteString(w, `[]`)
+		writeTestResponse(t, w, `[]`)
 	}))
 	defer server.Close()
 
-	h := &InterLinkHandler{Ctx: context.Background(), SidecarEndpoint: "http+unix://", ClientHTTP: client}
+	h := &InterLinkHandler{Ctx: context.Background(), SidecarEndpoint: testUnixEndpoint, ClientHTTP: client}
 	remoteParent := oteltrace.NewSpanContext(oteltrace.SpanContextConfig{
 		TraceID:    oteltrace.TraceID{1, 2, 3},
 		SpanID:     oteltrace.SpanID{4, 5, 6},
@@ -142,7 +158,7 @@ func TestDetailedTracingAddsMetadataWithoutValues(t *testing.T) {
 				Annotations: map[string]string{"example.org/token": sensitiveValue},
 			},
 			Spec: v1.PodSpec{Containers: []v1.Container{{
-				Name:  "worker",
+				Name:  testContainerName,
 				Image: "registry.example/worker:v1",
 				Env:   []v1.EnvVar{{Name: "ACCESS_TOKEN", Value: sensitiveValue}},
 			}}},
@@ -163,7 +179,7 @@ func TestDetailedTracingAddsMetadataWithoutValues(t *testing.T) {
 	assert.True(t, detailed.AsBool())
 	containerNames, ok := tracingAttrValue(span.Attributes, "interlink.pod.container.names")
 	require.True(t, ok)
-	assert.Equal(t, []string{"worker"}, containerNames.AsStringSlice())
+	assert.Equal(t, []string{testContainerName}, containerNames.AsStringSlice())
 	labelKeys, ok := tracingAttrValue(span.Attributes, "interlink.pod.label.keys")
 	require.True(t, ok)
 	assert.Equal(t, []string{"team"}, labelKeys.AsStringSlice())
@@ -186,7 +202,7 @@ func TestDefaultTracingOmitsDetailedMetadata(t *testing.T) {
 	h := tracingTestHandler(t, http.StatusOK)
 	pod := &v1.Pod{
 		ObjectMeta: metav1.ObjectMeta{Name: "span-pod", Namespace: "ns", UID: "span-pod-uid"},
-		Spec:       v1.PodSpec{Containers: []v1.Container{{Name: "worker", Image: "private.example/worker:v1"}}},
+		Spec:       v1.PodSpec{Containers: []v1.Container{{Name: testContainerName, Image: "private.example/worker:v1"}}},
 	}
 	h.DeleteHandler(httptest.NewRecorder(), httptest.NewRequest(http.MethodPost, "/delete", tracingJSON(t, pod)))
 

@@ -217,7 +217,10 @@ func splitHostPort(address string) (string, int) {
 	if err != nil {
 		return strings.Trim(address, "[]"), 0
 	}
-	port, _ := strconv.Atoi(rawPort)
+	port, err := strconv.Atoi(rawPort)
+	if err != nil {
+		return host, 0
+	}
 	return host, port
 }
 

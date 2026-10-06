@@ -74,7 +74,7 @@ func newSidecarHandler(t *testing.T, sidecarStatus int) *InterLinkHandler {
 
 	return &InterLinkHandler{
 		Ctx:             context.Background(),
-		SidecarEndpoint: "http+unix://",
+		SidecarEndpoint: testUnixEndpoint,
 		ClientHTTP:      client,
 	}
 }
@@ -197,7 +197,7 @@ func TestStatusHandlerRecordsOutcomeWhenServedFromCache(t *testing.T) {
 	}
 
 	// No sidecar is configured: reaching it would fail the request outright.
-	h := &InterLinkHandler{Ctx: context.Background(), SidecarEndpoint: "http+unix://", ClientHTTP: http.DefaultClient}
+	h := &InterLinkHandler{Ctx: context.Background(), SidecarEndpoint: testUnixEndpoint, ClientHTTP: http.DefaultClient}
 
 	w := httptest.NewRecorder()
 	h.StatusHandler(w, httptest.NewRequest(http.MethodGet, "/status", mustJSON(t, []*v1.Pod{pod})))
