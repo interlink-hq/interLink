@@ -21,6 +21,53 @@ import (
 
 const testNamespace = "test-ns"
 
+// Literals shared by the tests of this package. They live in one block so each
+// value is written once; where the production code already names a value
+// (valueTrue, nvidiaGPU, virtualNodeNoScheduleTaint) the tests reuse that
+// constant instead of adding a second name for it.
+const (
+	// Object names.
+	testPodName        = "test-pod"
+	testPodDefaultName = "pod-default"
+	testShadowName     = "shadow-nb"
+	testAppName        = "app"
+
+	// ConfigMap / secret keys and values.
+	testConfigMapName       = "my-config"
+	testConfigKey1          = "key1"
+	testConfigKey2          = "key2"
+	testCACrtKey            = "ca.crt"
+	testOverrideCert        = "OVERRIDE-CERT"
+	testLogLevelEnv         = "LOG_LEVEL"
+	testSSHKeySecret        = "hpc-ssh-key"
+	testKnownHostsConfigMap = "hpc-known-hosts"
+	testConfigValue1        = "value1"
+	testConfigValue2        = "value2"
+
+	// Downward API field paths and projected volume entries.
+	testFieldPathMetadataName        = "metadata.name"
+	testFieldPathMetadataLabels      = "metadata.labels"
+	testFieldPathMetadataAnnotations = "metadata.annotations"
+	testPodNamePath                  = "pod-name"
+	testLabelsPath                   = "labels"
+	testAnnotationsPath              = "annotations"
+	testAnnotationValue              = "value"
+
+	// Node capacity, accelerator and taint values.
+	testGPUModel             = "A100"
+	testMemoryQuantity       = "32Gi"
+	testMilliQuantity        = "500m"
+	testTaintEffectNoExecute = "NoExecute"
+	testTaintKeyExisting     = "existing"
+	testTaintKeyPlugin       = "plugin"
+	testTaintValueNew        = "new"
+	testTaintValueOld        = "old"
+
+	// Status and annotation values.
+	testConditionTrue     = "True"
+	testMeshDisabledValue = "disabled"
+)
+
 // unixSocketRoundTripper rewrites http+unix URLs to http://unix so the underlying
 // transport can dial the configured unix socket.
 type unixSocketRoundTripper struct {
@@ -248,7 +295,9 @@ func TestDeleteRequestHonoursContextCancellation(t *testing.T) {
 		// been consumed, so a handler blocking on an unread body never sees its
 		// context cancelled, never returns, and the server.Close() below waits for
 		// it until the whole package times out.
-		_, _ = io.Copy(io.Discard, r.Body)
+		if _, err := io.Copy(io.Discard, r.Body); err != nil {
+			t.Errorf("draining the request body failed: %v", err)
+		}
 
 		select {
 		case <-r.Context().Done():
@@ -319,7 +368,7 @@ func TestRemoteExecutionHandleProjectedSourceConfigMap(t *testing.T) {
 
 	pod := &v1.Pod{
 		ObjectMeta: metav1.ObjectMeta{
-			Name:      "test-pod",
+			Name:      testPodName,
 			Namespace: namespace,
 		},
 	}
@@ -335,34 +384,34 @@ func TestRemoteExecutionHandleProjectedSourceConfigMap(t *testing.T) {
 	}{
 		{
 			name:          "configmap without items projects all keys",
-			configMapName: "my-config",
+			configMapName: testConfigMapName,
 			configMapData: map[string]string{
-				"key1": "value1",
-				"key2": "value2",
+				testConfigKey1: testConfigValue1,
+				testConfigKey2: testConfigValue2,
 			},
 			sourceItems:   nil,
 			overrideCaCrt: "",
 			expectedData: map[string]string{
-				"key1": "value1",
-				"key2": "value2",
+				testConfigKey1: testConfigValue1,
+				testConfigKey2: testConfigValue2,
 			},
 		},
 		{
 			name:          "configmap with items projects only specified keys",
-			configMapName: "my-config",
+			configMapName: testConfigMapName,
 			configMapData: map[string]string{
-				"key1": "value1",
-				"key2": "value2",
-				"key3": "value3",
+				testConfigKey1: testConfigValue1,
+				testConfigKey2: testConfigValue2,
+				"key3":         "value3",
 			},
 			sourceItems: []v1.KeyToPath{
-				{Key: "key1", Path: "mapped-key1"},
-				{Key: "key2", Path: "mapped-key2"},
+				{Key: testConfigKey1, Path: "mapped-key1"},
+				{Key: testConfigKey2, Path: "mapped-key2"},
 			},
 			overrideCaCrt: "",
 			expectedData: map[string]string{
-				"mapped-key1": "value1",
-				"mapped-key2": "value2",
+				"mapped-key1": testConfigValue1,
+				"mapped-key2": testConfigValue2,
 			},
 		},
 		{
@@ -370,9 +419,9 @@ func TestRemoteExecutionHandleProjectedSourceConfigMap(t *testing.T) {
 			configMapName: "kube-root-ca.crt",
 			configMapData: nil,
 			sourceItems:   nil,
-			overrideCaCrt: "OVERRIDE-CERT",
+			overrideCaCrt: testOverrideCert,
 			expectedData: map[string]string{
-				"ca.crt": "OVERRIDE-CERT",
+				testCACrtKey: testOverrideCert,
 			},
 		},
 		{
@@ -380,30 +429,30 @@ func TestRemoteExecutionHandleProjectedSourceConfigMap(t *testing.T) {
 			configMapName: "kube-root-ca.crt",
 			configMapData: nil,
 			sourceItems: []v1.KeyToPath{
-				{Key: "ca.crt", Path: "ca.crt"},
+				{Key: testCACrtKey, Path: testCACrtKey},
 			},
-			overrideCaCrt: "OVERRIDE-CERT",
+			overrideCaCrt: testOverrideCert,
 			expectedData: map[string]string{
-				"ca.crt": "OVERRIDE-CERT",
+				testCACrtKey: testOverrideCert,
 			},
 		},
 		{
 			name:          "configmap without items with multiline value preserves newlines",
-			configMapName: "my-config",
+			configMapName: testConfigMapName,
 			configMapData: map[string]string{
-				"ca.crt": "-----BEGIN CERTIFICATE-----\nMIIBIjAN\n-----END CERTIFICATE-----\n",
+				testCACrtKey: "-----BEGIN CERTIFICATE-----\nMIIBIjAN\n-----END CERTIFICATE-----\n",
 			},
 			sourceItems:   nil,
 			overrideCaCrt: "",
 			expectedData: map[string]string{
-				"ca.crt": "-----BEGIN CERTIFICATE-----\nMIIBIjAN\n-----END CERTIFICATE-----\n",
+				testCACrtKey: "-----BEGIN CERTIFICATE-----\nMIIBIjAN\n-----END CERTIFICATE-----\n",
 			},
 		},
 		{
 			name:          "missing key in items returns error",
-			configMapName: "my-config",
+			configMapName: testConfigMapName,
 			configMapData: map[string]string{
-				"key1": "value1",
+				testConfigKey1: testConfigValue1,
 			},
 			sourceItems: []v1.KeyToPath{
 				{Key: "missing-key", Path: "some-path"},
@@ -465,11 +514,11 @@ func TestRemoteExecutionHandleProjectedSourceDownwardAPIFieldRef(t *testing.T) {
 	ctx := context.Background()
 	pod := &v1.Pod{
 		ObjectMeta: metav1.ObjectMeta{
-			Name:        "test-pod",
+			Name:        testPodName,
 			Namespace:   testNamespace,
 			UID:         "uid-1234",
-			Labels:      map[string]string{"app": "demo", "tier": "backend"},
-			Annotations: map[string]string{"my.annotation/key": "value"},
+			Labels:      map[string]string{testAppName: "demo", "tier": "backend"},
+			Annotations: map[string]string{"my.annotation/key": testAnnotationValue},
 		},
 		Spec: v1.PodSpec{
 			NodeName:           "node-a",
@@ -483,11 +532,11 @@ func TestRemoteExecutionHandleProjectedSourceDownwardAPIFieldRef(t *testing.T) {
 	source := v1.VolumeProjection{
 		DownwardAPI: &v1.DownwardAPIProjection{
 			Items: []v1.DownwardAPIVolumeFile{
-				{Path: "pod-name", FieldRef: &v1.ObjectFieldSelector{FieldPath: "metadata.name"}},
+				{Path: testPodNamePath, FieldRef: &v1.ObjectFieldSelector{FieldPath: testFieldPathMetadataName}},
 				{Path: "namespace", FieldRef: &v1.ObjectFieldSelector{FieldPath: "metadata.namespace"}},
 				{Path: "uid", FieldRef: &v1.ObjectFieldSelector{FieldPath: "metadata.uid"}},
-				{Path: "labels", FieldRef: &v1.ObjectFieldSelector{FieldPath: "metadata.labels"}},
-				{Path: "annotations", FieldRef: &v1.ObjectFieldSelector{FieldPath: "metadata.annotations"}},
+				{Path: testLabelsPath, FieldRef: &v1.ObjectFieldSelector{FieldPath: testFieldPathMetadataLabels}},
+				{Path: testAnnotationsPath, FieldRef: &v1.ObjectFieldSelector{FieldPath: testFieldPathMetadataAnnotations}},
 				{Path: "node-name", FieldRef: &v1.ObjectFieldSelector{FieldPath: "spec.nodeName"}},
 				{Path: "sa-name", FieldRef: &v1.ObjectFieldSelector{FieldPath: "spec.serviceAccountName"}},
 				{Path: "pod-ip", FieldRef: &v1.ObjectFieldSelector{FieldPath: "status.podIP"}},
@@ -500,11 +549,11 @@ func TestRemoteExecutionHandleProjectedSourceDownwardAPIFieldRef(t *testing.T) {
 	err := remoteExecutionHandleProjectedSource(ctx, &Provider{}, pod, source, projectedVolume)
 	require.NoError(t, err)
 
-	assert.Equal(t, "test-pod", projectedVolume.Data["pod-name"])
+	assert.Equal(t, testPodName, projectedVolume.Data[testPodNamePath])
 	assert.Equal(t, testNamespace, projectedVolume.Data["namespace"])
 	assert.Equal(t, "uid-1234", projectedVolume.Data["uid"])
-	assert.Equal(t, "app=\"demo\"\ntier=\"backend\"\n", projectedVolume.Data["labels"])
-	assert.Equal(t, "my.annotation/key=\"value\"\n", projectedVolume.Data["annotations"])
+	assert.Equal(t, "app=\"demo\"\ntier=\"backend\"\n", projectedVolume.Data[testLabelsPath])
+	assert.Equal(t, "my.annotation/key=\"value\"\n", projectedVolume.Data[testAnnotationsPath])
 	assert.Equal(t, "node-a", projectedVolume.Data["node-name"])
 	assert.Equal(t, "svc-account", projectedVolume.Data["sa-name"])
 	assert.Equal(t, "10.42.0.15", projectedVolume.Data["pod-ip"])
@@ -516,10 +565,10 @@ func TestRemoteExecutionHandleVolumesDownwardAPI(t *testing.T) {
 	namespace := testNamespace
 	pod := &v1.Pod{
 		ObjectMeta: metav1.ObjectMeta{
-			Name:        "test-pod",
+			Name:        testPodName,
 			Namespace:   namespace,
 			UID:         "uid-1234",
-			Labels:      map[string]string{"app": "demo"},
+			Labels:      map[string]string{testAppName: "demo"},
 			Annotations: map[string]string{"a": "b"},
 		},
 		Spec: v1.PodSpec{
@@ -529,9 +578,9 @@ func TestRemoteExecutionHandleVolumesDownwardAPI(t *testing.T) {
 					VolumeSource: v1.VolumeSource{
 						DownwardAPI: &v1.DownwardAPIVolumeSource{
 							Items: []v1.DownwardAPIVolumeFile{
-								{Path: "pod-name", FieldRef: &v1.ObjectFieldSelector{FieldPath: "metadata.name"}},
-								{Path: "labels", FieldRef: &v1.ObjectFieldSelector{FieldPath: "metadata.labels"}},
-								{Path: "annotations", FieldRef: &v1.ObjectFieldSelector{FieldPath: "metadata.annotations"}},
+								{Path: testPodNamePath, FieldRef: &v1.ObjectFieldSelector{FieldPath: testFieldPathMetadataName}},
+								{Path: testLabelsPath, FieldRef: &v1.ObjectFieldSelector{FieldPath: testFieldPathMetadataLabels}},
+								{Path: testAnnotationsPath, FieldRef: &v1.ObjectFieldSelector{FieldPath: testFieldPathMetadataAnnotations}},
 							},
 						},
 					},
@@ -551,18 +600,18 @@ func TestRemoteExecutionHandleVolumesDownwardAPI(t *testing.T) {
 	require.NoError(t, err)
 	require.Len(t, req.ProjectedVolumeMaps, 1)
 	assert.Equal(t, "podinfo", req.ProjectedVolumeMaps[0].Name)
-	assert.Equal(t, "test-pod", req.ProjectedVolumeMaps[0].Data["pod-name"])
-	assert.Equal(t, "app=\"demo\"\n", req.ProjectedVolumeMaps[0].Data["labels"])
-	assert.Equal(t, "a=\"b\"\n", req.ProjectedVolumeMaps[0].Data["annotations"])
+	assert.Equal(t, testPodName, req.ProjectedVolumeMaps[0].Data[testPodNamePath])
+	assert.Equal(t, "app=\"demo\"\n", req.ProjectedVolumeMaps[0].Data[testLabelsPath])
+	assert.Equal(t, "a=\"b\"\n", req.ProjectedVolumeMaps[0].Data[testAnnotationsPath])
 	require.Len(t, pod.Spec.Volumes, 1)
 	require.NotNil(t, pod.Spec.Volumes[0].Projected)
 	assert.Nil(t, pod.Spec.Volumes[0].DownwardAPI)
 	require.Len(t, pod.Spec.Volumes[0].Projected.Sources, 1)
 	require.NotNil(t, pod.Spec.Volumes[0].Projected.Sources[0].DownwardAPI)
 	assert.Equal(t, pod.Spec.Volumes[0].Projected.Sources[0].DownwardAPI.Items, []v1.DownwardAPIVolumeFile{
-		{Path: "pod-name", FieldRef: &v1.ObjectFieldSelector{FieldPath: "metadata.name"}},
-		{Path: "labels", FieldRef: &v1.ObjectFieldSelector{FieldPath: "metadata.labels"}},
-		{Path: "annotations", FieldRef: &v1.ObjectFieldSelector{FieldPath: "metadata.annotations"}},
+		{Path: testPodNamePath, FieldRef: &v1.ObjectFieldSelector{FieldPath: testFieldPathMetadataName}},
+		{Path: testLabelsPath, FieldRef: &v1.ObjectFieldSelector{FieldPath: testFieldPathMetadataLabels}},
+		{Path: testAnnotationsPath, FieldRef: &v1.ObjectFieldSelector{FieldPath: testFieldPathMetadataAnnotations}},
 	})
 }
 
@@ -571,7 +620,7 @@ func TestRemoteExecutionHandleVolumesDownwardAPIDisabledProjectedVolumes(t *test
 	namespace := testNamespace
 	pod := &v1.Pod{
 		ObjectMeta: metav1.ObjectMeta{
-			Name:      "test-pod",
+			Name:      testPodName,
 			Namespace: namespace,
 		},
 		Spec: v1.PodSpec{
@@ -581,7 +630,7 @@ func TestRemoteExecutionHandleVolumesDownwardAPIDisabledProjectedVolumes(t *test
 					VolumeSource: v1.VolumeSource{
 						DownwardAPI: &v1.DownwardAPIVolumeSource{
 							Items: []v1.DownwardAPIVolumeFile{
-								{Path: "pod-name", FieldRef: &v1.ObjectFieldSelector{FieldPath: "metadata.name"}},
+								{Path: testPodNamePath, FieldRef: &v1.ObjectFieldSelector{FieldPath: testFieldPathMetadataName}},
 							},
 						},
 					},
@@ -614,15 +663,15 @@ func TestResolveEnvFromRefs(t *testing.T) {
 
 	pod := &v1.Pod{
 		ObjectMeta: metav1.ObjectMeta{
-			Name:      "test-pod",
+			Name:      testPodName,
 			Namespace: namespace,
 		},
 	}
 
 	container := &v1.Container{
-		Name: "main",
+		Name: deleteTestContainer,
 		Env: []v1.EnvVar{
-			{Name: "LOG_LEVEL", Value: "info"},
+			{Name: testLogLevelEnv, Value: "info"},
 		},
 		EnvFrom: []v1.EnvFromSource{
 			{
@@ -643,8 +692,8 @@ func TestResolveEnvFromRefs(t *testing.T) {
 		&v1.ConfigMap{
 			ObjectMeta: metav1.ObjectMeta{Name: "app-config", Namespace: namespace},
 			Data: map[string]string{
-				"LOG_LEVEL": "debug",
-				"DATABASE":  "postgresql",
+				testLogLevelEnv: "debug",
+				"DATABASE":      "postgresql",
 			},
 		},
 		&v1.Secret{
@@ -662,7 +711,7 @@ func TestResolveEnvFromRefs(t *testing.T) {
 	resolveEnvFromRefs(ctx, p, pod, container)
 
 	assert.Empty(t, container.EnvFrom)
-	assert.Contains(t, container.Env, v1.EnvVar{Name: "LOG_LEVEL", Value: "info"})
+	assert.Contains(t, container.Env, v1.EnvVar{Name: testLogLevelEnv, Value: "info"})
 	assert.Contains(t, container.Env, v1.EnvVar{Name: "DATABASE", Value: "postgresql"})
 	assert.Contains(t, container.Env, v1.EnvVar{Name: "AWS_ACCESS_KEY_ID", Value: "AKIA"})
 }
@@ -673,14 +722,14 @@ func TestResolveEnvFromRefsOptionalMissingSecret(t *testing.T) {
 
 	pod := &v1.Pod{
 		ObjectMeta: metav1.ObjectMeta{
-			Name:      "test-pod",
+			Name:      testPodName,
 			Namespace: namespace,
 		},
 	}
 
 	optional := true
 	container := &v1.Container{
-		Name: "main",
+		Name: deleteTestContainer,
 		EnvFrom: []v1.EnvFromSource{
 			{
 				SecretRef: &v1.SecretEnvSource{

@@ -75,6 +75,15 @@ const (
 
 // Pacing of the pending-deletion reconciliation sweep.
 const (
+	// valueTrue is the string the boolean node labels and the interlink.eu/*
+	// annotations are compared against.
+	valueTrue = "true"
+	// osVirtualKubelet is the kubernetes.io/os value of a virtual node, and the
+	// type it reports in its own labels.
+	osVirtualKubelet = "virtual-kubelet"
+)
+
+const (
 	deleteSweepInterval    = 10 * time.Second
 	deleteRetryBaseBackoff = 5 * time.Second
 	deleteRetryMaxBackoff  = 5 * time.Minute
@@ -170,10 +179,10 @@ type Provider struct {
 	shadowNodeNames sync.Map
 	// shadowsReleased marks, per pod UID, shadows already removed because their
 	// pod ended, so the status loop removes each one once.
-	shadowsReleased sync.Map
-	pendingDeletes       map[string]*pendingDelete
-	pendingDeletesMu     sync.Mutex
-	deleteLoopOnce       sync.Once
+	shadowsReleased  sync.Map
+	pendingDeletes   map[string]*pendingDelete
+	pendingDeletesMu sync.Mutex
+	deleteLoopOnce   sync.Once
 }
 
 // pendingDelete tracks a pod whose remote deletion has not been confirmed by the
@@ -470,12 +479,12 @@ func NewProviderConfig(
 	SetDefaultResource(&config)
 
 	lbls := map[string]string{
-		"alpha.service-controller.kubernetes.io/exclude-balancer": "true",
-		"kubernetes.io/os":       "virtual-kubelet",
+		"alpha.service-controller.kubernetes.io/exclude-balancer": valueTrue,
+		"kubernetes.io/os":       osVirtualKubelet,
 		"kubernetes.io/hostname": nodeName,
 		"kubernetes.io/role":     "agent",
-		"node.kubernetes.io/exclude-from-external-load-balancers": "true",
-		"virtual-node.interlink/type":                             "virtual-kubelet",
+		"node.kubernetes.io/exclude-from-external-load-balancers": valueTrue,
+		"virtual-node.interlink/type":                             osVirtualKubelet,
 	}
 
 	taints := []v1.Taint{
@@ -547,7 +556,7 @@ func NewProviderConfig(
 		Status: v1.NodeStatus{
 			NodeInfo: v1.NodeSystemInfo{
 				KubeletVersion:  nodeVersion,
-				Architecture:    "virtual-kubelet",
+				Architecture:    osVirtualKubelet,
 				OperatingSystem: "linux",
 			},
 			Addresses:       []v1.NodeAddress{{Type: v1.NodeInternalIP, Address: internalIP}},

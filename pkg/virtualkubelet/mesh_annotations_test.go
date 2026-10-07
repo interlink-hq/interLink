@@ -15,7 +15,7 @@ func TestClearConflictingNetworkAnnotations(t *testing.T) {
 				Annotations: map[string]string{
 					annWSTunnelClientCmds: "wstunnel-command",
 					annWGClientSnippet:    "wireguard-snippet",
-					"keep":                "value",
+					"keep":                testAnnotationValue,
 				},
 			},
 		}
@@ -24,7 +24,7 @@ func TestClearConflictingNetworkAnnotations(t *testing.T) {
 
 		assert.NotContains(t, pod.Annotations, annWSTunnelClientCmds)
 		assert.Contains(t, pod.Annotations, annWGClientSnippet)
-		assert.Equal(t, "value", pod.Annotations["keep"])
+		assert.Equal(t, testAnnotationValue, pod.Annotations["keep"])
 	})
 
 	t.Run("non mesh removes wireguard snippet annotation", func(t *testing.T) {
@@ -33,7 +33,7 @@ func TestClearConflictingNetworkAnnotations(t *testing.T) {
 				Annotations: map[string]string{
 					annWSTunnelClientCmds: "wstunnel-command",
 					annWGClientSnippet:    "wireguard-snippet",
-					"keep":                "value",
+					"keep":                testAnnotationValue,
 				},
 			},
 		}
@@ -42,7 +42,7 @@ func TestClearConflictingNetworkAnnotations(t *testing.T) {
 
 		assert.Contains(t, pod.Annotations, annWSTunnelClientCmds)
 		assert.NotContains(t, pod.Annotations, annWGClientSnippet)
-		assert.Equal(t, "value", pod.Annotations["keep"])
+		assert.Equal(t, testAnnotationValue, pod.Annotations["keep"])
 	})
 
 	t.Run("nil-safe", func(t *testing.T) {

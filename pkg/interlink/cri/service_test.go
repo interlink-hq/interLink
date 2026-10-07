@@ -9,6 +9,13 @@ import (
 	runtimeapi "k8s.io/cri-api/pkg/apis/runtime/v1"
 )
 
+const (
+	testPodName          = "test-pod"
+	testDefaultNamespace = "default"
+	testContainerName    = "test-container"
+	testContainerImage   = "nginx:latest"
+)
+
 func TestNewFakeRuntimeService(t *testing.T) {
 	service := NewFakeRuntimeService()
 
@@ -57,8 +64,8 @@ func TestFakeRuntimeService_RunPodSandbox(t *testing.T) {
 
 	config := &runtimeapi.PodSandboxConfig{
 		Metadata: &runtimeapi.PodSandboxMetadata{
-			Name:      "test-pod",
-			Namespace: "default",
+			Name:      testPodName,
+			Namespace: testDefaultNamespace,
 			Uid:       "12345",
 		},
 	}
@@ -77,8 +84,8 @@ func TestFakeRuntimeService_StopPodSandbox(t *testing.T) {
 	// First create a sandbox
 	config := &runtimeapi.PodSandboxConfig{
 		Metadata: &runtimeapi.PodSandboxMetadata{
-			Name:      "test-pod",
-			Namespace: "default",
+			Name:      testPodName,
+			Namespace: testDefaultNamespace,
 			Uid:       "12345",
 		},
 	}
@@ -102,8 +109,8 @@ func TestFakeRuntimeService_RemovePodSandbox(t *testing.T) {
 	// First create a sandbox
 	config := &runtimeapi.PodSandboxConfig{
 		Metadata: &runtimeapi.PodSandboxMetadata{
-			Name:      "test-pod",
-			Namespace: "default",
+			Name:      testPodName,
+			Namespace: testDefaultNamespace,
 			Uid:       "12345",
 		},
 	}
@@ -127,8 +134,8 @@ func TestFakeRuntimeService_CreateContainer(t *testing.T) {
 	// First create a sandbox
 	sandboxConfig := &runtimeapi.PodSandboxConfig{
 		Metadata: &runtimeapi.PodSandboxMetadata{
-			Name:      "test-pod",
-			Namespace: "default",
+			Name:      testPodName,
+			Namespace: testDefaultNamespace,
 			Uid:       "12345",
 		},
 	}
@@ -138,10 +145,10 @@ func TestFakeRuntimeService_CreateContainer(t *testing.T) {
 	// Create a container
 	containerConfig := &runtimeapi.ContainerConfig{
 		Metadata: &runtimeapi.ContainerMetadata{
-			Name: "test-container",
+			Name: testContainerName,
 		},
 		Image: &runtimeapi.ImageSpec{
-			Image: "nginx:latest",
+			Image: testContainerImage,
 		},
 	}
 
@@ -160,8 +167,8 @@ func TestFakeRuntimeService_StartContainer(t *testing.T) {
 	// Create sandbox and container first
 	sandboxConfig := &runtimeapi.PodSandboxConfig{
 		Metadata: &runtimeapi.PodSandboxMetadata{
-			Name:      "test-pod",
-			Namespace: "default",
+			Name:      testPodName,
+			Namespace: testDefaultNamespace,
 			Uid:       "12345",
 		},
 	}
@@ -170,10 +177,10 @@ func TestFakeRuntimeService_StartContainer(t *testing.T) {
 
 	containerConfig := &runtimeapi.ContainerConfig{
 		Metadata: &runtimeapi.ContainerMetadata{
-			Name: "test-container",
+			Name: testContainerName,
 		},
 		Image: &runtimeapi.ImageSpec{
-			Image: "nginx:latest",
+			Image: testContainerImage,
 		},
 	}
 	containerID, err := service.CreateContainer(ctx, sandboxID, containerConfig, sandboxConfig)
@@ -196,8 +203,8 @@ func TestFakeRuntimeService_StopContainer(t *testing.T) {
 	// Create and start a container
 	sandboxConfig := &runtimeapi.PodSandboxConfig{
 		Metadata: &runtimeapi.PodSandboxMetadata{
-			Name:      "test-pod",
-			Namespace: "default",
+			Name:      testPodName,
+			Namespace: testDefaultNamespace,
 			Uid:       "12345",
 		},
 	}
@@ -206,10 +213,10 @@ func TestFakeRuntimeService_StopContainer(t *testing.T) {
 
 	containerConfig := &runtimeapi.ContainerConfig{
 		Metadata: &runtimeapi.ContainerMetadata{
-			Name: "test-container",
+			Name: testContainerName,
 		},
 		Image: &runtimeapi.ImageSpec{
-			Image: "nginx:latest",
+			Image: testContainerImage,
 		},
 	}
 	containerID, err := service.CreateContainer(ctx, sandboxID, containerConfig, sandboxConfig)
@@ -248,8 +255,8 @@ func TestFakeRuntimeService_ListPodSandbox(t *testing.T) {
 	for i := 0; i < 3; i++ {
 		config := &runtimeapi.PodSandboxConfig{
 			Metadata: &runtimeapi.PodSandboxMetadata{
-				Name:      "test-pod",
-				Namespace: "default",
+				Name:      testPodName,
+				Namespace: testDefaultNamespace,
 				Uid:       string(rune(i)),
 			},
 		}
@@ -271,8 +278,8 @@ func TestFakeRuntimeService_ListContainers(t *testing.T) {
 	// Create sandbox and containers
 	sandboxConfig := &runtimeapi.PodSandboxConfig{
 		Metadata: &runtimeapi.PodSandboxMetadata{
-			Name:      "test-pod",
-			Namespace: "default",
+			Name:      testPodName,
+			Namespace: testDefaultNamespace,
 			Uid:       "12345",
 		},
 	}
@@ -282,11 +289,11 @@ func TestFakeRuntimeService_ListContainers(t *testing.T) {
 	for i := 0; i < 2; i++ {
 		containerConfig := &runtimeapi.ContainerConfig{
 			Metadata: &runtimeapi.ContainerMetadata{
-				Name:    "test-container",
+				Name:    testContainerName,
 				Attempt: uint32(i),
 			},
 			Image: &runtimeapi.ImageSpec{
-				Image: "nginx:latest",
+				Image: testContainerImage,
 			},
 		}
 		_, err := service.CreateContainer(ctx, sandboxID, containerConfig, sandboxConfig)

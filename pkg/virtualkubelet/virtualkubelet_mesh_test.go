@@ -35,7 +35,7 @@ func TestIsMeshNetworkingDisabled(t *testing.T) {
 		},
 		{
 			name:        "disabled",
-			annotations: map[string]string{annMeshNetworkDisabled: "disabled"},
+			annotations: map[string]string{annMeshNetworkDisabled: testMeshDisabledValue},
 			expected:    true,
 		},
 		{
@@ -64,7 +64,7 @@ func TestIsMeshNetworkingDisabled(t *testing.T) {
 func TestExecuteShadowTemplateIngressTLS(t *testing.T) {
 	p := &Provider{}
 	manifest, err := p.executeShadowTemplate(t.Context(), ShadowTemplateData{
-		Name:                 "pod-default",
+		Name:                 testPodDefaultName,
 		Namespace:            "default-shadow",
 		RandomPassword:       testPathPrefix,
 		WildcardDNS:          "tunnel.example.com",
@@ -83,7 +83,7 @@ func TestExecuteShadowTemplateIngressTLS(t *testing.T) {
 func TestExecuteShadowTemplateFullMeshSelectsWireGuardTemplate(t *testing.T) {
 	p := &Provider{}
 	manifest, err := p.executeShadowTemplate(t.Context(), ShadowTemplateData{
-		Name:            "pod-default",
+		Name:            testPodDefaultName,
 		Namespace:       "default-shadow",
 		RandomPassword:  testPathPrefix,
 		WildcardDNS:     "tunnel.example.com",
@@ -118,7 +118,7 @@ func TestComputeShadowResourceIdentityUsesFinalNamespace(t *testing.T) {
 				Name:      "my-pod",
 				Namespace: testNamespaceDefault,
 				Annotations: map[string]string{
-					testShadowSameNsAnnotation: "true",
+					testShadowSameNsAnnotation: valueTrue,
 				},
 			},
 		})
@@ -141,7 +141,7 @@ func TestComputeShadowResourceIdentitySameNamespaceLongNames(t *testing.T) {
 				Name:      podName,
 				Namespace: namespace,
 				Annotations: map[string]string{
-					testShadowSameNsAnnotation: "true",
+					testShadowSameNsAnnotation: valueTrue,
 				},
 			},
 		})
@@ -165,7 +165,7 @@ func TestComputeShadowResourceIdentitySameNamespaceLongNames(t *testing.T) {
 				Name:      "web",
 				Namespace: namespace,
 				Annotations: map[string]string{
-					testShadowSameNsAnnotation: "true",
+					testShadowSameNsAnnotation: valueTrue,
 				},
 			},
 		})
@@ -211,7 +211,7 @@ func TestShouldCreateShadow(t *testing.T) {
 		Spec: v1.PodSpec{
 			Containers: []v1.Container{
 				{
-					Name: "main",
+					Name: deleteTestContainer,
 					Ports: []v1.ContainerPort{
 						{ContainerPort: 8080},
 					},
@@ -256,7 +256,7 @@ func TestShouldCreateShadow(t *testing.T) {
 			pod: &v1.Pod{
 				ObjectMeta: metav1.ObjectMeta{
 					Annotations: map[string]string{
-						"interlink.eu/pod-vpn": "true",
+						"interlink.eu/pod-vpn": valueTrue,
 					},
 				},
 				Spec: basePod.Spec,
@@ -269,7 +269,7 @@ func TestShouldCreateShadow(t *testing.T) {
 			pod: &v1.Pod{
 				ObjectMeta: metav1.ObjectMeta{
 					Annotations: map[string]string{
-						annMeshNetworkDisabled: "disabled",
+						annMeshNetworkDisabled: testMeshDisabledValue,
 					},
 				},
 				Spec: basePod.Spec,
@@ -292,7 +292,7 @@ func TestShouldCreateShadow(t *testing.T) {
 
 func TestCleanupShadowResources(t *testing.T) {
 	const (
-		name = "pod-default"
+		name = testPodDefaultName
 		ns   = testNamespaceDefault
 	)
 
