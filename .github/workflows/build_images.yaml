@@ -13,7 +13,7 @@ jobs:
     #  DOCKER_TARGET_PLATFORM: linux/arm64
     steps:
       - name: Checkout
-        uses: actions/checkout@v6
+        uses: actions/checkout@v7
       - name: Set env
         run: echo "RELEASE_VERSION=${GITHUB_REF#refs/*/}" >> $GITHUB_ENV
       - name: Set up QEMU
@@ -88,7 +88,7 @@ jobs:
     #  DOCKER_TARGET_PLATFORM: linux/arm64
     steps:
       - name: Checkout
-        uses: actions/checkout@v6
+        uses: actions/checkout@v7
       - name: Set env
         run: echo "RELEASE_VERSION=${GITHUB_REF#refs/*/}" >> $GITHUB_ENV
       - name: Set up QEMU
