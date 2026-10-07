@@ -348,6 +348,7 @@ func (g *gateway) assign(worker string, now time.Time) (*job, *chunk) {
 }
 
 func (g *gateway) accept(j *job, c *chunk, worker string, res result, now time.Time) bool {
+	g.sweep(now)
 	if g.jobs[j.uid] != j || !j.finished.IsZero() || c.done || c.worker != worker ||
 		res.Type != "result" || res.Attempt != c.attempt || !now.Before(c.deadline) {
 		return false

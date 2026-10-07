@@ -210,6 +210,68 @@ func TestLeasesInvalidResultsAndExpiry(t *testing.T) {
 	if j.reason != "DeadlineExceeded" {
 		t.Fatal("queued job deadline not enforced")
 	}
+	call(t, g.api(), "POST", "/delete", fmt.Sprintf(`{"metadata":{"uid":%q}}`, testUID), http.StatusOK)
+	call(t, g.api(), "POST", "/create", createBody("a"), http.StatusOK)
+	j = g.jobs[testUID]
+	j, c = g.assign("late", j.created.Add(jobDuration-time.Second))
+	if g.accept(j, c, "late", result{Type: "result", Attempt: c.attempt, Counts: countText(c.text)},
+		j.created.Add(jobDuration)) || j.reason != "DeadlineExceeded" {
+		t.Fatal("result accepted past overall job deadline")
+	}
+}
+
+func TestWebSocketOriginCapacityAndCancellation(t *testing.T) {
+	g := newGateway()
+	server := httptest.NewServer(g.public())
+	defer server.Close()
+	url := "ws" + strings.TrimPrefix(server.URL, "http") + "/ws?consent=yes"
+	_, response, err := websocket.DefaultDialer.Dial(url, http.Header{"Origin": {"http://untrusted.example"}})
+	if err == nil || response.StatusCode != http.StatusForbidden {
+		t.Fatal("cross-origin WebSocket allowed")
+	}
+	if err := response.Body.Close(); err != nil {
+		t.Fatal(err)
+	}
+	g.mu.Lock()
+	g.workers = maxWorkers
+	g.mu.Unlock()
+	_, response, err = websocket.DefaultDialer.Dial(url, nil)
+	if err == nil || response.StatusCode != http.StatusServiceUnavailable {
+		t.Fatal("worker capacity not enforced")
+	}
+	if err := response.Body.Close(); err != nil {
+		t.Fatal(err)
+	}
+	g.mu.Lock()
+	g.workers = 0
+	g.mu.Unlock()
+	for _, cancel := range []string{"delete", "lease"} {
+		call(t, g.api(), "POST", "/create", createBody("a"), http.StatusOK)
+		conn, _, err := websocket.DefaultDialer.Dial(url, nil)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if err := conn.SetReadDeadline(time.Now().Add(3 * time.Second)); err != nil {
+			t.Fatal(err)
+		}
+		var message task
+		if err := conn.ReadJSON(&message); err != nil {
+			t.Fatal(err)
+		}
+		if cancel == "delete" {
+			call(t, g.api(), "POST", "/delete", fmt.Sprintf(`{"metadata":{"uid":%q}}`, testUID), http.StatusOK)
+		} else {
+			g.mu.Lock()
+			g.jobs[testUID].chunks[0].deadline = time.Now().Add(-time.Second)
+			g.mu.Unlock()
+		}
+		if err := conn.ReadJSON(&message); err == nil {
+			t.Fatalf("%s did not close worker", cancel)
+		}
+		if err := conn.Close(); err != nil {
+			t.Fatal(err)
+		}
+	}
 }
 
 func TestWebSocketDisconnectAndCompletion(t *testing.T) {
