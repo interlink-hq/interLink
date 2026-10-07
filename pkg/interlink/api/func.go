@@ -43,9 +43,24 @@ func getData(ctx context.Context, config types.Config, pod types.PodCreateReques
 		retrievedData.Containers = append(retrievedData.Containers, data)
 
 		durationContainer := time.Now().UnixMicro() - startContainer
-		span.AddEvent("Init Container "+container.Name, trace.WithAttributes(
+		attrs := []attribute.KeyValue{
 			attribute.Int64("initcontainer.getdata.duration", durationContainer),
-			attribute.String("pod.name", pod.Pod.Name)))
+			attribute.String("pod.name", pod.Pod.Name),
+			attribute.String("k8s.container.name", container.Name),
+			attribute.String("interlink.container.type", "init"),
+			attribute.Int("interlink.container.volume_mount.count", len(container.VolumeMounts)),
+			attribute.Int("interlink.retrieved.config_map.count", len(data.ConfigMaps)),
+			attribute.Int("interlink.retrieved.secret.count", len(data.Secrets)),
+			attribute.Int("interlink.retrieved.projected_volume.count", len(data.ProjectedVolumeMaps)),
+		}
+		if detailedTracingEnabled(ctx) {
+			attrs = append(attrs,
+				attribute.StringSlice("interlink.retrieved.config_map.names", configMapNames(data.ConfigMaps)),
+				attribute.StringSlice("interlink.retrieved.secret.names", secretNames(data.Secrets)),
+				attribute.StringSlice("interlink.retrieved.projected_volume.names", configMapNames(data.ProjectedVolumeMaps)),
+			)
+		}
+		span.AddEvent("Init Container "+container.Name, trace.WithAttributes(attrs...))
 	}
 
 	for _, container := range pod.Pod.Spec.Containers {
@@ -60,13 +75,42 @@ func getData(ctx context.Context, config types.Config, pod types.PodCreateReques
 		retrievedData.Containers = append(retrievedData.Containers, data)
 
 		durationContainer := time.Now().UnixMicro() - startContainer
-		span.AddEvent("Container "+container.Name, trace.WithAttributes(
+		attrs := []attribute.KeyValue{
 			attribute.Int64("container.getdata.duration", durationContainer),
-			attribute.String("pod.name", pod.Pod.Name)))
+			attribute.String("pod.name", pod.Pod.Name),
+			attribute.String("k8s.container.name", container.Name),
+			attribute.String("interlink.container.type", "regular"),
+			attribute.Int("interlink.container.volume_mount.count", len(container.VolumeMounts)),
+			attribute.Int("interlink.retrieved.config_map.count", len(data.ConfigMaps)),
+			attribute.Int("interlink.retrieved.secret.count", len(data.Secrets)),
+			attribute.Int("interlink.retrieved.projected_volume.count", len(data.ProjectedVolumeMaps)),
+		}
+		if detailedTracingEnabled(ctx) {
+			attrs = append(attrs,
+				attribute.StringSlice("interlink.retrieved.config_map.names", configMapNames(data.ConfigMaps)),
+				attribute.StringSlice("interlink.retrieved.secret.names", secretNames(data.Secrets)),
+				attribute.StringSlice("interlink.retrieved.projected_volume.names", configMapNames(data.ProjectedVolumeMaps)),
+			)
+		}
+		span.AddEvent("Container "+container.Name, trace.WithAttributes(attrs...))
 	}
 
 	duration := time.Now().UnixMicro() - start
-	span.SetAttributes(attribute.Int64("getdata.duration", duration))
+	retrievedConfigMaps := 0
+	retrievedSecrets := 0
+	retrievedProjectedVolumes := 0
+	for _, container := range retrievedData.Containers {
+		retrievedConfigMaps += len(container.ConfigMaps)
+		retrievedSecrets += len(container.Secrets)
+		retrievedProjectedVolumes += len(container.ProjectedVolumeMaps)
+	}
+	span.SetAttributes(
+		attribute.Int64("getdata.duration", duration),
+		attribute.Int("interlink.retrieved.container.count", len(retrievedData.Containers)),
+		attribute.Int("interlink.retrieved.config_map.count", retrievedConfigMaps),
+		attribute.Int("interlink.retrieved.secret.count", retrievedSecrets),
+		attribute.Int("interlink.retrieved.projected_volume.count", retrievedProjectedVolumes),
+	)
 	return retrievedData, nil
 }
 

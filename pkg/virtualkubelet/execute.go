@@ -26,6 +26,7 @@ import (
 	"github.com/containerd/containerd/log"
 	"go.opentelemetry.io/otel"
 	"go.opentelemetry.io/otel/attribute"
+	"go.opentelemetry.io/otel/propagation"
 	trace "go.opentelemetry.io/otel/trace"
 	v1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/api/resource"
@@ -207,18 +208,27 @@ func failedMount(ctx context.Context, failedAndWait *bool, name string, pod *v1.
 	return nil
 }
 
-func traceExecute(ctx context.Context, pod *v1.Pod, name string, startHTTPCall int64) *trace.Span {
+func traceExecute(ctx context.Context, pod *v1.Pod, name string, startHTTPCall int64) (context.Context, trace.Span) {
 	tracer := otel.Tracer("interlink-service")
-	_, spanHTTP := tracer.Start(ctx, name, trace.WithAttributes(
+	return tracer.Start(ctx, name, trace.WithAttributes(
 		attribute.String("pod.name", pod.Name),
 		attribute.String("pod.namespace", pod.Namespace),
 		attribute.String("pod.uid", string(pod.UID)),
 		attribute.Int64("start.timestamp", startHTTPCall),
-	))
-	defer spanHTTP.End()
-	defer types.SetDurationSpan(startHTTPCall, spanHTTP)
+	), trace.WithSpanKind(trace.SpanKindClient))
+}
 
-	return &spanHTTP
+// injectTraceContext puts the trace context of ctx into the request headers, so
+// that the API server can continue the trace instead of starting a new one.
+//
+// It also makes ctx the request context, which REPLACES whatever context the
+// request was built with. A caller that needs a deadline or a cancellation on
+// the request has to derive ctx from it, not the other way round, or it is
+// silently dropped here.
+func injectTraceContext(ctx context.Context, req *http.Request) *http.Request {
+	req = req.WithContext(ctx)
+	otel.GetTextMapPropagator().Inject(ctx, propagation.HeaderCarrier(req.Header))
+	return req
 }
 
 // createTLSHTTPClient creates an HTTP client with TLS/mTLS configuration
@@ -310,14 +320,15 @@ func PingInterLink(ctx context.Context, config Config) (bool, int, string, error
 	}
 
 	startHTTPCall := time.Now().UnixMicro()
-	_, spanHTTP := tracer.Start(ctx, "PingHttpCall", trace.WithAttributes(
+	spanCtx, spanHTTP := tracer.Start(ctx, "PingHttpCall", trace.WithAttributes(
 		attribute.Int64("start.timestamp", startHTTPCall),
-	))
+	), trace.WithSpanKind(trace.SpanKindClient))
 	defer spanHTTP.End()
 	defer types.SetDurationSpan(startHTTPCall, spanHTTP)
 
 	// Add session number for end-to-end from VK to API to InterLink plugin (eg interlink-slurm-plugin)
 	AddSessionContext(req, "PingInterLink#"+strconv.Itoa(rand.Intn(100000)))
+	req = injectTraceContext(spanCtx, req)
 
 	// Create TLS-enabled HTTP client
 	httpClient, err := createTLSHTTPClient(ctx, config.TLS)
@@ -340,7 +351,7 @@ func PingInterLink(ctx context.Context, config Config) (bool, int, string, error
 		return false, retVal, "", err
 	}
 
-	if resp.StatusCode != http.StatusOK {
+	if !types.IsSuccessStatus(resp.StatusCode) {
 		log.G(ctx).Error("server error: " + fmt.Sprint(resp.StatusCode))
 		return false, retVal, string(respBody), nil
 	}
@@ -370,10 +381,13 @@ func updateCacheRequest(ctx context.Context, config Config, pod v1.Pod, token st
 	req.Header.Set("Content-Type", "application/json")
 
 	startHTTPCall := time.Now().UnixMicro()
-	spanHTTP := traceExecute(ctx, &pod, "UpdateCacheHttpCall", startHTTPCall)
+	spanCtx, spanHTTP := traceExecute(ctx, &pod, "UpdateCacheHttpCall", startHTTPCall)
+	defer spanHTTP.End()
+	defer types.SetDurationSpan(startHTTPCall, spanHTTP)
 
 	// Add session number for end-to-end from VK to API to InterLink plugin (eg interlink-slurm-plugin)
 	AddSessionContext(req, "UpdateCache#"+strconv.Itoa(rand.Intn(100000)))
+	req = injectTraceContext(spanCtx, req)
 
 	// Create TLS-enabled HTTP client
 	httpClient, err := createTLSHTTPClient(ctx, config.TLS)
@@ -389,8 +403,8 @@ func updateCacheRequest(ctx context.Context, config Config, pod v1.Pod, token st
 	}
 	defer resp.Body.Close()
 
-	types.SetDurationSpan(startHTTPCall, *spanHTTP, types.WithHTTPReturnCode(resp.StatusCode))
-	if resp.StatusCode != http.StatusOK {
+	types.SetDurationSpan(startHTTPCall, spanHTTP, types.WithHTTPReturnCode(resp.StatusCode))
+	if !types.IsSuccessStatus(resp.StatusCode) {
 		return errors.New("Unexpected error occured while updating InterLink cache. Status code: " + strconv.Itoa(resp.StatusCode) + ". Check InterLink's logs for further informations")
 	}
 
@@ -420,17 +434,18 @@ func createRequest(ctx context.Context, config Config, pod types.PodCreateReques
 	}
 
 	startHTTPCall := time.Now().UnixMicro()
-	_, spanHTTP := tracer.Start(ctx, "CreateHttpCall", trace.WithAttributes(
+	spanCtx, spanHTTP := tracer.Start(ctx, "CreateHttpCall", trace.WithAttributes(
 		attribute.String("pod.name", pod.Pod.Name),
 		attribute.String("pod.namespace", pod.Pod.Namespace),
 		attribute.String("pod.uid", string(pod.Pod.UID)),
 		attribute.Int64("start.timestamp", startHTTPCall),
-	))
+	), trace.WithSpanKind(trace.SpanKindClient))
 	defer spanHTTP.End()
 	defer types.SetDurationSpan(startHTTPCall, spanHTTP)
 
 	// Add session number for end-to-end from VK to API to InterLink plugin (eg interlink-slurm-plugin)
 	AddSessionContext(req, "CreatePod#"+strconv.Itoa(rand.Intn(100000)))
+	req = injectTraceContext(spanCtx, req)
 
 	// Create TLS-enabled HTTP client
 	httpClient, err := createTLSHTTPClient(ctx, config.TLS)
@@ -451,7 +466,7 @@ func createRequest(ctx context.Context, config Config, pod types.PodCreateReques
 		return nil, fmt.Errorf("error doing ReadAll() in createRequest() log request: %s error: %w", fmt.Sprintf("%#v", req), err)
 	}
 
-	if resp.StatusCode != http.StatusOK {
+	if !types.IsSuccessStatus(resp.StatusCode) {
 		return nil, fmt.Errorf("error creating pod (HTTP %d): %s", resp.StatusCode, string(returnValue))
 	}
 
@@ -471,7 +486,18 @@ func deleteRequest(ctx context.Context, config Config, pod *v1.Pod, token string
 		return nil, err
 	}
 	reader := bytes.NewReader(bodyBytes)
-	requestCtx, cancel := context.WithTimeout(ctx, requestTimeout)
+
+	startHTTPCall := time.Now().UnixMicro()
+	spanCtx, spanHTTP := traceExecute(ctx, pod, "DeleteHttpCall", startHTTPCall)
+	defer spanHTTP.End()
+	defer types.SetDurationSpan(startHTTPCall, spanHTTP)
+
+	// The deadline is derived from the span context, and the request is built
+	// with the result: injectTraceContext below replaces the request context, so
+	// a deadline taken from a context that is not an ancestor of spanCtx would be
+	// dropped and the call would be left bounded only by the client timeout set
+	// further down.
+	requestCtx, cancel := context.WithTimeout(spanCtx, requestTimeout)
 	defer cancel()
 	req, err := http.NewRequestWithContext(requestCtx, http.MethodDelete, interLinkEndpoint+"/delete", reader)
 	if err != nil {
@@ -479,11 +505,9 @@ func deleteRequest(ctx context.Context, config Config, pod *v1.Pod, token string
 		return nil, err
 	}
 
-	startHTTPCall := time.Now().UnixMicro()
-	spanHTTP := traceExecute(ctx, pod, "DeleteHttpCall", startHTTPCall)
-
 	// Add session number for end-to-end from VK to API to InterLink plugin (eg interlink-slurm-plugin)
 	AddSessionContext(req, "DeletePod#"+strconv.Itoa(rand.Intn(100000)))
+	req = injectTraceContext(requestCtx, req)
 
 	// Create TLS-enabled HTTP client
 	httpClient, err := createTLSHTTPClient(ctx, config.TLS)
@@ -502,7 +526,7 @@ func deleteRequest(ctx context.Context, config Config, pod *v1.Pod, token string
 	defer resp.Body.Close()
 
 	statusCode := resp.StatusCode
-	types.SetDurationSpan(startHTTPCall, *spanHTTP, types.WithHTTPReturnCode(resp.StatusCode))
+	types.SetDurationSpan(startHTTPCall, spanHTTP, types.WithHTTPReturnCode(resp.StatusCode))
 
 	if statusCode != http.StatusOK {
 		return nil, errors.New("Unexpected error occured while deleting Pods. Status code: " + strconv.Itoa(resp.StatusCode) + ". Check InterLink's logs for further informations")
@@ -541,14 +565,15 @@ func statusRequest(ctx context.Context, config Config, podsList []*v1.Pod, token
 	//  log.L.Println(string(bodyBytes))
 
 	startHTTPCall := time.Now().UnixMicro()
-	_, spanHTTP := tracer.Start(ctx, "StatusHttpCall", trace.WithAttributes(
+	spanCtx, spanHTTP := tracer.Start(ctx, "StatusHttpCall", trace.WithAttributes(
 		attribute.Int64("start.timestamp", startHTTPCall),
-	))
+	), trace.WithSpanKind(trace.SpanKindClient))
 	defer spanHTTP.End()
 	defer types.SetDurationSpan(startHTTPCall, spanHTTP)
 
 	// Add session number for end-to-end from VK to API to InterLink plugin (eg interlink-slurm-plugin)
 	AddSessionContext(req, "GetStatus#"+strconv.Itoa(rand.Intn(100000)))
+	req = injectTraceContext(spanCtx, req)
 
 	// Create TLS-enabled HTTP client
 	httpClient, err := createTLSHTTPClient(ctx, config.TLS)
@@ -563,7 +588,7 @@ func statusRequest(ctx context.Context, config Config, podsList []*v1.Pod, token
 	defer resp.Body.Close()
 
 	types.SetDurationSpan(startHTTPCall, spanHTTP, types.WithHTTPReturnCode(resp.StatusCode))
-	if resp.StatusCode != http.StatusOK {
+	if !types.IsSuccessStatus(resp.StatusCode) {
 		returnValue, err := io.ReadAll(resp.Body)
 		if err != nil {
 			log.L.Error(err)
@@ -623,18 +648,19 @@ func LogRetrieval(
 	// log.G(ctx).Println(string(bodyBytes))
 
 	startHTTPCall := time.Now().UnixMicro()
-	_, spanHTTP := tracer.Start(ctx, "LogHttpCall", trace.WithAttributes(
+	spanCtx, spanHTTP := tracer.Start(ctx, "LogHttpCall", trace.WithAttributes(
 		attribute.String("pod.name", logsRequest.PodName),
 		attribute.String("pod.namespace", logsRequest.Namespace),
 		attribute.String("pod.uid", logsRequest.PodUID),
 		attribute.Int64("start.timestamp", startHTTPCall),
-	))
+	), trace.WithSpanKind(trace.SpanKindClient))
 	defer spanHTTP.End()
 	defer types.SetDurationSpan(startHTTPCall, spanHTTP)
 
 	log.G(ctx).Debug(sessionContextMessage, "before doRequestWithClient()")
 	// Add session number for end-to-end from VK to API to InterLink plugin (eg interlink-slurm-plugin)
 	AddSessionContext(req, sessionContext)
+	req = injectTraceContext(spanCtx, req)
 
 	clientHTTPTransport.DisableKeepAlives = true
 	clientHTTPTransport.MaxIdleConnsPerHost = -1
@@ -651,7 +677,7 @@ func LogRetrieval(
 	log.G(ctx).Debug(sessionContextMessage, "after doRequestWithClient()")
 
 	types.SetDurationSpan(startHTTPCall, spanHTTP, types.WithHTTPReturnCode(resp.StatusCode))
-	if resp.StatusCode != http.StatusOK {
+	if !types.IsSuccessStatus(resp.StatusCode) {
 		err = errors.New(sessionContextMessage + "Unexpected error occured while getting logs. Status code: " + strconv.Itoa(resp.StatusCode) + ". Check InterLink's logs for further informations")
 	}
 

@@ -5,4 +5,7 @@ SidecarURL: "http://172.17.0.1"
 SidecarPort: "4000"
 VerboseLogging: true
 ErrorsOnlyLogging: false
+Tracing:
+  Enabled: false
+  Detailed: false
 DataRootFolder: "~/.interlink"
