@@ -25,10 +25,11 @@ configuration, no pre-exec injection.
 
 :::info
 The SSH shadow replaces **wstunnel**, not [full mesh](./13-mesh-network-configuration.mdx).
-It exposes the offloaded pod's ports to the cluster; it does not give the pod access
-back into the cluster, so an offloaded workload still cannot reach in-cluster object
-storage or message buses. Combining the two is rejected at startup and tracked in
-[#548](https://github.com/interlink-hq/interLink/issues/548).
+It exposes the offloaded pod's ports to the cluster. A workload that needs the other
+direction, in-cluster object storage or a message bus for example, gets it over the same
+login node with the [reverse tunnel](#pod-to-cluster-the-reverse-tunnel), without
+WireGuard and without a network namespace. Combining the SSH shadow with full mesh is
+rejected at startup.
 :::
 
 ---
@@ -86,6 +87,7 @@ warning in the virtual kubelet log.
 | --- | --- | --- | --- |
 | `wstunnel` (default) | cluster → pod | `EnableTunnel` + exposed ports | wstunnel client, dials out |
 | `ssh` | cluster → pod | `EnableTunnel` + exposed ports | nothing |
+| `ssh` reverse | pod → cluster | `SSH.Reverse.Enabled` + `interlink.eu/reverse-forwards` | nothing: the batch script waits for the tunnel |
 | full mesh | bidirectional | `FullMesh: true`, every pod | `mesh.sh` (slirp4netns + WireGuard) |
 
 ---
@@ -145,6 +147,10 @@ in the chart repository for a complete deployment.
 | `ReplicateCredentials` | `true` | Copy the credential into each shadow's namespace |
 | `NodeWaitTimeout` | `2h` | How long the shadow waits for the compute node |
 | `ExtraOptions` | `[]` | Extra ssh options, each passed as `-o <option>` |
+| `Reverse.Enabled` | `false` | Let pods ask for a [tunnel back into the cluster](#pod-to-cluster-the-reverse-tunnel) |
+| `Reverse.NodeExec` | `ssh` | How the shadow runs a command on the compute node from the login node: `ssh` (`ssh <node>`) or `srun` (`srun --jobid=<job> --overlap`, several times slower, see [Performance](#performance)) |
+| `Reverse.SshdPath` | `/usr/sbin/sshd` | The sshd binary on the compute node |
+| `Reverse.PythonPath` | `python3` | The python3 on the compute node, for owner-only forwards |
 
 Misconfiguration fails at **startup**, not on the first offloaded pod, so a missing
 `LoginHost` or a `kerberos` block without a `Principal` is caught immediately.
@@ -385,6 +391,130 @@ kubelet log.
 
 ---
 
+## Pod to cluster: the reverse tunnel
+
+Everything above carries connections from the cluster to the pod. A workload that
+needs the other direction, an object store, a message bus or the Kubernetes API that
+only exist inside the cluster, gets it over the same login node. The site switches it
+on with `Network.SSH.Reverse.Enabled: true`; the pod lists what it needs:
+
+```yaml
+apiVersion: v1
+kind: Pod
+metadata:
+  name: trainer
+  annotations:
+    interlink.eu/reverse-forwards: "minio.user.svc.cluster.local:9000 6443:kubernetes.default.svc.cluster.local:443"
+```
+
+The workload then uses the Service name and port as it would in the cluster,
+`http://minio.user.svc.cluster.local:9000` here. The compute node needs no route to the
+cluster, no WireGuard and no network namespace, so its own interfaces, InfiniBand
+included, stay visible to the job.
+
+### How it works
+
+```
+job container ──connect name:port──> 127.x.y.z:port on the compute node (sshd, -R)
+                                           │ carried back over the shadow's ssh session
+                                           ▼
+                     shadow pod (ssh-reverse) ──dials──> Service inside the cluster
+```
+
+1. The shadow runs a second container, `ssh-reverse`. Once the compute node is known
+   it starts a user-space `sshd -i` there, as the job's user, through a command run
+   on the login node (`ssh <node>` or `srun --overlap`, see `NodeExec`). The
+   command's stdin and stdout are that sshd's transport: it listens on no port. Its
+   host key and the one client key it accepts are generated for each start and
+   never leave the shadow.
+2. The shadow connects to it with `ssh -R`. Each forward is bound on the compute
+   node, on a loopback address derived from the pod UID (`127.x.y.z`), and every
+   connection made there is dialled from the shadow pod, inside the cluster.
+3. The virtual kubelet prepends a snippet to the pod's `slurm-job.vk.io/pre-exec`.
+   It maps the forwarded names to that address in the container's `/etc/hosts`
+   (through `SINGULARITY_BIND` and `APPTAINER_BIND`) and holds the workload until the
+   tunnel answers, for at most ten minutes. The workload itself is unchanged.
+
+The tunnel is rebuilt if the job moves to another node, like the forwards.
+
+### What the site has to allow
+
+- A command on the compute node, run from the login node as the job's user. Either
+  `ssh <node>` into a node where that user has a running job, which sites with
+  `pam_slurm_adopt` allow, or `srun --jobid=<job> --overlap`, which needs nothing
+  beyond Slurm. `NodeExec` picks one; a pod can override it.
+- `sshd` on the compute node (`Reverse.SshdPath`) and, for owner-only forwards,
+  `python3`. Both are stock on most distributions and neither needs root.
+- Nothing in the login node's `sshd_config`: the forwards are bound by the sshd the
+  shadow starts, not by the site's.
+
+### Annotations
+
+| Annotation | Value |
+| --- | --- |
+| `interlink.eu/reverse-forwards` | Space-separated endpoints, each `host:port` or `listen-port:host:port` |
+| `interlink.eu/reverse-socks-port` | Port of a SOCKS5 proxy for endpoints not listed; off when unset |
+| `interlink.eu/reverse-bind` | The `127.x.y.z` address to use instead of the derived one |
+| `interlink.eu/reverse-node-exec` | `ssh` or `srun`, overriding `Reverse.NodeExec` |
+| `interlink.eu/reverse-owner-only` | `true` (default) or `false`, see below |
+
+A Service port below 1024 cannot be bound by an unprivileged sshd on the compute
+node: give it a listen port, `6443:kubernetes.default.svc.cluster.local:443`, and the
+job connects to port 6443. The name resolves to the right address either way. An
+annotation that does not parse is refused when the pod is created, with the reason in
+the virtual kubelet log and the pod's events.
+
+### Endpoints not known in advance
+
+`interlink.eu/reverse-socks-port: "1080"` adds a SOCKS5 proxy on the same address. A
+program told to use it, `ALL_PROXY=socks5h://127.x.y.z:1080` for curl and Python
+requests, reaches any cluster address by name, resolved inside the cluster at connect
+time. It is off unless asked for, and it is a plain loopback listener that every user
+of that compute node can also use, so declare what you can and keep SOCKS for the rest.
+
+### Who else can use the forwards
+
+A port on a loopback address is reachable by every user of the compute node. By
+default each forward therefore ends in a unix socket that only the job's user can
+open, with a small relay in front, run by the sshd session on the node, that accepts
+a connection only when the connecting socket belongs to that user (read from
+`/proc/net/tcp`). `interlink.eu/reverse-owner-only: "false"` binds the ports directly
+instead: no relay, no `python3` on the node, and no protection from other users.
+
+### Performance
+
+All of a pod's forwards share one ssh session, so the ceiling per pod is what one
+SSH channel stream does on that link, and the path has three legs: the job to the
+listener on the node, the carrier between the node and the login node, and ssh from
+the login node to the cluster.
+
+- The carrier is the biggest factor. With `NodeExec: ssh` the bytes go through the
+  node's own sshd; with `srun` they go through Slurm's I/O forwarding, which was 4 to 5
+  times slower in our runs (CERN: about 200 MB/s against 40 to 80; SURF: 95 against 15
+  to 50). On a slow WAN both hit the link first (MareNostrum 5 from CERN: about 50 MB/s
+  either way).
+- Owner-only mode costs nothing measurable: with and without the relay the same runs
+  gave the same figures at the three sites. It is one small process per pod on the node.
+- Small requests pay the round trip of the whole path, not the throughput. The relay
+  sets `TCP_NODELAY`; without it, request and reply patterns such as a filesystem over
+  the tunnel lost 40 ms per operation to Nagle's algorithm.
+- Figures above are single runs of a 200 MiB object PUT and GET from the job, with
+  several test jobs on the same node at once.
+
+### Limits
+
+- TCP only.
+- The listeners exist on the node that runs the batch script. Ranks of a multi-node
+  job on other nodes have no tunnel.
+- The tunnel comes up once the shadow has learned the compute node, a status poll or
+  two after the job starts; the pre-exec waits for it.
+- The pre-exec assumes the Slurm plugin with Singularity or Apptainer, as the mesh
+  pre-exec does.
+- `/tmp/il-rev-<shadow>` on the compute node holds the keys and sockets while the
+  tunnel is up; the session removes it when the tunnel ends.
+
+---
+
 ## Troubleshooting
 
 **Shadow stuck in `Init:0/1`.** Normal while the job is queued. If it persists,
@@ -421,6 +551,15 @@ the value it produced is quoted in the message.
 already contains a different object under the credential's name. Rename the
 credential, or set `ReplicateCredentials: false` and provision it yourself.
 
+**`interLink: the reverse tunnel did not come up within 600s` in the job log.** The
+shadow's `ssh-reverse` container never got through; read its log. `could not prepare
+... on <node>` means the command to the compute node was refused, so try
+`NodeExec: srun`; `no running job named ... on <node>` in `srun` mode means `squeue`
+on the login node did not list a running job under the pod's UID.
+
+**Pod creation fails with `interlink.eu/reverse-forwards: ...`.** The annotation did
+not parse; the message names the entry and what is wrong with it.
+
 **An nginx wstunnel Deployment appears instead of the SSH shadow.** A custom template
 file is overriding the built-in one. The virtual kubelet prefers
 `Network.WstunnelTemplatePath` over its own templates; the Helm chart stops mounting
@@ -432,5 +571,6 @@ it in `ssh` mode, but a hand-written config may still point at one.
 
 - [Discussion #535](https://github.com/interlink-hq/interLink/discussions/535) — the original proposal
 - [Issue #545](https://github.com/interlink-hq/interLink/issues/545) — in-cluster SSH deployment
+- [Issue #548](https://github.com/interlink-hq/interLink/issues/548) — pod to cluster connectivity without WireGuard
 - [Wstunnel Configuration](./10-wstunnel-configuration.mdx)
 - [Mesh Network Configuration](./13-mesh-network-configuration.mdx)

@@ -15,6 +15,7 @@ InterLink supports several categories of annotations:
 - **[VPN & Networking](#vpn--networking)**: Configure pod IP allocation and VPN connectivity
 - **[Mesh Networking](#mesh-networking)**: Control bidirectional mesh networking for offloaded pods
 - **[Wstunnel Integration](#wstunnel-integration)**: Control websocket tunneling for exposed ports
+- **[SSH Reverse Tunnel](#ssh-reverse-tunnel)**: Let an offloaded pod reach endpoints inside the cluster over the SSH shadow
 - **[Job Management](#job-management)**: Handle remote job execution and tracking
 - **[System Annotations](#system-annotations)**: Internal annotations used by interLink components
 
@@ -230,6 +231,101 @@ spec:
 - Case-insensitive protocol names
 
 **Default:** Not set (no additional ports forwarded)
+
+---
+
+## SSH Reverse Tunnel
+
+With the [SSH shadow](./14-ssh-tunnel-configuration.mdx) and
+`Network.SSH.Reverse.Enabled: true`, these annotations let an offloaded pod open
+connections to endpoints inside the cluster. How it works, what the site has to allow
+and the limits are in
+[Pod to cluster: the reverse tunnel](./14-ssh-tunnel-configuration.mdx#pod-to-cluster-the-reverse-tunnel).
+
+### `interlink.eu/reverse-forwards`
+
+Lists the cluster endpoints the pod may connect to.
+
+**Usage:**
+```yaml
+apiVersion: v1
+kind: Pod
+metadata:
+  name: trainer
+  annotations:
+    interlink.eu/reverse-forwards: "minio.user.svc.cluster.local:9000 6443:kubernetes.default.svc.cluster.local:443"
+spec:
+  containers:
+  - name: trainer
+    image: docker://python:3.12
+```
+
+**Format:**
+- **Endpoint**: `host:port` - the job connects to the same port
+- **Remapped**: `listen-port:host:port` - the job connects to `listen-port`; needed when `port` is below 1024
+- **Several**: space-separated
+
+**Behavior:**
+- The virtual kubelet adds the names to the container's `/etc/hosts` and waits for the tunnel before the workload starts
+- A Service FQDN also resolves as `name.namespace.svc` and `name.namespace`, and as `name` in the pod's own namespace
+- An entry that does not parse, or a listen port below 1024, is refused when the pod is created
+- Needs `Network.SSH.Reverse.Enabled: true`; otherwise the pod is refused rather than run without its tunnel
+
+**Default:** Not set (no connections back into the cluster)
+
+---
+
+### `interlink.eu/reverse-socks-port`
+
+Adds a SOCKS5 proxy for endpoints not listed in `interlink.eu/reverse-forwards`.
+
+**Usage:**
+```yaml
+metadata:
+  annotations:
+    interlink.eu/reverse-socks-port: "1080"
+```
+
+**Behavior:**
+- Any cluster address, resolved inside the cluster at connect time, for programs told to use the proxy (`ALL_PROXY=socks5h://<bind>:1080`)
+- A plain loopback listener: every user of the compute node can use it
+- Must be above 1023 and not clash with a forward's listen port
+
+**Default:** Not set (no proxy)
+
+---
+
+### `interlink.eu/reverse-bind`
+
+The `127.x.y.z` address the forwards listen on inside the job.
+
+**Behavior:**
+- Derived from the pod UID when unset, so two pods on one node never share it
+- Must be in `127.0.0.0/8` and not `127.0.0.1`
+
+**Default:** Derived from the pod UID
+
+---
+
+### `interlink.eu/reverse-node-exec`
+
+How the shadow runs a command on the compute node from the login node, for this pod.
+
+**Format:** `ssh` (`ssh <node>`) or `srun` (`srun --jobid=<job> --overlap`)
+
+**Default:** `Network.SSH.Reverse.NodeExec`
+
+---
+
+### `interlink.eu/reverse-owner-only`
+
+Whether the forwards can be used by the job's user only.
+
+**Behavior:**
+- `true`: each forward ends in a unix socket only that user can open, with a relay in front that checks the connecting user; needs `python3` on the compute node
+- `false`: the ports are bound directly, open to every user of the compute node
+
+**Default:** `true`
 
 ---
 
