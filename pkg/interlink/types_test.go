@@ -11,17 +11,26 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 )
 
+// Shared test constants for the interlink package test files.
+const (
+	testPodName          = "test-pod"
+	testDefaultNamespace = "default"
+	testContainerName    = "test-container"
+	testSidecarURL       = "http://localhost"
+	testDataRootFolder   = "/tmp/interlink"
+)
+
 func TestPodCreateRequests_JSONSerialization(t *testing.T) {
 	pod := v1.Pod{
 		ObjectMeta: metav1.ObjectMeta{
-			Name:      "test-pod",
-			Namespace: "default",
+			Name:      testPodName,
+			Namespace: testDefaultNamespace,
 			UID:       "12345-67890",
 		},
 		Spec: v1.PodSpec{
 			Containers: []v1.Container{
 				{
-					Name:  "test-container",
+					Name:  testContainerName,
 					Image: "nginx:latest",
 				},
 			},
@@ -31,7 +40,7 @@ func TestPodCreateRequests_JSONSerialization(t *testing.T) {
 	configMap := v1.ConfigMap{
 		ObjectMeta: metav1.ObjectMeta{
 			Name:      "test-config",
-			Namespace: "default",
+			Namespace: testDefaultNamespace,
 		},
 		Data: map[string]string{
 			"key": "value",
@@ -41,7 +50,7 @@ func TestPodCreateRequests_JSONSerialization(t *testing.T) {
 	secret := v1.Secret{
 		ObjectMeta: metav1.ObjectMeta{
 			Name:      "test-secret",
-			Namespace: "default",
+			Namespace: testDefaultNamespace,
 		},
 		Data: map[string][]byte{
 			"password": []byte("secret-value"),
@@ -77,7 +86,7 @@ func TestPodCreateRequests_JSONSerialization(t *testing.T) {
 
 func TestPodStatus_JSONSerialization(t *testing.T) {
 	containerStatus := v1.ContainerStatus{
-		Name:  "test-container",
+		Name:  testContainerName,
 		Ready: true,
 		State: v1.ContainerState{
 			Running: &v1.ContainerStateRunning{
@@ -87,9 +96,9 @@ func TestPodStatus_JSONSerialization(t *testing.T) {
 	}
 
 	podStatus := PodStatus{
-		PodName:      "test-pod",
+		PodName:      testPodName,
 		PodUID:       "12345-67890",
-		PodNamespace: "default",
+		PodNamespace: testDefaultNamespace,
 		JobID:        "slurm-123456",
 		Containers:   []v1.ContainerStatus{containerStatus},
 	}
@@ -109,7 +118,7 @@ func TestPodStatus_JSONSerialization(t *testing.T) {
 	assert.Equal(t, podStatus.PodNamespace, decoded.PodNamespace)
 	assert.Equal(t, podStatus.JobID, decoded.JobID)
 	assert.Len(t, decoded.Containers, 1)
-	assert.Equal(t, "test-container", decoded.Containers[0].Name)
+	assert.Equal(t, testContainerName, decoded.Containers[0].Name)
 }
 
 func TestCreateStruct_JSONSerialization(t *testing.T) {
@@ -136,7 +145,7 @@ func TestRetrievedPodData_JSONSerialization(t *testing.T) {
 	pod := v1.Pod{
 		ObjectMeta: metav1.ObjectMeta{
 			Name:      "retrieved-pod",
-			Namespace: "default",
+			Namespace: testDefaultNamespace,
 		},
 	}
 
@@ -206,10 +215,10 @@ func TestLogStruct_JSONSerialization(t *testing.T) {
 	}
 
 	logStruct := LogStruct{
-		Namespace:     "default",
+		Namespace:     testDefaultNamespace,
 		PodUID:        "pod-12345",
-		PodName:       "test-pod",
-		ContainerName: "test-container",
+		PodName:       testPodName,
+		ContainerName: testContainerName,
 		Opts:          logOpts,
 	}
 
@@ -267,7 +276,7 @@ func TestPodStatus_MultipleContainers(t *testing.T) {
 	podStatus := PodStatus{
 		PodName:      "multi-container-pod",
 		PodUID:       "uuid-123",
-		PodNamespace: "default",
+		PodNamespace: testDefaultNamespace,
 		JobID:        "job-456",
 		Containers: []v1.ContainerStatus{
 			{Name: "container1", Ready: true},

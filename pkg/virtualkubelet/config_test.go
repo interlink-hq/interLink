@@ -45,8 +45,8 @@ func TestResources_Configuration(t *testing.T) {
 		Pods:   "100",
 		Accelerators: []Accelerator{
 			{
-				ResourceType: "nvidia.com/gpu",
-				Model:        "A100",
+				ResourceType: nvidiaGPU,
+				Model:        testGPUModel,
 				Available:    "8",
 			},
 		},
@@ -56,7 +56,7 @@ func TestResources_Configuration(t *testing.T) {
 	assert.Equal(t, "128Gi", resources.Memory)
 	assert.Equal(t, "100", resources.Pods)
 	assert.Len(t, resources.Accelerators, 1)
-	assert.Equal(t, "nvidia.com/gpu", resources.Accelerators[0].ResourceType)
+	assert.Equal(t, nvidiaGPU, resources.Accelerators[0].ResourceType)
 	assert.Equal(t, "8", resources.Accelerators[0].Available)
 }
 
@@ -153,7 +153,7 @@ func TestAccelerator_AvailableIsKubernetesQuantity(t *testing.T) {
 		{"integer count", "8", true},
 		{"large count", "1000", true},
 		{"memory-style quantity", "16Gi", true},
-		{"milli-style quantity", "500m", true},
+		{"milli-style quantity", testMilliQuantity, true},
 		{"invalid string", "not-a-quantity", false},
 		{"empty string", "", false},
 	}
@@ -177,8 +177,8 @@ func TestGetResources_AcceleratorQuantities(t *testing.T) {
 			Memory: "16Gi",
 			Pods:   "100",
 			Accelerators: []Accelerator{
-				{ResourceType: "nvidia.com/gpu", Model: "A100", Available: "4"},
-				{ResourceType: "nvidia.com/gpu", Model: "A100", Available: "4"},
+				{ResourceType: nvidiaGPU, Model: testGPUModel, Available: "4"},
+				{ResourceType: nvidiaGPU, Model: testGPUModel, Available: "4"},
 				{ResourceType: "amd.com/gpu", Model: "MI250", Available: "2"},
 				{ResourceType: "xilinx.com/fpga", Model: "U250", Available: "1"},
 			},
@@ -187,7 +187,7 @@ func TestGetResources_AcceleratorQuantities(t *testing.T) {
 
 	resourceList := GetResources(config)
 
-	nvidiaGPUQty := resourceList["nvidia.com/gpu"]
+	nvidiaGPUQty := resourceList[nvidiaGPU]
 	assert.Equal(t, int64(8), nvidiaGPUQty.Value(), "nvidia.com/gpu should sum to 8")
 
 	amdGPUQty := resourceList["amd.com/gpu"]
@@ -201,7 +201,7 @@ func TestUpdateNodeResources_CPUMemoryPods(t *testing.T) {
 	config := Config{
 		Resources: Resources{
 			CPU:    "10",
-			Memory: "32Gi",
+			Memory: testMemoryQuantity,
 			Pods:   "100",
 		},
 	}
@@ -236,7 +236,7 @@ func TestUpdateNodeResources_Accelerators(t *testing.T) {
 	config := Config{
 		Resources: Resources{
 			CPU:    "10",
-			Memory: "32Gi",
+			Memory: testMemoryQuantity,
 			Pods:   "100",
 		},
 	}
@@ -246,13 +246,13 @@ func TestUpdateNodeResources_Accelerators(t *testing.T) {
 	ctx := context.Background()
 	resources := &types.ResourcesResponse{
 		Accelerators: []types.AcceleratorResponse{
-			{ResourceType: "nvidia.com/gpu", Available: "8"},
+			{ResourceType: nvidiaGPU, Available: "8"},
 			{ResourceType: "xilinx.com/fpga", Available: "2"},
 		},
 	}
 	provider.updateNodeResources(ctx, resources)
 
-	gpuQty := provider.node.Status.Capacity["nvidia.com/gpu"]
+	gpuQty := provider.node.Status.Capacity[nvidiaGPU]
 	assert.Equal(t, int64(8), gpuQty.Value())
 	fpgaQty := provider.node.Status.Capacity["xilinx.com/fpga"]
 	assert.Equal(t, int64(2), fpgaQty.Value())
@@ -262,7 +262,7 @@ func TestUpdateNodeResources_InvalidValues(t *testing.T) {
 	config := Config{
 		Resources: Resources{
 			CPU:    "10",
-			Memory: "32Gi",
+			Memory: testMemoryQuantity,
 			Pods:   "100",
 		},
 	}
@@ -286,7 +286,7 @@ func TestUpdateNodeResources_InvalidPodsQuantity(t *testing.T) {
 	config := Config{
 		Resources: Resources{
 			CPU:    "10",
-			Memory: "32Gi",
+			Memory: testMemoryQuantity,
 			Pods:   "100",
 		},
 	}
@@ -295,7 +295,7 @@ func TestUpdateNodeResources_InvalidPodsQuantity(t *testing.T) {
 
 	originalPods := provider.node.Status.Capacity["pods"].DeepCopy()
 
-	for _, pods := range []string{"500m", "-1"} {
+	for _, pods := range []string{testMilliQuantity, "-1"} {
 		t.Run(pods, func(t *testing.T) {
 			ctx := context.Background()
 			provider.updateNodeResources(ctx, &types.ResourcesResponse{Pods: pods})
@@ -310,23 +310,23 @@ func TestUpdateNodeResources_InvalidAcceleratorQuantity(t *testing.T) {
 	config := Config{
 		Resources: Resources{
 			CPU:    "10",
-			Memory: "32Gi",
+			Memory: testMemoryQuantity,
 			Pods:   "100",
 		},
 	}
 	provider, err := NewProviderConfig(config, "test-node", "v1.0", "linux", "10.0.0.1", 10250, nil)
 	assert.NoError(t, err)
 
-	for _, available := range []string{"500m", "-1"} {
+	for _, available := range []string{testMilliQuantity, "-1"} {
 		t.Run(available, func(t *testing.T) {
 			ctx := context.Background()
 			provider.updateNodeResources(ctx, &types.ResourcesResponse{
 				Accelerators: []types.AcceleratorResponse{
-					{ResourceType: "nvidia.com/gpu", Available: available},
+					{ResourceType: nvidiaGPU, Available: available},
 				},
 			})
 
-			_, exists := provider.node.Status.Capacity[v1.ResourceName("nvidia.com/gpu")]
+			_, exists := provider.node.Status.Capacity[v1.ResourceName(nvidiaGPU)]
 			assert.False(t, exists)
 		})
 	}
@@ -336,7 +336,7 @@ func TestUpdateNodeResources_Nil(t *testing.T) {
 	config := Config{
 		Resources: Resources{
 			CPU:    "10",
-			Memory: "32Gi",
+			Memory: testMemoryQuantity,
 			Pods:   "100",
 		},
 	}
@@ -357,7 +357,7 @@ func TestUpdateNodeResources_PartialUpdate(t *testing.T) {
 	config := Config{
 		Resources: Resources{
 			CPU:    "10",
-			Memory: "32Gi",
+			Memory: testMemoryQuantity,
 			Pods:   "100",
 		},
 	}
@@ -386,27 +386,27 @@ func TestUpdateNodeResources_PartialUpdate(t *testing.T) {
 func TestUpdateNodeTaints_ReplacesPluginManagedTaintsAndPreservesSystemTaint(t *testing.T) {
 	config := Config{
 		NodeTaints: []TaintSpec{
-			{Key: "existing", Value: "old", Effect: "NoExecute"},
+			{Key: testTaintKeyExisting, Value: testTaintValueOld, Effect: testTaintEffectNoExecute},
 		},
 	}
 	provider, err := NewProviderConfig(config, "test-node", "v1.0", "linux", "10.0.0.1", 10250, nil)
 	assert.NoError(t, err)
 
 	taints := []types.TaintResponse{
-		{Key: "virtual-node.interlink/no-schedule", Value: "false", Effect: "NoSchedule"},
-		{Key: "plugin", Value: "new", Effect: "PreferNoSchedule"},
+		{Key: virtualNodeNoScheduleTaint, Value: "false", Effect: "NoSchedule"},
+		{Key: testTaintKeyPlugin, Value: testTaintValueNew, Effect: "PreferNoSchedule"},
 	}
 	provider.updateNodeTaints(context.Background(), &taints)
 
 	assert.Equal(t, []v1.Taint{
 		{
-			Key:    "virtual-node.interlink/no-schedule",
-			Value:  "true",
+			Key:    virtualNodeNoScheduleTaint,
+			Value:  valueTrue,
 			Effect: v1.TaintEffectNoSchedule,
 		},
 		{
-			Key:    "plugin",
-			Value:  "new",
+			Key:    testTaintKeyPlugin,
+			Value:  testTaintValueNew,
 			Effect: v1.TaintEffectPreferNoSchedule,
 		},
 	}, provider.node.Spec.Taints)
@@ -415,7 +415,7 @@ func TestUpdateNodeTaints_ReplacesPluginManagedTaintsAndPreservesSystemTaint(t *
 func TestUpdateNodeTaints_EmptySliceClearsPluginManagedTaints(t *testing.T) {
 	config := Config{
 		NodeTaints: []TaintSpec{
-			{Key: "existing", Value: "old", Effect: "NoExecute"},
+			{Key: testTaintKeyExisting, Value: testTaintValueOld, Effect: testTaintEffectNoExecute},
 		},
 	}
 	provider, err := NewProviderConfig(config, "test-node", "v1.0", "linux", "10.0.0.1", 10250, nil)
@@ -426,8 +426,8 @@ func TestUpdateNodeTaints_EmptySliceClearsPluginManagedTaints(t *testing.T) {
 
 	assert.Equal(t, []v1.Taint{
 		{
-			Key:    "virtual-node.interlink/no-schedule",
-			Value:  "true",
+			Key:    virtualNodeNoScheduleTaint,
+			Value:  valueTrue,
 			Effect: v1.TaintEffectNoSchedule,
 		},
 	}, provider.node.Spec.Taints)
@@ -436,7 +436,7 @@ func TestUpdateNodeTaints_EmptySliceClearsPluginManagedTaints(t *testing.T) {
 func TestUpdateNodeTaints_NilLeavesExistingTaintsUnchangedAndUnknownEffectDefaults(t *testing.T) {
 	config := Config{
 		NodeTaints: []TaintSpec{
-			{Key: "existing", Value: "old", Effect: "NoExecute"},
+			{Key: testTaintKeyExisting, Value: testTaintValueOld, Effect: testTaintEffectNoExecute},
 		},
 	}
 	provider, err := NewProviderConfig(config, "test-node", "v1.0", "linux", "10.0.0.1", 10250, nil)
@@ -447,19 +447,19 @@ func TestUpdateNodeTaints_NilLeavesExistingTaintsUnchangedAndUnknownEffectDefaul
 	assert.Equal(t, originalTaints, provider.node.Spec.Taints)
 
 	taints := []types.TaintResponse{
-		{Key: "plugin", Value: "new", Effect: "UnexpectedEffect"},
+		{Key: testTaintKeyPlugin, Value: testTaintValueNew, Effect: "UnexpectedEffect"},
 	}
 	provider.updateNodeTaints(context.Background(), &taints)
 
 	assert.Equal(t, []v1.Taint{
 		{
-			Key:    "virtual-node.interlink/no-schedule",
-			Value:  "true",
+			Key:    virtualNodeNoScheduleTaint,
+			Value:  valueTrue,
 			Effect: v1.TaintEffectNoSchedule,
 		},
 		{
-			Key:    "plugin",
-			Value:  "new",
+			Key:    testTaintKeyPlugin,
+			Value:  testTaintValueNew,
 			Effect: v1.TaintEffectNoSchedule,
 		},
 	}, provider.node.Spec.Taints)

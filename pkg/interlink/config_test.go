@@ -31,11 +31,11 @@ DataRootFolder: "/tmp/interlink"
 			want: Config{
 				InterlinkAddress:  "http://0.0.0.0",
 				Interlinkport:     "3000",
-				Sidecarurl:        "http://localhost",
+				Sidecarurl:        testSidecarURL,
 				Sidecarport:       "4000",
 				VerboseLogging:    true,
 				ErrorsOnlyLogging: false,
-				DataRootFolder:    "/tmp/interlink",
+				DataRootFolder:    testDataRootFolder,
 			},
 			wantErr: false,
 		},
@@ -58,11 +58,11 @@ TLS:
 			want: Config{
 				InterlinkAddress:  "https://0.0.0.0",
 				Interlinkport:     "3000",
-				Sidecarurl:        "http://localhost",
+				Sidecarurl:        testSidecarURL,
 				Sidecarport:       "4000",
 				VerboseLogging:    false,
 				ErrorsOnlyLogging: false,
-				DataRootFolder:    "/tmp/interlink",
+				DataRootFolder:    testDataRootFolder,
 				TLS: TLSConfig{
 					Enabled:    true,
 					CertFile:   "/certs/server.crt",
@@ -100,11 +100,11 @@ JobScriptBuildConfig:
 			want: Config{
 				InterlinkAddress:  "http://0.0.0.0",
 				Interlinkport:     "3000",
-				Sidecarurl:        "http://localhost",
+				Sidecarurl:        testSidecarURL,
 				Sidecarport:       "4000",
 				VerboseLogging:    false,
 				ErrorsOnlyLogging: false,
-				DataRootFolder:    "/tmp/interlink",
+				DataRootFolder:    testDataRootFolder,
 				JobScriptBuildConfig: &ScriptBuildConfig{
 					SingularityHub: SingularityHubConfig{
 						Server:               "https://hub.example.com",

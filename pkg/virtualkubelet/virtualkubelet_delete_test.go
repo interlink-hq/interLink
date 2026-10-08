@@ -31,7 +31,7 @@ func newDeleteTestProvider(t *testing.T, handler http.Handler) (*Provider, *v1.P
 
 	pod := &v1.Pod{
 		ObjectMeta: metav1.ObjectMeta{
-			Name:      "test-pod",
+			Name:      testPodName,
 			Namespace: testNamespace,
 			UID:       "test-pod-uid",
 		},
