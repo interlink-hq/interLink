@@ -90,6 +90,22 @@ func NormalizeShadowConfig(config *Config) error {
 		s.ReplicateCredentials = &replicate
 	}
 
+	r := &s.Reverse
+	r.NodeExec = strings.ToLower(strings.TrimSpace(r.NodeExec))
+	switch r.NodeExec {
+	case "":
+		r.NodeExec = SSHReverseNodeExecSSH
+	case SSHReverseNodeExecSSH, SSHReverseNodeExecSrun:
+	default:
+		return fmt.Errorf("unknown Network.SSH.Reverse.NodeExec %q: expected %q or %q", r.NodeExec, SSHReverseNodeExecSSH, SSHReverseNodeExecSrun)
+	}
+	if r.SshdPath == "" {
+		r.SshdPath = DefaultSSHReverseSshdPath
+	}
+	if r.PythonPath == "" {
+		r.PythonPath = DefaultSSHReversePythonPath
+	}
+
 	s.ForwardMode = strings.ToLower(strings.TrimSpace(s.ForwardMode))
 	switch s.ForwardMode {
 	case "":

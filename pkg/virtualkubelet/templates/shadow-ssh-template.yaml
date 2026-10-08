@@ -1,3 +1,33 @@
+{{- /* ssh client options shared by every ssh the shadow runs against the login node */ -}}
+{{- define "sshOptions" -}}
+ssh_opts="\
+              -p {{.SSH.Port}} \
+              -o BatchMode=yes \
+              -o ServerAliveInterval=30 \
+              -o ServerAliveCountMax=3 \
+            {{- if eq .SSH.Auth "kerberos" }}
+              -o GSSAPIAuthentication=yes \
+              -o GSSAPIDelegateCredentials=yes \
+              -o PreferredAuthentications=gssapi-with-mic \
+            {{- else }}
+              -i /interlink/ssh/{{.SSH.KeySecretKey}} \
+              -o IdentitiesOnly=yes \
+              -o PreferredAuthentications=publickey \
+            {{- end }}
+            {{- if .SSH.KnownHostsConfigMap }}
+              -o StrictHostKeyChecking=yes \
+              -o UserKnownHostsFile=/interlink/known-hosts/known_hosts \
+            {{- else }}
+              -o StrictHostKeyChecking=accept-new \
+            {{- end }}
+            {{- range .SSH.ExtraOptions }}
+              -o {{.}} \
+            {{- end }}
+              "
+{{- end -}}
+{{- /* nothing to forward without a TCP port: no forward container, no Service */ -}}
+{{- $hasTCP := false }}
+{{- range .ExposedPorts }}{{ if ne .Protocol "UDP" }}{{ $hasTCP = true }}{{ end }}{{ end }}
 apiVersion: apps/v1
 kind: Deployment
 metadata:
@@ -113,6 +143,7 @@ spec:
           capabilities:
             drop: ["ALL"]
       {{- end }}
+      {{- if $hasTCP }}
       - name: ssh-forward
         image: {{.SSH.Image}}
         command: ["/bin/sh", "-c"]
@@ -122,30 +153,7 @@ spec:
             read_node() { tr -d '[:space:]' < /interlink/node/{{.NodeNameKey}} 2>/dev/null || true; }
 
             target={{.SSH.User}}@{{.SSH.LoginHost}}
-            ssh_opts="\
-              -p {{.SSH.Port}} \
-              -o BatchMode=yes \
-              -o ServerAliveInterval=30 \
-              -o ServerAliveCountMax=3 \
-            {{- if eq .SSH.Auth "kerberos" }}
-              -o GSSAPIAuthentication=yes \
-              -o GSSAPIDelegateCredentials=yes \
-              -o PreferredAuthentications=gssapi-with-mic \
-            {{- else }}
-              -i /interlink/ssh/{{.SSH.KeySecretKey}} \
-              -o IdentitiesOnly=yes \
-              -o PreferredAuthentications=publickey \
-            {{- end }}
-            {{- if .SSH.KnownHostsConfigMap }}
-              -o StrictHostKeyChecking=yes \
-              -o UserKnownHostsFile=/interlink/known-hosts/known_hosts \
-            {{- else }}
-              -o StrictHostKeyChecking=accept-new \
-            {{- end }}
-            {{- range .SSH.ExtraOptions }}
-              -o {{.}} \
-            {{- end }}
-              "
+            {{ template "sshOptions" . }}
 
             pids=
 
@@ -304,6 +312,305 @@ spec:
           allowPrivilegeEscalation: false
           capabilities:
             drop: ["ALL"]
+      {{- end }}
+      {{- if .Reverse }}
+      # Connections opened BY the offloaded pod towards cluster endpoints, with no
+      # WireGuard and no network namespace (interlink-hq/interLink#548).
+      #
+      # The shadow starts a user-space `sshd -i` on the compute node, as the job's
+      # own user, with the stdio of a command run through the login node as its
+      # transport, so it listens on nothing. `-R` then binds the pod's loopback
+      # address on the compute node, and every connection made there is dialled
+      # from this container, inside the cluster.
+      - name: ssh-reverse
+        image: {{.SSH.Image}}
+        command: ["/bin/sh", "-c"]
+        args:
+          - |
+            set -u
+            read_node() { tr -d '[:space:]' < /interlink/node/{{.NodeNameKey}} 2>/dev/null || true; }
+
+            target={{.SSH.User}}@{{.SSH.LoginHost}}
+            {{ template "sshOptions" . }}
+            ssh_opts="$ssh_opts -o LogLevel=ERROR"
+
+            w=/tmp/interlink-reverse
+            rdir=/tmp/il-rev-{{.Name}}
+            pid=
+
+            # A TCP listener on a loopback address is open to every user of the compute
+            # node. In owner-only mode each forward therefore ends in a unix socket that
+            # only the job's user can open, and relay.py puts the TCP port in front of
+            # it, accepting a connection only when the connecting socket is that user's.
+            rflags=
+            relay_args=
+            for f in $REV_FORWARDS; do
+              lport=${f%%:*}; dest=${f#*:}
+              if [ "$REV_OWNER_ONLY" = true ]; then
+                rflags="$rflags -R $rdir/$lport.sock:$dest"
+                relay_args="$relay_args $lport=$rdir/$lport.sock"
+              else
+                rflags="$rflags -R $REV_BIND:$lport:$dest"
+              fi
+            done
+            # ssh has no unix-socket form of the SOCKS forward, so that port is a plain
+            # loopback listener whatever the mode.
+            if [ -n "$REV_SOCKS_PORT" ]; then
+              rflags="$rflags -R $REV_BIND:$REV_SOCKS_PORT"
+            fi
+
+            # How a command reaches the compute node from the login node.
+            node_exec() {
+              if [ "$REV_NODE_EXEC" = srun ]; then
+                # The plugin names the batch job after the pod UID.
+                # shellcheck disable=SC2086
+                jid=$(ssh $ssh_opts "$target" "squeue -h --me -t R -n $REV_JOB_NAME -o %i" 2>/dev/null | head -n 1)
+                echo "$jid" | grep -Eq '^[0-9]+$' || return 1
+                echo "srun --jobid=$jid --overlap -u -n1 --cpus-per-task=1"
+              else
+                echo "ssh -o BatchMode=yes -o StrictHostKeyChecking=accept-new -o LogLevel=ERROR $node"
+              fi
+            }
+
+            start_reverse() {
+              rm -rf "$w"; mkdir -p "$w"
+              nexec=$(node_exec) || { echo "no running job named $REV_JOB_NAME on $node" >&2; return 1; }
+
+              # A fresh key pair for each side on every start: nothing here outlives
+              # the session, and nothing is taken from the site credential.
+              ssh-keygen -q -t ed25519 -N '' -C interlink-reverse -f "$w/client"
+              ssh-keygen -q -t ed25519 -N '' -C interlink-reverse -f "$w/host"
+              echo "interlink-job $(cat "$w/host.pub")" > "$w/known_hosts"
+
+              cat > "$w/relay.py" <<'EORELAY'
+            #!/usr/bin/env python3
+            """Owner-only TCP front for the reverse tunnel's unix sockets.
+
+            A TCP listener on a loopback address can be reached by every user of the compute
+            node. This relay accepts a connection only when the connecting socket belongs to the
+            user running it, read from /proc/net/tcp, and then pipes it to a unix socket that
+            only that user can open.
+
+                relay.py <bind address> <port>=<unix socket> [...]
+            """
+            import os, socket, sys, threading
+
+            ALLOW = os.getuid()
+
+
+            def hexip(ip):
+                return "".join("%02X" % b for b in reversed(socket.inet_aton(ip)))
+
+
+            def peer_uid(conn):
+                (pip, pport), (lip, lport) = conn.getpeername(), conn.getsockname()
+                want_local, want_remote = "%s:%04X" % (hexip(pip), pport), "%s:%04X" % (hexip(lip), lport)
+                with open("/proc/net/tcp") as f:
+                    next(f)
+                    for line in f:
+                        c = line.split()
+                        if c[1] == want_local and c[2] == want_remote:
+                            return int(c[7])
+                return None
+
+
+            def pump(src, dst):
+                try:
+                    while True:
+                        data = src.recv(1 << 16)
+                        if not data:
+                            break
+                        dst.sendall(data)
+                except OSError:
+                    pass
+                finally:
+                    try:
+                        dst.shutdown(socket.SHUT_WR)
+                    except OSError:
+                        pass
+
+
+            def handle(conn, path):
+                uid = peer_uid(conn)
+                if uid != ALLOW:
+                    print(f"refused a connection from uid {uid}", file=sys.stderr, flush=True)
+                    conn.close()
+                    return
+                up = socket.socket(socket.AF_UNIX)
+                try:
+                    up.connect(path)
+                except OSError as e:
+                    print(f"{path}: {e}", file=sys.stderr, flush=True)
+                    conn.close()
+                    return
+                t = threading.Thread(target=pump, args=(up, conn), daemon=True)
+                t.start()
+                pump(conn, up)
+                t.join()
+                conn.close()
+                up.close()
+
+
+            def serve(bind, port, path):
+                s = socket.socket()
+                s.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+                s.bind((bind, port))
+                s.listen(128)
+                while True:
+                    conn, _ = s.accept()
+                    conn.setsockopt(socket.IPPROTO_TCP, socket.TCP_NODELAY, 1)
+                    threading.Thread(target=handle, args=(conn, path), daemon=True).start()
+
+
+            bind = sys.argv[1]
+            for spec in sys.argv[2:]:
+                port, path = spec.split("=", 1)
+                threading.Thread(target=serve, args=(bind, int(port), path), daemon=True).start()
+            print(f"relay up on {bind}, allowing uid {ALLOW}", file=sys.stderr, flush=True)
+            sys.stdin.read()  # ends with the ssh session
+            EORELAY
+
+              # The session command runs for as long as the tunnel and removes the
+              # directory when it ends.
+              if [ "$REV_OWNER_ONLY" = true ]; then
+                session="$REV_PYTHON $rdir/relay.py $REV_BIND$relay_args"
+              else
+                session="cat >/dev/null"
+              fi
+              {
+                echo "umask 077; rm -rf $rdir; mkdir -p $rdir || exit 1"
+                echo "cat > $rdir/host <<'EOK'"; cat "$w/host"; echo EOK
+                echo "cat > $rdir/authorized_keys <<'EOK'"; cat "$w/client.pub"; echo EOK
+                echo "cat > $rdir/relay.py <<'EOK'"; cat "$w/relay.py"; echo EOK
+                echo "cat > $rdir/sshd_config <<'EOK'"
+                echo "HostKey $rdir/host"
+                echo "AuthorizedKeysFile $rdir/authorized_keys"
+                echo "PidFile none"
+                echo "UsePAM no"
+                echo "StrictModes no"
+                echo "PasswordAuthentication no"
+                echo "KbdInteractiveAuthentication no"
+                echo "PubkeyAuthentication yes"
+                echo "AllowTcpForwarding remote"
+                echo "GatewayPorts clientspecified"
+                echo "AllowStreamLocalForwarding remote"
+                echo "StreamLocalBindUnlink yes"
+                echo "StreamLocalBindMask 0177"
+                echo "AllowAgentForwarding no"
+                echo "PermitTTY no"
+                echo "X11Forwarding no"
+                echo "ForceCommand sh -c 'trap \"rm -rf $rdir\" EXIT HUP TERM; $session'"
+                echo EOK
+              } > "$w/bootstrap.sh"
+              # shellcheck disable=SC2086
+              ssh $ssh_opts "$target" "$nexec sh -s" < "$w/bootstrap.sh" || { echo "could not prepare $rdir on $node" >&2; return 1; }
+
+              printf '#!/bin/sh\nexec ssh %s %s "%s $REV_SSHD -i -e -f %s/sshd_config"\n' \
+                "$ssh_opts" "$target" "$nexec" "$rdir" > "$w/proxy.sh"
+              chmod +x "$w/proxy.sh"
+
+              # The session lives until its stdin closes: keep the pipe open from here
+              # so both ends die together.
+              mkfifo "$w/hold"
+              # shellcheck disable=SC2086
+              ssh -T \
+                -o ProxyCommand="$w/proxy.sh" \
+                -o ExitOnForwardFailure=yes \
+                -o BatchMode=yes \
+                -o ServerAliveInterval=30 -o ServerAliveCountMax=3 \
+                -o UserKnownHostsFile="$w/known_hosts" -o StrictHostKeyChecking=yes -o HostKeyAlias=interlink-job \
+                -o GSSAPIAuthentication=no -o PreferredAuthentications=publickey \
+                -i "$w/client" -o IdentitiesOnly=yes \
+                $rflags {{.SSH.User}}@interlink-job < "$w/hold" &
+              pid=$!
+              exec 9> "$w/hold"
+            }
+
+            stop_reverse() {
+              [ -n "$pid" ] && kill "$pid" 2>/dev/null
+              exec 9>&- 2>/dev/null || true
+              wait 2>/dev/null || true
+              pid=
+            }
+
+            node=$(read_node)
+            [ -n "$node" ] || { echo "no compute node recorded" >&2; exit 1; }
+
+            while :; do
+              echo "reverse:$rflags on $node via {{.SSH.LoginHost}} ($REV_NODE_EXEC, owner-only $REV_OWNER_ONLY)"
+              start_reverse || { stop_reverse; exit 1; }
+
+              changed=false
+              while kill -0 "$pid" 2>/dev/null; do
+                current=$(read_node)
+                if [ -n "$current" ] && [ "$current" != "$node" ]; then
+                  echo "compute node changed from $node to $current, rebuilding the reverse tunnel"
+                  node=$current
+                  changed=true
+                  break
+                fi
+                sleep 10
+              done
+
+              stop_reverse
+              $changed && continue
+              echo "the reverse tunnel exited; letting Kubernetes restart the container" >&2
+              exit 1
+            done
+        env:
+        - name: REV_FORWARDS
+          value: "{{range $i, $f := .Reverse.Forwards}}{{if $i}} {{end}}{{$f.ListenPort}}:{{$f.Host}}:{{$f.Port}}{{end}}"
+        - name: REV_SOCKS_PORT
+          value: "{{if .Reverse.SocksPort}}{{.Reverse.SocksPort}}{{end}}"
+        - name: REV_BIND
+          value: "{{.Reverse.Bind}}"
+        - name: REV_NODE_EXEC
+          value: "{{.Reverse.NodeExec}}"
+        - name: REV_OWNER_ONLY
+          value: "{{.Reverse.OwnerOnly}}"
+        - name: REV_SSHD
+          value: "{{.Reverse.SshdPath}}"
+        - name: REV_PYTHON
+          value: "{{.Reverse.PythonPath}}"
+        - name: REV_JOB_NAME
+          value: "{{.Reverse.JobName}}"
+        {{- if eq .SSH.Auth "kerberos" }}
+        - name: KRB5CCNAME
+          value: FILE:/interlink/krb5cc/ccache
+        {{- end }}
+        volumeMounts:
+        - name: shadow-node
+          mountPath: /interlink/node
+          readOnly: true
+        {{- if eq .SSH.Auth "kerberos" }}
+        - name: shadow-krb5cc
+          mountPath: /interlink/krb5cc
+          readOnly: true
+        {{- if .SSH.Krb5ConfigMap }}
+        - name: shadow-krb5-config
+          mountPath: /etc/krb5.conf
+          subPath: krb5.conf
+          readOnly: true
+        {{- end }}
+        {{- else }}
+        - name: shadow-ssh-key
+          mountPath: /interlink/ssh
+          readOnly: true
+        {{- end }}
+        {{- if .SSH.KnownHostsConfigMap }}
+        - name: shadow-known-hosts
+          mountPath: /interlink/known-hosts
+          readOnly: true
+        {{- end }}
+        resources:
+          requests:
+            cpu: 100m
+            memory: 64Mi
+        securityContext:
+          allowPrivilegeEscalation: false
+          capabilities:
+            drop: ["ALL"]
+      {{- end }}
       volumes:
       # Mounted as a directory, not subPath: only directory mounts are refreshed in
       # place when the VK writes the compute node into this ConfigMap.
@@ -334,6 +641,7 @@ spec:
         configMap:
           name: {{.SSH.KnownHostsConfigMap}}
       {{- end }}
+{{- if $hasTCP }}
 ---
 apiVersion: v1
 kind: Service
@@ -353,3 +661,4 @@ spec:
     protocol: {{.Protocol}}
   {{- end }}
   {{- end }}
+{{- end }}

@@ -273,4 +273,27 @@ type SSHTunnel struct {
 	NodeWaitTimeout string `yaml:"NodeWaitTimeout,omitempty"`
 	// ExtraOptions are additional ssh client options, each passed verbatim as -o <opt>
 	ExtraOptions []string `yaml:"ExtraOptions,omitempty"`
+	// Reverse lets offloaded pods open connections back into the cluster through
+	// the same login node, see the interlink.eu/reverse-* annotations.
+	Reverse SSHReverse `yaml:"Reverse,omitempty"`
+}
+
+// SSHReverse configures connections opened by offloaded pods towards cluster
+// endpoints. The shadow starts a user-space sshd on the compute node, as the job's
+// user, and binds the pod's forwards there with `ssh -R`; nothing on the compute
+// node has to reach the cluster.
+type SSHReverse struct {
+	// Enabled lets pods ask for it (default false). A pod that asks while this is
+	// false is refused at creation rather than run without its tunnel.
+	Enabled bool `yaml:"Enabled,omitempty"`
+	// NodeExec is how the shadow reaches the compute node from the login node:
+	// "ssh" (default) runs `ssh <node>`, which the site must allow into a node
+	// where the user has a job; "srun" runs `srun --jobid=<job> --overlap` inside
+	// the job's own allocation. A pod may override it.
+	NodeExec string `yaml:"NodeExec,omitempty"`
+	// SshdPath is the sshd binary on the compute node (default "/usr/sbin/sshd")
+	SshdPath string `yaml:"SshdPath,omitempty"`
+	// PythonPath is the python3 on the compute node that runs the owner-only relay
+	// (default "python3")
+	PythonPath string `yaml:"PythonPath,omitempty"`
 }
