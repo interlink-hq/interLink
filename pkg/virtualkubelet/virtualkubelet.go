@@ -695,7 +695,9 @@ func (p *Provider) nodeUpdate(ctx context.Context) {
 		case <-t.C:
 		}
 		_, code, respBody, err := PingInterLink(ctx, p.config)
-		if err != nil || code != 200 {
+		// Any 2xx means the API answered, like everywhere else: PingInterLink
+		// returns -1 when it did not, so an unreachable API still fails here.
+		if err != nil || !types.IsSuccessStatus(code) {
 			// Use custom condition with InterLink status information
 			errorMsg := fmt.Sprintf("Ping failed with code %d", code)
 			if err != nil {

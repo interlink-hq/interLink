@@ -68,6 +68,19 @@ func (h *InterLinkHandler) StatusHandler(w http.ResponseWriter, r *http.Request)
 		return
 	}
 
+	// A top-level null unmarshals into a nil slice without error. The handler
+	// reads an empty list as "no filter" and answers with every cached status,
+	// so a body of "null" would quietly dump the whole cache instead of being
+	// rejected. An explicit empty array keeps meaning "all pods", as before.
+	if pods == nil {
+		errWithContext := fmt.Errorf("request body must contain an array of pods")
+		log.G(h.Ctx).Error(errWithContext)
+		statusCode = http.StatusBadRequest
+		w.WriteHeader(statusCode)
+		types.SetSpanError(span, statusCode, errWithContext)
+		return
+	}
+
 	// A JSON null inside the array unmarshals into a nil element, and every use
 	// of it below dereferences the pod. Letting it through panics the handler:
 	// net/http recovers, but the span is then exported Unset and without a

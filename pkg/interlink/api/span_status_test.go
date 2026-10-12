@@ -541,3 +541,46 @@ func TestLogsContainerNameIsNotTracedUnlessDetailed(t *testing.T) {
 		assert.Equal(t, testLogContainerName, name)
 	})
 }
+
+// A top-level null unmarshals into a nil slice without error, and an empty list
+// means "every pod" to this handler, so a body of "null" used to answer 200
+// with the whole cache in it.
+func TestStatusHandlerRejectsATopLevelNullBody(t *testing.T) {
+	exporter := newSpanRecorder(t)
+	h := newSidecarHandler(t, http.StatusOK)
+
+	pod := testPod()
+	PodStatuses.Statuses = map[string]types.PodStatus{
+		string(pod.UID): {PodUID: string(pod.UID), PodName: pod.Name, PodNamespace: pod.Namespace},
+	}
+
+	w := httptest.NewRecorder()
+	h.StatusHandler(w, httptest.NewRequest(http.MethodPost, "/status", bytes.NewReader([]byte("null"))))
+
+	require.Equal(t, http.StatusBadRequest, w.Code)
+	assert.NotContains(t, w.Body.String(), string(pod.UID), "the cache must not be returned")
+
+	span := exportedSpan(t, exporter, "StatusAPI")
+	assert.Equal(t, codes.Error, span.Status.Code)
+	code, ok := spanAttrInt(span, "exit.code")
+	require.True(t, ok)
+	assert.Equal(t, int64(http.StatusBadRequest), code)
+}
+
+// An explicit empty array still means "every pod", which is what the VK relies
+// on: only the null body is a malformed request.
+func TestStatusHandlerStillServesAnEmptyArrayFromTheCache(t *testing.T) {
+	newSpanRecorder(t)
+	h := newSidecarHandler(t, http.StatusOK)
+
+	pod := testPod()
+	PodStatuses.Statuses = map[string]types.PodStatus{
+		string(pod.UID): {PodUID: string(pod.UID), PodName: pod.Name, PodNamespace: pod.Namespace},
+	}
+
+	w := httptest.NewRecorder()
+	h.StatusHandler(w, httptest.NewRequest(http.MethodPost, "/status", bytes.NewReader([]byte("[]"))))
+
+	require.Equal(t, http.StatusOK, w.Code)
+	assert.Contains(t, w.Body.String(), string(pod.UID))
+}

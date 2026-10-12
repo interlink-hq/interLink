@@ -771,3 +771,42 @@ func TestResolveEnvFromRefsOptionalMissingSecret(t *testing.T) {
 	assert.Empty(t, container.Env)
 	assert.Empty(t, container.EnvFrom)
 }
+
+// The health loop asks PingInterLink for the code the API answered and treats
+// anything outside 2xx as unhealthy, so the code it reports has to be the real
+// one: a plugin answering 202 is healthy, a 503 is not.
+func TestPingInterLinkReportsAnySuccessfulStatus(t *testing.T) {
+	tests := []struct {
+		status      int
+		wantOK      bool
+		wantCode    int
+		wantHealthy bool
+	}{
+		{http.StatusOK, true, http.StatusOK, true},
+		{http.StatusAccepted, true, http.StatusAccepted, true},
+		{http.StatusNoContent, true, http.StatusNoContent, true},
+		{http.StatusServiceUnavailable, false, -1, false},
+	}
+
+	for _, tc := range tests {
+		t.Run(http.StatusText(tc.status), func(t *testing.T) {
+			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+				w.WriteHeader(tc.status)
+			}))
+			defer server.Close()
+
+			host, port, err := net.SplitHostPort(strings.TrimPrefix(server.URL, "http://"))
+			require.NoError(t, err)
+
+			ok, code, _, err := PingInterLink(context.Background(), Config{
+				InterlinkURL:  "http://" + host,
+				InterlinkPort: port,
+			})
+			require.NoError(t, err)
+			assert.Equal(t, tc.wantOK, ok)
+			assert.Equal(t, tc.wantCode, code)
+			// The condition the health loop applies to that code.
+			assert.Equal(t, tc.wantHealthy, types.IsSuccessStatus(code))
+		})
+	}
+}
