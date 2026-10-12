@@ -123,7 +123,7 @@ func main() {
 	}
 	ilpprof.Start(ctx, interLinkConfig.Pprof.Enabled, pprofAddr+":"+pprofPort, "127.0.0.1:6061")
 
-	if os.Getenv("ENABLE_TRACING") == "1" {
+	if interLinkConfig.Tracing.Enabled {
 		shutdown, err := interlink.InitTracer(ctx, "InterLink-Plugin-")
 		if err != nil {
 			log.G(ctx).Fatal(err)

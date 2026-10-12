@@ -1,10 +1,12 @@
 package interlink
 
 import (
+	"fmt"
 	"net/http"
 	"time"
 
 	"go.opentelemetry.io/otel/attribute"
+	"go.opentelemetry.io/otel/codes"
 	trace "go.opentelemetry.io/otel/trace"
 )
 
@@ -32,8 +34,58 @@ func SetDurationSpan(startTime int64, span trace.Span, opts ...SpanOption) {
 		attribute.Int64("duration", duration))
 
 	if config.SetHTTPCode {
-		span.SetAttributes(attribute.Int("exit.code", config.HTTPReturnCode))
+		SetHTTPReturnCode(span, config.HTTPReturnCode)
 	}
+}
+
+// SetHTTPReturnCode records the HTTP status code reported to the client on the
+// span, without touching timing information. Use it when the code becomes known
+// at a different moment from the end of the operation.
+func SetHTTPReturnCode(span trace.Span, statusCode int) {
+	span.SetAttributes(
+		// Keep exit.code for compatibility with existing dashboards.
+		attribute.Int("exit.code", statusCode),
+		attribute.Int("http.response.status_code", statusCode),
+	)
+}
+
+// SetSpanError marks the span as failed, records err on it, and — when
+// statusCode is non-zero — stores the HTTP status reported to the client.
+//
+// The span status is the only outcome signal that generic tracing consumers
+// understand: the OpenTelemetry Collector spanmetrics connector, for instance,
+// exposes it as the status_code dimension used to build error-rate metrics. A
+// failing path that does not call this produces a span indistinguishable from a
+// successful one, so every error path must call it before returning.
+//
+// The SDK never downgrades an Ok status back to Error, so this must run before
+// any SetSpanOK on the same span. In practice that means calling it on the error
+// path immediately before returning.
+func SetSpanError(span trace.Span, statusCode int, err error) {
+	if statusCode != 0 {
+		SetHTTPReturnCode(span, statusCode)
+	}
+	if err != nil {
+		span.SetAttributes(attribute.String("error.type", fmt.Sprintf("%T", err)))
+		span.RecordError(err)
+		span.SetStatus(codes.Error, err.Error())
+		return
+	}
+	span.SetAttributes(attribute.String("error.type", http.StatusText(statusCode)))
+	span.SetStatus(codes.Error, http.StatusText(statusCode))
+}
+
+// SetSpanOK marks the span as successful and — when statusCode is non-zero —
+// stores the HTTP status reported to the client.
+//
+// The SDK treats Ok as final and ignores any later attempt to set Error, so call
+// this only once the handler has genuinely completed, after every error path has
+// already returned.
+func SetSpanOK(span trace.Span, statusCode int) {
+	if statusCode != 0 {
+		SetHTTPReturnCode(span, statusCode)
+	}
+	span.SetStatus(codes.Ok, "")
 }
 
 // SetInfoFromHeaders extracts tracing-related information from HTTP headers

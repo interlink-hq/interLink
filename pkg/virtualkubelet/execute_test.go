@@ -14,6 +14,9 @@ import (
 	types "github.com/interlink-hq/interlink/pkg/interlink"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+	"go.opentelemetry.io/otel"
+	"go.opentelemetry.io/otel/propagation"
+	oteltrace "go.opentelemetry.io/otel/trace"
 	v1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/client-go/kubernetes/fake"
@@ -67,6 +70,25 @@ const (
 	testConditionTrue     = "True"
 	testMeshDisabledValue = "disabled"
 )
+
+func TestInjectTraceContext(t *testing.T) {
+	previousPropagator := otel.GetTextMapPropagator()
+	otel.SetTextMapPropagator(propagation.TraceContext{})
+	t.Cleanup(func() { otel.SetTextMapPropagator(previousPropagator) })
+
+	spanContext := oteltrace.NewSpanContext(oteltrace.SpanContextConfig{
+		TraceID:    oteltrace.TraceID{1, 2, 3},
+		SpanID:     oteltrace.SpanID{4, 5, 6},
+		TraceFlags: oteltrace.FlagsSampled,
+	})
+	ctx := oteltrace.ContextWithSpanContext(context.Background(), spanContext)
+	req := httptest.NewRequest(http.MethodPost, "/create", nil)
+
+	req = injectTraceContext(ctx, req)
+
+	assert.Equal(t, "00-"+spanContext.TraceID().String()+"-"+spanContext.SpanID().String()+"-01", req.Header.Get("traceparent"))
+	assert.Equal(t, spanContext, oteltrace.SpanContextFromContext(req.Context()))
+}
 
 // unixSocketRoundTripper rewrites http+unix URLs to http://unix so the underlying
 // transport can dial the configured unix socket.
@@ -748,4 +770,89 @@ func TestResolveEnvFromRefsOptionalMissingSecret(t *testing.T) {
 
 	assert.Empty(t, container.Env)
 	assert.Empty(t, container.EnvFrom)
+}
+
+// The health loop asks PingInterLink for the code the API answered and treats
+// anything outside 2xx as unhealthy, so the code it reports has to be the real
+// one: a plugin answering 202 is healthy, a 503 is not.
+func TestPingInterLinkReportsAnySuccessfulStatus(t *testing.T) {
+	tests := []struct {
+		status      int
+		wantOK      bool
+		wantCode    int
+		wantHealthy bool
+	}{
+		{http.StatusOK, true, http.StatusOK, true},
+		{http.StatusAccepted, true, http.StatusAccepted, true},
+		{http.StatusNoContent, true, http.StatusNoContent, true},
+		{http.StatusServiceUnavailable, false, -1, false},
+	}
+
+	for _, tc := range tests {
+		t.Run(http.StatusText(tc.status), func(t *testing.T) {
+			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+				w.WriteHeader(tc.status)
+			}))
+			defer server.Close()
+
+			host, port, err := net.SplitHostPort(strings.TrimPrefix(server.URL, "http://"))
+			require.NoError(t, err)
+
+			ok, code, _, err := PingInterLink(context.Background(), Config{
+				InterlinkURL:  "http://" + host,
+				InterlinkPort: port,
+			})
+			require.NoError(t, err)
+			assert.Equal(t, tc.wantOK, ok)
+			assert.Equal(t, tc.wantCode, code)
+			// The condition the health loop applies to that code.
+			assert.Equal(t, tc.wantHealthy, types.IsSuccessStatus(code))
+		})
+	}
+}
+
+// Accepting any 2xx must not accept a successful answer with no payload: the
+// create response carries the job identifier and RemoteExecution unmarshals it
+// immediately, so an empty body has to fail at this boundary with a message
+// that says what was missing.
+func TestCreateAndStatusRequestsRejectAnEmptySuccessfulBody(t *testing.T) {
+	serve := func(t *testing.T, status int, body string) Config {
+		t.Helper()
+		server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			if _, err := io.Copy(io.Discard, r.Body); err != nil {
+				t.Errorf("draining the request body failed: %v", err)
+			}
+			w.WriteHeader(status)
+			if body != "" {
+				if _, err := io.WriteString(w, body); err != nil {
+					t.Errorf("writing the test response failed: %v", err)
+				}
+			}
+		}))
+		t.Cleanup(server.Close)
+
+		host, port, err := net.SplitHostPort(strings.TrimPrefix(server.URL, "http://"))
+		require.NoError(t, err)
+		return Config{InterlinkURL: "http://" + host, InterlinkPort: port}
+	}
+
+	pod := &v1.Pod{ObjectMeta: metav1.ObjectMeta{Name: testPodName, Namespace: testNamespace, UID: "uid"}}
+
+	t.Run("create rejects an empty 204", func(t *testing.T) {
+		_, err := createRequest(context.Background(), serve(t, http.StatusNoContent, ""), types.PodCreateRequests{Pod: *pod}, "")
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "empty body")
+	})
+
+	t.Run("create accepts a 201 with a payload", func(t *testing.T) {
+		got, err := createRequest(context.Background(), serve(t, http.StatusCreated, `{"PodUID":"uid"}`), types.PodCreateRequests{Pod: *pod}, "")
+		require.NoError(t, err)
+		assert.JSONEq(t, `{"PodUID":"uid"}`, string(got))
+	})
+
+	t.Run("status rejects an empty 200", func(t *testing.T) {
+		_, err := statusRequest(context.Background(), serve(t, http.StatusOK, ""), []*v1.Pod{pod}, "")
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "empty body")
+	})
 }

@@ -14,7 +14,6 @@ import (
 
 	types "github.com/interlink-hq/interlink/pkg/interlink"
 
-	"go.opentelemetry.io/otel"
 	"go.opentelemetry.io/otel/attribute"
 	trace "go.opentelemetry.io/otel/trace"
 )
@@ -32,29 +31,69 @@ import (
 //
 // HTTP Status Codes:
 //   - 200: Status query completed successfully
+//   - 2xx: Any other successful code answered by the sidecar plugin is forwarded as is
+//   - 400: Malformed request body (not a JSON array of pods, or a null element in it)
 //   - 500: Internal server error (sidecar communication failures, JSON marshalling errors)
 func (h *InterLinkHandler) StatusHandler(w http.ResponseWriter, r *http.Request) {
 	start := time.Now().UnixMicro()
-	tracer := otel.Tracer("interlink-API")
-	_, span := tracer.Start(h.Ctx, "StatusAPI", trace.WithAttributes(
-		attribute.Int64("start.timestamp", start),
-	))
+	ctx, span, sessionContext := h.startAPITrace(r, "StatusAPI", "/status", start)
 	defer span.End()
 	defer types.SetDurationSpan(start, span)
-	defer types.SetInfoFromHeaders(span, &r.Header)
+	// X-Forwarded-Email and X-Forwarded-User identify a person, so they follow
+	// the same opt-in rule as the other client details.
+	if h.Config.Tracing.Detailed {
+		defer types.SetInfoFromHeaders(span, &r.Header)
+	}
 	statusCode := http.StatusOK
 	var pods []*v1.Pod
 	log.G(h.Ctx).Info("InterLink: received GetStatus call")
 
 	bodyBytes, err := io.ReadAll(r.Body)
 	if err != nil {
-		log.G(h.Ctx).Fatal(err)
+		statusCode = http.StatusInternalServerError
+		w.WriteHeader(statusCode)
+		log.G(h.Ctx).Error(err)
+		types.SetSpanError(span, statusCode, err)
+		return
 	}
+	setRequestBodySize(span, bodyBytes)
 
 	err = json.Unmarshal(bodyBytes, &pods)
 	if err != nil {
 		errWithContext := fmt.Errorf("error doing fisrt Unmarshal() in StatusHandler() error detail: %s error: %w", fmt.Sprintf("%#v", err), err)
 		log.G(h.Ctx).Error(errWithContext)
+		statusCode = http.StatusBadRequest
+		w.WriteHeader(statusCode)
+		types.SetSpanError(span, statusCode, errWithContext)
+		return
+	}
+
+	// A top-level null unmarshals into a nil slice without error. The handler
+	// reads an empty list as "no filter" and answers with every cached status,
+	// so a body of "null" would quietly dump the whole cache instead of being
+	// rejected. An explicit empty array keeps meaning "all pods", as before.
+	if pods == nil {
+		errWithContext := fmt.Errorf("request body must contain an array of pods")
+		log.G(h.Ctx).Error(errWithContext)
+		statusCode = http.StatusBadRequest
+		w.WriteHeader(statusCode)
+		types.SetSpanError(span, statusCode, errWithContext)
+		return
+	}
+
+	// A JSON null inside the array unmarshals into a nil element, and every use
+	// of it below dereferences the pod. Letting it through panics the handler:
+	// net/http recovers, but the span is then exported Unset and without a
+	// return code, which is the very outcome this handler reports on.
+	for i, pod := range pods {
+		if pod == nil {
+			errWithContext := fmt.Errorf("pod at index %d of the request body is null", i)
+			log.G(h.Ctx).Error(errWithContext)
+			statusCode = http.StatusBadRequest
+			w.WriteHeader(statusCode)
+			types.SetSpanError(span, statusCode, errWithContext)
+			return
+		}
 	}
 
 	span.SetAttributes(
@@ -62,46 +101,70 @@ func (h *InterLinkHandler) StatusHandler(w http.ResponseWriter, r *http.Request)
 	)
 
 	var podsToBeChecked []*v1.Pod
+	// Set once the plugin has answered: from then on the client has already been
+	// sent that code, so a later failure must not replace it on the span.
+	pluginAnswered := false
 	var returnedStatuses []types.PodStatus // returned from the query to the sidecar
 	var returnPods []types.PodStatus       // returned to the vk
+	cacheHits := 0
 
 	PodStatuses.mu.Lock()
 	for _, pod := range pods {
 		cached := checkIfCached(string(pod.UID))
+		if cached {
+			cacheHits++
+		}
 		if pod.Status.Phase == v1.PodRunning || pod.Status.Phase == v1.PodPending || !cached {
 			podsToBeChecked = append(podsToBeChecked, pod)
 		}
-		span.AddEvent("Pod "+pod.Name+" is cached", trace.WithAttributes(
-			attribute.String("pod.name", pod.Name),
-			attribute.String("pod.namespace", pod.Namespace),
-			attribute.String("pod.uid", string(pod.UID)),
-			attribute.String("pod.phase", string(pod.Status.Phase)),
-		))
+		if h.Config.Tracing.Detailed {
+			span.AddEvent("Evaluated pod status cache", trace.WithAttributes(
+				attribute.String("pod.name", pod.Name),
+				attribute.String("pod.namespace", pod.Namespace),
+				attribute.String("pod.uid", string(pod.UID)),
+				attribute.String("pod.phase", string(pod.Status.Phase)),
+				attribute.Bool("interlink.status.cache.hit", cached),
+			))
+		}
 	}
 	PodStatuses.mu.Unlock()
+	span.SetAttributes(
+		attribute.Int("interlink.status.cache.hit_count", cacheHits),
+		attribute.Int("interlink.status.cache.miss_count", len(pods)-cacheHits),
+		attribute.Int("interlink.status.plugin_query.count", len(podsToBeChecked)),
+	)
 
 	if len(podsToBeChecked) > 0 {
 
 		bodyBytes, err = json.Marshal(podsToBeChecked)
 		if err != nil {
-			log.G(h.Ctx).Fatal(err)
+			statusCode = http.StatusInternalServerError
+			w.WriteHeader(statusCode)
+			log.G(h.Ctx).Error(err)
+			types.SetSpanError(span, statusCode, err)
+			return
 		}
 
 		reader := bytes.NewReader(bodyBytes)
-		req, err := http.NewRequest(http.MethodGet, h.SidecarEndpoint+"/status", reader)
+		req, err := http.NewRequestWithContext(ctx, http.MethodGet, h.SidecarEndpoint+"/status", reader)
 		if err != nil {
-			log.G(h.Ctx).Fatal(err)
+			statusCode = http.StatusInternalServerError
+			w.WriteHeader(statusCode)
+			log.G(h.Ctx).Error(err)
+			types.SetSpanError(span, statusCode, err)
+			return
 		}
 
 		log.G(h.Ctx).Info("InterLink: forwarding GetStatus call to sidecar")
 		req.Header.Set("Content-Type", "application/json")
 
-		sessionContext := GetSessionContext(r)
-		bodyBytes, err = ReqWithError(h.Ctx, req, w, start, span, false, true, sessionContext, h.ClientHTTP)
+		bodyBytes, err = ReqWithError(ctx, req, w, start, span, false, true, sessionContext, h.ClientHTTP)
 		if err != nil {
+			// ReqWithError has already marked the span as failed.
 			log.L.Error(err)
 			return
 		}
+		pluginAnswered = true
 
 		err = json.Unmarshal(bodyBytes, &returnedStatuses)
 		if err != nil {
@@ -109,12 +172,11 @@ func (h *InterLinkHandler) StatusHandler(w http.ResponseWriter, r *http.Request)
 			w.WriteHeader(statusCode)
 			errWithContext := fmt.Errorf("error doing Unmarshal() in StatusHandler() of req %s error detail: %s error: %w", fmt.Sprintf("%#v", req), fmt.Sprintf("%#v", err), err)
 			log.G(h.Ctx).Error(errWithContext)
+			types.SetSpanError(span, failureSpanCode(statusCode, pluginAnswered), errWithContext)
 			return
 		}
 
 		updateStatuses(returnedStatuses)
-		types.SetDurationSpan(start, span, types.WithHTTPReturnCode(statusCode))
-
 	}
 
 	if len(pods) > 0 {
@@ -141,12 +203,26 @@ func (h *InterLinkHandler) StatusHandler(w http.ResponseWriter, r *http.Request)
 		statusCode = http.StatusInternalServerError
 		w.WriteHeader(statusCode)
 		log.G(h.Ctx).Error(err)
+		types.SetSpanError(span, failureSpanCode(statusCode, pluginAnswered), err)
 		return
 	}
+	span.SetAttributes(
+		attribute.Int("interlink.status.returned.count", len(returnPods)),
+		attribute.Int("http.response.body.size", len(returnValue)),
+	)
 
 	w.WriteHeader(statusCode)
 	_, err = w.Write(returnValue)
 	if err != nil {
-		log.G(h.Ctx).Error(errors.New("failed to write to http buffer"))
+		errWrite := errors.New("failed to write to http buffer")
+		log.G(h.Ctx).Error(errWrite)
+		types.SetSpanError(span, failureSpanCode(statusCode, pluginAnswered), errWrite)
+		return
 	}
+
+	// Recorded here rather than inside the "pods to be checked" branch above, so
+	// that a request served entirely from cache also carries its return code.
+	// Once the plugin has answered, the code it sent is the one the client got,
+	// including a 2xx other than 200, so the local default must not replace it.
+	types.SetSpanOK(span, failureSpanCode(statusCode, pluginAnswered))
 }
