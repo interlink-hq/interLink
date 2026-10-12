@@ -139,7 +139,7 @@ func isShadowSameNamespace(pod *v1.Pod) bool {
 	if pod == nil || pod.Annotations == nil {
 		return false
 	}
-	return pod.Annotations["interlink.eu/shadow-same-ns"] == "true"
+	return pod.Annotations["interlink.eu/shadow-same-ns"] == valueTrue
 }
 
 func computeShadowResourceIdentity(pod *v1.Pod) (shadowResourceIdentity, error) {

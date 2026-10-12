@@ -28,7 +28,7 @@ func sshConfig() Config {
 			SSH: SSHTunnel{
 				LoginHost: "login.hpc.example.org",
 				User:      "alice",
-				KeySecret: "hpc-ssh-key",
+				KeySecret: testSSHKeySecret,
 			},
 		},
 	}
@@ -287,7 +287,7 @@ func TestSSHShadowTemplate(t *testing.T) {
 
 	t.Run("pins host keys when a known_hosts ConfigMap is configured", func(t *testing.T) {
 		config := sshConfig()
-		config.Network.SSH.KnownHostsConfigMap = "hpc-known-hosts"
+		config.Network.SSH.KnownHostsConfigMap = testKnownHostsConfigMap
 
 		manifest, _ := renderSSHShadow(t, config, tcp)
 
@@ -309,11 +309,11 @@ func TestReplicateShadowCredentials(t *testing.T) {
 	newClient := func() *fake.Clientset {
 		return fake.NewSimpleClientset(
 			&v1.Secret{
-				ObjectMeta: metav1.ObjectMeta{Name: "hpc-ssh-key", Namespace: source},
+				ObjectMeta: metav1.ObjectMeta{Name: testSSHKeySecret, Namespace: source},
 				Data:       map[string][]byte{DefaultSSHKeySecretKey: []byte("PRIVATE KEY")},
 			},
 			&v1.ConfigMap{
-				ObjectMeta: metav1.ObjectMeta{Name: "hpc-known-hosts", Namespace: source},
+				ObjectMeta: metav1.ObjectMeta{Name: testKnownHostsConfigMap, Namespace: source},
 				Data:       map[string]string{"known_hosts": "login.hpc.example.org ssh-ed25519 AAAA"},
 			},
 		)
@@ -321,17 +321,17 @@ func TestReplicateShadowCredentials(t *testing.T) {
 
 	t.Run("copies the credential into the shadow namespace", func(t *testing.T) {
 		config := sshConfig()
-		config.Network.SSH.KnownHostsConfigMap = "hpc-known-hosts"
+		config.Network.SSH.KnownHostsConfigMap = testKnownHostsConfigMap
 		client := newClient()
 		p := &Provider{clientSet: client, config: normalized(t, config)}
 
 		assert.NoError(t, p.replicateShadowCredentials(t.Context(), target))
 
-		secret, err := client.CoreV1().Secrets(target.Namespace).Get(t.Context(), "hpc-ssh-key", metav1.GetOptions{})
+		secret, err := client.CoreV1().Secrets(target.Namespace).Get(t.Context(), testSSHKeySecret, metav1.GetOptions{})
 		assert.NoError(t, err)
 		assert.Equal(t, []byte("PRIVATE KEY"), secret.Data[DefaultSSHKeySecretKey])
 
-		cm, err := client.CoreV1().ConfigMaps(target.Namespace).Get(t.Context(), "hpc-known-hosts", metav1.GetOptions{})
+		cm, err := client.CoreV1().ConfigMaps(target.Namespace).Get(t.Context(), testKnownHostsConfigMap, metav1.GetOptions{})
 		assert.NoError(t, err)
 		assert.Contains(t, cm.Data["known_hosts"], "ssh-ed25519")
 	})
@@ -345,7 +345,7 @@ func TestReplicateShadowCredentials(t *testing.T) {
 
 		assert.NoError(t, p.replicateShadowCredentials(t.Context(), target))
 
-		_, err := client.CoreV1().Secrets(target.Namespace).Get(t.Context(), "hpc-ssh-key", metav1.GetOptions{})
+		_, err := client.CoreV1().Secrets(target.Namespace).Get(t.Context(), testSSHKeySecret, metav1.GetOptions{})
 		assert.Error(t, err, "the operator opted out; nothing should be copied")
 	})
 
@@ -355,7 +355,7 @@ func TestReplicateShadowCredentials(t *testing.T) {
 		err := p.replicateShadowCredentials(t.Context(), target)
 
 		assert.Error(t, err)
-		assert.Contains(t, err.Error(), "hpc-ssh-key")
+		assert.Contains(t, err.Error(), testSSHKeySecret)
 	})
 
 	t.Run("is a no-op when the shadow already lives in the source namespace", func(t *testing.T) {
@@ -384,22 +384,22 @@ func TestReplicateCredentialsRefusesToClobber(t *testing.T) {
 
 	config := normalized(t, sshConfig())
 	credential := &v1.Secret{
-		ObjectMeta: metav1.ObjectMeta{Name: "hpc-ssh-key", Namespace: source},
+		ObjectMeta: metav1.ObjectMeta{Name: testSSHKeySecret, Namespace: source},
 		Data:       map[string][]byte{DefaultSSHKeySecretKey: []byte("hpc-private-key")},
 	}
 
 	t.Run("a secret the user already owns is left alone", func(t *testing.T) {
 		theirs := &v1.Secret{
-			ObjectMeta: metav1.ObjectMeta{Name: "hpc-ssh-key", Namespace: target},
+			ObjectMeta: metav1.ObjectMeta{Name: testSSHKeySecret, Namespace: target},
 			Data:       map[string][]byte{"theirs": []byte("do not lose me")},
 		}
 		client := fake.NewSimpleClientset(credential, theirs)
 		p := &Provider{clientSet: client, config: config}
 
-		err := p.replicateShadowCredentials(t.Context(), shadowResourceIdentity{Name: "shadow-nb", Namespace: target})
+		err := p.replicateShadowCredentials(t.Context(), shadowResourceIdentity{Name: testShadowName, Namespace: target})
 
 		assert.ErrorContains(t, err, "refusing to overwrite")
-		kept, getErr := client.CoreV1().Secrets(target).Get(t.Context(), "hpc-ssh-key", metav1.GetOptions{})
+		kept, getErr := client.CoreV1().Secrets(target).Get(t.Context(), testSSHKeySecret, metav1.GetOptions{})
 		assert.NoError(t, getErr)
 		assert.Equal(t, []byte("do not lose me"), kept.Data["theirs"])
 	})
@@ -408,16 +408,16 @@ func TestReplicateCredentialsRefusesToClobber(t *testing.T) {
 	// content matches, so upgrading must not start failing every offloaded pod.
 	t.Run("an unmarked copy with identical content is adopted", func(t *testing.T) {
 		unmarked := &v1.Secret{
-			ObjectMeta: metav1.ObjectMeta{Name: "hpc-ssh-key", Namespace: target},
+			ObjectMeta: metav1.ObjectMeta{Name: testSSHKeySecret, Namespace: target},
 			Data:       map[string][]byte{DefaultSSHKeySecretKey: []byte("hpc-private-key")},
 		}
 		client := fake.NewSimpleClientset(credential, unmarked)
 		p := &Provider{clientSet: client, config: config}
 
-		err := p.replicateShadowCredentials(t.Context(), shadowResourceIdentity{Name: "shadow-nb", Namespace: target})
+		err := p.replicateShadowCredentials(t.Context(), shadowResourceIdentity{Name: testShadowName, Namespace: target})
 
 		assert.NoError(t, err, "an identical copy loses nothing by being rewritten")
-		adopted, getErr := client.CoreV1().Secrets(target).Get(t.Context(), "hpc-ssh-key", metav1.GetOptions{})
+		adopted, getErr := client.CoreV1().Secrets(target).Get(t.Context(), testSSHKeySecret, metav1.GetOptions{})
 		assert.NoError(t, getErr)
 		assert.Equal(t, source, adopted.Annotations[shadowReplicatedFromAnnotation])
 	})
@@ -425,10 +425,10 @@ func TestReplicateCredentialsRefusesToClobber(t *testing.T) {
 	t.Run("a copy interLink made earlier is refreshed", func(t *testing.T) {
 		client := fake.NewSimpleClientset(credential)
 		p := &Provider{clientSet: client, config: config}
-		identity := shadowResourceIdentity{Name: "shadow-nb", Namespace: target}
+		identity := shadowResourceIdentity{Name: testShadowName, Namespace: target}
 
 		assert.NoError(t, p.replicateShadowCredentials(t.Context(), identity))
-		first, err := client.CoreV1().Secrets(target).Get(t.Context(), "hpc-ssh-key", metav1.GetOptions{})
+		first, err := client.CoreV1().Secrets(target).Get(t.Context(), testSSHKeySecret, metav1.GetOptions{})
 		assert.NoError(t, err)
 		assert.Equal(t, source, first.Annotations[shadowReplicatedFromAnnotation])
 

@@ -364,6 +364,10 @@ func NewInterLinkConfig() (Config, error) {
 		return Config{}, err
 	}
 
+	// #nosec G709 -- the input is the operator's own configuration file, read
+	// from an absolute path checked above, not data received from a caller. The
+	// target is a plain struct with no custom unmarshaller, so there is nothing
+	// for a payload to reach.
 	err = yaml.Unmarshal(yfile, &interLinkNewConfig)
 	if err != nil {
 		return Config{}, err
