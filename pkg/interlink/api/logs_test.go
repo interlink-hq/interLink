@@ -18,6 +18,15 @@ import (
 	types "github.com/interlink-hq/interlink/pkg/interlink"
 )
 
+const (
+	testDefaultNamespace        = "default"
+	testPodUID                  = "12345678-1234-1234-1234-123456789012"
+	testLogContainerName        = "my-container"
+	testErrInvalidNamespace     = "invalid namespace"
+	testErrInvalidPodUID        = "invalid pod UID"
+	testErrInvalidContainerName = "invalid container name"
+)
+
 func setupLogsTestTracer() (*trace.TracerProvider, func()) {
 	exporter := tracetest.NewInMemoryExporter()
 	tp := trace.NewTracerProvider(
@@ -42,9 +51,9 @@ func TestValidateLogRequest(t *testing.T) {
 		{
 			name: "valid request",
 			req: types.LogStruct{
-				Namespace:     "default",
-				PodUID:        "12345678-1234-1234-1234-123456789012",
-				ContainerName: "my-container",
+				Namespace:     testDefaultNamespace,
+				PodUID:        testPodUID,
+				ContainerName: testLogContainerName,
 			},
 			wantErr: false,
 		},
@@ -60,7 +69,7 @@ func TestValidateLogRequest(t *testing.T) {
 			name: "single character namespace",
 			req: types.LogStruct{
 				Namespace: "a",
-				PodUID:    "12345678-1234-1234-1234-123456789012",
+				PodUID:    testPodUID,
 			},
 			wantErr: false,
 		},
@@ -68,66 +77,66 @@ func TestValidateLogRequest(t *testing.T) {
 			name: "invalid namespace - contains path separator",
 			req: types.LogStruct{
 				Namespace: "default/../../etc",
-				PodUID:    "12345678-1234-1234-1234-123456789012",
+				PodUID:    testPodUID,
 			},
 			wantErr:   true,
-			errSubstr: "invalid namespace",
+			errSubstr: testErrInvalidNamespace,
 		},
 		{
 			name: "invalid namespace - contains uppercase",
 			req: types.LogStruct{
 				Namespace: "Default",
-				PodUID:    "12345678-1234-1234-1234-123456789012",
+				PodUID:    testPodUID,
 			},
 			wantErr:   true,
-			errSubstr: "invalid namespace",
+			errSubstr: testErrInvalidNamespace,
 		},
 		{
 			name: "invalid namespace - starts with hyphen",
 			req: types.LogStruct{
 				Namespace: "-default",
-				PodUID:    "12345678-1234-1234-1234-123456789012",
+				PodUID:    testPodUID,
 			},
 			wantErr:   true,
-			errSubstr: "invalid namespace",
+			errSubstr: testErrInvalidNamespace,
 		},
 		{
 			name: "invalid pod UID - not UUID format",
 			req: types.LogStruct{
-				Namespace: "default",
+				Namespace: testDefaultNamespace,
 				PodUID:    "not-a-uuid",
 			},
 			wantErr:   true,
-			errSubstr: "invalid pod UID",
+			errSubstr: testErrInvalidPodUID,
 		},
 		{
 			name: "invalid pod UID - path traversal",
 			req: types.LogStruct{
-				Namespace: "default",
+				Namespace: testDefaultNamespace,
 				PodUID:    "../../etc/passwd",
 			},
 			wantErr:   true,
-			errSubstr: "invalid pod UID",
+			errSubstr: testErrInvalidPodUID,
 		},
 		{
 			name: "invalid container name - contains path separator",
 			req: types.LogStruct{
-				Namespace:     "default",
-				PodUID:        "12345678-1234-1234-1234-123456789012",
+				Namespace:     testDefaultNamespace,
+				PodUID:        testPodUID,
 				ContainerName: "container/../../../etc/passwd",
 			},
 			wantErr:   true,
-			errSubstr: "invalid container name",
+			errSubstr: testErrInvalidContainerName,
 		},
 		{
 			name: "invalid container name - contains uppercase",
 			req: types.LogStruct{
-				Namespace:     "default",
-				PodUID:        "12345678-1234-1234-1234-123456789012",
+				Namespace:     testDefaultNamespace,
+				PodUID:        testPodUID,
 				ContainerName: "MyContainer",
 			},
 			wantErr:   true,
-			errSubstr: "invalid container name",
+			errSubstr: testErrInvalidContainerName,
 		},
 	}
 
@@ -172,9 +181,9 @@ func TestGetLogsHandler_Validation(t *testing.T) {
 		{
 			name: "valid request forwarded to sidecar",
 			req: types.LogStruct{
-				Namespace:     "default",
-				PodUID:        "12345678-1234-1234-1234-123456789012",
-				ContainerName: "my-container",
+				Namespace:     testDefaultNamespace,
+				PodUID:        testPodUID,
+				ContainerName: testLogContainerName,
 				PodName:       "my-pod",
 			},
 			expectedStatus: http.StatusOK,
@@ -183,37 +192,37 @@ func TestGetLogsHandler_Validation(t *testing.T) {
 			name: "invalid namespace rejected",
 			req: types.LogStruct{
 				Namespace:     "../etc",
-				PodUID:        "12345678-1234-1234-1234-123456789012",
-				ContainerName: "my-container",
+				PodUID:        testPodUID,
+				ContainerName: testLogContainerName,
 			},
 			expectedStatus: http.StatusBadRequest,
-			expectedBody:   "invalid namespace",
+			expectedBody:   testErrInvalidNamespace,
 		},
 		{
 			name: "invalid pod UID rejected",
 			req: types.LogStruct{
-				Namespace:     "default",
+				Namespace:     testDefaultNamespace,
 				PodUID:        "../../etc/passwd",
-				ContainerName: "my-container",
+				ContainerName: testLogContainerName,
 			},
 			expectedStatus: http.StatusBadRequest,
-			expectedBody:   "invalid pod UID",
+			expectedBody:   testErrInvalidPodUID,
 		},
 		{
 			name: "invalid container name rejected",
 			req: types.LogStruct{
-				Namespace:     "default",
-				PodUID:        "12345678-1234-1234-1234-123456789012",
+				Namespace:     testDefaultNamespace,
+				PodUID:        testPodUID,
 				ContainerName: "../../../etc",
 			},
 			expectedStatus: http.StatusBadRequest,
-			expectedBody:   "invalid container name",
+			expectedBody:   testErrInvalidContainerName,
 		},
 		{
 			name: "both Tail and LimitBytes set",
 			req: types.LogStruct{
-				Namespace: "default",
-				PodUID:    "12345678-1234-1234-1234-123456789012",
+				Namespace: testDefaultNamespace,
+				PodUID:    testPodUID,
 				Opts: types.ContainerLogOpts{
 					Tail:       10,
 					LimitBytes: 1024,
@@ -225,8 +234,8 @@ func TestGetLogsHandler_Validation(t *testing.T) {
 		{
 			name: "both SinceSeconds and SinceTime set",
 			req: types.LogStruct{
-				Namespace: "default",
-				PodUID:    "12345678-1234-1234-1234-123456789012",
+				Namespace: testDefaultNamespace,
+				PodUID:    testPodUID,
 				Opts: types.ContainerLogOpts{
 					SinceSeconds: 60,
 					SinceTime:    time.Now(),
@@ -279,9 +288,9 @@ func TestGetLogsHandler_InvalidSidecarEndpoint(t *testing.T) {
 	defer cleanup()
 
 	req := types.LogStruct{
-		Namespace:     "default",
-		PodUID:        "12345678-1234-1234-1234-123456789012",
-		ContainerName: "my-container",
+		Namespace:     testDefaultNamespace,
+		PodUID:        testPodUID,
+		ContainerName: testLogContainerName,
 		PodName:       "my-pod",
 	}
 	body, err := json.Marshal(req)

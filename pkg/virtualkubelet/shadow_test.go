@@ -22,7 +22,7 @@ func podWithPort(name, namespace string, uid string) *v1.Pod {
 		ObjectMeta: metav1.ObjectMeta{Name: name, Namespace: namespace, UID: k8stypes.UID(uid)},
 		Spec: v1.PodSpec{
 			Containers: []v1.Container{{
-				Name:  "app",
+				Name:  testAppName,
 				Ports: []v1.ContainerPort{{ContainerPort: 8888}},
 			}},
 		},
@@ -46,7 +46,7 @@ func configMapPatches(client *fake.Clientset) []k8stesting.Action {
 }
 
 func TestResetShadowNodeConfigMap(t *testing.T) {
-	identity := shadowResourceIdentity{Name: "pod-default", Namespace: testNamespaceDefault}
+	identity := shadowResourceIdentity{Name: testPodDefaultName, Namespace: testNamespaceDefault}
 
 	t.Run("creates the configmap with an empty node so the shadow can mount it before the job is scheduled", func(t *testing.T) {
 		client := fake.NewSimpleClientset()
@@ -144,7 +144,7 @@ func TestPublishShadowNodeName(t *testing.T) {
 }
 
 func TestCleanupShadowResourcesRemovesNodeConfigMap(t *testing.T) {
-	const name = "pod-default"
+	const name = testPodDefaultName
 	ns := testNamespaceDefault
 
 	client := fake.NewSimpleClientset(&v1.ConfigMap{
