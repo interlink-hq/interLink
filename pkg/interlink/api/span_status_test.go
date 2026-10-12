@@ -505,3 +505,39 @@ func TestLateFailureKeepsTheCodeTheClientReceived(t *testing.T) {
 	assert.Equal(t, int64(http.StatusOK), code,
 		"the span must report the code the client received, not the 500 that never reached it")
 }
+
+// The container name is a workload identifier: the monitoring guide lists
+// container names as detailed-only, so GetLogsAPI must not carry it by default.
+func TestLogsContainerNameIsNotTracedUnlessDetailed(t *testing.T) {
+	logRequest := func() *http.Request {
+		return httptest.NewRequest(http.MethodGet, "/getLogs", mustJSON(t, types.LogStruct{
+			Namespace:     testDefaultNamespace,
+			PodUID:        testPodUID,
+			ContainerName: testLogContainerName,
+		}))
+	}
+
+	t.Run("off by default", func(t *testing.T) {
+		exporter := newSpanRecorder(t)
+		h := newSidecarHandler(t, http.StatusOK)
+
+		h.GetLogsHandler(httptest.NewRecorder(), logRequest())
+
+		span := exportedSpan(t, exporter, "GetLogsAPI")
+		_, ok := spanAttrString(span, "k8s.container.name")
+		assert.False(t, ok, "the container name must not be on the span")
+	})
+
+	t.Run("recorded when detailed", func(t *testing.T) {
+		exporter := newSpanRecorder(t)
+		h := newSidecarHandler(t, http.StatusOK)
+		h.Config.Tracing.Detailed = true
+
+		h.GetLogsHandler(httptest.NewRecorder(), logRequest())
+
+		span := exportedSpan(t, exporter, "GetLogsAPI")
+		name, ok := spanAttrString(span, "k8s.container.name")
+		require.True(t, ok)
+		assert.Equal(t, testLogContainerName, name)
+	})
+}

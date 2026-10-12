@@ -26,7 +26,9 @@ import (
 //
 // HTTP Status Codes:
 //   - 200: Pod deletion request processed successfully
-//   - 500: Internal server error (sidecar communication failures, JSON unmarshalling errors)
+//   - 2xx: Any other successful code answered by the sidecar plugin is forwarded as is
+//   - 400: Malformed request body (not a JSON pod, or a null one)
+//   - 500: Internal server error (sidecar communication failures, request build errors)
 func (h *InterLinkHandler) DeleteHandler(w http.ResponseWriter, r *http.Request) {
 	start := time.Now().UnixMicro()
 	ctx, span, sessionContext := h.startAPITrace(r, "DeleteAPI", "/delete", start)

@@ -358,6 +358,14 @@ func TestTLSConfig_Validation(t *testing.T) {
 // stop the server from starting: tracing is turned off and a warning is logged.
 func TestTracingEnvOverride(t *testing.T) {
 	t.Run("unset keeps the configured value", func(t *testing.T) {
+		// The variable may legitimately be set in the environment running the
+		// tests, and t.Setenv cannot unset: remove it and put it back afterwards,
+		// otherwise this subtest asserts the opposite of what it means to.
+		if previous, ok := os.LookupEnv("ENABLE_TRACING"); ok {
+			t.Cleanup(func() { assert.NoError(t, os.Setenv("ENABLE_TRACING", previous)) })
+		}
+		require.NoError(t, os.Unsetenv("ENABLE_TRACING"))
+
 		assert.True(t, tracingEnvOverride("ENABLE_TRACING", true))
 		assert.False(t, tracingEnvOverride("ENABLE_TRACING", false))
 	})

@@ -46,9 +46,15 @@ func (h *InterLinkHandler) UpdateCacheHandler(w http.ResponseWriter, r *http.Req
 	// limit and have the batch processor drop every span batched with it. Only
 	// the pod identity goes on the span.
 	var pod *v1.Pod
-	if err := json.Unmarshal(bodyBytes, &pod); err != nil || pod == nil {
+	if unmarshalErr := json.Unmarshal(bodyBytes, &pod); unmarshalErr != nil || pod == nil {
 		statusCode = http.StatusBadRequest
-		errBody := fmt.Errorf("request body must contain a pod: %w", err)
+		// A body of "null" unmarshals without error into a nil pod, so wrapping
+		// unmarshalErr here would format as %!w(<nil>) and that text would become
+		// the span's failure description.
+		errBody := errors.New("request body must contain a pod")
+		if unmarshalErr != nil {
+			errBody = fmt.Errorf("request body must contain a pod: %w", unmarshalErr)
+		}
 		w.WriteHeader(statusCode)
 		log.G(h.Ctx).Error(errBody)
 		types.SetSpanError(span, statusCode, errBody)

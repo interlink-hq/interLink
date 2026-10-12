@@ -31,6 +31,8 @@ import (
 //
 // HTTP Status Codes:
 //   - 200: Status query completed successfully
+//   - 2xx: Any other successful code answered by the sidecar plugin is forwarded as is
+//   - 400: Malformed request body (not a JSON array of pods, or a null element in it)
 //   - 500: Internal server error (sidecar communication failures, JSON marshalling errors)
 func (h *InterLinkHandler) StatusHandler(w http.ResponseWriter, r *http.Request) {
 	start := time.Now().UnixMicro()
@@ -201,11 +203,13 @@ func (h *InterLinkHandler) StatusHandler(w http.ResponseWriter, r *http.Request)
 	if err != nil {
 		errWrite := errors.New("failed to write to http buffer")
 		log.G(h.Ctx).Error(errWrite)
-		types.SetSpanError(span, statusCode, errWrite)
+		types.SetSpanError(span, failureSpanCode(statusCode, pluginAnswered), errWrite)
 		return
 	}
 
 	// Recorded here rather than inside the "pods to be checked" branch above, so
 	// that a request served entirely from cache also carries its return code.
-	types.SetSpanOK(span, statusCode)
+	// Once the plugin has answered, the code it sent is the one the client got,
+	// including a 2xx other than 200, so the local default must not replace it.
+	types.SetSpanOK(span, failureSpanCode(statusCode, pluginAnswered))
 }

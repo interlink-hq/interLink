@@ -101,7 +101,6 @@ func (h *InterLinkHandler) GetLogsHandler(w http.ResponseWriter, r *http.Request
 		attribute.String("k8s.pod.name", req2.PodName),
 		attribute.String("k8s.namespace.name", req2.Namespace),
 		attribute.String("k8s.pod.uid", req2.PodUID),
-		attribute.String("k8s.container.name", req2.ContainerName),
 		attribute.Int("opts.limitbytes", req2.Opts.LimitBytes),
 		attribute.Int("opts.since", req2.Opts.SinceSeconds),
 		attribute.Int("opts.tail", req2.Opts.Tail),
@@ -111,6 +110,11 @@ func (h *InterLinkHandler) GetLogsHandler(w http.ResponseWriter, r *http.Request
 	)
 	if !req2.Opts.SinceTime.IsZero() {
 		span.SetAttributes(attribute.Int64("opts.sincetime", req2.Opts.SinceTime.UnixMicro()))
+	}
+	// The container name is a workload identifier, so it follows the opt-in rule
+	// the monitoring guide states for container names.
+	if h.Config.Tracing.Detailed {
+		span.SetAttributes(attribute.String("k8s.container.name", req2.ContainerName))
 	}
 
 	log.G(h.Ctx).Info(sessionContextMessage, "InterLink: new GetLogs podUID: now ", req2.PodUID)
