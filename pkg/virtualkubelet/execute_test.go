@@ -810,3 +810,49 @@ func TestPingInterLinkReportsAnySuccessfulStatus(t *testing.T) {
 		})
 	}
 }
+
+// Accepting any 2xx must not accept a successful answer with no payload: the
+// create response carries the job identifier and RemoteExecution unmarshals it
+// immediately, so an empty body has to fail at this boundary with a message
+// that says what was missing.
+func TestCreateAndStatusRequestsRejectAnEmptySuccessfulBody(t *testing.T) {
+	serve := func(t *testing.T, status int, body string) Config {
+		t.Helper()
+		server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			if _, err := io.Copy(io.Discard, r.Body); err != nil {
+				t.Errorf("draining the request body failed: %v", err)
+			}
+			w.WriteHeader(status)
+			if body != "" {
+				if _, err := io.WriteString(w, body); err != nil {
+					t.Errorf("writing the test response failed: %v", err)
+				}
+			}
+		}))
+		t.Cleanup(server.Close)
+
+		host, port, err := net.SplitHostPort(strings.TrimPrefix(server.URL, "http://"))
+		require.NoError(t, err)
+		return Config{InterlinkURL: "http://" + host, InterlinkPort: port}
+	}
+
+	pod := &v1.Pod{ObjectMeta: metav1.ObjectMeta{Name: testPodName, Namespace: testNamespace, UID: "uid"}}
+
+	t.Run("create rejects an empty 204", func(t *testing.T) {
+		_, err := createRequest(context.Background(), serve(t, http.StatusNoContent, ""), types.PodCreateRequests{Pod: *pod}, "")
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "empty body")
+	})
+
+	t.Run("create accepts a 201 with a payload", func(t *testing.T) {
+		got, err := createRequest(context.Background(), serve(t, http.StatusCreated, `{"PodUID":"uid"}`), types.PodCreateRequests{Pod: *pod}, "")
+		require.NoError(t, err)
+		assert.JSONEq(t, `{"PodUID":"uid"}`, string(got))
+	})
+
+	t.Run("status rejects an empty 200", func(t *testing.T) {
+		_, err := statusRequest(context.Background(), serve(t, http.StatusOK, ""), []*v1.Pod{pod}, "")
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "empty body")
+	})
+}

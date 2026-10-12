@@ -470,6 +470,14 @@ func createRequest(ctx context.Context, config Config, pod types.PodCreateReques
 		return nil, fmt.Errorf("error creating pod (HTTP %d): %s", resp.StatusCode, string(returnValue))
 	}
 
+	// The create response carries the job identifier, which RemoteExecution
+	// unmarshals straight away: a successful code with no body (a 204, say) is a
+	// protocol violation, and reporting it here beats failing later on an
+	// unmarshal of nothing.
+	if len(returnValue) == 0 {
+		return nil, fmt.Errorf("create answered HTTP %d with an empty body, expected the job identifier", resp.StatusCode)
+	}
+
 	return returnValue, nil
 }
 
@@ -600,6 +608,12 @@ func statusRequest(ctx context.Context, config Config, podsList []*v1.Pod, token
 	if err != nil {
 		log.L.Error(err)
 		return nil, err
+	}
+
+	// checkPodsStatus unmarshals this into a list of statuses, so an empty body
+	// on a successful code is reported here rather than as a failed unmarshal.
+	if len(returnValue) == 0 {
+		return nil, fmt.Errorf("status answered HTTP %d with an empty body, expected a list of pod statuses", resp.StatusCode)
 	}
 
 	return returnValue, nil
