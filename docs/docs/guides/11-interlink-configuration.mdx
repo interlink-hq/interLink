@@ -220,8 +220,8 @@ Virtual Kubelet down to the plugin call: the Virtual Kubelet is the one that
 starts the trace and passes it on, so with tracing enabled on the API server
 only, its spans are the roots of their own traces.
 
-A value that is not a boolean turns the switch off and logs a warning, rather
-than stopping the server.
+A value that is not a boolean, including an empty string, turns the switch off
+and logs a warning, rather than stopping the server.
 
 :::
 

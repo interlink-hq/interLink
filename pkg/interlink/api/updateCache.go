@@ -3,12 +3,12 @@ package api
 import (
 	"encoding/json"
 	"errors"
+	"fmt"
 	"io"
 	"net/http"
 	"time"
 
 	"github.com/containerd/containerd/log"
-	"go.opentelemetry.io/otel/attribute"
 	v1 "k8s.io/api/core/v1"
 
 	types "github.com/interlink-hq/interlink/pkg/interlink"
@@ -20,7 +20,11 @@ func (h *InterLinkHandler) UpdateCacheHandler(w http.ResponseWriter, r *http.Req
 	_, span, _ := h.startAPITrace(r, "UpdateCacheAPI", "/updateCache", start)
 	defer span.End()
 	defer types.SetDurationSpan(start, span)
-	defer types.SetInfoFromHeaders(span, &r.Header)
+	// X-Forwarded-Email and X-Forwarded-User identify a person, so they follow
+	// the same opt-in rule as the other client details.
+	if h.Config.Tracing.Detailed {
+		defer types.SetInfoFromHeaders(span, &r.Header)
+	}
 
 	log.G(h.Ctx).Info("InterLink: received UpdateCache call")
 
@@ -35,20 +39,27 @@ func (h *InterLinkHandler) UpdateCacheHandler(w http.ResponseWriter, r *http.Req
 	}
 	setRequestBodySize(span, bodyBytes)
 
-	// The body is never recorded verbatim. The VK posts the whole pod as JSON
-	// here, so copying it into an attribute put tens of kilobytes of
-	// client-supplied content on the span: enough for a large body to push the
-	// OTLP export past its message size limit and have the batch processor drop
-	// every span batched with it. Only the pod identity is recorded, and only
-	// when the body really is a pod.
+	// The body is the pod to forget, as JSON: the VK marshals it in
+	// updateCacheRequest. It is never recorded verbatim, because copying it into
+	// an attribute put tens of kilobytes of client-supplied content on the span,
+	// enough for a large body to push the OTLP export past its message size
+	// limit and have the batch processor drop every span batched with it. Only
+	// the pod identity goes on the span.
 	var pod *v1.Pod
-	if err := json.Unmarshal(bodyBytes, &pod); err == nil && pod != nil {
-		setPodSpanAttributes(span, pod, h.Config.Tracing.Detailed)
-	} else {
-		span.SetAttributes(attribute.Bool("interlink.update_cache.body.is_pod", false))
+	if err := json.Unmarshal(bodyBytes, &pod); err != nil || pod == nil {
+		statusCode = http.StatusBadRequest
+		errBody := fmt.Errorf("request body must contain a pod: %w", err)
+		w.WriteHeader(statusCode)
+		log.G(h.Ctx).Error(errBody)
+		types.SetSpanError(span, statusCode, errBody)
+		return
 	}
+	setPodSpanAttributes(span, pod, h.Config.Tracing.Detailed)
 
-	deleteCachedStatus(string(bodyBytes))
+	// Keyed by pod UID, like every other entry: deleteCachedStatus used to be
+	// given the whole body, which matches no key, so the invalidation this
+	// handler exists for never happened and the call still answered 200.
+	deleteCachedStatus(string(pod.UID))
 
 	w.WriteHeader(statusCode)
 	_, err = w.Write([]byte("Updated cache"))

@@ -444,8 +444,15 @@ func tracingEnvOverride(name string, current bool) bool {
 
 func optionalEnvBool(name string) (value bool, set bool, err error) {
 	raw, set := os.LookupEnv(name)
-	if !set || raw == "" {
+	if !set {
 		return false, false, nil
+	}
+
+	// A variable that is set but empty is an override, not an absent one: the
+	// previous check (`== "1"`) read it as "off", so treating it as unset here
+	// would let a Tracing.Enabled: true in the file switch tracing back on.
+	if raw == "" {
+		return false, true, fmt.Errorf("%s is set but empty", name)
 	}
 
 	value, err = strconv.ParseBool(raw)

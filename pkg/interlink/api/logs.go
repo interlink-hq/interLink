@@ -63,7 +63,11 @@ func (h *InterLinkHandler) GetLogsHandler(w http.ResponseWriter, r *http.Request
 	ctx, span, sessionContext := h.startAPITrace(r, "GetLogsAPI", "/getLogs", start)
 	defer span.End()
 	defer types.SetDurationSpan(start, span)
-	defer types.SetInfoFromHeaders(span, &r.Header)
+	// X-Forwarded-Email and X-Forwarded-User identify a person, so they follow
+	// the same opt-in rule as the other client details.
+	if h.Config.Tracing.Detailed {
+		defer types.SetInfoFromHeaders(span, &r.Header)
+	}
 
 	sessionContextMessage := GetSessionContextMessage(sessionContext)
 

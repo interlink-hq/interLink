@@ -528,7 +528,7 @@ func deleteRequest(ctx context.Context, config Config, pod *v1.Pod, token string
 	statusCode := resp.StatusCode
 	types.SetDurationSpan(startHTTPCall, spanHTTP, types.WithHTTPReturnCode(resp.StatusCode))
 
-	if statusCode != http.StatusOK {
+	if !types.IsSuccessStatus(statusCode) {
 		return nil, errors.New("Unexpected error occured while deleting Pods. Status code: " + strconv.Itoa(resp.StatusCode) + ". Check InterLink's logs for further informations")
 	}
 

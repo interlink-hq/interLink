@@ -209,6 +209,21 @@ func setCreateRequestSpanAttributes(span trace.Span, pod interlink.PodCreateRequ
 	)
 }
 
+// failureSpanCode returns the status code to record on the span for a failure
+// detected after an upstream call already answered.
+//
+// ReqWithError writes and flushes the upstream status as soon as it has it, even
+// for an intermediate call, so from that point on the client is committed to
+// that code and the synthetic 500 a later check would like to send never
+// reaches it. Returning zero keeps the code ReqWithError recorded — the one the
+// client actually observed — while SetSpanError still marks the span failed.
+func failureSpanCode(statusCode int, upstreamAnswered bool) int {
+	if upstreamAnswered {
+		return 0
+	}
+	return statusCode
+}
+
 func splitHostPort(address string) (string, int) {
 	if address == "" {
 		return "", 0
@@ -440,8 +455,9 @@ func ReqWithError(
 	otel.GetTextMapPropagator().Inject(outboundCtx, propagation.HeaderCarrier(req.Header))
 
 	if !isSafeURL(req.URL.String()) {
+		// clientStatusCode stays zero: the call never left, so the client span must
+		// not claim an upstream status. The 500 below is what this server answers.
 		statusCode := http.StatusInternalServerError
-		clientStatusCode = statusCode
 		errWithContext := fmt.Errorf("potential SSRF detected: %s", req.URL.String())
 		w.WriteHeader(statusCode)
 		interlink.SetSpanError(span, statusCode, errWithContext)
@@ -449,8 +465,8 @@ func ReqWithError(
 	}
 	resp, err := clientHTTP.Do(req) // #nosec G704
 	if err != nil {
+		// No response came back, so again the client span keeps no status code.
 		statusCode := http.StatusInternalServerError
-		clientStatusCode = statusCode
 		log.G(ctx).Errorf("%s HTTP client.Do() failed: %v", sessionContextMessage, err)
 		w.WriteHeader(statusCode)
 		errWithContext := fmt.Errorf(sessionContextMessage+

@@ -377,3 +377,11 @@ func TestTracingEnvOverride(t *testing.T) {
 		assert.False(t, tracingEnvOverride("ENABLE_TRACING", true))
 	})
 }
+
+// A variable that is set but empty is an override, not an absent one: the check
+// this replaced (`== "1"`) read it as "off", so treating it as unset would let a
+// Tracing.Enabled: true in the file switch tracing back on.
+func TestTracingEnvOverrideWithAnEmptyValue(t *testing.T) {
+	t.Setenv("ENABLE_TRACING", "")
+	assert.False(t, tracingEnvOverride("ENABLE_TRACING", true))
+}

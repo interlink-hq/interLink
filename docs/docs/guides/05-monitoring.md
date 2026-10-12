@@ -111,11 +111,17 @@ Tracing:
 
 Set `Detailed: true` to add high-cardinality diagnostics such as container and
 image names, metadata keys, referenced object names, cache decisions, and
-client information. The trace does not include HTTP bodies, Secret/ConfigMap
-contents, environment variable values, container commands, or arguments. The
-legacy `ENABLE_TRACING=1` environment variable remains supported, and
+client information. Client information includes the `X-Forwarded-Email` and
+`X-Forwarded-User` headers, which identify a person, so they are recorded only
+in detailed mode.
+
+The trace does not include HTTP bodies, Secret/ConfigMap contents, environment
+variable values, container commands, or arguments, in either mode.
+
+The legacy `ENABLE_TRACING=1` environment variable remains supported, and
 `ENABLE_DETAILED_TRACING=1` overrides the detailed setting. A value that is
-neither a boolean nor `1`/`0` turns the switch off and logs a warning.
+neither a boolean nor `1`/`0` turns the switch off and logs a warning, and so
+does a variable that is set to the empty string.
 
 This block configures the **interLink API server** only. The Virtual Kubelet is
 enabled separately, with `ENABLE_TRACING=1` on its own process, and accepts only

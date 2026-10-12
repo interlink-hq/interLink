@@ -34,7 +34,11 @@ func (h *InterLinkHandler) CreateHandler(w http.ResponseWriter, r *http.Request)
 	ctx, span, sessionContext := h.startAPITrace(r, "CreateAPI", "/create", start)
 	defer span.End()
 	defer types.SetDurationSpan(start, span)
-	defer types.SetInfoFromHeaders(span, &r.Header)
+	// X-Forwarded-Email and X-Forwarded-User identify a person, so they follow
+	// the same opt-in rule as the other client details.
+	if h.Config.Tracing.Detailed {
+		defer types.SetInfoFromHeaders(span, &r.Header)
+	}
 
 	log.G(h.Ctx).Info("InterLink: received Create call")
 
@@ -50,7 +54,10 @@ func (h *InterLinkHandler) CreateHandler(w http.ResponseWriter, r *http.Request)
 	}
 	setRequestBodySize(span, bodyBytes)
 
-	var req *http.Request           // request to forward to sidecar
+	var req *http.Request // request to forward to sidecar
+	// Set once the job-script builder has answered: its code has already been
+	// sent to the client, so a later failure must not replace it on the span.
+	upstreamAnswered := false
 	var pod types.PodCreateRequests // request for interlink
 	err = json.Unmarshal(bodyBytes, &pod)
 	if err != nil {
@@ -130,6 +137,7 @@ func (h *InterLinkHandler) CreateHandler(w http.ResponseWriter, r *http.Request)
 			log.G(h.Ctx).Errorf("JobScriptBuilder request failed: %v", err)
 			return
 		}
+		upstreamAnswered = true
 
 		log.G(h.Ctx).Debugf("Received response from JobScriptBuilder: %s", string(bodyBytesResp))
 
@@ -172,7 +180,7 @@ func (h *InterLinkHandler) CreateHandler(w http.ResponseWriter, r *http.Request)
 		statusCode = http.StatusInternalServerError
 		w.WriteHeader(statusCode)
 		log.G(h.Ctx).Error(err)
-		types.SetSpanError(span, statusCode, err)
+		types.SetSpanError(span, failureSpanCode(statusCode, upstreamAnswered), err)
 		return
 	}
 	log.G(h.Ctx).Debug(string(bodyBytes))
@@ -184,7 +192,7 @@ func (h *InterLinkHandler) CreateHandler(w http.ResponseWriter, r *http.Request)
 		statusCode = http.StatusInternalServerError
 		w.WriteHeader(statusCode)
 		log.G(h.Ctx).Error(err)
-		types.SetSpanError(span, statusCode, err)
+		types.SetSpanError(span, failureSpanCode(statusCode, upstreamAnswered), err)
 		return
 	}
 

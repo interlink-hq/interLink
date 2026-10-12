@@ -37,7 +37,11 @@ func (h *InterLinkHandler) StatusHandler(w http.ResponseWriter, r *http.Request)
 	ctx, span, sessionContext := h.startAPITrace(r, "StatusAPI", "/status", start)
 	defer span.End()
 	defer types.SetDurationSpan(start, span)
-	defer types.SetInfoFromHeaders(span, &r.Header)
+	// X-Forwarded-Email and X-Forwarded-User identify a person, so they follow
+	// the same opt-in rule as the other client details.
+	if h.Config.Tracing.Detailed {
+		defer types.SetInfoFromHeaders(span, &r.Header)
+	}
 	statusCode := http.StatusOK
 	var pods []*v1.Pod
 	log.G(h.Ctx).Info("InterLink: received GetStatus call")
@@ -82,6 +86,9 @@ func (h *InterLinkHandler) StatusHandler(w http.ResponseWriter, r *http.Request)
 	)
 
 	var podsToBeChecked []*v1.Pod
+	// Set once the plugin has answered: from then on the client has already been
+	// sent that code, so a later failure must not replace it on the span.
+	pluginAnswered := false
 	var returnedStatuses []types.PodStatus // returned from the query to the sidecar
 	var returnPods []types.PodStatus       // returned to the vk
 	cacheHits := 0
@@ -142,6 +149,7 @@ func (h *InterLinkHandler) StatusHandler(w http.ResponseWriter, r *http.Request)
 			log.L.Error(err)
 			return
 		}
+		pluginAnswered = true
 
 		err = json.Unmarshal(bodyBytes, &returnedStatuses)
 		if err != nil {
@@ -149,7 +157,7 @@ func (h *InterLinkHandler) StatusHandler(w http.ResponseWriter, r *http.Request)
 			w.WriteHeader(statusCode)
 			errWithContext := fmt.Errorf("error doing Unmarshal() in StatusHandler() of req %s error detail: %s error: %w", fmt.Sprintf("%#v", req), fmt.Sprintf("%#v", err), err)
 			log.G(h.Ctx).Error(errWithContext)
-			types.SetSpanError(span, statusCode, errWithContext)
+			types.SetSpanError(span, failureSpanCode(statusCode, pluginAnswered), errWithContext)
 			return
 		}
 
@@ -180,7 +188,7 @@ func (h *InterLinkHandler) StatusHandler(w http.ResponseWriter, r *http.Request)
 		statusCode = http.StatusInternalServerError
 		w.WriteHeader(statusCode)
 		log.G(h.Ctx).Error(err)
-		types.SetSpanError(span, statusCode, err)
+		types.SetSpanError(span, failureSpanCode(statusCode, pluginAnswered), err)
 		return
 	}
 	span.SetAttributes(

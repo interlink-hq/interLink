@@ -20,7 +20,11 @@ func (h *InterLinkHandler) Ping(w http.ResponseWriter, r *http.Request) {
 	ctx, span, sessionContext := h.startAPITrace(r, "PingAPI", "/pinglink", start)
 	defer span.End()
 	defer types.SetDurationSpan(start, span)
-	defer types.SetInfoFromHeaders(span, &r.Header)
+	// X-Forwarded-Email and X-Forwarded-User identify a person, so they follow
+	// the same opt-in rule as the other client details.
+	if h.Config.Tracing.Detailed {
+		defer types.SetInfoFromHeaders(span, &r.Header)
+	}
 
 	log.G(h.Ctx).Info("InterLink: received Ping call")
 

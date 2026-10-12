@@ -405,3 +405,103 @@ func TestErrorPluginStatusIsStillAFailure(t *testing.T) {
 	require.True(t, ok)
 	assert.Equal(t, int64(http.StatusInternalServerError), code)
 }
+
+// The VK posts the pod to forget as JSON, while the cache is keyed by pod UID.
+// Handing the whole body to deleteCachedStatus matched no key, so the
+// invalidation never happened and the call still answered 200.
+func TestUpdateCacheHandlerInvalidatesByPodUID(t *testing.T) {
+	newSpanRecorder(t)
+	h := newSidecarHandler(t, http.StatusOK)
+	pod := testPod()
+
+	PodStatuses.Statuses = map[string]types.PodStatus{
+		string(pod.UID): {PodUID: string(pod.UID), PodName: pod.Name, PodNamespace: pod.Namespace},
+	}
+
+	w := httptest.NewRecorder()
+	h.UpdateCacheHandler(w, httptest.NewRequest(http.MethodPost, "/updateCache", mustJSON(t, pod)))
+
+	require.Equal(t, http.StatusOK, w.Code)
+	assert.NotContains(t, PodStatuses.Statuses, string(pod.UID), "the cached status must be gone")
+}
+
+func TestUpdateCacheHandlerRejectsABodyThatIsNotAPod(t *testing.T) {
+	exporter := newSpanRecorder(t)
+	h := newSidecarHandler(t, http.StatusOK)
+
+	w := httptest.NewRecorder()
+	h.UpdateCacheHandler(w, httptest.NewRequest(http.MethodPost, "/updateCache", bytes.NewReader([]byte("not a pod"))))
+
+	require.Equal(t, http.StatusBadRequest, w.Code)
+
+	span := exportedSpan(t, exporter, "UpdateCacheAPI")
+	assert.Equal(t, codes.Error, span.Status.Code)
+	code, ok := spanAttrInt(span, "exit.code")
+	require.True(t, ok)
+	assert.Equal(t, int64(http.StatusBadRequest), code)
+}
+
+// X-Forwarded-Email and X-Forwarded-User identify a person: they must not reach
+// a span unless detailed tracing was asked for.
+func TestClientHeadersAreNotTracedUnlessDetailed(t *testing.T) {
+	request := func() *http.Request {
+		r := httptest.NewRequest(http.MethodDelete, "/delete", mustJSON(t, testPod()))
+		r.Header.Set("X-Forwarded-Email", "someone@example.org")
+		r.Header.Set("X-Forwarded-User", "someone")
+		return r
+	}
+
+	t.Run("off by default", func(t *testing.T) {
+		exporter := newSpanRecorder(t)
+		h := newSidecarHandler(t, http.StatusOK)
+
+		h.DeleteHandler(httptest.NewRecorder(), request())
+
+		span := exportedSpan(t, exporter, "DeleteAPI")
+		_, ok := spanAttrString(span, "X-Forwarded-Email")
+		assert.False(t, ok, "the caller email must not be on the span")
+		_, ok = spanAttrString(span, "X-Forwarded-User")
+		assert.False(t, ok, "the caller user must not be on the span")
+	})
+
+	t.Run("recorded when detailed", func(t *testing.T) {
+		exporter := newSpanRecorder(t)
+		h := newSidecarHandler(t, http.StatusOK)
+		h.Config.Tracing.Detailed = true
+
+		h.DeleteHandler(httptest.NewRecorder(), request())
+
+		span := exportedSpan(t, exporter, "DeleteAPI")
+		email, ok := spanAttrString(span, "X-Forwarded-Email")
+		require.True(t, ok)
+		assert.Equal(t, "someone@example.org", email)
+	})
+}
+
+// ReqWithError writes the upstream status to the client before the handler has
+// finished validating, so a failure found afterwards cannot change what the
+// caller received. The span must keep the code the client actually observed.
+func TestLateFailureKeepsTheCodeTheClientReceived(t *testing.T) {
+	exporter := newSpanRecorder(t)
+
+	// The plugin answers 200 with a body the handler cannot unmarshal.
+	server, _, client := newUnixTestServer(t, http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.WriteHeader(http.StatusOK)
+		writeTestResponse(t, w, `not the json a status response is made of`)
+	}))
+	t.Cleanup(server.Close)
+	h := &InterLinkHandler{Ctx: context.Background(), SidecarEndpoint: testUnixEndpoint, ClientHTTP: client}
+
+	PodStatuses.Statuses = map[string]types.PodStatus{}
+	w := httptest.NewRecorder()
+	h.StatusHandler(w, httptest.NewRequest(http.MethodGet, "/status", mustJSON(t, []*v1.Pod{testPod()})))
+
+	require.Equal(t, http.StatusOK, w.Code, "the client was committed to the plugin's status")
+
+	span := exportedSpan(t, exporter, "StatusAPI")
+	assert.Equal(t, codes.Error, span.Status.Code, "the failure must still be visible")
+	code, ok := spanAttrInt(span, "exit.code")
+	require.True(t, ok)
+	assert.Equal(t, int64(http.StatusOK), code,
+		"the span must report the code the client received, not the 500 that never reached it")
+}
