@@ -78,7 +78,7 @@ func TestCleanupOldCSRs(t *testing.T) {
 						Conditions: []certificates.CertificateSigningRequestCondition{
 							{
 								Type:   certificates.CertificateApproved,
-								Status: "True",
+								Status: testConditionTrue,
 							},
 						},
 						Certificate: []byte("fake-cert"),
@@ -105,7 +105,7 @@ func TestCleanupOldCSRs(t *testing.T) {
 						Conditions: []certificates.CertificateSigningRequestCondition{
 							{
 								Type:   certificates.CertificateDenied,
-								Status: "True",
+								Status: testConditionTrue,
 							},
 						},
 					},
@@ -173,7 +173,7 @@ func TestCleanupOldCSRs(t *testing.T) {
 						Conditions: []certificates.CertificateSigningRequestCondition{
 							{
 								Type:   certificates.CertificateApproved,
-								Status: "True",
+								Status: testConditionTrue,
 							},
 						},
 						Certificate: []byte("fake-cert"),
@@ -200,7 +200,7 @@ func TestCleanupOldCSRs(t *testing.T) {
 						Conditions: []certificates.CertificateSigningRequestCondition{
 							{
 								Type:   certificates.CertificateApproved,
-								Status: "True",
+								Status: testConditionTrue,
 							},
 						},
 						Certificate: []byte("fake-cert"),
@@ -220,7 +220,7 @@ func TestCleanupOldCSRs(t *testing.T) {
 						Conditions: []certificates.CertificateSigningRequestCondition{
 							{
 								Type:   certificates.CertificateDenied,
-								Status: "True",
+								Status: testConditionTrue,
 							},
 						},
 					},

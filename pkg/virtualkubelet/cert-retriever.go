@@ -279,7 +279,7 @@ func (m *persistentCSRManager) monitorCSR(ctx context.Context) {
 func NewCertificateRetriever(kubeClient kubernetes.Interface, signer string, nodeName string, nodeIP net.IP) (Crtretriever, error) {
 	const (
 		vkCertsPath   = "/tmp/certs"
-		vkCertsPrefix = "virtual-kubelet"
+		vkCertsPrefix = osVirtualKubelet
 	)
 
 	ctx := context.Background()
