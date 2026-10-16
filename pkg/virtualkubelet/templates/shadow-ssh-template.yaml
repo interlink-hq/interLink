@@ -1,3 +1,86 @@
+{{- /* ssh client options for the login hop, shared by every ssh the shadow runs
+against the login node. Delegation comes after ExtraOptions, so that
+GSSAPIDelegateCredentials=yes there turns it back on. */ -}}
+{{- define "sshOptions" -}}
+ssh_opts="\
+              -p {{.SSH.Port}} \
+              -o BatchMode=yes \
+              -o ServerAliveInterval=30 \
+              -o ServerAliveCountMax=3 \
+            {{- if eq .SSH.Auth "kerberos" }}
+              -o GSSAPIAuthentication=yes \
+              -o PreferredAuthentications=gssapi-with-mic \
+            {{- else }}
+              -i /interlink/ssh/{{.SSH.KeySecretKey}} \
+              -o IdentitiesOnly=yes \
+              -o PreferredAuthentications=publickey \
+            {{- end }}
+            {{- if .SSH.KnownHostsConfigMap }}
+              -o StrictHostKeyChecking=yes \
+              -o UserKnownHostsFile=/interlink/known-hosts/known_hosts \
+            {{- else }}
+              -o StrictHostKeyChecking=accept-new \
+            {{- end }}
+            {{- range .SSH.ExtraOptions }}
+              -o {{.}} \
+            {{- end }}
+            {{- if eq .SSH.Auth "kerberos" }}
+              -o GSSAPIDelegateCredentials=no \
+            {{- end }}
+              "
+{{- end -}}
+{{- /* ssh client options for a session on the compute node's own sshd. Expanded
+after $w is set; delegation is always off on this hop. */ -}}
+{{- define "nodeOptions" -}}
+node_opts="\
+                -p 22 \
+                -o BatchMode=yes \
+                -o ServerAliveInterval=30 \
+                -o ServerAliveCountMax=3 \
+              {{- if eq .SSH.Auth "kerberos" }}
+                -o GSSAPIAuthentication=yes \
+                -o GSSAPIDelegateCredentials=no \
+                -o PreferredAuthentications=gssapi-with-mic \
+              {{- else }}
+                -i /interlink/ssh/{{.SSH.KeySecretKey}} \
+                -o IdentitiesOnly=yes \
+                -o PreferredAuthentications=publickey \
+              {{- end }}
+                -o UserKnownHostsFile=$w/node_known_hosts \
+                -o StrictHostKeyChecking={{if eq .SSH.NodeHostKeys "accept-new"}}accept-new{{else}}yes{{end}} \
+                -o ProxyCommand=$w/node-proxy \
+              {{- range .SSH.ExtraOptions }}
+                -o {{.}} \
+              {{- end }}
+                "
+{{- end -}}
+{{- define "nodeHop" -}}
+# $w/node-proxy carries a session to the compute node's own sshd through the login
+            # node; $w/node_known_hosts is what that session is checked against.
+            node_hop() {
+              : > "$w/node_known_hosts"
+            {{- if .SSH.KnownHostsConfigMap }}
+              cat /interlink/known-hosts/known_hosts >> "$w/node_known_hosts"
+            {{- end }}
+            {{- if eq .SSH.NodeHostKeys "verify" }}
+              # The login node's own list of node keys, often one @cert-authority line.
+              # shellcheck disable=SC2086
+              ssh $ssh_opts "$target" 'cat /etc/ssh/ssh_known_hosts /etc/ssh/ssh_known_hosts2' \
+                >> "$w/node_known_hosts" 2>/dev/null || true
+              ssh-keygen -F "$node" -f "$w/node_known_hosts" >/dev/null 2>&1 ||
+                grep -q '^@cert-authority' "$w/node_known_hosts" ||
+                echo "no host key for $node: add its key, a host pattern or an @cert-authority line to KnownHostsConfigMap, or set NodeHostKeys: accept-new" >&2
+            {{- else }}
+              echo "WARNING: the host key of $node is not verified (NodeHostKeys: accept-new)" >&2
+            {{- end }}
+            {{- if eq .SSH.ForwardMode "exec" }}
+              printf '#!/bin/sh\nexec ssh %s %s "%s %s 22"\n' "$ssh_opts" "$target" "$connect_cmd" "'$node'" > "$w/node-proxy"
+            {{- else }}
+              printf '#!/bin/sh\nexec ssh %s -W %s:22 %s\n' "$ssh_opts" "$node" "$target" > "$w/node-proxy"
+            {{- end }}
+              chmod +x "$w/node-proxy"
+            }
+{{- end -}}
 apiVersion: apps/v1
 kind: Deployment
 metadata:
@@ -41,6 +124,18 @@ spec:
               sleep 5
             done
             echo "compute node: $node"
+            {{- if .NeedsSocketDir }}
+            told=false
+            until sd=$(tr -d '[:space:]' < /interlink/node/{{.SocketDirKey}} 2>/dev/null || true); [ -n "$sd" ]; do
+              if [ "$(date +%s)" -ge "$deadline" ]; then
+                echo "timed out waiting for a socket directory: the plugin must set SocketDirRoot" >&2
+                exit 1
+              fi
+              $told || { echo "waiting for the plugin to report a socket directory (plugins without SocketDirRoot never do)"; told=true; }
+              sleep 5
+            done
+            echo "socket directory: $sd"
+            {{- end }}
         volumeMounts:
         - name: shadow-node
           mountPath: /interlink/node
@@ -118,34 +213,102 @@ spec:
         command: ["/bin/sh", "-c"]
         args:
           - |
+            {{- if eq .SSH.ForwardTarget "node" }}
+            set -u
+            read_node() { tr -d '[:space:]' < /interlink/node/{{.NodeNameKey}} 2>/dev/null || true; }
+            read_sockdir() { tr -d '[:space:]' < /interlink/node/{{.SocketDirKey}} 2>/dev/null || true; }
+
+            target={{.SSH.User}}@{{.SSH.LoginHost}}
+            {{- if eq .SSH.ForwardMode "exec" }}
+            connect_cmd='{{.SSH.ExecConnectCommand}}'
+            {{- end }}
+            w=/tmp/interlink-forward
+            {{ template "sshOptions" . }}
+
+            {{ template "nodeHop" . }}
+
+            pids=
+
+            start_forwarders() {
+              rm -rf "$w"
+              mkdir -p "$w"
+              {{ template "nodeOptions" . }}
+              node_hop || return 1
+
+              # One -L per port, opened by the node's own sshd to 127.0.0.1 or to a
+              # socket in the job's directory, so the workload never listens on the
+              # network. ForwardMode only decides how the login node relays the
+              # session to the node (see node_hop).
+              # shellcheck disable=SC2086
+              ssh -N -o ExitOnForwardFailure=yes $node_opts \
+              {{- range .ExposedPorts }}
+              {{- if ne .Protocol "UDP" }}
+              {{- if .Socket }}
+                -L "0.0.0.0:{{.Port}}:$sd/fwd-{{.Port}}.sock" \
+              {{- else }}
+                -L "0.0.0.0:{{.Port}}:127.0.0.1:{{.Port}}" \
+              {{- end }}
+              {{- end }}
+              {{- end }}
+                "{{.SSH.User}}@$node" &
+              pids=$!
+            }
+
+            all_alive() {
+              for pid in $pids; do
+                kill -0 "$pid" 2>/dev/null || return 1
+              done
+              return 0
+            }
+
+            stop_forwarders() {
+              for pid in $pids; do
+                kill "$pid" 2>/dev/null || true
+              done
+              wait 2>/dev/null || true
+              pids=
+            }
+
+            # A requeued job comes back on a different host, and the virtual kubelet
+            # republishes the node and the socket directory into the mounted ConfigMap.
+            moved() {
+              cur=$(read_node)
+              cur_sd=$(read_sockdir)
+              [ -n "$cur" ] || return 1
+              [ "$cur" != "$node" ] || { [ -n "$cur_sd" ] && [ "$cur_sd" != "$sd" ]; }
+            }
+
+            node=$(read_node)
+            sd=$(read_sockdir)
+            [ -n "$node" ] || { echo "no compute node recorded" >&2; exit 1; }
+            {{- if .NeedsSocketDir }}
+            [ -n "$sd" ] || { echo "no socket directory reported: set SocketDirRoot in the plugin" >&2; exit 1; }
+            {{- end }}
+
+            while :; do
+              echo "forwarding{{range .ExposedPorts}}{{if ne .Protocol "UDP"}} {{.Port}}{{end}}{{end}} to $node through {{.SSH.LoginHost}} (node target, {{.SSH.ForwardMode}} mode)"
+              if start_forwarders; then
+                while all_alive && ! moved; do sleep 10; done
+              fi
+              stop_forwarders
+
+              if moved; then
+                echo "compute node or socket directory changed, rebuilding the tunnel"
+                node=$cur
+                [ -n "$cur_sd" ] && sd=$cur_sd
+                continue
+              fi
+              # A requeued job does not run on $node yet, so its sshd refuses us: retry
+              # here rather than crash-loop into minutes of back-off.
+              echo "the tunnel to $node is down; retrying in 30s" >&2
+              sleep 30
+            done
+            {{- else }}
             set -u
             read_node() { tr -d '[:space:]' < /interlink/node/{{.NodeNameKey}} 2>/dev/null || true; }
 
             target={{.SSH.User}}@{{.SSH.LoginHost}}
-            ssh_opts="\
-              -p {{.SSH.Port}} \
-              -o BatchMode=yes \
-              -o ServerAliveInterval=30 \
-              -o ServerAliveCountMax=3 \
-            {{- if eq .SSH.Auth "kerberos" }}
-              -o GSSAPIAuthentication=yes \
-              -o GSSAPIDelegateCredentials=yes \
-              -o PreferredAuthentications=gssapi-with-mic \
-            {{- else }}
-              -i /interlink/ssh/{{.SSH.KeySecretKey}} \
-              -o IdentitiesOnly=yes \
-              -o PreferredAuthentications=publickey \
-            {{- end }}
-            {{- if .SSH.KnownHostsConfigMap }}
-              -o StrictHostKeyChecking=yes \
-              -o UserKnownHostsFile=/interlink/known-hosts/known_hosts \
-            {{- else }}
-              -o StrictHostKeyChecking=accept-new \
-            {{- end }}
-            {{- range .SSH.ExtraOptions }}
-              -o {{.}} \
-            {{- end }}
-              "
+            {{ template "sshOptions" . }}
 
             pids=
 
@@ -259,6 +422,7 @@ spec:
               echo "the tunnel exited; letting Kubernetes restart the container" >&2
               exit 1
             done
+            {{- end }}
         {{- if eq .SSH.Auth "kerberos" }}
         env:
         - name: KRB5CCNAME

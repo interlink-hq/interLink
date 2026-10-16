@@ -1,10 +1,12 @@
 # Image for the SSH port-forward shadow pod (Network.ShadowMode: ssh).
 #
-# It runs `ssh -N -L ...` against an HPC login node, so it needs an ssh client and,
-# for GSSAPI sites, the Kerberos client tools to obtain and renew a ticket from a
-# keytab. socat provides the local listeners used by Network.SSH.ForwardMode "exec",
-# where the login node grants no forwarding privilege. Nothing from this repository
-# is installed: the shadow runs no interLink binary, only stock ssh.
+# It forwards the pod's ports with stock ssh, through an HPC login node and, with
+# Network.SSH.ForwardTarget "node", to the compute node's own sshd (ssh-keygen, from
+# openssh-client, checks node host keys). For GSSAPI sites it needs the Kerberos
+# client tools to obtain and renew a ticket from a keytab. socat provides the local
+# listeners of Network.SSH.ForwardMode "exec", where no sshd grants forwarding.
+# Nothing from this repository is installed: the shadow runs no interLink binary,
+# only stock ssh.
 FROM debian:bookworm-slim
 
 RUN apt-get update \
