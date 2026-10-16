@@ -90,20 +90,8 @@ func NormalizeShadowConfig(config *Config) error {
 		s.ReplicateCredentials = &replicate
 	}
 
-	r := &s.Reverse
-	r.NodeExec = strings.ToLower(strings.TrimSpace(r.NodeExec))
-	switch r.NodeExec {
-	case "":
-		r.NodeExec = SSHReverseNodeExecSSH
-	case SSHReverseNodeExecSSH, SSHReverseNodeExecSrun:
-	default:
-		return fmt.Errorf("unknown Network.SSH.Reverse.NodeExec %q: expected %q or %q", r.NodeExec, SSHReverseNodeExecSSH, SSHReverseNodeExecSrun)
-	}
-	if r.SshdPath == "" {
-		r.SshdPath = DefaultSSHReverseSshdPath
-	}
-	if r.PythonPath == "" {
-		r.PythonPath = DefaultSSHReversePythonPath
+	if err := normalizeReverseConfig(s); err != nil {
+		return err
 	}
 
 	s.ForwardMode = strings.ToLower(strings.TrimSpace(s.ForwardMode))
@@ -176,10 +164,44 @@ func NormalizeShadowConfig(config *Config) error {
 	return nil
 }
 
+// normalizeReverseConfig defaults and validates Network.SSH.Reverse.
+func normalizeReverseConfig(s *SSHTunnel) error {
+	r := &s.Reverse
+	r.NodeExec = strings.ToLower(strings.TrimSpace(r.NodeExec))
+	switch r.NodeExec {
+	case "":
+		r.NodeExec = SSHReverseNodeExecSSH
+	case SSHReverseNodeExecSSH, SSHReverseNodeExecSrun:
+	default:
+		return fmt.Errorf("unknown Network.SSH.Reverse.NodeExec %q: expected %q or %q", r.NodeExec, SSHReverseNodeExecSSH, SSHReverseNodeExecSrun)
+	}
+	if r.NodeExec == SSHReverseNodeExecSrun && strings.TrimSpace(s.ExecConnectCommand) == "" {
+		s.ExecConnectCommand = DefaultSSHExecConnectCommand
+	}
+	r.Sshd = strings.ToLower(strings.TrimSpace(r.Sshd))
+	switch r.Sshd {
+	case "":
+		r.Sshd = SSHReverseSshdNode
+	case SSHReverseSshdNode, SSHReverseSshdUserspace:
+	default:
+		return fmt.Errorf("unknown Network.SSH.Reverse.Sshd %q: expected %q or %q", r.Sshd, SSHReverseSshdNode, SSHReverseSshdUserspace)
+	}
+	if r.SshdPath == "" {
+		r.SshdPath = DefaultSSHReverseSshdPath
+	}
+	if r.PythonPath == "" {
+		r.PythonPath = DefaultSSHReversePythonPath
+	}
+	return nil
+}
+
 // usesNodeHops reports whether the shadow opens ssh sessions on compute nodes,
-// which is what NodeHostKeys governs.
+// which is what NodeHostKeys governs. Only a user-space sshd started through srun
+// avoids them: its host key is one the shadow generated.
 func usesNodeHops(s SSHTunnel) bool {
-	return s.ForwardTarget == SSHForwardTargetNode
+	r := s.Reverse
+	return s.ForwardTarget == SSHForwardTargetNode ||
+		(r.Enabled && (r.Sshd == SSHReverseSshdNode || r.NodeExec == SSHReverseNodeExecSSH))
 }
 
 // sshNodeWaitSeconds converts the configured wait into whole seconds for the shell

@@ -2,6 +2,7 @@ package virtualkubelet
 
 import (
 	"context"
+	_ "embed"
 	"encoding/json"
 	"fmt"
 	"hash/fnv"
@@ -24,30 +25,37 @@ const (
 	// annReverseSocksPort asks for a SOCKS5 proxy on the given port for endpoints
 	// not listed in annReverseForwards.
 	annReverseSocksPort = "interlink.eu/reverse-socks-port"
-	// annReverseBind overrides the 127.x.y.z address the forwards listen on inside
-	// the job, normally derived from the pod UID.
+	// annReverseBind overrides the 127.x.y.z address of the owner-only relay
+	// inside the job, normally derived from the pod UID.
 	annReverseBind = "interlink.eu/reverse-bind"
-	// annReverseNodeExec overrides Network.SSH.Reverse.NodeExec for one pod.
-	annReverseNodeExec = "interlink.eu/reverse-node-exec"
-	// annReverseOwnerOnly ("true", the default, or "false") controls whether the
-	// forwards are reachable by the job's user only or by everyone on the node.
-	annReverseOwnerOnly = "interlink.eu/reverse-owner-only"
 )
 
-// How the shadow reaches the compute node from the login node to start its sshd.
+// How the shadow reaches the compute node.
 const (
-	// SSHReverseNodeExecSSH runs `ssh <node>` on the login node. Needs the site to
-	// allow ssh into a node where the user has a running job.
+	// SSHReverseNodeExecSSH opens node:22 through the login node, as
+	// Network.SSH.ForwardMode says. Needs the site to allow ssh into a node where
+	// the user has a running job.
 	SSHReverseNodeExecSSH = "ssh"
 	// SSHReverseNodeExecSrun runs `srun --jobid=<job> --overlap` on the login node,
-	// inside the job's own allocation. Needs nothing beyond Slurm.
+	// inside the job's own allocation. A last resort: lower throughput, and the
+	// login node needs the user's Kerberos ticket where there is one.
 	SSHReverseNodeExecSrun = "srun"
+)
+
+// Which sshd makes the forwards on the compute node.
+const (
+	// SSHReverseSshdNode is the compute node's own sshd.
+	SSHReverseSshdNode = "node"
+	// SSHReverseSshdUserspace is an sshd the shadow starts in the job, as the
+	// job's user, with its own config, for sites whose node sshd refuses
+	// forwarding.
+	SSHReverseSshdUserspace = "userspace"
 )
 
 const (
 	// DefaultSSHReverseSshdPath is where sshd is looked for on the compute node.
 	DefaultSSHReverseSshdPath = "/usr/sbin/sshd"
-	// DefaultSSHReversePythonPath runs the owner-only relay on the compute node.
+	// DefaultSSHReversePythonPath runs the job's owner-only relay.
 	DefaultSSHReversePythonPath = "python3"
 	// reverseTunnelWaitSeconds bounds how long the job waits for its tunnel before
 	// giving up. The tunnel follows the compute node name, which the shadow learns a
@@ -72,11 +80,12 @@ type ReverseTunnel struct {
 	Forwards []ReverseForward
 	// SocksPort is 0 when no SOCKS proxy was asked for.
 	SocksPort int32
-	// Bind is the 127.x.y.z address the forwards listen on, inside the job.
+	// Bind is the 127.x.y.z address the job's relay listens on.
 	Bind string
 	// NodeExec is SSHReverseNodeExecSSH or SSHReverseNodeExecSrun.
-	NodeExec   string
-	OwnerOnly  bool
+	NodeExec string
+	// Sshd is SSHReverseSshdNode or SSHReverseSshdUserspace.
+	Sshd       string
 	SshdPath   string
 	PythonPath string
 	// JobName is how srun mode finds the allocation: the plugin names the batch
@@ -115,8 +124,20 @@ func (p *Provider) checkReverseRequest(pod *v1.Pod) error {
 		return fmt.Errorf("pod %s/%s sets %s, but Network.EnableTunnel is false", pod.Namespace, pod.Name, annReverseForwards)
 	case !p.config.Network.SSH.Reverse.Enabled:
 		return fmt.Errorf("pod %s/%s sets %s, but this virtual kubelet does not allow it (Network.SSH.Reverse.Enabled)", pod.Namespace, pod.Name, annReverseForwards)
+	case strings.TrimSpace(pod.Annotations[annReverseSocksPort]) != "" && !p.config.Network.SSH.Reverse.AllowSocks:
+		return fmt.Errorf("pod %s/%s sets %s, but this virtual kubelet does not allow a SOCKS proxy (Network.SSH.Reverse.AllowSocks)", pod.Namespace, pod.Name, annReverseSocksPort)
 	}
 	return nil
+}
+
+// warnSocksProxy tells the pod's owner, in the VK log and as an Event on the pod,
+// that its SOCKS proxy is open to every user of the compute node.
+func (p *Provider) warnSocksProxy(ctx context.Context, pod *v1.Pod, port int32) {
+	msg := fmt.Sprintf("SOCKS proxy on 127.0.0.1:%d on the compute node: every user of that node can reach through it any endpoint the shadow reaches in the cluster", port)
+	log.G(ctx).Warningf("pod %s/%s: %s", pod.Namespace, pod.Name, msg)
+	if p.eventRecorder != nil {
+		p.eventRecorder.Event(pod, v1.EventTypeWarning, "ReverseSocksProxy", msg)
+	}
 }
 
 // parseReverseTunnel turns the pod's reverse annotations into template data,
@@ -126,7 +147,7 @@ func parseReverseTunnel(pod *v1.Pod, cfg SSHReverse) (*ReverseTunnel, error) {
 	ann := pod.Annotations
 	rt := &ReverseTunnel{
 		NodeExec:   cfg.NodeExec,
-		OwnerOnly:  true,
+		Sshd:       cfg.Sshd,
 		SshdPath:   cfg.SshdPath,
 		PythonPath: cfg.PythonPath,
 		JobName:    string(pod.UID),
@@ -166,21 +187,6 @@ func parseReverseTunnel(pod *v1.Pod, cfg SSHReverse) (*ReverseTunnel, error) {
 			return nil, fmt.Errorf("%s: %q is not a 127.x.y.z address other than 127.0.0.1", annReverseBind, v)
 		}
 		rt.Bind = ip.String()
-	}
-
-	if v := strings.ToLower(strings.TrimSpace(ann[annReverseNodeExec])); v != "" {
-		if v != SSHReverseNodeExecSSH && v != SSHReverseNodeExecSrun {
-			return nil, fmt.Errorf("%s: %q is not %q or %q", annReverseNodeExec, v, SSHReverseNodeExecSSH, SSHReverseNodeExecSrun)
-		}
-		rt.NodeExec = v
-	}
-
-	if v := strings.TrimSpace(ann[annReverseOwnerOnly]); v != "" {
-		ownerOnly, err := strconv.ParseBool(v)
-		if err != nil {
-			return nil, fmt.Errorf("%s: %q is not true or false", annReverseOwnerOnly, v)
-		}
-		rt.OwnerOnly = ownerOnly
 	}
 
 	return rt, nil
@@ -254,11 +260,23 @@ func reverseHostAliases(host, podNamespace string) []string {
 	return names
 }
 
-// reversePreExec is the shell the job runs before its workload: it maps the
-// forwarded names to the tunnel's loopback address in the container's /etc/hosts
-// and waits for the tunnel, which is up only once the shadow has learned which
-// node the job landed on. It assumes a bash batch script and a Singularity or
-// Apptainer runtime, as the mesh pre-exec does.
+// reverseRelay is the owner-only relay the job runs in front of the tunnel's unix
+// sockets.
+//
+//go:embed templates/reverse-relay.py
+var reverseRelay string
+
+// reversePreExec is the shell the job runs before its workload. It starts the
+// relay that holds the pod's loopback address for the whole job, maps the
+// forwarded names to that address in the container's /etc/hosts, and waits until
+// the shadow has bound every forward in the socket directory, which happens only
+// once the shadow has learned which node the job landed on. A SOCKS proxy is
+// waited for on 127.0.0.1 and must belong to the job's user. It assumes a bash
+// batch script and a Singularity or Apptainer runtime, as the mesh pre-exec does.
+//
+// The hosts file stays in node-local temporary space and never goes into
+// $INTERLINK_SOCKET_DIR: only the batch node runs the relay, so ranks on other
+// nodes must not resolve the names to an address nobody holds there.
 func reversePreExec(rt *ReverseTunnel, podNamespace string) string {
 	seen := map[string]bool{}
 	var hosts []string
@@ -270,24 +288,55 @@ func reversePreExec(rt *ReverseTunnel, podNamespace string) string {
 			}
 		}
 	}
-	probe := rt.SocksPort
-	if len(rt.Forwards) > 0 {
-		probe = rt.Forwards[0].ListenPort
-	}
+	timeout := fmt.Sprintf("[ $(( $(date +%%s) - il_rev_t0 )) -ge %d ] && { echo 'interLink: the reverse tunnel did not come up within %ds' >&2; exit 1; }\n",
+		reverseTunnelWaitSeconds, reverseTunnelWaitSeconds)
 
 	var b strings.Builder
 	b.WriteString("# interLink reverse tunnel: cluster endpoints reachable from this job\n")
-	if len(hosts) > 0 {
-		b.WriteString("il_rev_hosts=${TMPDIR:-/tmp}/interlink-reverse-hosts.$$\n")
+	b.WriteString("il_rev_d=${INTERLINK_SOCKET_DIR:-}\n")
+	b.WriteString("[ -n \"$il_rev_d\" ] || { echo 'interLink: the reverse tunnel needs a plugin with SocketDirRoot set' >&2; exit 1; }\n")
+	b.WriteString("il_rev_t0=$(date +%s)\n")
+	if len(rt.Forwards) > 0 {
+		fmt.Fprintf(&b, "# Node-local on purpose: only the batch node has a relay behind %s.\n", rt.Bind)
+		b.WriteString("il_rev_hosts=$(mktemp \"${TMPDIR:-/tmp}/interlink-hosts.XXXXXX\") || exit 1\n")
 		fmt.Fprintf(&b, "{ cat /etc/hosts; echo '%s %s'; } > \"$il_rev_hosts\"\n", rt.Bind, strings.Join(hosts, " "))
 		b.WriteString("export SINGULARITY_BIND=\"${SINGULARITY_BIND:+$SINGULARITY_BIND,}$il_rev_hosts:/etc/hosts\"\n")
 		b.WriteString("export APPTAINER_BIND=\"${APPTAINER_BIND:+$APPTAINER_BIND,}$il_rev_hosts:/etc/hosts\"\n")
+		b.WriteString("cat > \"$il_rev_d/rev-relay.py\" <<'EORELAY'\n")
+		b.WriteString(reverseRelay)
+		if !strings.HasSuffix(reverseRelay, "\n") {
+			b.WriteString("\n")
+		}
+		b.WriteString("EORELAY\n")
+		// -I: a module loaded by the batch script must not reach the relay through
+		// PYTHONPATH or PYTHONHOME.
+		fmt.Fprintf(&b, "%s -I \"$il_rev_d/rev-relay.py\" %s", rt.PythonPath, rt.Bind)
+		var ready []string
+		for _, f := range rt.Forwards {
+			sock := fmt.Sprintf("\"$il_rev_d/rev-%d.sock\"", f.ListenPort)
+			fmt.Fprintf(&b, " %d=%s", f.ListenPort, sock)
+			ready = append(ready, "[ -S "+sock+" ]")
+		}
+		b.WriteString(" &\n")
+		b.WriteString("il_rev_relay=$!\n")
+		fmt.Fprintf(&b, "until [ -e \"$il_rev_d/rev-relay.ready\" ] && %s; do\n", strings.Join(ready, " && "))
+		b.WriteString("  kill -0 \"$il_rev_relay\" 2>/dev/null || { echo 'interLink: the reverse relay stopped, see above' >&2; exit 1; }\n")
+		b.WriteString("  " + timeout)
+		b.WriteString("  sleep 2\n")
+		b.WriteString("done\n")
 	}
-	b.WriteString("il_rev_t0=$(date +%s)\n")
-	fmt.Fprintf(&b, "until (exec 3<>/dev/tcp/%s/%d) 2>/dev/null; do\n", rt.Bind, probe)
-	fmt.Fprintf(&b, "  if [ $(( $(date +%%s) - il_rev_t0 )) -ge %d ]; then echo 'interLink: the reverse tunnel did not come up within %ds' >&2; exit 1; fi\n", reverseTunnelWaitSeconds, reverseTunnelWaitSeconds)
-	b.WriteString("  sleep 2\n")
-	b.WriteString("done\n")
+	if rt.SocksPort != 0 {
+		// Anyone on the node may bind 127.0.0.1 first: wait for the listener to be
+		// the job user's own, and fail if it is somebody else's.
+		port := fmt.Sprintf("%04X", rt.SocksPort)
+		b.WriteString("il_rev_uid=$(id -u)\n")
+		b.WriteString(`il_rev_owner() { awk -v p=":$1" -v u="$il_rev_uid" 'NR>1 && $4=="0A" && ($2=="0100007F"p || $2=="00000000"p) {print ($8==u ? "own" : "other"); exit}' /proc/net/tcp; }` + "\n")
+		fmt.Fprintf(&b, "until [ \"$(il_rev_owner %s)\" = own ]; do\n", port)
+		fmt.Fprintf(&b, "  [ \"$(il_rev_owner %s)\" = other ] && { echo 'interLink: another user listens on the SOCKS port' >&2; exit 1; }\n", port)
+		b.WriteString("  " + timeout)
+		b.WriteString("  sleep 2\n")
+		b.WriteString("done\n")
+	}
 	b.WriteString("echo \"interLink: reverse tunnel ready after $(( $(date +%s) - il_rev_t0 ))s\"\n")
 	return b.String()
 }
