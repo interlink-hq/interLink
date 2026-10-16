@@ -62,7 +62,7 @@ func NormalizeShadowConfig(config *Config) error {
 	// Mesh needs the compute node to dial out to the cluster, which is exactly what
 	// an SSH-only site cannot do. Combining the two is tracked separately.
 	if n.FullMesh {
-		return fmt.Errorf("Network.FullMesh is not supported with ShadowMode %q: the SSH shadow only exposes the offloaded pod's ports to the cluster, it does not give the pod access back into it (see interlink-hq/interLink#548)", ShadowModeSSH)
+		return fmt.Errorf("Network.FullMesh is not supported with ShadowMode %q: the SSH shadow has no mesh; pods reach cluster endpoints with Network.SSH.Reverse (see interlink-hq/interLink#548)", ShadowModeSSH)
 	}
 
 	s := &n.SSH
@@ -88,6 +88,22 @@ func NormalizeShadowConfig(config *Config) error {
 	if s.ReplicateCredentials == nil {
 		replicate := true
 		s.ReplicateCredentials = &replicate
+	}
+
+	r := &s.Reverse
+	r.NodeExec = strings.ToLower(strings.TrimSpace(r.NodeExec))
+	switch r.NodeExec {
+	case "":
+		r.NodeExec = SSHReverseNodeExecSSH
+	case SSHReverseNodeExecSSH, SSHReverseNodeExecSrun:
+	default:
+		return fmt.Errorf("unknown Network.SSH.Reverse.NodeExec %q: expected %q or %q", r.NodeExec, SSHReverseNodeExecSSH, SSHReverseNodeExecSrun)
+	}
+	if r.SshdPath == "" {
+		r.SshdPath = DefaultSSHReverseSshdPath
+	}
+	if r.PythonPath == "" {
+		r.PythonPath = DefaultSSHReversePythonPath
 	}
 
 	s.ForwardMode = strings.ToLower(strings.TrimSpace(s.ForwardMode))
