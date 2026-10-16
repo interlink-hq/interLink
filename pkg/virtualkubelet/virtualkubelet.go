@@ -39,6 +39,7 @@ import (
 	"k8s.io/client-go/kubernetes"
 	"k8s.io/client-go/kubernetes/scheme"
 	"k8s.io/client-go/tools/clientcmd"
+	"k8s.io/client-go/tools/record"
 	stats "k8s.io/kubelet/pkg/apis/stats/v1alpha1"
 
 	types "github.com/interlink-hq/interlink/pkg/interlink"
@@ -197,6 +198,9 @@ type Provider struct {
 	pendingDeletes   map[string]*pendingDelete
 	pendingDeletesMu sync.Mutex
 	deleteLoopOnce   sync.Once
+	// eventRecorder records Events on the pods this node runs; nil until
+	// SetEventRecorder is called.
+	eventRecorder record.EventRecorder
 }
 
 // pendingDelete tracks a pod whose remote deletion has not been confirmed by the
@@ -2449,6 +2453,12 @@ func (p *Provider) GetPods(ctx context.Context) ([]*v1.Pod, error) {
 // NotifyPods is called to set a pod notifier callback function. Also starts the go routine to monitor all vk pods
 func (p *Provider) NotifyPods(_ context.Context, f func(*v1.Pod)) {
 	p.notifier = f
+}
+
+// SetEventRecorder sets where the provider records Events on pods, normally the
+// recorder the pod controller uses.
+func (p *Provider) SetEventRecorder(r record.EventRecorder) {
+	p.eventRecorder = r
 }
 
 // statusLoop preiodically monitoring the status of all the pods in p.pods
