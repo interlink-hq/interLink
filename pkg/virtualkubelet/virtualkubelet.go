@@ -141,7 +141,8 @@ type ShadowTemplateData struct {
 	// job created on the compute node.
 	SocketDirKey string
 	// NeedsSocketDir is true when the shadow cannot start without a socket
-	// directory, because at least one exposed port is a unix socket.
+	// directory, because at least one exposed port is a unix socket or the pod
+	// has a reverse tunnel.
 	NeedsSocketDir bool
 	// SSH carries the SSH port-forward settings, used by the ssh shadow template.
 	SSH SSHTunnel
@@ -1096,6 +1097,10 @@ func (p *Provider) createShadowPod(ctx context.Context, originalPod *v1.Pod) (*v
 				return nil, nil, err
 			}
 			templateData.Reverse = reverse
+			templateData.NeedsSocketDir = true
+			if reverse.SocksPort != 0 {
+				p.warnSocksProxy(ctx, originalPod, reverse.SocksPort)
+			}
 		}
 	}
 
