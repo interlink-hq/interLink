@@ -893,7 +893,7 @@ and insert these lines into its `if`, before its last condition, the
 
 ```sh
    ok "rm -f $d/rev-\*\.sock" ||
-   ok "while \[ -d $d \]; do sleep 10; done" ||
+   ok "while \[ -d $d \]; do sleep 10; echo; done" ||
    ok "squeue -h --me -t R -n [0-9a-f-]{36} -o %i" ||
    ok "srun --jobid=[0-9]+ --overlap -u -n1 --cpus-per-task=1 $NC 127\.0\.0\.1 22" ||
 ```
