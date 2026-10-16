@@ -15,6 +15,11 @@ import (
 	k8stesting "k8s.io/client-go/testing"
 )
 
+const (
+	testComputeNode = "node042.hpc.example.org"
+	testSocketDir   = "/shared/il/0123456789ab"
+)
+
 // podWithPort is an offloaded pod that exposes a port, which is what makes the VK
 // render a shadow for it.
 func podWithPort(name, namespace string, uid string) *v1.Pod {
@@ -56,13 +61,13 @@ func TestResetShadowNodeConfigMap(t *testing.T) {
 
 		cm, err := client.CoreV1().ConfigMaps(identity.Namespace).Get(t.Context(), shadowNodeConfigMapName(identity.Name), metav1.GetOptions{})
 		assert.NoError(t, err)
-		assert.Equal(t, "", cm.Data[shadowNodeNameKey])
+		assert.Equal(t, map[string]string{shadowNodeNameKey: "", shadowSocketDirKey: ""}, cm.Data)
 	})
 
-	t.Run("blanks a leftover node from a previous run", func(t *testing.T) {
+	t.Run("blanks a leftover node and socket directory from a previous run", func(t *testing.T) {
 		client := fake.NewSimpleClientset(&v1.ConfigMap{
 			ObjectMeta: metav1.ObjectMeta{Name: shadowNodeConfigMapName(identity.Name), Namespace: identity.Namespace},
-			Data:       map[string]string{shadowNodeNameKey: "stale-node.hpc.example.org"},
+			Data:       map[string]string{shadowNodeNameKey: "stale-node.hpc.example.org", shadowSocketDirKey: testSocketDir},
 		})
 		p := tunnelProvider(client)
 
@@ -72,10 +77,11 @@ func TestResetShadowNodeConfigMap(t *testing.T) {
 		assert.NoError(t, err)
 		assert.Equal(t, "", cm.Data[shadowNodeNameKey],
 			"a stale node would make the shadow tunnel to a host whose job is gone")
+		assert.Equal(t, "", cm.Data[shadowSocketDirKey])
 	})
 }
 
-func TestPublishShadowNodeName(t *testing.T) {
+func TestPublishShadowNode(t *testing.T) {
 	pod := podWithPort("nb", testNamespaceDefault, "uid-1")
 	identity, err := computeShadowResourceIdentity(pod)
 	assert.NoError(t, err)
@@ -92,18 +98,65 @@ func TestPublishShadowNodeName(t *testing.T) {
 		client := newClient()
 		p := tunnelProvider(client)
 
-		p.publishShadowNodeName(t.Context(), pod, "node042.hpc.example.org")
+		p.publishShadowNode(t.Context(), pod, testComputeNode, "")
 
 		cm, err := client.CoreV1().ConfigMaps(identity.Namespace).Get(t.Context(), cmName, metav1.GetOptions{})
 		assert.NoError(t, err)
-		assert.Equal(t, "node042.hpc.example.org", cm.Data[shadowNodeNameKey])
+		assert.Equal(t, testComputeNode, cm.Data[shadowNodeNameKey])
+	})
+
+	// The shadow must never see a new node next to the previous job's directory.
+	t.Run("writes the node and the socket directory in one patch", func(t *testing.T) {
+		client := newClient()
+		p := tunnelProvider(client)
+
+		p.publishShadowNode(t.Context(), pod, testComputeNode, testSocketDir)
+
+		assert.Len(t, configMapPatches(client), 1)
+		cm, err := client.CoreV1().ConfigMaps(identity.Namespace).Get(t.Context(), cmName, metav1.GetOptions{})
+		assert.NoError(t, err)
+		assert.Equal(t, testComputeNode, cm.Data[shadowNodeNameKey])
+		assert.Equal(t, testSocketDir, cm.Data[shadowSocketDirKey])
+	})
+
+	t.Run("the same node and directory twice write once", func(t *testing.T) {
+		client := newClient()
+		p := tunnelProvider(client)
+
+		p.publishShadowNode(t.Context(), pod, testComputeNode, testSocketDir)
+		p.publishShadowNode(t.Context(), pod, testComputeNode, testSocketDir)
+
+		assert.Len(t, configMapPatches(client), 1)
+	})
+
+	t.Run("a new socket directory on the same node is written", func(t *testing.T) {
+		client := newClient()
+		p := tunnelProvider(client)
+
+		p.publishShadowNode(t.Context(), pod, testComputeNode, "")
+		p.publishShadowNode(t.Context(), pod, testComputeNode, testSocketDir)
+
+		assert.Len(t, configMapPatches(client), 2)
+	})
+
+	t.Run("an invalid socket directory publishes the node without it", func(t *testing.T) {
+		client := newClient()
+		p := tunnelProvider(client)
+
+		p.publishShadowNode(t.Context(), pod, testComputeNode, "/shared/il/x;id")
+
+		cm, err := client.CoreV1().ConfigMaps(identity.Namespace).Get(t.Context(), cmName, metav1.GetOptions{})
+		assert.NoError(t, err)
+		assert.Equal(t, testComputeNode, cm.Data[shadowNodeNameKey],
+			"TCP forwards still work without a socket directory")
+		assert.Equal(t, "", cm.Data[shadowSocketDirKey])
 	})
 
 	t.Run("an empty node name leaves the configmap alone while the job is queued", func(t *testing.T) {
 		client := newClient()
 		p := tunnelProvider(client)
 
-		p.publishShadowNodeName(t.Context(), pod, "")
+		p.publishShadowNode(t.Context(), pod, "", "")
 
 		assert.Empty(t, configMapPatches(client), "waiting for an allocation must not write to the API")
 	})
@@ -112,10 +165,10 @@ func TestPublishShadowNodeName(t *testing.T) {
 		client := newClient()
 		p := tunnelProvider(client)
 
-		p.publishShadowNodeName(t.Context(), pod, "node042.hpc.example.org")
+		p.publishShadowNode(t.Context(), pod, testComputeNode, "")
 		before := len(configMapPatches(client))
 		for range 5 {
-			p.publishShadowNodeName(t.Context(), pod, "node042.hpc.example.org")
+			p.publishShadowNode(t.Context(), pod, testComputeNode, "")
 		}
 
 		assert.Len(t, configMapPatches(client), before,
@@ -126,7 +179,7 @@ func TestPublishShadowNodeName(t *testing.T) {
 		client := newClient()
 		p := &Provider{clientSet: client, config: Config{Network: Network{EnableTunnel: false}}}
 
-		p.publishShadowNodeName(t.Context(), pod, "node042.hpc.example.org")
+		p.publishShadowNode(t.Context(), pod, testComputeNode, "")
 
 		assert.Empty(t, configMapPatches(client))
 	})
@@ -135,9 +188,9 @@ func TestPublishShadowNodeName(t *testing.T) {
 		client := newClient()
 		p := tunnelProvider(client)
 
-		p.publishShadowNodeName(t.Context(), pod, "node042.hpc.example.org")
+		p.publishShadowNode(t.Context(), pod, testComputeNode, "")
 		p.forgetShadowNodeName(pod)
-		p.publishShadowNodeName(t.Context(), pod, "node042.hpc.example.org")
+		p.publishShadowNode(t.Context(), pod, testComputeNode, "")
 
 		assert.Len(t, configMapPatches(client), 2)
 	})
@@ -195,10 +248,48 @@ func TestIsValidComputeNodeName(t *testing.T) {
 		"a name longer than a DNS name is not one")
 }
 
-// TestPublishShadowNodeNameRefusesHostileNames makes sure a bad value never reaches
+// TestIsValidSocketDir pins what a plugin may report as a socket directory. The
+// shadow puts it in ssh arguments and in commands run on the node, and the longest
+// socket path built from it must fit in a unix socket address.
+func TestIsValidSocketDir(t *testing.T) {
+	valid := []string{
+		testSocketDir,
+		"/a",
+		"/scratch/user_1/il-sockets/0123456789ab",
+		"/" + strings.Repeat("a", maxSocketDirLen-1),
+	}
+	for _, dir := range valid {
+		assert.True(t, isValidSocketDir(dir), "expected %q to be accepted", dir)
+	}
+
+	refused := map[string]string{
+		"relative path":              "shared/il/0123456789ab",
+		"dot-dot segment":            "/shared/../etc",
+		"dot segment":                "/shared/./il",
+		"double slash":               "/shared//il",
+		"trailing slash":             "/shared/il/",
+		"space":                      "/shared/il dir",
+		"dollar":                     "/shared/$HOME",
+		"semicolon":                  "/shared/il;id",
+		"quote":                      "/shared/il'x",
+		"root alone":                 "/",
+		"empty":                      "",
+		"one byte over the limit":    "/" + strings.Repeat("a", maxSocketDirLen),
+		"leading hyphen in segment":  "/-oProxyCommand=x",
+		"newline":                    "/shared/il\nx",
+		"longest socket would break": "/" + strings.Repeat("b", 120),
+	}
+	for why, dir := range refused {
+		assert.False(t, isValidSocketDir(dir), "expected %q to be refused (%s)", dir, why)
+	}
+	assert.Len(t, "/"+strings.Repeat("a", maxSocketDirLen-1)+"/fwd-65535.sock", 107,
+		"the longest socket path must fit the 108-byte sun_path with its NUL")
+}
+
+// TestPublishShadowNodeRefusesHostileNames makes sure a bad value never reaches
 // the ConfigMap the shadow mounts, so neither forward mode can be made to run
 // something other than ssh.
-func TestPublishShadowNodeNameRefusesHostileNames(t *testing.T) {
+func TestPublishShadowNodeRefusesHostileNames(t *testing.T) {
 	pod := podWithPort("nb", testNamespaceDefault, "uid-hostile")
 	identity, err := computeShadowResourceIdentity(pod)
 	assert.NoError(t, err)
@@ -211,7 +302,7 @@ func TestPublishShadowNodeNameRefusesHostileNames(t *testing.T) {
 		})
 		p := tunnelProvider(client)
 
-		p.publishShadowNodeName(t.Context(), pod, nodeName)
+		p.publishShadowNode(t.Context(), pod, nodeName, "")
 
 		assert.Empty(t, configMapPatches(client), "must not patch for %q", nodeName)
 		cm, err := client.CoreV1().ConfigMaps(identity.Namespace).Get(t.Context(), cmName, metav1.GetOptions{})
