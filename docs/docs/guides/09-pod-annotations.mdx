@@ -344,6 +344,7 @@ spec:
 - A Service FQDN also resolves as `name.namespace.svc` and `name.namespace`, and as `name` in the pod's own namespace
 - An entry that does not parse, or a listen port below 1024, is refused when the pod is created
 - Needs `Network.SSH.Reverse.Enabled: true`; otherwise the pod is refused rather than run without its tunnel
+- Needs a plugin that gives the job a socket directory (`SocketDirRoot` in the Slurm plugin); otherwise the job fails at start
 
 **Default:** Not set (no connections back into the cluster)
 
@@ -353,6 +354,13 @@ spec:
 
 Adds a SOCKS5 proxy for endpoints not listed in `interlink.eu/reverse-forwards`.
 
+:::warning
+The proxy listens on `127.0.0.1` of the compute node, where every user of that node
+can use it to reach any endpoint the shadow reaches in the cluster. The virtual
+kubelet refuses it unless `Network.SSH.Reverse.AllowSocks` is true. A site that agreed
+to fixed endpoints and no proxy has not agreed to this: ask before turning it on.
+:::
+
 **Usage:**
 ```yaml
 metadata:
@@ -361,8 +369,10 @@ metadata:
 ```
 
 **Behavior:**
-- Any cluster address, resolved inside the cluster at connect time, for programs told to use the proxy (`ALL_PROXY=socks5h://<bind>:1080`)
-- A plain loopback listener: every user of the compute node can use it
+- Any cluster address, resolved inside the cluster at connect time, for programs told to use the proxy (`ALL_PROXY=socks5h://127.0.0.1:1080`)
+- Pod creation is refused unless the virtual kubelet sets `Network.SSH.Reverse.AllowSocks: true`; when it does, the pod gets a `ReverseSocksProxy` warning event
+- A plain listener on `127.0.0.1`, with no owner check: every user of the compute node can use it
+- Two pods on one compute node cannot use the same port; the job fails at start when another user already listens on it, and the shadow's tunnel fails when another pod of the same account does
 - Must be above 1023 and not clash with a forward's listen port
 
 **Default:** Not set (no proxy)
@@ -371,35 +381,14 @@ metadata:
 
 ### `interlink.eu/reverse-bind`
 
-The `127.x.y.z` address the forwards listen on inside the job.
+The `127.x.y.z` address of the owner-only relay: the forwards listen there, inside the job.
 
 **Behavior:**
 - Derived from the pod UID when unset, so two pods on one node never share it
 - Must be in `127.0.0.0/8` and not `127.0.0.1`
+- The job fails at start if something else already listens on that address and a forward's port
 
 **Default:** Derived from the pod UID
-
----
-
-### `interlink.eu/reverse-node-exec`
-
-How the shadow runs a command on the compute node from the login node, for this pod.
-
-**Format:** `ssh` (`ssh <node>`) or `srun` (`srun --jobid=<job> --overlap`)
-
-**Default:** `Network.SSH.Reverse.NodeExec`
-
----
-
-### `interlink.eu/reverse-owner-only`
-
-Whether the forwards can be used by the job's user only.
-
-**Behavior:**
-- `true`: each forward ends in a unix socket only that user can open, with a relay in front that checks the connecting user; needs `python3` on the compute node
-- `false`: the ports are bound directly, open to every user of the compute node
-
-**Default:** `true`
 
 ---
 
