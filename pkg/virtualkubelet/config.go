@@ -292,7 +292,8 @@ type SSHTunnel struct {
 	// ExecConnectCommand is the relay command of the "exec" mode, run on the login
 	// node. It must relay a connection on its stdin and stdout, and defaults to
 	// "nc": `<command> <compute node> <port>` with ForwardTarget "login",
-	// `<command> <compute node> 22` with "node".
+	// `<command> <compute node> 22` with "node". Reverse.NodeExec "srun" also runs
+	// `<command> 127.0.0.1 22` inside the job's allocation.
 	ExecConnectCommand string `yaml:"ExecConnectCommand,omitempty"`
 	// NodeHostKeys selects how compute node host keys are checked on every session
 	// that ends on a compute node: "verify" (default) checks them against
@@ -345,21 +346,36 @@ type SSHTunnel struct {
 }
 
 // SSHReverse configures connections opened by offloaded pods towards cluster
-// endpoints. The shadow starts a user-space sshd on the compute node, as the job's
-// user, and binds the pod's forwards there with `ssh -R`; nothing on the compute
-// node has to reach the cluster.
+// endpoints. Each forward is made by the compute node's own sshd, or by a
+// user-space sshd as a fallback, with `ssh -R` to a unix socket in the pod's socket
+// directory; a relay the job starts puts the pod's loopback address in front of
+// those sockets and accepts only the job's user. Nothing on the compute node has
+// to reach the cluster.
 type SSHReverse struct {
 	// Enabled lets pods ask for it (default false). A pod that asks while this is
 	// false is refused at creation rather than run without its tunnel.
 	Enabled bool `yaml:"Enabled,omitempty"`
-	// NodeExec is how the shadow reaches the compute node from the login node:
-	// "ssh" (default) runs `ssh <node>`, which the site must allow into a node
-	// where the user has a job; "srun" runs `srun --jobid=<job> --overlap` inside
-	// the job's own allocation. A pod may override it.
+	// Sshd selects which sshd makes the forwards on the compute node: "node"
+	// (default) is the node's own sshd, reached like ForwardTarget "node" and
+	// checked against NodeHostKeys; "userspace" is an sshd the shadow starts in the
+	// job as the job's user, for sites whose node sshd refuses forwarding.
+	Sshd string `yaml:"Sshd,omitempty"`
+	// AllowSocks lets pods ask for a SOCKS5 proxy with
+	// interlink.eu/reverse-socks-port (default false). The proxy listens on
+	// 127.0.0.1 of the compute node, where every user of that node can reach
+	// through it any endpoint the shadow reaches in the cluster.
+	AllowSocks bool `yaml:"AllowSocks,omitempty"`
+	// NodeExec is how the shadow reaches the compute node: "ssh" (default) opens
+	// node:22 through the login node as ForwardMode says, which the site must
+	// allow into a node where the user has a job; "srun" runs `srun
+	// --jobid=<job> --overlap` on the login node, inside the job's own allocation.
+	// srun is a last resort: lower throughput, and with Kerberos it delegates the
+	// ticket to the login node. Set here only, never per pod.
 	NodeExec string `yaml:"NodeExec,omitempty"`
-	// SshdPath is the sshd binary on the compute node (default "/usr/sbin/sshd")
+	// SshdPath is the sshd binary on the compute node, for Sshd "userspace" only
+	// (default "/usr/sbin/sshd")
 	SshdPath string `yaml:"SshdPath,omitempty"`
-	// PythonPath is the python3 on the compute node that runs the owner-only relay
-	// (default "python3")
+	// PythonPath is the python3 (3.6 or later) on the compute node that runs the
+	// job's owner-only relay, isolated with -I (default "python3")
 	PythonPath string `yaml:"PythonPath,omitempty"`
 }
