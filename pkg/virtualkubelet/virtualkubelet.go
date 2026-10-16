@@ -14,6 +14,7 @@ import (
 	"net"
 	"net/http"
 	"os"
+	"slices"
 	"strconv"
 	"strings"
 	"sync"
@@ -100,6 +101,7 @@ const (
 	annDisableOffloadContainers     = "interlink.eu/disable-offload-containers"      // comma-separated container names
 	annDisableOffloadInitContainers = "interlink.eu/disable-offload-init-containers" // comma-separated init container names
 	annMeshNetworkDisabled          = "interlink.eu/mesh-network"                    // set to "disabled" to opt out of mesh networking
+	annShadowSocketPorts            = "interlink.eu/shadow-socket-ports"             // comma-separated exposed TCP ports served on unix sockets
 )
 
 type ShadowTemplateData struct {
@@ -127,6 +129,12 @@ type ShadowTemplateData struct {
 	NodeConfigMap string
 	// NodeNameKey is the key inside NodeConfigMap holding the node name.
 	NodeNameKey string
+	// SocketDirKey is the key inside NodeConfigMap holding the socket directory the
+	// job created on the compute node.
+	SocketDirKey string
+	// NeedsSocketDir is true when the shadow cannot start without a socket
+	// directory, because at least one exposed port is a unix socket.
+	NeedsSocketDir bool
 	// SSH carries the SSH port-forward settings, used by the ssh shadow template.
 	SSH SSHTunnel
 	// SSHNodeWaitSeconds is SSH.NodeWaitTimeout in whole seconds, for the shell loop
@@ -138,6 +146,9 @@ type PortMapping struct {
 	Port     int32
 	Name     string
 	Protocol string
+	// Socket marks a port the workload serves on <socket dir>/fwd-<port>.sock
+	// instead of 127.0.0.1:<port> (interlink.eu/shadow-socket-ports).
+	Socket bool
 }
 
 type MeshScriptTemplateData struct {
@@ -174,8 +185,9 @@ type Provider struct {
 	clientSet            kubernetes.Interface
 	clientHTTPTransport  *http.Transport
 	podIPs               []string
-	// shadowNodeNames caches, per pod UID, the last compute node published to
-	// that pod's shadow, so the status loop only writes on change.
+	// shadowNodeNames caches, per pod UID, the last compute node and socket
+	// directory published to that pod's shadow, so the status loop only writes on
+	// change.
 	shadowNodeNames sync.Map
 	// shadowsReleased marks, per pod UID, shadows already removed because their
 	// pod ended, so the status loop removes each one once.
@@ -1013,12 +1025,14 @@ func (p *Provider) createShadowPod(ctx context.Context, originalPod *v1.Pod) (*v
 	podLabels, podAnnotations := copyPodLabelsAndAnnotations(originalPod)
 	log.G(ctx).Infof("Copied %d labels and %d annotations from original pod to shadow pod", len(podLabels), len(podAnnotations))
 
+	exposedPorts := shadowPortMappings(originalPod)
+
 	fullMeshEnabledForPod := p.config.Network.FullMesh && !isMeshNetworkingDisabled(originalPod)
 	templateData := ShadowTemplateData{
 		Name:                 identity.Name,
 		Namespace:            identity.Namespace,
 		RandomPassword:       pathPrefix,
-		ExposedPorts:         extractPortMappings(originalPod),
+		ExposedPorts:         exposedPorts,
 		WildcardDNS:          p.config.Network.WildcardDNS,
 		LocalContainers:      localContainers,
 		LocalInitContainers:  localInitContainers,
@@ -1030,6 +1044,8 @@ func (p *Provider) createShadowPod(ctx context.Context, originalPod *v1.Pod) (*v
 		FullMesh:             fullMeshEnabledForPod,
 		NodeConfigMap:        shadowNodeConfigMapName(identity.Name),
 		NodeNameKey:          shadowNodeNameKey,
+		SocketDirKey:         shadowSocketDirKey,
+		NeedsSocketDir:       hasSocketPorts(exposedPorts),
 		SSH:                  p.config.Network.SSH,
 		SSHNodeWaitSeconds:   p.sshNodeWaitSeconds(),
 	}
@@ -1702,6 +1718,92 @@ func hasExtraPortsAnnotation(pod *v1.Pod) bool {
 	return exists && strings.TrimSpace(extraPorts) != ""
 }
 
+// parseSocketPorts reads the interlink.eu/shadow-socket-ports annotation, a
+// comma-separated list of port numbers.
+func parseSocketPorts(value string) ([]int32, error) {
+	var ports []int32
+	for _, field := range strings.Split(value, ",") {
+		field = strings.TrimSpace(field)
+		n, err := strconv.ParseUint(field, 10, 32)
+		if err != nil {
+			return nil, fmt.Errorf("%q is not a port number", field)
+		}
+		if n < 1 || n > 65535 {
+			return nil, fmt.Errorf("port %d is outside 1-65535", n)
+		}
+		ports = append(ports, int32(n))
+	}
+	return ports, nil
+}
+
+// checkSocketPortsRequest refuses, at creation, a pod whose
+// interlink.eu/shadow-socket-ports annotation cannot be honoured. Forwarding such
+// a port to 127.0.0.1 instead would reach whoever listens there, which is what
+// the socket was meant to rule out.
+func (p *Provider) checkSocketPortsRequest(pod *v1.Pod) error {
+	value := strings.TrimSpace(pod.Annotations[annShadowSocketPorts])
+	if value == "" {
+		return nil
+	}
+	switch {
+	case !p.isSSHShadow():
+		return fmt.Errorf("pod %s/%s sets %s, which needs Network.ShadowMode %q", pod.Namespace, pod.Name, annShadowSocketPorts, ShadowModeSSH)
+	case !p.config.Network.EnableTunnel:
+		return fmt.Errorf("pod %s/%s sets %s, but Network.EnableTunnel is false", pod.Namespace, pod.Name, annShadowSocketPorts)
+	case p.config.Network.SSH.ForwardTarget != SSHForwardTargetNode:
+		return fmt.Errorf("pod %s/%s sets %s, which needs Network.SSH.ForwardTarget %q", pod.Namespace, pod.Name, annShadowSocketPorts, SSHForwardTargetNode)
+	}
+
+	ports, err := parseSocketPorts(value)
+	if err != nil {
+		return fmt.Errorf("pod %s/%s: invalid %s: %w", pod.Namespace, pod.Name, annShadowSocketPorts, err)
+	}
+	exposed := map[int32]bool{}
+	for _, m := range extractPortMappings(pod) {
+		if m.Protocol == DefaultProtocol {
+			exposed[m.Port] = true
+		}
+	}
+	for _, port := range ports {
+		if !exposed[port] {
+			return fmt.Errorf("pod %s/%s: %s lists port %d, which is not an exposed TCP port", pod.Namespace, pod.Name, annShadowSocketPorts, port)
+		}
+	}
+	return nil
+}
+
+// shadowPortMappings returns the ports the shadow forwards, with the ones listed
+// in interlink.eu/shadow-socket-ports marked as unix sockets.
+func shadowPortMappings(pod *v1.Pod) []PortMapping {
+	ports := extractPortMappings(pod)
+	markSocketPorts(pod, ports)
+	return ports
+}
+
+// markSocketPorts flags the exposed TCP ports the pod lists in
+// interlink.eu/shadow-socket-ports. checkSocketPortsRequest has already refused
+// the pod if the annotation is malformed.
+func markSocketPorts(pod *v1.Pod, ports []PortMapping) {
+	value := strings.TrimSpace(pod.Annotations[annShadowSocketPorts])
+	if value == "" {
+		return
+	}
+	listed, err := parseSocketPorts(value)
+	if err != nil {
+		return
+	}
+	for i := range ports {
+		if ports[i].Protocol == DefaultProtocol && slices.Contains(listed, ports[i].Port) {
+			ports[i].Socket = true
+		}
+	}
+}
+
+// hasSocketPorts reports whether any port is served on a unix socket.
+func hasSocketPorts(ports []PortMapping) bool {
+	return slices.ContainsFunc(ports, func(m PortMapping) bool { return m.Socket })
+}
+
 // shouldCreateShadow checks if shadow infrastructure should be created
 func (p *Provider) shouldCreateShadow(pod *v1.Pod) bool {
 	return p.config.Network.EnableTunnel && (hasExposedPorts(pod) || hasExtraPortsAnnotation(pod)) &&
@@ -1920,6 +2022,10 @@ func (p *Provider) setPodInitialStatus(ctx context.Context, pod *v1.Pod, podIP s
 // CreatePod accepts a Pod definition and stores it in memory in p.pods
 func (p *Provider) CreatePod(ctx context.Context, pod *v1.Pod) error {
 	TracerUpdate(&ctx, "CreatePodVK", pod)
+
+	if err := p.checkSocketPortsRequest(pod); err != nil {
+		return err
+	}
 
 	var state v1.ContainerState
 

@@ -31,6 +31,10 @@ const shadowNodeConfigMapSuffix = "-node"
 // shadowNodeNameKey is the key inside that ConfigMap holding the node name.
 const shadowNodeNameKey = "compute-node"
 
+// shadowSocketDirKey is the key inside that ConfigMap holding the directory on the
+// compute node where the pod's unix sockets live.
+const shadowSocketDirKey = "socket-dir"
+
 // maxComputeNodeNameLen is the longest DNS name, and so the longest thing a plugin
 // can legitimately report as a compute node.
 const maxComputeNodeNameLen = 253
@@ -47,6 +51,22 @@ var computeNodeNamePattern = regexp.MustCompile(`^[A-Za-z0-9]([A-Za-z0-9._:-]*[A
 // in front of ssh.
 func isValidComputeNodeName(nodeName string) bool {
 	return len(nodeName) <= maxComputeNodeNameLen && computeNodeNamePattern.MatchString(nodeName)
+}
+
+// maxSocketDirLen keeps the longest socket path the shadow builds,
+// <dir>/fwd-65535.sock, within the 107 bytes a unix socket path can hold.
+const maxSocketDirLen = 92
+
+// socketDirPattern matches an absolute path made of plain segments. The shadow
+// puts the directory in ssh arguments and in commands run on the node, so it is
+// held to the same rule as the node name: refused, never escaped. A segment
+// cannot start with a dot, which also keeps out "." and "..".
+var socketDirPattern = regexp.MustCompile(`^(/[A-Za-z0-9_][A-Za-z0-9._-]*)+$`)
+
+// isValidSocketDir reports whether a plugin-supplied socket directory is safe to
+// hand to the shadow.
+func isValidSocketDir(dir string) bool {
+	return len(dir) <= maxSocketDirLen && socketDirPattern.MatchString(dir)
 }
 
 func sanitizeDNSName(name string) string {
@@ -282,7 +302,7 @@ func (p *Provider) resetShadowNodeConfigMap(ctx context.Context, identity shadow
 			Name:      shadowNodeConfigMapName(identity.Name),
 			Namespace: identity.Namespace,
 		},
-		Data: map[string]string{shadowNodeNameKey: ""},
+		Data: map[string]string{shadowNodeNameKey: "", shadowSocketDirKey: ""},
 	}
 
 	_, err := p.clientSet.CoreV1().ConfigMaps(identity.Namespace).Create(ctx, cm, metav1.CreateOptions{})
@@ -298,16 +318,17 @@ func (p *Provider) resetShadowNodeConfigMap(ctx context.Context, identity shadow
 	return nil
 }
 
-// publishShadowNodeName records the remote compute node a pod was allocated on
-// into its shadow's node ConfigMap, so the shadow can direct its tunnel at the
-// right host. The ConfigMap is mounted rather than passed as an env var on
-// purpose: kubelet refreshes it in place, whereas changing the pod spec would
-// restart the shadow and change the pod IP already reported to Kubernetes as the
-// offloaded pod's IP.
+// publishShadowNode records the remote compute node a pod was allocated on, and
+// the socket directory its job created there, into its shadow's node ConfigMap,
+// so the shadow can direct its tunnel at the right host. The ConfigMap is mounted
+// rather than passed as an env var on purpose: kubelet refreshes it in place,
+// whereas changing the pod spec would restart the shadow and change the pod IP
+// already reported to Kubernetes as the offloaded pod's IP. Both keys go in one
+// patch, so the shadow never sees a new node with the previous job's directory.
 //
-// Repeated calls with an unchanged value are dropped, so the status loop does not
+// Repeated calls with unchanged values are dropped, so the status loop does not
 // write on every poll.
-func (p *Provider) publishShadowNodeName(ctx context.Context, pod *v1.Pod, nodeName string) {
+func (p *Provider) publishShadowNode(ctx context.Context, pod *v1.Pod, nodeName, socketDir string) {
 	if nodeName == "" || !p.hasShadow(pod) {
 		return
 	}
@@ -317,7 +338,14 @@ func (p *Provider) publishShadowNodeName(ctx context.Context, pod *v1.Pod, nodeN
 			nodeName, pod.Namespace, pod.Name)
 		return
 	}
-	if last, ok := p.shadowNodeNames.Load(string(pod.UID)); ok && last == nodeName {
+	if socketDir != "" && !isValidSocketDir(socketDir) {
+		log.G(ctx).Errorf(
+			"Refusing to publish socket directory %q for %s/%s: not an absolute path of at most %d bytes in [A-Za-z0-9._-]. Publishing the node without it.",
+			socketDir, pod.Namespace, pod.Name, maxSocketDirLen)
+		socketDir = ""
+	}
+	published := nodeName + "\x00" + socketDir
+	if last, ok := p.shadowNodeNames.Load(string(pod.UID)); ok && last == published {
 		return
 	}
 
@@ -327,7 +355,10 @@ func (p *Provider) publishShadowNodeName(ctx context.Context, pod *v1.Pod, nodeN
 		return
 	}
 
-	patch, err := json.Marshal(map[string]map[string]string{"data": {shadowNodeNameKey: nodeName}})
+	patch, err := json.Marshal(map[string]map[string]string{"data": {
+		shadowNodeNameKey:  nodeName,
+		shadowSocketDirKey: socketDir,
+	}})
 	if err != nil {
 		log.G(ctx).Warningf("Failed to marshal shadow node patch for %s/%s: %v", pod.Namespace, pod.Name, err)
 		return
@@ -342,8 +373,8 @@ func (p *Provider) publishShadowNodeName(ctx context.Context, pod *v1.Pod, nodeN
 		return
 	}
 
-	p.shadowNodeNames.Store(string(pod.UID), nodeName)
-	log.G(ctx).Infof("Published compute node %q for shadow %s/%s", nodeName, identity.Namespace, identity.Name)
+	p.shadowNodeNames.Store(string(pod.UID), published)
+	log.G(ctx).Infof("Published compute node %q, socket directory %q for shadow %s/%s", nodeName, socketDir, identity.Namespace, identity.Name)
 }
 
 // releaseShadowOfEndedPod removes the shadow of a pod whose remote job ended.
@@ -371,8 +402,8 @@ func (p *Provider) releaseShadowOfEndedPod(ctx context.Context, pod *v1.Pod) {
 	p.forgetShadowNodeName(pod)
 }
 
-// forgetShadowNodeName drops the cached node name for a pod that is going away,
-// so a pod recreated under a new UID starts from a clean slate.
+// forgetShadowNodeName drops the cached node and socket directory for a pod that is
+// going away, so a pod recreated under a new UID starts from a clean slate.
 func (p *Provider) forgetShadowNodeName(pod *v1.Pod) {
 	p.shadowNodeNames.Delete(string(pod.UID))
 }
