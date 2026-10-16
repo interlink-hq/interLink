@@ -150,6 +150,8 @@ type ShadowTemplateData struct {
 	// PodUID is the UID of the pod the shadow stands for, put on the shadow's pods as
 	// shadowOfLabel.
 	PodUID string
+	// Reverse is the pod's tunnel back into the cluster, nil unless it asked for one.
+	Reverse *ReverseTunnel
 }
 
 type PortMapping struct {
@@ -1084,6 +1086,13 @@ func (p *Provider) createShadowPod(ctx context.Context, originalPod *v1.Pod) (*v
 
 	if p.isSSHShadow() {
 		warnOnUDPPorts(ctx, templateData.ExposedPorts)
+		if p.reverseRequested(originalPod) {
+			reverse, err := parseReverseTunnel(originalPod, p.config.Network.SSH.Reverse)
+			if err != nil {
+				return nil, nil, err
+			}
+			templateData.Reverse = reverse
+		}
 	}
 
 	log.G(ctx).Debugf("LocalInitContainers count: %d", len(templateData.LocalInitContainers))
@@ -1848,8 +1857,10 @@ func hasSocketPorts(ports []PortMapping) bool {
 
 // shouldCreateShadow checks if shadow infrastructure should be created
 func (p *Provider) shouldCreateShadow(pod *v1.Pod) bool {
-	return p.config.Network.EnableTunnel && (hasExposedPorts(pod) || hasExtraPortsAnnotation(pod)) &&
-		pod.Annotations["interlink.eu/pod-vpn"] == ""
+	if !p.config.Network.EnableTunnel || pod.Annotations["interlink.eu/pod-vpn"] != "" {
+		return false
+	}
+	return hasExposedPorts(pod) || hasExtraPortsAnnotation(pod) || p.reverseRequested(pod)
 }
 
 // isMeshNetworkingDisabled returns true when the pod has opted out of mesh networking
@@ -1905,6 +1916,12 @@ func (p *Provider) handleShadowCreation(ctx context.Context, pod *v1.Pod) (strin
 			log.G(ctx).Warningf("Failed to add wstunnel client annotation to pod %s/%s: %v", pod.Namespace, pod.Name, err)
 			// Note: We don't clean up here since the shadow infrastructure is working,
 			// just the annotation failed (non-critical)
+		}
+	} else if templateData.Reverse != nil {
+		// The reverse tunnel is the one ssh case where the workload has something to
+		// do: name the forwarded endpoints and wait for the tunnel before starting.
+		if err := p.addReversePreExec(ctx, pod, templateData.Reverse); err != nil {
+			log.G(ctx).Warningf("Failed to record the reverse tunnel pre-exec on pod %s/%s: %v", pod.Namespace, pod.Name, err)
 		}
 	}
 
@@ -2069,6 +2086,9 @@ func (p *Provider) CreatePod(ctx context.Context, pod *v1.Pod) error {
 	TracerUpdate(&ctx, "CreatePodVK", pod)
 
 	if err := p.checkSocketPortsRequest(pod); err != nil {
+		return err
+	}
+	if err := p.checkReverseRequest(pod); err != nil {
 		return err
 	}
 
