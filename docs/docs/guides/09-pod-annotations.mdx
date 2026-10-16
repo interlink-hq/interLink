@@ -15,6 +15,8 @@ InterLink supports several categories of annotations:
 - **[VPN & Networking](#vpn--networking)**: Configure pod IP allocation and VPN connectivity
 - **[Mesh Networking](#mesh-networking)**: Control bidirectional mesh networking for offloaded pods
 - **[Wstunnel Integration](#wstunnel-integration)**: Control websocket tunneling for exposed ports
+- **[SSH Shadow](#ssh-shadow)**: Unix socket ports and namespace placement for shadow pods
+- **[SSH Reverse Tunnel](#ssh-reverse-tunnel)**: Let an offloaded pod reach endpoints inside the cluster over the SSH shadow
 - **[Job Management](#job-management)**: Handle remote job execution and tracking
 - **[System Annotations](#system-annotations)**: Internal annotations used by interLink components
 
@@ -230,6 +232,163 @@ spec:
 - Case-insensitive protocol names
 
 **Default:** Not set (no additional ports forwarded)
+
+---
+
+## SSH Shadow
+
+Annotations for the [SSH shadow](./14-ssh-tunnel-configuration.mdx)
+(`Network.ShadowMode: ssh`). `interlink.eu/wstunnel-extra-ports` applies to it too.
+
+### `interlink.eu/shadow-socket-ports`
+
+Lists the exposed ports whose server listens on a unix socket instead of a TCP port.
+
+**Usage:**
+```yaml
+apiVersion: v1
+kind: Pod
+metadata:
+  name: notebook
+  annotations:
+    interlink.eu/shadow-socket-ports: "8888"
+spec:
+  containers:
+  - name: jupyter
+    image: docker://jupyter/scipy-notebook
+    command:
+    - sh
+    - -c
+    - >-
+      exec jupyter lab --no-browser
+      --ServerApp.sock=$INTERLINK_SOCKET_DIR/fwd-8888.sock
+      --ServerApp.allow_remote_access=True
+    ports:
+    - containerPort: 8888
+```
+
+**Behavior:**
+- The shadow forwards each listed port to `$INTERLINK_SOCKET_DIR/fwd-<port>.sock` on the compute node instead of `127.0.0.1:<port>`; the workload creates that socket
+- `INTERLINK_SOCKET_DIR` is a directory private to the pod's job (mode 0700), set in every container by the plugin
+- Unlike a TCP port on `127.0.0.1`, a socket in that directory is closed to other users of the compute node; see [Where the workload listens](./14-ssh-tunnel-configuration.mdx#where-the-workload-listens)
+- Requires `Network.EnableTunnel: true`, `ShadowMode: ssh`, `SSH.ForwardTarget: node`, and a plugin that reports a socket directory (`SocketDirRoot` in the Slurm plugin)
+- Each entry must be an exposed TCP port of the pod: a `containerPort` or a port in `interlink.eu/wstunnel-extra-ports`
+- Pod creation is refused when the value is malformed, names a port that is not an exposed TCP port, or the requirements above are not met: the pod shows reason `ProviderFailed` with the error as its message (`kubectl describe pod`), and the virtual kubelet logs it too
+- Jupyter needs `--ServerApp.allow_remote_access=True`, as in the example, to answer requests that come through the shadow's Service; its token stays on, see [Pod configuration](./14-ssh-tunnel-configuration.mdx#pod-configuration)
+
+**Format:** Comma-separated port numbers, e.g. `"8888"` or `"8888,6006"`
+
+**Default:** Not set (every port is forwarded over TCP)
+
+---
+
+### `interlink.eu/shadow-same-ns`
+
+Creates the pod's shadow in the pod's own namespace instead of a separate one.
+
+**Usage:**
+```yaml
+apiVersion: v1
+kind: Pod
+metadata:
+  name: notebook
+  annotations:
+    interlink.eu/shadow-same-ns: "true"
+```
+
+**Behavior:**
+- Applies to every shadow, wstunnel or SSH
+- Without it, the shadow's resources are named `<pod>-<namespace>` in a namespace `<namespace>-shadow`; with it, `shadow-<pod>-<namespace>` in the pod's own namespace
+- Suits multi-tenant setups such as per-user notebook namespaces, where the shadow's Service belongs next to the pod
+- With the SSH shadow, the credential is copied into that namespace unless `ReplicateCredentials` is false; see [Credential replication](./14-ssh-tunnel-configuration.mdx#credential-replication)
+- Only the value `"true"` enables it
+- Pod creation fails when the namespace name is so long that the shadow's name and namespace together cannot fit in 63 characters; use a shorter namespace or drop the annotation
+
+**Default:** Not set (shadow in `<namespace>-shadow`)
+
+---
+
+## SSH Reverse Tunnel
+
+With the [SSH shadow](./14-ssh-tunnel-configuration.mdx) and
+`Network.SSH.Reverse.Enabled: true`, these annotations let an offloaded pod open
+connections to endpoints inside the cluster. How it works, what the site has to allow
+and the limits are in
+[Pod to cluster: the reverse tunnel](./14-ssh-tunnel-configuration.mdx#pod-to-cluster-the-reverse-tunnel).
+
+### `interlink.eu/reverse-forwards`
+
+Lists the cluster endpoints the pod may connect to.
+
+**Usage:**
+```yaml
+apiVersion: v1
+kind: Pod
+metadata:
+  name: trainer
+  annotations:
+    interlink.eu/reverse-forwards: "minio.user.svc.cluster.local:9000 6443:kubernetes.default.svc.cluster.local:443"
+spec:
+  containers:
+  - name: trainer
+    image: docker://python:3.12
+```
+
+**Format:**
+- **Endpoint**: `host:port` - the job connects to the same port
+- **Remapped**: `listen-port:host:port` - the job connects to `listen-port`; needed when `port` is below 1024
+- **Several**: space-separated
+
+**Behavior:**
+- The virtual kubelet adds the names to the container's `/etc/hosts` and waits for the tunnel before the workload starts
+- A Service FQDN also resolves as `name.namespace.svc` and `name.namespace`, and as `name` in the pod's own namespace
+- An entry that does not parse, or a listen port below 1024, is refused when the pod is created
+- Needs `Network.SSH.Reverse.Enabled: true`; otherwise the pod is refused rather than run without its tunnel
+- Needs a plugin that gives the job a socket directory (`SocketDirRoot` in the Slurm plugin); otherwise the job fails at start
+
+**Default:** Not set (no connections back into the cluster)
+
+---
+
+### `interlink.eu/reverse-socks-port`
+
+Adds a SOCKS5 proxy for endpoints not listed in `interlink.eu/reverse-forwards`.
+
+:::warning
+The proxy listens on `127.0.0.1` of the compute node, where every user of that node
+can use it to reach any endpoint the shadow reaches in the cluster. The virtual
+kubelet refuses it unless `Network.SSH.Reverse.AllowSocks` is true. A site that agreed
+to fixed endpoints and no proxy has not agreed to this: ask before turning it on.
+:::
+
+**Usage:**
+```yaml
+metadata:
+  annotations:
+    interlink.eu/reverse-socks-port: "1080"
+```
+
+**Behavior:**
+- Any cluster address, resolved inside the cluster at connect time, for programs told to use the proxy (`ALL_PROXY=socks5h://127.0.0.1:1080`)
+- Pod creation is refused unless the virtual kubelet sets `Network.SSH.Reverse.AllowSocks: true`; when it does, the pod gets a `ReverseSocksProxy` warning event
+- A plain listener on `127.0.0.1`, with no owner check: every user of the compute node can use it
+- Two pods on one compute node cannot use the same port; the job fails at start when another user already listens on it, and the shadow's tunnel fails when another pod of the same account does
+- Must be above 1023 and not clash with a forward's listen port
+
+**Default:** Not set (no proxy)
+
+---
+
+### `interlink.eu/reverse-bind`
+
+The `127.x.y.z` address of the owner-only relay: the forwards listen there, inside the job.
+
+**Behavior:**
+- Derived from the pod UID when unset, so two pods on one node never share it
+- Must be in `127.0.0.0/8` and not `127.0.0.1`
+- The job fails at start if something else already listens on that address and a forward's port
+
+**Default:** Derived from the pod UID
 
 ---
 

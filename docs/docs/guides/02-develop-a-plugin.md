@@ -98,10 +98,20 @@ types:
     "UID": "pod-uid",
     "namespace": "default",
     "JID": "remote-job-id",
+    "nodeName": "node07.hpc.example.org",   // Optional: compute node, once running
+    "socketDir": "/scratch/il/1b2c3d4e5f60", // Optional: per-pod socket directory
     "containers": [...],     // Container status array
     "initContainers": [...]  // Init container status array
 }
 ```
+
+`nodeName` and `socketDir` are optional and only used by the
+[SSH shadow](./14-ssh-tunnel-configuration.mdx#how-the-compute-node-is-discovered).
+Report `nodeName` once the workload runs, as the name the login node resolves
+(`hostname -f` on the node), and leave it empty while the job is queued. Report
+`socketDir` only together with `nodeName`, and only once the job has created it: an
+absolute path of at most 92 bytes to a directory private to the pod's job (mode
+0700), which the containers also get as `INTERLINK_SOCKET_DIR`.
 
 #### CreateStruct
 
