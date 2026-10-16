@@ -223,7 +223,7 @@ in the chart repository for a complete deployment.
 | `NodeWaitTimeout` | `2h` | How long the shadow waits for the compute node |
 | `ExtraOptions` | `[]` | Extra ssh options, each passed as `-o <option>` on every hop, after the shadow's own. ssh keeps the first value it sees, so they add settings but cannot override the shadow's. One exception: `GSSAPIDelegateCredentials=yes` turns Kerberos delegation back on for the login hop |
 | `Reverse.Enabled` | `false` | Let pods ask for a [tunnel back into the cluster](#pod-to-cluster-the-reverse-tunnel) |
-| `Reverse.NodeExec` | `ssh` | How the shadow runs a command on the compute node from the login node: `ssh` (`ssh <node>`) or `srun` (`srun --jobid=<job> --overlap`, several times slower, see [Performance](#performance)) |
+| `Reverse.NodeExec` | `ssh` | How the shadow runs a command on the compute node from the login node: `ssh` (`ssh <node>`) or `srun` (`srun --jobid=<job> --overlap`, lower throughput, see [Performance](#performance)) |
 | `Reverse.SshdPath` | `/usr/sbin/sshd` | The sshd binary on the compute node |
 | `Reverse.PythonPath` | `python3` | The python3 on the compute node, for owner-only forwards |
 
@@ -817,6 +817,12 @@ instead: no relay, no `python3` on the node, and no protection from other users.
   pre-exec does.
 - `/tmp/il-rev-<shadow>` on the compute node holds the keys and sockets while the
   tunnel is up; the session removes it when the tunnel ends.
+
+### Performance
+
+`NodeExec: srun` carries the tunnel through Slurm's I/O forwarding, which has lower
+throughput than `ssh <node>`. Prefer `ssh` and keep `srun` for nodes the login node
+cannot reach over ssh. The owner-only relay adds no measurable cost.
 
 ---
 
