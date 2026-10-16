@@ -129,7 +129,7 @@ warning in the virtual kubelet log.
 | --- | --- | --- | --- |
 | `wstunnel` (default) | cluster → pod | `EnableTunnel` + exposed ports | wstunnel client, dials out |
 | `ssh` | cluster → pod | `EnableTunnel` + exposed ports | nothing |
-| `ssh` reverse | pod → cluster | `SSH.Reverse.Enabled` + `interlink.eu/reverse-forwards` | nothing: the batch script waits for the tunnel |
+| `ssh` reverse | pod → cluster | `SSH.Reverse.Enabled` + `interlink.eu/reverse-forwards` | nothing: the batch script starts a relay and waits for the tunnel |
 | full mesh | bidirectional | `FullMesh: true`, every pod | `mesh.sh` (slirp4netns + WireGuard) |
 
 ---
@@ -218,14 +218,16 @@ in the chart repository for a complete deployment.
 | `Principal` | none | Kerberos principal (`kerberos`) |
 | `Krb5ConfigMap` | none | ConfigMap with a `krb5.conf`, mounted at `/etc/krb5.conf` |
 | `KnownHostsConfigMap` | none | ConfigMap with a `known_hosts` file: the login node's key, plus compute node keys, host patterns or `@cert-authority` lines |
-| `NodeHostKeys` | `verify` | How compute node host keys are checked with `ForwardTarget: node`: `verify` or `accept-new`. See [Compute nodes](#compute-nodes) |
+| `NodeHostKeys` | `verify` | How compute node host keys are checked, with `ForwardTarget: node` and by the reverse tunnel, except a user-space sshd reached with `Reverse.NodeExec: srun`: `verify` or `accept-new`. See [Compute nodes](#compute-nodes) |
 | `ReplicateCredentials` | `true` | Copy the credential into each shadow's namespace |
 | `NodeWaitTimeout` | `2h` | How long the shadow waits for the compute node |
 | `ExtraOptions` | `[]` | Extra ssh options, each passed as `-o <option>` on every hop, after the shadow's own. ssh keeps the first value it sees, so they add settings but cannot override the shadow's. One exception: `GSSAPIDelegateCredentials=yes` turns Kerberos delegation back on for the login hop |
 | `Reverse.Enabled` | `false` | Let pods ask for a [tunnel back into the cluster](#pod-to-cluster-the-reverse-tunnel) |
-| `Reverse.NodeExec` | `ssh` | How the shadow runs a command on the compute node from the login node: `ssh` (`ssh <node>`) or `srun` (`srun --jobid=<job> --overlap`, lower throughput, see [Performance](#performance)) |
-| `Reverse.SshdPath` | `/usr/sbin/sshd` | The sshd binary on the compute node |
-| `Reverse.PythonPath` | `python3` | The python3 on the compute node, for owner-only forwards |
+| `Reverse.Sshd` | `node` | Which sshd makes the reverse forwards: `node` (the compute node's own) or `userspace` (one the shadow starts in the job, for nodes whose sshd refuses forwarding). See [A user-space sshd](#a-user-space-sshd) |
+| `Reverse.NodeExec` | `ssh` | How the shadow reaches port 22 of the compute node: `ssh` (through the login node, as `ForwardMode` says) or `srun` (`srun --jobid=<job> --overlap` on the login node, a last resort with lower throughput, see [Performance](#performance)). Set here only: pods cannot change it |
+| `Reverse.AllowSocks` | `false` | Let pods ask for a SOCKS proxy on the compute node, open to every user of that node. See [Endpoints not known in advance](#endpoints-not-known-in-advance) |
+| `Reverse.SshdPath` | `/usr/sbin/sshd` | The sshd binary on the compute node, for `Reverse.Sshd: userspace` only |
+| `Reverse.PythonPath` | `python3` | The python3 on the compute node, which runs the relay |
 
 Misconfiguration fails at **startup**, not on the first offloaded pod, so a missing
 `LoginHost` or a `kerberos` block without a `Principal` is caught immediately.
@@ -345,11 +347,12 @@ restrict,port-forwarding,from="<cluster egress>,<login nodes>",command="$HOME/.i
 
 - `restrict` turns off port, agent and X11 forwarding and terminal allocation.
 - `port-forwarding` turns port forwarding back on, which `ForwardTarget: node`
-  needs in both modes (the forwards are `-L` on the compute node) and
-  `ForwardMode: portforward` needs on the login node. Only a deployment with
-  `ForwardTarget: login` and `ForwardMode: exec` can drop it: sshd then forwards
-  nothing for this key, but the wrapper's `nc` lines still relay to any host and
-  port the login node reaches, so `from=` stays the main limit.
+  needs in both modes (the forwards are `-L` on the compute node), as do
+  `ForwardMode: portforward` on the login node and the
+  [reverse tunnel](#pod-to-cluster-the-reverse-tunnel). Only a deployment with
+  `ForwardTarget: login`, `ForwardMode: exec` and no reverse tunnel can drop it:
+  sshd then forwards nothing for this key, but the wrapper's `nc` lines still relay
+  to any host and port the login node reaches, so `from=` stays the main limit.
 - `from=` lists where the key may be used from: the cluster's egress addresses for
   the login hop, and the login nodes, as the compute nodes see them, for the hop to
   a compute node. This is the main limit. A key that may forward, or run the
@@ -382,14 +385,16 @@ It allows the netcat relays of `exec` mode and the read of the login node's host
 list that [`NodeHostKeys: verify`](#compute-nodes) does, and nothing else: no shell,
 no `scp`, no job submission. Set `NC` to the virtual kubelet's `ExecConnectCommand`.
 The newline check matters: `grep -x` matches line by line, so a second line could
-otherwise ride along.
+otherwise ride along. The reverse tunnel needs
+[a few more lines](#with-a-key-for-the-tunnel-only).
 
 As written, `h` accepts any host, so the relays reach whatever the login node
 reaches. A site can narrow them by setting `h` to its node-name pattern, for example
 `h="'?node[0-9]+\.nodes\.example\.org'?"`.
 
 This works for `Auth: publickey` only. A keytab is the account's own credential and
-cannot be restricted this way.
+cannot be restricted this way. It does not work with
+[`Reverse.Sshd: userspace`](#a-user-space-sshd) either.
 
 ### Kerberos
 
@@ -415,7 +420,9 @@ expiry.
 The ticket is not forwarded to the login node or to compute nodes
 (`GSSAPIDelegateCredentials=no`): nothing the shadow runs there needs it. If a site
 requires it on the login node, add `GSSAPIDelegateCredentials=yes` to
-`ExtraOptions`.
+`ExtraOptions`. The one exception is the reverse tunnel's last-resort carrier,
+`Reverse.NodeExec: srun`: `srun` runs on the login node and needs the ticket there,
+so the login hop then delegates it. The hop to a compute node never does.
 
 ### Host key verification
 
@@ -442,8 +449,11 @@ This switches the shadow to `StrictHostKeyChecking=yes`.
 
 #### Compute nodes
 
-With `ForwardTarget: node` the shadow opens a second session, through the login
-node, to the compute node's own sshd, and checks that node's host key too.
+With `ForwardTarget: node`, and for the
+[reverse tunnel](#pod-to-cluster-the-reverse-tunnel) whatever the target, the shadow
+opens a second session, through the login node, to the compute node's own sshd, and
+checks that node's host key too. The one exception is a
+[user-space sshd](#a-user-space-sshd) reached with `Reverse.NodeExec: srun`.
 `NodeHostKeys` decides how:
 
 - `verify` (default): the key must be listed, and ssh runs with
@@ -505,8 +515,9 @@ scheduled anything — so at creation time there is no node to forward to yet.
    the pod spec, so kubelet refreshes it in place — restarting the shadow would
    change its pod IP, which Kubernetes has already been told is the offloaded pod's IP.
 4. The shadow's `wait-for-node` init container polls the mounted node name, and the
-   socket directory when the pod has [socket ports](#where-the-workload-listens),
-   then `ssh-forward` starts the tunnel.
+   socket directory when the pod has [socket ports](#where-the-workload-listens) or a
+   [reverse tunnel](#pod-to-cluster-the-reverse-tunnel). Then the tunnels start:
+   `ssh-forward` for exposed ports, `ssh-reverse` for a reverse tunnel.
 
 While the job is queued the shadow sits in `Init:0/1`. That is the expected state,
 not a failure — it reads as "waiting for the allocation" rather than a crash-looping
@@ -740,89 +751,188 @@ included, stay visible to the job.
 ### How it works
 
 ```
-job container ──connect name:port──> 127.x.y.z:port on the compute node (sshd, -R)
+job container ──connect name:port──> relay on 127.x.y.z:port (started by the job)
+                                           │ checks the caller's user
+                                           ▼
+                            <socket dir>/rev-<port>.sock (compute node's sshd, -R)
                                            │ carried back over the shadow's ssh session
                                            ▼
                      shadow pod (ssh-reverse) ──dials──> Service inside the cluster
 ```
 
-1. The shadow runs a second container, `ssh-reverse`. Once the compute node is known
-   it starts a user-space `sshd -i` there, as the job's user, through a command run
-   on the login node (`ssh <node>` or `srun --overlap`, see `NodeExec`). The
-   command's stdin and stdout are that sshd's transport: it listens on no port. Its
-   host key and the one client key it accepts are generated for each start and
-   never leave the shadow.
-2. The shadow connects to it with `ssh -R`. Each forward is bound on the compute
-   node, on a loopback address derived from the pod UID (`127.x.y.z`), and every
-   connection made there is dialled from the shadow pod, inside the cluster.
-3. The virtual kubelet prepends a snippet to the pod's `slurm-job.vk.io/pre-exec`.
-   It maps the forwarded names to that address in the container's `/etc/hosts`
-   (through `SINGULARITY_BIND` and `APPTAINER_BIND`) and holds the workload until the
-   tunnel answers, for at most ten minutes. The workload itself is unchanged.
+1. The virtual kubelet prepends a snippet to the pod's `slurm-job.vk.io/pre-exec`.
+   When the job starts, it launches a small Python relay on the compute node that
+   listens on a loopback address derived from the pod UID (`127.x.y.z`), one port per
+   forward, for as long as the job runs. It maps the forwarded names to that address
+   in the container's `/etc/hosts` (through `SINGULARITY_BIND` and `APPTAINER_BIND`)
+   and holds the workload until the tunnel is up, for at most ten minutes. The
+   workload itself is unchanged.
+2. The shadow runs a second container, `ssh-reverse`. Once the compute node and the
+   pod's [socket directory](#the-socket-directory) are known, it logs in to the
+   compute node's own sshd through the login node, the same way and with the same
+   [host key check](#compute-nodes) as `ForwardTarget: node`, and asks it with
+   `ssh -R` for one unix socket per forward, `rev-<port>.sock` in the socket
+   directory. The session runs nothing but a wait that ends when the job removes
+   that directory.
+3. For each connection, the relay checks that it comes from the job's user and hands
+   it to the matching socket. sshd carries it back over the session, and the shadow
+   pod dials the endpoint from inside the cluster.
 
-The tunnel is rebuilt if the job moves to another node, like the forwards.
+The tunnel is rebuilt if the job moves to another node, like the forwards. While it is
+down, the relay keeps its address and closes new connections at once.
 
 ### What the site has to allow
 
-- A command on the compute node, run from the login node as the job's user. Either
-  `ssh <node>` into a node where that user has a running job, which sites with
-  `pam_slurm_adopt` allow, or `srun --jobid=<job> --overlap`, which needs nothing
-  beyond Slurm. `NodeExec` picks one; a pod can override it.
-- `sshd` on the compute node (`Reverse.SshdPath`) and, for owner-only forwards,
-  `python3`. Both are stock on most distributions and neither needs root.
-- Nothing in the login node's `sshd_config`: the forwards are bound by the sshd the
-  shadow starts, not by the site's.
+The reverse tunnel always ends on the compute node, whatever `ForwardTarget` says.
+With the default `Reverse.NodeExec: ssh` it gets there the way
+[`ForwardTarget: node`](#with-forwardtarget-node) does, so it needs the same: `-W` or
+`nc <node> 22` on the login node, as `ForwardMode` says, and an ssh login to a node
+where the account has a running job. With `Reverse.NodeExec: srun` it needs `squeue`
+and `srun --jobid=<job> --overlap` on the login node instead and, with
+`Reverse.Sshd: node`, a netcat on the compute nodes (`ExecConnectCommand`) and a login
+to the node's sshd from `127.0.0.1`. On top of that:
+
+- **Remote forwarding to a unix socket on the compute node's sshd**,
+  `AllowStreamLocalForwarding yes` (the default) or `remote`, in both forward modes. A
+  [SOCKS proxy](#endpoints-not-known-in-advance) also needs `AllowTcpForwarding yes`
+  or `remote` there.
+- **A socket directory** from the plugin: `SocketDirRoot` in the Slurm plugin, see
+  [The socket directory](#the-socket-directory). The relay and the sockets live there.
+- **`python3` on the compute nodes** (`Reverse.PythonPath`), which runs the relay. It is
+  stock on most distributions and needs no root.
+
+Where the compute node's sshd refuses that forwarding, an sshd the shadow starts in
+the job can take its place, see [A user-space sshd](#a-user-space-sshd).
 
 ### Annotations
 
 | Annotation | Value |
 | --- | --- |
 | `interlink.eu/reverse-forwards` | Space-separated endpoints, each `host:port` or `listen-port:host:port` |
-| `interlink.eu/reverse-socks-port` | Port of a SOCKS5 proxy for endpoints not listed; off when unset |
-| `interlink.eu/reverse-bind` | The `127.x.y.z` address to use instead of the derived one |
-| `interlink.eu/reverse-node-exec` | `ssh` or `srun`, overriding `Reverse.NodeExec` |
-| `interlink.eu/reverse-owner-only` | `true` (default) or `false`, see below |
+| `interlink.eu/reverse-socks-port` | Port of a SOCKS5 proxy for endpoints not listed; off when unset, refused unless the virtual kubelet sets `Reverse.AllowSocks` |
+| `interlink.eu/reverse-bind` | The `127.x.y.z` address the relay listens on, instead of the derived one |
 
-A Service port below 1024 cannot be bound by an unprivileged sshd on the compute
-node: give it a listen port, `6443:kubernetes.default.svc.cluster.local:443`, and the
-job connects to port 6443. The name resolves to the right address either way. An
+The relay runs as the job's user, so it cannot bind a port below 1024: give such an
+endpoint a listen port, `6443:kubernetes.default.svc.cluster.local:443`, and the job
+connects to port 6443. The name resolves to the right address either way. An
 annotation that does not parse is refused when the pod is created, with the reason in
 the virtual kubelet log and the pod's events.
 
+The carrier to the compute node and the sshd that makes the forwards are the site's
+choice, set in the virtual kubelet configuration (`Reverse.NodeExec`,
+`Reverse.Sshd`); a pod cannot change them.
+
 ### Endpoints not known in advance
 
-`interlink.eu/reverse-socks-port: "1080"` adds a SOCKS5 proxy on the same address. A
-program told to use it, `ALL_PROXY=socks5h://127.x.y.z:1080` for curl and Python
-requests, reaches any cluster address by name, resolved inside the cluster at connect
-time. It is off unless asked for, and it is a plain loopback listener that every user
-of that compute node can also use, so declare what you can and keep SOCKS for the rest.
+:::warning
+A SOCKS proxy lets every user of the compute node reach, through it, any endpoint the
+shadow reaches in the cluster. ssh has no unix socket form of it, so it listens on
+`127.0.0.1` of the node and neither the relay nor the socket directory protects it.
+It is off unless the virtual kubelet sets `Reverse.AllowSocks: true`. A site that
+agreed to a reverse tunnel with fixed endpoints and no proxy has not agreed to this:
+ask before turning it on.
+:::
+
+With `AllowSocks`, `interlink.eu/reverse-socks-port: "1080"` adds a SOCKS5 proxy on
+`127.0.0.1:1080` of the compute node. A program told to use it,
+`ALL_PROXY=socks5h://127.0.0.1:1080` for curl and Python requests, reaches any cluster
+address by name, resolved inside the cluster at connect time. Declare what you can in
+`interlink.eu/reverse-forwards` and keep SOCKS for the rest.
+
+- Without `AllowSocks`, a pod that sets the annotation is refused when it is created.
+- With it, the pod gets a `ReverseSocksProxy` warning event, and the virtual kubelet
+  and the shadow log a warning.
+- Every pod's proxy is on `127.0.0.1`, so two pods on one compute node cannot use the
+  same port. If another user already listens on it, the job fails at start. If
+  another pod of the same account does, the job cannot tell, and the shadow's tunnel
+  fails instead, see [Troubleshooting](#troubleshooting).
 
 ### Who else can use the forwards
 
-A port on a loopback address is reachable by every user of the compute node. By
-default each forward therefore ends in a unix socket that only the job's user can
-open, with a small relay in front, run by the sshd session on the node, that accepts
-a connection only when the connecting socket belongs to that user (read from
-`/proc/net/tcp`). `interlink.eu/reverse-owner-only: "false"` binds the ports directly
-instead: no relay, no `python3` on the node, and no protection from other users.
+Only the job's user. A port on a loopback address is reachable by every user of the
+compute node, so the relay accepts a connection only when the connecting socket
+belongs to the job's user (read from `/proc/net/tcp`), and the socket behind it is
+created by sshd with mode 0600 inside the 0700 socket directory. This is always on.
+
+The job holds the relay's address from its start to its end, so nobody else can take
+it later, not even while the tunnel is being rebuilt. If something already listens
+there when the job starts, the relay cannot bind and the job fails rather than run
+with a stranger's listener in its place.
+
+It does not keep out other jobs of the same account, or the node's administrators.
+
+### A user-space sshd
+
+With `Reverse.Sshd: userspace` the forwards are made by an sshd the shadow starts on
+the compute node, as the job's user, instead of the node's own. It runs as `sshd -i`,
+with an ssh session's stdin and stdout as its transport, so it listens on no port. Its
+host key and the one client key it accepts are generated for each start and never
+leave the shadow, and its configuration, written to the socket directory, allows
+remote forwarding and nothing else. The relay, the sockets and the owner check are the
+same as above.
+
+It needs the sshd binary on the node (`Reverse.SshdPath`), and a key allowed to run
+any command on the node, or on the login node with `Reverse.NodeExec: srun`, because
+the shadow sends the script that prepares it. It does not work with a
+[key for the tunnel only](#a-key-for-the-tunnel-only).
+
+With `Reverse.NodeExec: srun` no session reaches the node's own sshd, so
+`NodeHostKeys` does not apply: the shadow checks only the host key it generated,
+which it sends through the login node.
+
+### With a key for the tunnel only
+
+With the default `Reverse.Sshd: node`, a
+[key for the tunnel only](#a-key-for-the-tunnel-only) works. Keep `port-forwarding`
+in its `authorized_keys` line, since `-R` needs it in both forward modes. In the
+wrapper, define the directory pattern next to `h=`:
+
+```sh
+d='/[A-Za-z0-9._/-]+'
+```
+
+and insert these lines into its `if`, before its last condition, the
+`ok 'cat /etc/ssh/ssh_known_hosts ...'; then` line:
+
+```sh
+   ok "rm -f $d/rev-\*\.sock" ||
+   ok "while \[ -d $d \]; do sleep 10; done" ||
+   ok "squeue -h --me -t R -n [0-9a-f-]{36} -o %i" ||
+   ok "srun --jobid=[0-9]+ --overlap -u -n1 --cpus-per-task=1 $NC 127\.0\.0\.1 22" ||
+```
+
+The first two run on the compute node: one clears the sockets a previous session left
+behind, before the forwards are requested, and the other is the wait that holds the
+session. The last two are the `srun` carrier, run on the login node. With it the
+compute node's sshd sees the session come from `127.0.0.1`, so add that address to
+`from=`.
 
 ### Limits
 
 - TCP only.
-- The listeners exist on the node that runs the batch script. Ranks of a multi-node
-  job on other nodes have no tunnel.
+- The relay and the sockets exist only on the batch node, the one the plugin reports
+  as `NodeName`, and so does the file that maps the names, as long as `TMPDIR` is
+  node-local. Ranks of a multi-node job on other nodes then fail instead of reaching
+  anything. With `TMPDIR` on a shared filesystem they resolve the names to an address
+  with no relay behind it, where another user of their node could listen.
+  Multi-node jobs are out of scope.
 - The tunnel comes up once the shadow has learned the compute node, a status poll or
   two after the job starts; the pre-exec waits for it.
 - The pre-exec assumes the Slurm plugin with Singularity or Apptainer, as the mesh
-  pre-exec does.
-- `/tmp/il-rev-<shadow>` on the compute node holds the keys and sockets while the
-  tunnel is up; the session removes it when the tunnel ends.
+  pre-exec does, and a plugin that reports a socket directory.
+- The sockets, the relay and, with a user-space sshd, its keys and configuration live
+  in the pod's socket directory. The job removes it when it ends, and the tunnel
+  session and the relay end with it.
 
 ### Performance
 
-`NodeExec: srun` carries the tunnel through Slurm's I/O forwarding, which has lower
-throughput than `ssh <node>`. Prefer `ssh` and keep `srun` for nodes the login node
-cannot reach over ssh. The owner-only relay adds no measurable cost.
+`Reverse.NodeExec: srun` reaches the compute node with `srun --jobid=<job> --overlap`
+on the login node, running inside the allocation `ExecConnectCommand` to
+`127.0.0.1:22` with `Reverse.Sshd: node`, or the user-space sshd itself with
+`userspace`, so the tunnel goes through Slurm's I/O forwarding, which has lower
+throughput than ssh. It is a last resort, for nodes the login node cannot reach over
+ssh. Under Kerberos it is also the one case where the login hop delegates the ticket,
+see [Kerberos](#kerberos). The owner-only relay adds no measurable cost.
 
 ---
 
@@ -838,10 +948,10 @@ kubectl get configmap <shadow>-node -o jsonpath='{.data.compute-node}'
 Empty means no plugin has reported one yet.
 
 **`waiting for the plugin to report a socket directory` in the `wait-for-node`
-log.** The pod lists socket ports, but the plugin has not reported a socket
-directory, and one without socket support never will: set `SocketDirRoot` in the
-Slurm plugin. After `NodeWaitTimeout` the init container fails with
-`timed out waiting for a socket directory`. What has been reported so far:
+log.** The pod lists socket ports or asks for a reverse tunnel, but the plugin has
+not reported a socket directory, and one without socket support never will: set
+`SocketDirRoot` in the Slurm plugin. After `NodeWaitTimeout` the init container fails
+with `timed out waiting for a socket directory`. What has been reported so far:
 
 ```bash
 kubectl get configmap <shadow>-node -o jsonpath='{.data.socket-dir}'
@@ -879,8 +989,8 @@ on the compute node. If the compute node refuses, have the site allow it or use
 `KnownHostsConfigMap` does not contain the login node's current key. Re-run
 `ssh-keyscan` and update the ConfigMap.
 
-With `node` it can also be the compute node's key. A line
-`no host key for <node>: ...` just before it means nothing in the list matches the
+With `node`, and in the `ssh-reverse` log, it can also be the compute node's key. A
+line `no host key for <node>: ...` just before it means nothing in the list matches the
 node's name: add its key, a host pattern or an `@cert-authority` line, as in
 [Compute nodes](#compute-nodes). That line is not printed when the list holds any
 `@cert-authority` line, so without it, first check that a line covers the reported
@@ -901,13 +1011,49 @@ already contains a different object under the credential's name. Rename the
 credential, or set `ReplicateCredentials: false` and provision it yourself.
 
 **`interLink: the reverse tunnel did not come up within 600s` in the job log.** The
-shadow's `ssh-reverse` container never got through; read its log. `could not prepare
-... on <node>` means the command to the compute node was refused, so try
-`NodeExec: srun`; `no running job named ... on <node>` in `srun` mode means `squeue`
-on the login node did not list a running job under the pod's UID.
+shadow's `ssh-reverse` container never got through. In its log each failed attempt
+ends in `the reverse tunnel to <node> is down; retrying in 30s`, and the lines before
+it say why:
+
+- `could not clear <dir> on <node>`: the session to the compute node failed. It goes
+  the same way as with `ForwardTarget: node`, so the lines before it read as in the
+  entries above: a host key the list does not accept, or a login the node refuses.
+- `remote port forwarding failed for listen path <dir>/rev-<port>.sock`: the compute
+  node's sshd refuses forwarding to a unix socket (`AllowStreamLocalForwarding`), or
+  the key lacks `port-forwarding`. Have the site allow it, or set
+  `Reverse.Sshd: userspace`. For the SOCKS port the line ends in `listen port <port>`:
+  the setting is `AllowTcpForwarding`, or something already listens on
+  `127.0.0.1:<port>` on that node (`ss -ltnp`), possibly another pod of the same
+  account. Pick another `interlink.eu/reverse-socks-port`.
+- `could not prepare <dir> on <node>`, with `Reverse.Sshd: userspace`: the session
+  that writes the user-space sshd's files into the socket directory failed (the login
+  to the node, `srun`, or `cd` into the directory). A wrong `Reverse.SshdPath` shows
+  up instead as the inner ssh failing to connect, just before the retry line.
+- `no running job named ...`, with `Reverse.NodeExec: srun`: `squeue` on the login
+  node did not list a running job under the pod's UID.
+
+**`interLink: the reverse tunnel needs a plugin with SocketDirRoot set` in the job
+log.** The plugin gave the job no socket directory. Set `SocketDirRoot` in the Slurm
+plugin, see [The socket directory](#the-socket-directory).
+
+**`interLink: the reverse relay stopped, see above` in the job log.** The relay did
+not start. `relay: cannot listen on 127.x.y.z:<port>: ...` just before it means
+something already listens on the pod's relay address; `ss -ltnp` on the node shows
+what. If it belongs to another user, the job failed on purpose rather than run behind
+it: report it to the site. Without that line, check `Reverse.PythonPath`.
+
+**`interLink: another user listens on the SOCKS port` in the job log.** Another user
+holds `127.0.0.1:<port>` on the compute node. Pick another
+`interlink.eu/reverse-socks-port`.
 
 **Pod creation fails with `interlink.eu/reverse-forwards: ...`.** The annotation did
 not parse; the message names the entry and what is wrong with it.
+
+**Pod creation fails with `... does not allow a SOCKS proxy`.** The pod sets
+`interlink.eu/reverse-socks-port` and the virtual kubelet does not set
+`Reverse.AllowSocks`. List the endpoints in `interlink.eu/reverse-forwards` instead,
+or read [Endpoints not known in advance](#endpoints-not-known-in-advance) before
+asking the site.
 
 **An nginx wstunnel Deployment appears instead of the SSH shadow.** A custom template
 file is overriding the built-in one. The virtual kubelet prefers
@@ -920,6 +1066,6 @@ it in `ssh` mode, but a hand-written config may still point at one.
 
 - [Discussion #535](https://github.com/interlink-hq/interLink/discussions/535) — the original proposal
 - [Issue #545](https://github.com/interlink-hq/interLink/issues/545) — in-cluster SSH deployment
-- [Issue #548](https://github.com/interlink-hq/interLink/issues/548) — pod to cluster connectivity without WireGuard
+- [Issue #548](https://github.com/interlink-hq/interLink/issues/548): pod to cluster connectivity without WireGuard
 - [Wstunnel Configuration](./10-wstunnel-configuration.mdx)
 - [Mesh Network Configuration](./13-mesh-network-configuration.mdx)
