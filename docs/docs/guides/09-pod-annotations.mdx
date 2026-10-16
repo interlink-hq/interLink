@@ -15,6 +15,7 @@ InterLink supports several categories of annotations:
 - **[VPN & Networking](#vpn--networking)**: Configure pod IP allocation and VPN connectivity
 - **[Mesh Networking](#mesh-networking)**: Control bidirectional mesh networking for offloaded pods
 - **[Wstunnel Integration](#wstunnel-integration)**: Control websocket tunneling for exposed ports
+- **[SSH Shadow](#ssh-shadow)**: Unix socket ports and namespace placement for shadow pods
 - **[Job Management](#job-management)**: Handle remote job execution and tracking
 - **[System Annotations](#system-annotations)**: Internal annotations used by interLink components
 
@@ -230,6 +231,79 @@ spec:
 - Case-insensitive protocol names
 
 **Default:** Not set (no additional ports forwarded)
+
+---
+
+## SSH Shadow
+
+Annotations for the [SSH shadow](./14-ssh-tunnel-configuration.mdx)
+(`Network.ShadowMode: ssh`). `interlink.eu/wstunnel-extra-ports` applies to it too.
+
+### `interlink.eu/shadow-socket-ports`
+
+Lists the exposed ports whose server listens on a unix socket instead of a TCP port.
+
+**Usage:**
+```yaml
+apiVersion: v1
+kind: Pod
+metadata:
+  name: notebook
+  annotations:
+    interlink.eu/shadow-socket-ports: "8888"
+spec:
+  containers:
+  - name: jupyter
+    image: docker://jupyter/scipy-notebook
+    command:
+    - sh
+    - -c
+    - >-
+      exec jupyter lab --no-browser
+      --ServerApp.sock=$INTERLINK_SOCKET_DIR/fwd-8888.sock
+      --ServerApp.allow_remote_access=True
+    ports:
+    - containerPort: 8888
+```
+
+**Behavior:**
+- The shadow forwards each listed port to `$INTERLINK_SOCKET_DIR/fwd-<port>.sock` on the compute node instead of `127.0.0.1:<port>`; the workload creates that socket
+- `INTERLINK_SOCKET_DIR` is a directory private to the pod's job (mode 0700), set in every container by the plugin
+- Unlike a TCP port on `127.0.0.1`, a socket in that directory is closed to other users of the compute node; see [Where the workload listens](./14-ssh-tunnel-configuration.mdx#where-the-workload-listens)
+- Requires `Network.EnableTunnel: true`, `ShadowMode: ssh`, `SSH.ForwardTarget: node`, and a plugin that reports a socket directory (`SocketDirRoot` in the Slurm plugin)
+- Each entry must be an exposed TCP port of the pod: a `containerPort` or a port in `interlink.eu/wstunnel-extra-ports`
+- Pod creation is refused when the value is malformed, names a port that is not an exposed TCP port, or the requirements above are not met: the pod shows reason `ProviderFailed` with the error as its message (`kubectl describe pod`), and the virtual kubelet logs it too
+- Jupyter needs `--ServerApp.allow_remote_access=True`, as in the example, to answer requests that come through the shadow's Service; its token stays on, see [Pod configuration](./14-ssh-tunnel-configuration.mdx#pod-configuration)
+
+**Format:** Comma-separated port numbers, e.g. `"8888"` or `"8888,6006"`
+
+**Default:** Not set (every port is forwarded over TCP)
+
+---
+
+### `interlink.eu/shadow-same-ns`
+
+Creates the pod's shadow in the pod's own namespace instead of a separate one.
+
+**Usage:**
+```yaml
+apiVersion: v1
+kind: Pod
+metadata:
+  name: notebook
+  annotations:
+    interlink.eu/shadow-same-ns: "true"
+```
+
+**Behavior:**
+- Applies to every shadow, wstunnel or SSH
+- Without it, the shadow's resources are named `<pod>-<namespace>` in a namespace `<namespace>-shadow`; with it, `shadow-<pod>-<namespace>` in the pod's own namespace
+- Suits multi-tenant setups such as per-user notebook namespaces, where the shadow's Service belongs next to the pod
+- With the SSH shadow, the credential is copied into that namespace unless `ReplicateCredentials` is false; see [Credential replication](./14-ssh-tunnel-configuration.mdx#credential-replication)
+- Only the value `"true"` enables it
+- Pod creation fails when the namespace name is so long that the shadow's name and namespace together cannot fit in 63 characters; use a shorter namespace or drop the annotation
+
+**Default:** Not set (shadow in `<namespace>-shadow`)
 
 ---
 

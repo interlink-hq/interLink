@@ -33,10 +33,19 @@ storage or message buses. Combining the two is rejected at startup and tracked i
 
 ---
 
-## Before you start: what the login node has to allow
+## Before you start: what the site has to allow
 
 The shadow is an ordinary SSH client, so everything it needs is decided by the
-login node's `sshd_config`.
+site's `sshd_config` files. Which ones depends on
+[`ForwardTarget`](#forward-modes): with `login`, the default, the shadow's session
+ends on the login node; with `node` it passes through the login node and ends on
+the compute node's own sshd.
+
+Both targets need **outbound SSH from the cluster** to the login node's port, from
+the namespaces shadows are created in. Network policies that restrict pod egress
+have to allow it.
+
+### With `ForwardTarget: login`
 
 1. **`AllowTcpForwarding yes`** for the account the shadow logs in as. This is the
    one that catches people out: plenty of HPC sites set `AllowTcpForwarding no`
@@ -71,9 +80,39 @@ login node's `sshd_config`.
    ssh <user>@<login node> "curl -sv http://<compute node fqdn>:<port>/"
    ```
 
-3. **Outbound SSH from the cluster** to the login node's port, from the namespaces
-   shadows are created in. Network policies that restrict pod egress have to allow
-   it.
+### With `ForwardTarget: node`
+
+1. **A way from the login node to port 22 of the compute node.** In `portforward`
+   mode the shadow uses `ssh -W`, which is TCP forwarding too, so the login node
+   needs `AllowTcpForwarding yes` as above. In `exec` mode it runs `nc <node> 22`
+   on the login node instead, which needs no forwarding privilege.
+2. **An ssh login to a compute node while the account has a job running there.**
+   Slurm sites usually allow it through `pam_slurm_adopt`. Check it from your own
+   machine, with the key the shadow will use, while one of your jobs runs on the
+   node:
+
+   ```bash
+   # portforward mode
+   ssh -J <user>@<login node> <user>@<compute node fqdn> hostname
+   # exec mode
+   ssh -o ProxyCommand="ssh <user>@<login node> nc %h 22" <user>@<compute node fqdn> hostname
+   ```
+
+   Run it before restricting the key as in
+   [A key for the tunnel only](#a-key-for-the-tunnel-only). With the restricted
+   key, run it from a host listed in `from=`; the wrapper then prints
+   `tunnel key: refused: hostname`, which already proves the key logged in on the
+   node.
+
+3. **Forwarding on the compute node's sshd**, in both modes: the forwards are
+   always `-L` on the node. `AllowTcpForwarding` for TCP ports and
+   `AllowStreamLocalForwarding` for [socket ports](#where-the-workload-listens).
+   Both are on in a stock `sshd_config`, and a login node that refuses forwarding
+   does not mean its compute nodes do: check with the command above plus
+   `-L 8080:127.0.0.1:8080`.
+
+The login node needs no route to the pod's own ports: the last hop happens inside
+the compute node.
 
 `ssh -L` carries TCP only. UDP ports on the offloaded pod are skipped, with a
 warning in the virtual kubelet log.
@@ -90,6 +129,26 @@ warning in the virtual kubelet log.
 
 ---
 
+## Security checklist
+
+The defaults keep existing deployments working unchanged. For a new deployment, or
+once the site is ready for it:
+
+1. **End the tunnel on the compute node**, `ForwardTarget: node`, so the workload
+   never listens on the network. See [Forward modes](#forward-modes).
+2. **Have the workload listen on a unix socket.** Failing that, on `127.0.0.1` with
+   the whole node to itself (`--exclusive`). Never on `0.0.0.0`. See
+   [Where the workload listens](#where-the-workload-listens).
+3. **Verify compute node host keys**: keep `NodeHostKeys: verify`, and pin the login
+   node's key in `KnownHostsConfigMap`. See [Compute nodes](#compute-nodes).
+4. **Give the shadow a key for the tunnel only**, restricted in `authorized_keys`,
+   never the plugin's key. See [A key for the tunnel only](#a-key-for-the-tunnel-only).
+5. **Decide on `ReplicateCredentials`.** It is on by default and copies that key
+   into every shadow namespace, where anyone who can read Secrets can use it. See
+   [Credential replication](#credential-replication).
+
+---
+
 ## Configuration
 
 ### Virtual Kubelet
@@ -103,10 +162,15 @@ Network:
     LoginHost: login.hpc.example.org
     User: alice
     KeySecret: hpc-ssh-key
+    ForwardTarget: node
+    KnownHostsConfigMap: hpc-known-hosts   # login node key, plus node keys or a CA line
 ```
 
 `EnableTunnel` turns shadow pods on for offloaded pods with exposed ports;
-`ShadowMode` picks which shadow is rendered. Both are needed.
+`ShadowMode` picks which shadow is rendered. Both are needed. `ForwardTarget: node`
+is recommended but not yet the default, see [Forward modes](#forward-modes).
+`KnownHostsConfigMap` holds the host keys the shadow trusts, see
+[Host key verification](#host-key-verification).
 
 ### Helm
 
@@ -119,7 +183,13 @@ virtualNode:
       loginHost: login.hpc.example.org
       user: alice
       keySecret: hpc-ssh-key
+      forwardTarget: node
+      knownHostsConfigMap: hpc-known-hosts
 ```
+
+Charts that predate `forwardTarget` and `nodeHostKeys` ignore them without an
+error, and the shadow stays on the login target: check that the output of
+`helm template` contains `ForwardTarget`.
 
 See [`examples/ssh_tunnel.yaml`](https://github.com/interlink-hq/interlink-helm-chart/blob/main/interlink/examples/ssh_tunnel.yaml)
 in the chart repository for a complete deployment.
@@ -128,23 +198,25 @@ in the chart repository for a complete deployment.
 
 | Option | Default | Description |
 | --- | --- | --- |
-| `LoginHost` | — | SSH login node to forward through (**required**) |
-| `User` | — | Login name on that node (**required**) |
+| `LoginHost` | none | SSH login node to forward through (**required**) |
+| `User` | none | Login name on that node (**required**) |
 | `Port` | `22` | Login node's SSH port |
 | `Image` | `ghcr.io/interlink-hq/interlink/ssh-tunnel:<version>` | Image the shadow runs. Needs an ssh client, plus `kinit` for Kerberos |
 | `Auth` | `publickey` | `publickey` or `kerberos` |
-| `ForwardMode` | `portforward` | `portforward` (`ssh -L`) or `exec` (relay through a command on the login node) |
-| `ExecConnectCommand` | `nc` | Command run on the login node in `exec` mode, invoked as `<command> <node> <port>` |
-| `KeySecret` | — | Secret holding the private key (`publickey`) |
+| `ForwardTarget` | `login` | Where the ssh session ends: `login` (the login node connects to the workload over plain TCP) or `node` (the compute node's own sshd, recommended). See [Forward modes](#forward-modes) |
+| `ForwardMode` | `portforward` | `portforward` (sshd forwarding: `-L` on the login node, or `-W` on the login node and `-L` on the compute node) or `exec` (ssh commands only, no forwarding) |
+| `ExecConnectCommand` | `nc` | Netcat run on the login node in `exec` mode: `<command> <node> <port>` with the login target, `<command> <node> 22` with the node target |
+| `KeySecret` | none | Secret holding the shadow's private key (`publickey`). Use [a key for the tunnel only](#a-key-for-the-tunnel-only), never the plugin's |
 | `KeySecretKey` | `id_ed25519` | Key inside `KeySecret` |
-| `KeytabSecret` | — | Secret holding the keytab (`kerberos`) |
+| `KeytabSecret` | none | Secret holding the keytab (`kerberos`) |
 | `KeytabSecretKey` | `user.keytab` | Key inside `KeytabSecret` |
-| `Principal` | — | Kerberos principal (`kerberos`) |
-| `Krb5ConfigMap` | — | ConfigMap with a `krb5.conf`, mounted at `/etc/krb5.conf` |
-| `KnownHostsConfigMap` | — | ConfigMap with a `known_hosts` file |
+| `Principal` | none | Kerberos principal (`kerberos`) |
+| `Krb5ConfigMap` | none | ConfigMap with a `krb5.conf`, mounted at `/etc/krb5.conf` |
+| `KnownHostsConfigMap` | none | ConfigMap with a `known_hosts` file: the login node's key, plus compute node keys, host patterns or `@cert-authority` lines |
+| `NodeHostKeys` | `verify` | How compute node host keys are checked with `ForwardTarget: node`: `verify` or `accept-new`. See [Compute nodes](#compute-nodes) |
 | `ReplicateCredentials` | `true` | Copy the credential into each shadow's namespace |
 | `NodeWaitTimeout` | `2h` | How long the shadow waits for the compute node |
-| `ExtraOptions` | `[]` | Extra ssh options, each passed as `-o <option>` |
+| `ExtraOptions` | `[]` | Extra ssh options, each passed as `-o <option>` on every hop, after the shadow's own. ssh keeps the first value it sees, so they add settings but cannot override the shadow's. One exception: `GSSAPIDelegateCredentials=yes` turns Kerberos delegation back on for the login hop |
 
 Misconfiguration fails at **startup**, not on the first offloaded pod, so a missing
 `LoginHost` or a `kerberos` block without a `Principal` is caught immediately.
@@ -153,16 +225,43 @@ Misconfiguration fails at **startup**, not on the first offloaded pod, so a miss
 
 ## Forward modes
 
-The default, `portforward`, is one `ssh -L` per exposed port. It is the cheapest
-option and depends on nothing but the ssh client, but it requires
-[`AllowTcpForwarding yes`](#before-you-start-what-the-login-node-has-to-allow) on
-the login node.
+Two settings decide how a connection travels from the shadow to the workload.
 
-`exec` is for sites that do not grant it. It gives each exposed port a local
-listener in the shadow and relays every accepted connection through a command run
-on the login node — by default `nc <compute node> <port>`. Nothing asks sshd to
-forward anything, so the only privileges involved are the ones the shadow already
-uses to log in.
+**`ForwardTarget` says where the shadow's ssh session ends.**
+
+- `login` (default): on the login node, which then opens a plain TCP connection to
+  `<compute node>:<port>`. That last leg is not encrypted, and the workload has to
+  listen on an address the login node can reach.
+- `node`: on the compute node's own sshd, reached through the login node. The login
+  node only relays encrypted traffic, and each forward is opened inside the node, to
+  `127.0.0.1:<port>` or to a unix socket, so the workload does not listen on the
+  network at all.
+
+`node` is the recommended setting. `login` stays the default so that an upgrade
+changes nothing for existing deployments; the virtual kubelet says so in one line
+at startup.
+
+**`ForwardMode` says what the shadow asks of the login node.**
+
+- `portforward` (default): yes, one `ssh -L` per exposed port. It is the cheapest
+  option and depends on nothing but the ssh client.
+- `exec`: no. It is for sites that do not grant forwarding. Each exposed port gets a
+  local listener in the shadow, and every accepted connection is relayed by a
+  netcat run as an ordinary ssh command. The only privileges involved are the ones
+  the shadow already uses to log in.
+
+What each combination needs from the site:
+
+| `ForwardTarget` | `ForwardMode` | Login node | Compute node | Workload listens on |
+| --- | --- | --- | --- | --- |
+| `login` | `portforward` | TCP forwarding (`-L`) | nothing | the node's address |
+| `login` | `exec` | runs `nc <node> <port>` | nothing | the node's address |
+| `node` | `portforward` | TCP forwarding (`-W <node>:22`) | TCP or socket forwarding (`-L`) | `127.0.0.1` or a socket |
+| `node` | `exec` | runs `nc <node> 22` | TCP or socket forwarding (`-L`) | `127.0.0.1` or a socket |
+
+`node` with `exec` needs no forwarding on the login node, only on the compute
+node's sshd, so it keeps the workload off the network at sites whose login nodes
+refuse forwarding:
 
 ```yaml
 Network:
@@ -171,17 +270,18 @@ Network:
     LoginHost: "login.hpc.example.org"
     User: "alice"
     KeySecret: "hpc-ssh-key"
+    ForwardTarget: "node"
     ForwardMode: "exec"
     ExecConnectCommand: "nc"   # ncat, or "nc -q 1" on a netcat that does not half-close
 ```
 
-The two are interchangeable above the socket: the Service still fronts the same
-container port, and the offloaded workload still only binds `0.0.0.0`. Nothing on
-either side can tell them apart.
+The two modes are interchangeable above the socket: the Service still fronts the
+same container port, and nothing on either side can tell them apart. The target is
+what decides where the workload has to listen, see
+[Where the workload listens](#where-the-workload-listens).
 
 | | `portforward` | `exec` |
 | --- | --- | --- |
-| Login node must allow | TCP forwarding | running a command, and have a netcat |
 | Connections | one long-lived ssh | one ssh channel per TCP connection |
 | Cost per connection | none | one multiplexed channel open |
 | Failure surfaces | at connect time | at connect time |
@@ -197,8 +297,10 @@ Two things to check when picking `exec`:
 - **Which netcat.** `nc` varies. `netcat-traditional` does not propagate a
   half-close, so a client that closes its write side can leave the connection
   hanging; `nc -q 1` or `ncat` avoids it. Set `ExecConnectCommand` accordingly.
-- **Process limits.** Even multiplexed, the login node runs a netcat per
-  connection. Sites with per-user process caps will notice a busy shadow.
+- **Process limits.** With `ForwardTarget: login`, even multiplexed, a netcat runs
+  on the login node per connection. Sites with per-user process caps will notice a
+  busy shadow. With `ForwardTarget: node` there is one netcat per tunnel, carrying
+  the session to the compute node's sshd.
 
 ---
 
@@ -219,6 +321,66 @@ SSH:
   Auth: publickey
   KeySecret: hpc-ssh-key
 ```
+
+### A key for the tunnel only
+
+The shadow's key is copied into every namespace a shadow runs in (see
+[Credential replication](#credential-replication)), so plan for it to leak. Never
+reuse the plugin's key, which can submit jobs. Create a key for the tunnel alone and
+restrict it in the HPC account's `~/.ssh/authorized_keys`, which login and compute
+nodes usually share:
+
+```
+restrict,port-forwarding,from="<cluster egress>,<login nodes>",command="$HOME/.interlink/tunnel-wrapper" ssh-ed25519 AAAA... interlink-tunnel
+```
+
+- `restrict` turns off port, agent and X11 forwarding and terminal allocation.
+- `port-forwarding` turns port forwarding back on, which `ForwardTarget: node`
+  needs in both modes (the forwards are `-L` on the compute node) and
+  `ForwardMode: portforward` needs on the login node. Only a deployment with
+  `ForwardTarget: login` and `ForwardMode: exec` can drop it: sshd then forwards
+  nothing for this key, but the wrapper's `nc` lines still relay to any host and
+  port the login node reaches, so `from=` stays the main limit.
+- `from=` lists where the key may be used from: the cluster's egress addresses for
+  the login hop, and the login nodes, as the compute nodes see them, for the hop to
+  a compute node. This is the main limit. A key that may forward, or run the
+  wrapper's `nc`, can reach anything the login node or a compute node reaches, and
+  `permitopen` has no way to say "any compute node".
+- `command=` runs the wrapper below in place of any shell or command the client
+  asks for.
+
+`~/.interlink/tunnel-wrapper`, executable by the account (`chmod 700`):
+
+```sh
+#!/bin/sh
+# The only commands the interLink tunnel key may run. Forwarding (-W, -L, -R) and
+# "ssh -N" open no session and never reach this script.
+NC='nc'                                   # the virtual kubelet's ExecConnectCommand
+c=${SSH_ORIGINAL_COMMAND:-}
+case $c in *'
+'*) echo "tunnel key: refused" >&2; exit 1 ;; esac
+h="'?[A-Za-z0-9][A-Za-z0-9._-]*'?"
+ok() { printf '%s\n' "$c" | grep -Eqx -- "$1"; }
+if ok "$NC $h [0-9]{1,5}" ||
+   ok 'cat /etc/ssh/ssh_known_hosts /etc/ssh/ssh_known_hosts2'; then
+  exec /bin/sh -c "$c"
+fi
+echo "tunnel key: refused: $c" >&2
+exit 1
+```
+
+It allows the netcat relays of `exec` mode and the read of the login node's host key
+list that [`NodeHostKeys: verify`](#compute-nodes) does, and nothing else: no shell,
+no `scp`, no job submission. Set `NC` to the virtual kubelet's `ExecConnectCommand`.
+The newline check matters: `grep -x` matches line by line, so a second line could
+otherwise ride along.
+
+As written, `h` accepts any host, so the relays reach whatever the login node
+reaches. A site can narrow them by setting `h` to its node-name pattern, for example
+`h="'?node[0-9]+\.nodes\.example\.org'?"`.
+
+This works for `Auth: publickey` only. A keytab is the account's own credential and
+cannot be restricted this way.
 
 ### Kerberos
 
@@ -241,7 +403,17 @@ The shadow runs `kinit` in an init container and refreshes the ticket from a
 sidecar for the life of the tunnel, so long-running notebooks survive ticket
 expiry.
 
+The ticket is not forwarded to the login node or to compute nodes
+(`GSSAPIDelegateCredentials=no`): nothing the shadow runs there needs it. If a site
+requires it on the login node, add `GSSAPIDelegateCredentials=yes` to
+`ExtraOptions`.
+
 ### Host key verification
+
+Kerberos and public keys both prove who the client is. Only the host key proves the
+server is the one you meant to reach.
+
+#### Login node
 
 Without `KnownHostsConfigMap` the shadow uses `StrictHostKeyChecking=accept-new`,
 which trusts whatever key the login node presents on first contact. That is a small
@@ -259,6 +431,55 @@ SSH:
 
 This switches the shadow to `StrictHostKeyChecking=yes`.
 
+#### Compute nodes
+
+With `ForwardTarget: node` the shadow opens a second session, through the login
+node, to the compute node's own sshd, and checks that node's host key too.
+`NodeHostKeys` decides how:
+
+- `verify` (default): the key must be listed, and ssh runs with
+  `StrictHostKeyChecking=yes`. At each start the shadow collects the keys it trusts
+  from the `KnownHostsConfigMap` file and from the login node's
+  `/etc/ssh/ssh_known_hosts` and `ssh_known_hosts2`, read over the login connection.
+  Some sites list their nodes there, often as a single `@cert-authority` line;
+  `verify` then needs only the login node's key pinned in `KnownHostsConfigMap`
+  (see below).
+- `accept-new`: any key is accepted, with a warning in the virtual kubelet and
+  shadow logs. This protects nothing: the shadow starts from an empty list every
+  time, so every start is a first contact.
+
+Verifying the node stops a host that pretends to be it, anywhere on the HPC
+network, from receiving the tunnel and the traffic in it.
+
+If the login node does not list the nodes, add them to the ConfigMap's
+`known_hosts`, next to the login node's key, in one of these forms:
+
+```
+# one key shared by every node
+*.nodes.example.org ssh-ed25519 AAAA...
+# the CA that signs the nodes' host certificates
+@cert-authority *.nodes.example.org ssh-ed25519 AAAA...
+# one line per node
+node07.nodes.example.org ssh-ed25519 AAAA...
+```
+
+Names are matched against what the plugin reports, `hostname -f` for the Slurm
+plugin. To see whether the nodes share a key, scan two of them from the login node
+and compare the fingerprints:
+
+```bash
+ssh <user>@<login node> "ssh-keyscan -t ed25519 <node a> <node b> 2>/dev/null" | ssh-keygen -lf -
+```
+
+The same fingerprint twice means one host-pattern line covers every node. Two
+different ones mean each node has its own key: ask the site for its CA or its list
+of node keys.
+
+Pin the login node's key as well. Without it the login connection is itself
+`accept-new`, and node keys read over it are only as trustworthy as that first
+contact: an impersonated login node could serve false ones. The virtual kubelet
+warns at startup in that case.
+
 ---
 
 ## How the compute node is discovered
@@ -266,13 +487,17 @@ This switches the shadow to `StrictHostKeyChecking=yes`.
 The shadow is created when the pod is, which is long before the batch system has
 scheduled anything — so at creation time there is no node to forward to yet.
 
-1. interLink creates a ConfigMap, `<shadow>-node`, holding an empty `compute-node` key.
-2. The plugin reports the allocated node as `PodStatus.NodeName` once the job runs.
-3. interLink patches that value into the ConfigMap. It is mounted, not injected into
+1. interLink creates a ConfigMap, `<shadow>-node`, holding two empty keys,
+   `compute-node` and `socket-dir`.
+2. The plugin reports the allocated node as `PodStatus.NodeName` once the job runs,
+   and, if it supports socket ports, the pod's
+   [socket directory](#the-socket-directory) as `PodStatus.SocketDir`.
+3. interLink patches both into the ConfigMap. It is mounted, not injected into
    the pod spec, so kubelet refreshes it in place — restarting the shadow would
    change its pod IP, which Kubernetes has already been told is the offloaded pod's IP.
-4. The shadow's `wait-for-node` init container polls the mounted file, then
-   `ssh-forward` starts the tunnel.
+4. The shadow's `wait-for-node` init container polls the mounted node name, and the
+   socket directory when the pod has [socket ports](#where-the-workload-listens),
+   then `ssh-forward` starts the tunnel.
 
 While the job is queued the shadow sits in `Init:0/1`. That is the expected state,
 not a failure — it reads as "waiting for the allocation" rather than a crash-looping
@@ -285,12 +510,20 @@ interLink republishes it, and the shadow rebuilds its forwarders **in place**:
 compute node changed from node07.hpc.example.org to node11.hpc.example.org, rebuilding the tunnel
 ```
 
+With `ForwardTarget: node` the line is
+`compute node or socket directory changed, rebuilding the tunnel`.
+
 The container is not restarted, so the shadow keeps its pod IP — the one Kubernetes
-has already been told is the offloaded pod's IP.
+has already been told is the offloaded pod's IP. With `ForwardTarget: node` it also
+rebuilds when the socket directory changes, and while the node refuses it, for
+example because a requeued job is not running there yet, it retries every 30
+seconds.
 
 :::warning
 This requires a plugin that reports `PodStatus.NodeName`. A plugin that does not
-will leave the shadow waiting until the timeout expires.
+will leave the shadow waiting until the timeout expires. Socket ports also need
+`PodStatus.SocketDir`, which the Slurm plugin reports only when its `SocketDirRoot`
+is set.
 :::
 
 ### What a plugin may report
@@ -310,6 +543,13 @@ carrying a quote or `$(` would break out of the relay command in `exec` mode. Pl
 should report what the node calls itself — `hostname -f` for the Slurm plugin — and
 nothing else.
 
+`PodStatus.SocketDir` must be an absolute path of at most 92 bytes, so that
+`<dir>/fwd-65535.sock` fits the 107-byte limit of a unix socket path. Each component
+may hold only letters, digits, `.`, `_` and `-`, and starts with a letter, a digit
+or `_`. An invalid directory is logged and published empty, so socket ports keep
+waiting. Report it only together with `NodeName`, once the job has created the
+directory.
+
 ---
 
 ## Credential replication
@@ -319,7 +559,10 @@ usual choice for multi-tenant setups such as Kubeflow notebooks — that means t
 shadow lands in a per-user namespace, where the SSH credential does not exist.
 
 By default interLink copies the credential Secret, and any `Krb5ConfigMap` /
-`KnownHostsConfigMap`, from its own namespace into the shadow's namespace.
+`KnownHostsConfigMap`, from its own namespace into the shadow's namespace. The
+Secret is the shadow's own, `KeySecret` or `KeytabSecret`, and nothing else is
+copied. Since the copy is readable there, make `KeySecret`
+[a key for the tunnel only](#a-key-for-the-tunnel-only).
 
 Copies are marked with `interlink.eu/replicated-from`, and only objects carrying
 that annotation are overwritten on a later pass. If an object of the same name is
@@ -344,9 +587,66 @@ replication controller.
 
 ---
 
+## Where the workload listens
+
+The tunnel hands each connection to an address on the compute node, and the
+workload has to listen there. That choice also decides who else on the HPC side can
+connect:
+
+- `0.0.0.0`: anyone who can reach the node over the network can connect.
+- `127.0.0.1`: every user with a job or a login on that node can connect.
+- A socket in a 0700 directory: the kernel checks the permissions on every connect,
+  so only your account gets in.
+
+With `ForwardTarget: node`, in order of preference:
+
+1. **A unix socket.** The workload listens on `$INTERLINK_SOCKET_DIR/fwd-<port>.sock`
+   and the pod lists the port in `interlink.eu/shadow-socket-ports`, as in the
+   [example below](#pod-configuration). It needs a plugin that provides a
+   [socket directory](#the-socket-directory).
+2. **TCP on `127.0.0.1`**, only when the job has the whole node, so that no other
+   user's job runs there: `slurm-job.vk.io/flags: "--exclusive"` with the Slurm
+   plugin.
+3. **Never `0.0.0.0`.** The forward does not need it, and it opens the workload to
+   the whole HPC network.
+
+With `ForwardTarget: login` the login node connects to the node's address, so the
+workload has to listen on it, which in practice means `0.0.0.0` and the exposure of
+the first line above. Keep the application's own authentication on, or move to the
+node target.
+
+The socket directory keeps out other HPC accounts. It does not keep out other jobs
+of the same account, the node's administrators, or anything in the cluster that can
+reach the shadow's Service: keep the application's own authentication, and restrict
+the Service with a NetworkPolicy.
+
+The server behind a forward must run on the batch node, the one the plugin reports
+as `NodeName`. A unix socket is reachable only on the host that bound it, so ranks
+of a multi-node job on other nodes cannot be forwarded: multi-node jobs are out of
+scope.
+
+### The socket directory
+
+The plugin picks a directory for each pod. The job creates it with mode 0700 when it
+starts, fails rather than use one it did not create, and removes it when it ends.
+Every container sees it at the same path, in `INTERLINK_SOCKET_DIR`.
+
+For the Slurm plugin, set `SocketDirRoot` in its configuration; each pod gets
+`<SocketDirRoot>/<first 12 hex digits of the pod UID>`. The root must be:
+
+- on a filesystem that both the job and an ssh session on the node see, never
+  node-local `/tmp`, which some sites make private to each job;
+- at most 79 bytes long, so that the longest socket path,
+  `<root>/<12 digits>/fwd-65535.sock`, fits the 107-byte limit;
+- owned by the account with mode 0700, never writable by other accounts. Where
+  others can write, they can create a pod's directory first and make its job fail.
+
+---
+
 ## Pod configuration
 
-Nothing special is required — an offloaded pod that exposes a port gets a shadow:
+An offloaded pod that exposes a port gets a shadow. With the node target, a notebook
+listening on a socket looks like this:
 
 ```yaml
 apiVersion: v1
@@ -357,6 +657,8 @@ metadata:
     # Keep the shadow in this pod's namespace, so it can mount credentials
     # replicated here rather than into a separate <ns>-shadow namespace.
     interlink.eu/shadow-same-ns: "true"
+    # Forward 8888 to $INTERLINK_SOCKET_DIR/fwd-8888.sock instead of a TCP port.
+    interlink.eu/shadow-socket-ports: "8888"
 spec:
   nodeSelector:
     kubernetes.io/hostname: hpc-vk
@@ -367,10 +669,30 @@ spec:
   containers:
   - name: jupyter
     image: docker://jupyter/scipy-notebook
+    command:
+    - sh
+    - -c
+    - >-
+      exec jupyter lab --no-browser
+      --ServerApp.sock=$INTERLINK_SOCKET_DIR/fwd-8888.sock
+      --ServerApp.allow_remote_access=True
     ports:
     - containerPort: 8888
       name: notebook
 ```
+
+Jupyter Server creates the socket with mode 0600 by default. Keep its token: the
+socket keeps out other HPC users, but anything in the cluster that reaches the
+shadow's Service still reaches the notebook. `allow_remote_access` only turns off
+Jupyter's check of the `Host` header: listening on a socket or on loopback, Jupyter
+otherwise answers 403 to any name but `localhost`, so to every request through an
+Ingress or the Service. The token stays on.
+
+Without a socket directory, give the job the whole node and listen on loopback:
+`slurm-job.vk.io/flags: "--exclusive"` and
+`--ip=127.0.0.1 --ServerApp.allow_remote_access=True`. With
+`ForwardTarget: login` the notebook needs `--ip=0.0.0.0` instead, with the exposure
+described in [Where the workload listens](#where-the-workload-listens).
 
 The shadow's Service carries the same ports, so anything that can reach the Service —
 an Ingress, an Istio VirtualService, `kubectl port-forward` — reaches the notebook.
@@ -396,20 +718,56 @@ kubectl get configmap <shadow>-node -o jsonpath='{.data.compute-node}'
 
 Empty means no plugin has reported one yet.
 
-**`ssh-forward` crash-loops with a permission error.** The credential Secret is
+**`waiting for the plugin to report a socket directory` in the `wait-for-node`
+log.** The pod lists socket ports, but the plugin has not reported a socket
+directory, and one without socket support never will: set `SocketDirRoot` in the
+Slurm plugin. After `NodeWaitTimeout` the init container fails with
+`timed out waiting for a socket directory`. What has been reported so far:
+
+```bash
+kubectl get configmap <shadow>-node -o jsonpath='{.data.socket-dir}'
+```
+
+**`ssh-forward` crash-loops (login target) or repeats
+`the tunnel to <node> is down; retrying in 30s` (node target), with a permission
+error.** The credential Secret is
 missing from the shadow's namespace, or `KeySecretKey` does not match the key inside
 it. With `ReplicateCredentials: false` the Secret must already exist there.
 
-**Connection refused through the tunnel.** The tunnel reached the compute node but
-nothing is listening on that port. Services often bind `127.0.0.1` by default; bind
-`0.0.0.0` instead — for a notebook, `--ip=0.0.0.0`.
+**Connection refused or reset through the tunnel.** The tunnel reached the compute
+node but nothing listens where it connects.
+
+- With `ForwardTarget: node` that is `127.0.0.1:<port>` on the batch node, or
+  `$INTERLINK_SOCKET_DIR/fwd-<port>.sock` for socket ports. Check that the server
+  listens there and runs on that node. A pod created before `SocketDirRoot` was set
+  or changed is given a directory its job never created: recreate the pod.
+- With `ForwardTarget: login` the login node connects to the node's address, which
+  a server on `127.0.0.1` does not listen on. Read
+  [Where the workload listens](#where-the-workload-listens) before binding
+  `0.0.0.0`, or move to the node target.
 
 **Connection reset, and `channel N: open failed: administratively prohibited` in the
-`ssh-forward` log.** The login node refuses port forwarding for this account. Either
-have the site allow it, or switch to [`ForwardMode: exec`](#forward-modes).
+`ssh-forward` log.** An sshd refuses port forwarding for this account. With
+`ForwardTarget: login` it is the login node's. With `node` it is either the login
+node's, refusing `-W` when the tunnel starts (followed by
+`stdio forwarding failed`), or the compute node's, refusing `-L` when traffic
+arrives. Either have the site allow it, or switch to
+[`ForwardMode: exec`](#forward-modes), which asks neither sshd to forward.
 
-**Host key verification failed.** `KnownHostsConfigMap` does not contain the login
-node's current key. Re-run `ssh-keyscan` and update the ConfigMap.
+**Host key verification failed.** With `ForwardTarget: login`,
+`KnownHostsConfigMap` does not contain the login node's current key. Re-run
+`ssh-keyscan` and update the ConfigMap.
+
+With `node` it can also be the compute node's key. A line
+`no host key for <node>: ...` just before it means nothing in the list matches the
+node's name: add its key, a host pattern or an `@cert-authority` line, as in
+[Compute nodes](#compute-nodes). That line is not printed when the list holds any
+`@cert-authority` line, so without it, first check that a line covers the reported
+name: `ssh-keygen -F <node> -f known_hosts`, against the ConfigMap's file and the
+login node's `/etc/ssh/ssh_known_hosts`. With a CA line, the node's certificate must
+also list that name as a principal. If both hold, the node presented a key or
+certificate the list does not accept. That is exactly what the check is for: ask the
+site whether the node was reinstalled before changing the ConfigMap.
 
 **`Refusing to publish compute node ...` in the virtual kubelet log, and the shadow
 stays in `Init:0/1`.** The plugin reported something that is not a hostname or an IP
