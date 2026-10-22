@@ -1752,6 +1752,8 @@ func (p *Provider) checkSocketPortsRequest(pod *v1.Pod) error {
 		return fmt.Errorf("pod %s/%s sets %s, but Network.EnableTunnel is false", pod.Namespace, pod.Name, annShadowSocketPorts)
 	case p.config.Network.SSH.ForwardTarget != SSHForwardTargetNode:
 		return fmt.Errorf("pod %s/%s sets %s, which needs Network.SSH.ForwardTarget %q", pod.Namespace, pod.Name, annShadowSocketPorts, SSHForwardTargetNode)
+	case pod.Annotations["interlink.eu/pod-vpn"] != "":
+		return fmt.Errorf("pod %s/%s sets %s, but interlink.eu/pod-vpn disables its shadow tunnel", pod.Namespace, pod.Name, annShadowSocketPorts)
 	}
 
 	ports, err := parseSocketPorts(value)
