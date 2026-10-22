@@ -61,6 +61,9 @@ node_opts="\
               : > "$w/node_known_hosts"
             {{- if .SSH.KnownHostsConfigMap }}
               cat /interlink/known-hosts/known_hosts >> "$w/node_known_hosts"
+              # A ConfigMap value may lack its final newline: keep the next file's
+              # first line from joining its last one.
+              echo >> "$w/node_known_hosts"
             {{- end }}
             {{- if eq .SSH.NodeHostKeys "verify" }}
               # The login node's own list of node keys, often one @cert-authority line.
@@ -76,7 +79,9 @@ node_opts="\
             {{- if eq .SSH.ForwardMode "exec" }}
               printf '#!/bin/sh\nexec ssh %s %s "%s %s 22"\n' "$ssh_opts" "$target" "$connect_cmd" "'$node'" > "$w/node-proxy"
             {{- else }}
-              printf '#!/bin/sh\nexec ssh %s -W %s:22 %s\n' "$ssh_opts" "$node" "$target" > "$w/node-proxy"
+              # ssh -W needs an IPv6 address in brackets to tell it from the port.
+              case $node in *:*) w_node="[$node]" ;; *) w_node=$node ;; esac
+              printf '#!/bin/sh\nexec ssh %s -W %s:22 %s\n' "$ssh_opts" "$w_node" "$target" > "$w/node-proxy"
             {{- end }}
               chmod +x "$w/node-proxy"
             }

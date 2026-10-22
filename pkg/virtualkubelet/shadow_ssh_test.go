@@ -423,6 +423,7 @@ func TestSSHShadowTemplateNodeTarget(t *testing.T) {
 		script := forwardScript(t, deployment)
 
 		assert.Contains(t, script, `-W %s:22`)
+		assert.Contains(t, script, `*:*) w_node="[$node]"`, "an IPv6 node goes to -W in brackets")
 		assert.Contains(t, script, `-L "0.0.0.0:6006:127.0.0.1:6006"`)
 		assert.Contains(t, script, `-L "0.0.0.0:8888:$sd/fwd-8888.sock"`)
 		assert.NotContains(t, manifest, "socat")
@@ -491,6 +492,8 @@ func TestSSHShadowTemplateNodeTarget(t *testing.T) {
 		assert.Contains(t, script, "cat /etc/ssh/ssh_known_hosts")
 		assert.Contains(t, script, "ssh-keygen -F")
 		assert.Contains(t, script, "cat /interlink/known-hosts/known_hosts")
+		assert.Regexp(t, `cat /interlink/known-hosts/known_hosts >> "\$w/node_known_hosts"\n(\s*#.*\n)*\s*echo >> "\$w/node_known_hosts"`, script,
+			"a ConfigMap without a final newline must not join the login node's first line")
 		assert.Contains(t, optionSet(t, script, "node_opts"), "StrictHostKeyChecking=yes")
 		assert.NotContains(t, script, "StrictHostKeyChecking=accept-new")
 	})
