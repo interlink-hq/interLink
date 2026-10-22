@@ -270,9 +270,10 @@ spec:
 - The shadow forwards each listed port to `$INTERLINK_SOCKET_DIR/fwd-<port>.sock` on the compute node instead of `127.0.0.1:<port>`; the workload creates that socket
 - `INTERLINK_SOCKET_DIR` is a directory private to the pod's job (mode 0700), set in every container by the plugin
 - Unlike a TCP port on `127.0.0.1`, a socket in that directory is closed to other users of the compute node; see [Where the workload listens](./14-ssh-tunnel-configuration.mdx#where-the-workload-listens)
-- Requires `Network.EnableTunnel: true`, `ShadowMode: ssh`, `SSH.ForwardTarget: node`, and a plugin that reports a socket directory (`SocketDirRoot` in the Slurm plugin)
+- Requires `Network.EnableTunnel: true`, `ShadowMode: ssh`, `SSH.ForwardTarget: node`, and no `interlink.eu/pod-vpn` on the pod
 - Each entry must be an exposed TCP port of the pod: a `containerPort` or a port in `interlink.eu/wstunnel-extra-ports`
 - Pod creation is refused when the value is malformed, names a port that is not an exposed TCP port, or the requirements above are not met: the pod shows reason `ProviderFailed` with the error as its message (`kubectl describe pod`), and the virtual kubelet logs it too
+- The plugin must also report a socket directory (`SocketDirRoot` in the Slurm plugin). The virtual kubelet cannot check that when the pod is created: without it the shadow waits in its init container, logging `waiting for the plugin to report a socket directory`, until `Network.SSH.NodeWaitTimeout` and then fails
 - Jupyter needs `--ServerApp.allow_remote_access=True`, as in the example, to answer requests that come through the shadow's Service; its token stays on, see [Pod configuration](./14-ssh-tunnel-configuration.mdx#pod-configuration)
 
 **Format:** Comma-separated port numbers, e.g. `"8888"` or `"8888,6006"`

@@ -362,7 +362,7 @@ NC='nc'                                   # the virtual kubelet's ExecConnectCom
 c=${SSH_ORIGINAL_COMMAND:-}
 case $c in *'
 '*) echo "tunnel key: refused" >&2; exit 1 ;; esac
-h="'?[A-Za-z0-9][A-Za-z0-9._-]*'?"
+h="'?[A-Za-z0-9][A-Za-z0-9._:-]*'?"
 ok() { printf '%s\n' "$c" | grep -Eqx -- "$1"; }
 if ok "$NC $h [0-9]{1,5}" ||
    ok 'cat /etc/ssh/ssh_known_hosts /etc/ssh/ssh_known_hosts2'; then
@@ -754,8 +754,10 @@ node but nothing listens where it connects.
 `ForwardTarget: login` it is the login node's. With `node` it is either the login
 node's, refusing `-W` when the tunnel starts (followed by
 `stdio forwarding failed`), or the compute node's, refusing `-L` when traffic
-arrives. Either have the site allow it, or switch to
-[`ForwardMode: exec`](#forward-modes), which asks neither sshd to forward.
+arrives. [`ForwardMode: exec`](#forward-modes) avoids only the first: the login
+node then runs `nc <node> 22` instead of forwarding, but the forwards stay `-L`
+on the compute node. If the compute node refuses, have the site allow it or use
+`ForwardTarget: login`.
 
 **Host key verification failed.** With `ForwardTarget: login`,
 `KnownHostsConfigMap` does not contain the login node's current key. Re-run
