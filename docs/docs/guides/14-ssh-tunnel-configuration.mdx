@@ -108,8 +108,11 @@ have to allow it.
    always `-L` on the node. `AllowTcpForwarding` for TCP ports and
    `AllowStreamLocalForwarding` for [socket ports](#where-the-workload-listens).
    Both are on in a stock `sshd_config`, and a login node that refuses forwarding
-   does not mean its compute nodes do: check with the command above plus
-   `-L 8080:127.0.0.1:8080`.
+   does not mean its compute nodes do. To test TCP forwarding, omit `hostname`
+   from the relevant command above and insert `-N -L 8080:127.0.0.1:8080` before
+   the destination. Keep it running and, from another terminal, connect to local
+   port 8080 while a server listens on the compute node's loopback port 8080.
+   A successful login or local listener alone does not test forwarding permission.
 
 The login node needs no route to the pod's own ports: the last hop happens inside
 the compute node.
