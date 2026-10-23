@@ -105,6 +105,7 @@ const (
 	annMeshNetworkDisabled          = "interlink.eu/mesh-network"                    // set to "disabled" to opt out of mesh networking
 	annShadowSocketPorts            = "interlink.eu/shadow-socket-ports"             // comma-separated exposed TCP ports served on unix sockets
 	shadowOwnerUIDLabel             = "interlink.eu/shadow-owner-uid"
+	shadowOwnerPodAnnotation        = "interlink.eu/shadow-owner-pod" // namespace/name of the pod in shadowOwnerUIDLabel
 )
 
 type ShadowTemplateData struct {
@@ -133,8 +134,10 @@ type ShadowTemplateData struct {
 	// in a container named PauseName, a name no kept init container uses.
 	PauseImage string
 	PauseName  string
-	// OwnerUID is stamped on every shadow resource (see shadowResourceIdentity).
+	// OwnerUID and OwnerPod are stamped on every shadow resource (see
+	// shadowResourceIdentity).
 	OwnerUID string
+	OwnerPod string
 	// NodeConfigMap is the ConfigMap the shadow can mount to learn which remote
 	// compute node the workload landed on. It exists from the moment the shadow is
 	// created but holds an empty NodeNameKey until the plugin reports the node.
@@ -1083,6 +1086,7 @@ func (p *Provider) createShadowPod(ctx context.Context, originalPod *v1.Pod) (*v
 		PauseImage:           p.shadowPauseImage(),
 		PauseName:            shadowPauseName(localInitContainers),
 		OwnerUID:             identity.OwnerUID,
+		OwnerPod:             identity.ownerPod(),
 		NodeConfigMap:        shadowNodeConfigMapName(identity.Name),
 		NodeNameKey:          shadowNodeNameKey,
 		SocketDirKey:         shadowSocketDirKey,
@@ -1463,7 +1467,7 @@ func (p *Provider) applyShadowObjects(ctx context.Context, manifestYAML string, 
 			continue
 		}
 		if meta, ok := obj.(metav1.Object); ok && td != nil {
-			stampShadowOwner(meta, td.OwnerUID)
+			stampShadowOwner(meta, td.OwnerUID, td.OwnerPod)
 		}
 
 		switch o := obj.(type) {
@@ -1616,7 +1620,7 @@ func (p *Provider) deleteOwnedShadowResource(ctx context.Context, identity shado
 			return err
 		}
 		if owner := obj.GetLabels()[shadowOwnerUIDLabel]; owner != "" && identity.OwnerUID != "" && owner != identity.OwnerUID &&
-			p.ownerIsCurrentPod(ctx, identity, owner) {
+			p.ownerIsCurrentPod(ctx, identity, obj) {
 			log.G(ctx).Infof("Keeping shadow %s %s/%s: it belongs to pod UID %s, not %s", kind, identity.Namespace, name, owner, identity.OwnerUID)
 			kept = true
 			return nil
@@ -1651,8 +1655,9 @@ func (p *Provider) lockShadow(namespace, name string) func() {
 	return mu.Unlock
 }
 
-// stampShadowOwner labels a shadow resource with the UID of the pod it serves.
-func stampShadowOwner(obj metav1.Object, ownerUID string) {
+// stampShadowOwner labels a shadow resource with the UID of the pod it serves and
+// annotates it with that pod's namespace/name.
+func stampShadowOwner(obj metav1.Object, ownerUID, ownerPod string) {
 	if ownerUID == "" {
 		return
 	}
@@ -1662,6 +1667,15 @@ func stampShadowOwner(obj metav1.Object, ownerUID string) {
 	}
 	labels[shadowOwnerUIDLabel] = ownerUID
 	obj.SetLabels(labels)
+	if ownerPod == "" {
+		return
+	}
+	annotations := obj.GetAnnotations()
+	if annotations == nil {
+		annotations = map[string]string{}
+	}
+	annotations[shadowOwnerPodAnnotation] = ownerPod
+	obj.SetAnnotations(annotations)
 }
 
 // cleanupPartialShadowResources removes specific resources that were created before a failure

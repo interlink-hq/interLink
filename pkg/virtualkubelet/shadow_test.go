@@ -450,40 +450,51 @@ func TestReleaseShadowIgnoresPodsWithoutAShadow(t *testing.T) {
 // name: the new pod's shadow has the same names, and the old pod's cleanup can run after
 // it was created. Only resources stamped with the old pod's UID may go.
 func TestCleanupKeepsShadowOfRecreatedPod(t *testing.T) {
-	const name = testPodDefaultName
+	const name, podName = testPodDefaultName, "nb-0"
 	const oldUID, newUID = "uid-old", "uid-new"
 	ns := testNamespaceDefault
+	// Every pod is named podName: the successor (newUID) exists, the old pod is gone.
+	cleanup := func(uid string) shadowResourceIdentity {
+		return shadowResourceIdentity{Name: name, Namespace: ns, OwnerUID: uid, PodName: podName, PodNamespace: ns}
+	}
+	owned := func(objectName, uid string) metav1.ObjectMeta {
+		meta := metav1.ObjectMeta{Name: objectName, Namespace: ns}
+		stampShadowOwner(&meta, uid, ns+"/"+podName)
+		return meta
+	}
+	withSuccessor := func(objects ...runtime.Object) *fake.Clientset {
+		successor := &v1.Pod{ObjectMeta: metav1.ObjectMeta{Name: podName, Namespace: ns, UID: k8stypes.UID(newUID)}}
+		return fake.NewSimpleClientset(append(objects, successor)...)
+	}
 	stamped := func(uid string) *appsv1.Deployment {
-		return &appsv1.Deployment{ObjectMeta: metav1.ObjectMeta{
-			Name: name, Namespace: ns, Labels: map[string]string{shadowOwnerUIDLabel: uid},
-		}}
+		return &appsv1.Deployment{ObjectMeta: owned(name, uid)}
 	}
 
 	t.Run("the old pod's cleanup keeps the new pod's shadow", func(t *testing.T) {
-		client := fake.NewSimpleClientset(stamped(newUID))
+		client := withSuccessor(stamped(newUID))
 		p := tunnelProvider(client)
 
-		p.cleanupShadowResources(t.Context(), shadowResourceIdentity{Name: name, Namespace: ns, OwnerUID: oldUID})
+		p.cleanupShadowResources(t.Context(), cleanup(oldUID))
 
 		_, err := client.AppsV1().Deployments(ns).Get(t.Context(), name, metav1.GetOptions{})
 		assert.NoError(t, err)
 	})
 
 	t.Run("the owner's cleanup removes it", func(t *testing.T) {
-		client := fake.NewSimpleClientset(stamped(newUID))
+		client := withSuccessor(stamped(newUID))
 		p := tunnelProvider(client)
 
-		p.cleanupShadowResources(t.Context(), shadowResourceIdentity{Name: name, Namespace: ns, OwnerUID: newUID})
+		p.cleanupShadowResources(t.Context(), cleanup(newUID))
 
 		_, err := client.AppsV1().Deployments(ns).Get(t.Context(), name, metav1.GetOptions{})
 		assert.True(t, apierrors.IsNotFound(err))
 	})
 
 	t.Run("an unstamped shadow from an older virtual kubelet is removed", func(t *testing.T) {
-		client := fake.NewSimpleClientset(&appsv1.Deployment{ObjectMeta: metav1.ObjectMeta{Name: name, Namespace: ns}})
+		client := withSuccessor(&appsv1.Deployment{ObjectMeta: metav1.ObjectMeta{Name: name, Namespace: ns}})
 		p := tunnelProvider(client)
 
-		p.cleanupShadowResources(t.Context(), shadowResourceIdentity{Name: name, Namespace: ns, OwnerUID: oldUID})
+		p.cleanupShadowResources(t.Context(), cleanup(oldUID))
 
 		_, err := client.AppsV1().Deployments(ns).Get(t.Context(), name, metav1.GetOptions{})
 		assert.True(t, apierrors.IsNotFound(err))
@@ -492,9 +503,7 @@ func TestCleanupKeepsShadowOfRecreatedPod(t *testing.T) {
 	// cert-manager creates the TLS Secret without the owner label: it follows its Ingress.
 	tlsObjects := func(owner string) []runtime.Object {
 		return []runtime.Object{
-			&networkingv1.Ingress{ObjectMeta: metav1.ObjectMeta{
-				Name: name, Namespace: ns, Labels: map[string]string{shadowOwnerUIDLabel: owner},
-			}},
+			&networkingv1.Ingress{ObjectMeta: owned(name, owner)},
 			&v1.Secret{ObjectMeta: metav1.ObjectMeta{Name: name + "-tls", Namespace: ns}},
 		}
 	}
@@ -503,11 +512,11 @@ func TestCleanupKeepsShadowOfRecreatedPod(t *testing.T) {
 		kept    bool
 	}{{cleanup: oldUID, kept: true}, {cleanup: newUID, kept: false}} {
 		t.Run("the TLS secret follows its ingress, cleanup by "+tc.cleanup, func(t *testing.T) {
-			client := fake.NewSimpleClientset(tlsObjects(newUID)...)
+			client := withSuccessor(tlsObjects(newUID)...)
 			p := tunnelProvider(client)
 			p.config.Network.IngressTLS = true
 
-			p.cleanupShadowResources(t.Context(), shadowResourceIdentity{Name: name, Namespace: ns, OwnerUID: tc.cleanup})
+			p.cleanupShadowResources(t.Context(), cleanup(tc.cleanup))
 
 			_, err := client.CoreV1().Secrets(ns).Get(t.Context(), name+"-tls", metav1.GetOptions{})
 			if tc.kept {
@@ -536,14 +545,14 @@ func TestCleanupKeepsShadowOfRecreatedPod(t *testing.T) {
 	}
 
 	t.Run("an ingress taken over between read and delete keeps it and its TLS secret", func(t *testing.T) {
-		client := fake.NewSimpleClientset(tlsObjects(oldUID)...)
+		client := withSuccessor(tlsObjects(oldUID)...)
 		conflictOnce(client, "ingresses", networkingv1.SchemeGroupVersion.WithResource("ingresses"), func(o metav1.Object) {
 			o.SetLabels(map[string]string{shadowOwnerUIDLabel: newUID})
 		})
 		p := tunnelProvider(client)
 		p.config.Network.IngressTLS = true
 
-		p.cleanupShadowResources(t.Context(), shadowResourceIdentity{Name: name, Namespace: ns, OwnerUID: oldUID})
+		p.cleanupShadowResources(t.Context(), cleanup(oldUID))
 
 		_, err := client.NetworkingV1().Ingresses(ns).Get(t.Context(), name, metav1.GetOptions{})
 		assert.NoError(t, err)
@@ -552,27 +561,27 @@ func TestCleanupKeepsShadowOfRecreatedPod(t *testing.T) {
 	})
 
 	t.Run("any other change between read and delete is retried", func(t *testing.T) {
-		client := fake.NewSimpleClientset(stamped(oldUID))
+		client := withSuccessor(stamped(oldUID))
 		conflictOnce(client, "deployments", appsv1.SchemeGroupVersion.WithResource("deployments"), func(o metav1.Object) {
 			o.SetAnnotations(map[string]string{"status": "updated"})
 		})
 		p := tunnelProvider(client)
 
-		p.cleanupShadowResources(t.Context(), shadowResourceIdentity{Name: name, Namespace: ns, OwnerUID: oldUID})
+		p.cleanupShadowResources(t.Context(), cleanup(oldUID))
 
 		_, err := client.AppsV1().Deployments(ns).Get(t.Context(), name, metav1.GetOptions{})
 		assert.True(t, apierrors.IsNotFound(err))
 	})
 
 	t.Run("the TLS secret stays when its ingress cannot be read", func(t *testing.T) {
-		client := fake.NewSimpleClientset(tlsObjects(newUID)...)
+		client := withSuccessor(tlsObjects(newUID)...)
 		client.PrependReactor("get", "ingresses", func(k8stesting.Action) (bool, runtime.Object, error) {
 			return true, nil, apierrors.NewInternalError(errors.New("etcd timeout"))
 		})
 		p := tunnelProvider(client)
 		p.config.Network.IngressTLS = true
 
-		p.cleanupShadowResources(t.Context(), shadowResourceIdentity{Name: name, Namespace: ns, OwnerUID: oldUID})
+		p.cleanupShadowResources(t.Context(), cleanup(oldUID))
 
 		_, err := client.CoreV1().Secrets(ns).Get(t.Context(), name+"-tls", metav1.GetOptions{})
 		assert.NoError(t, err)
@@ -581,7 +590,7 @@ func TestCleanupKeepsShadowOfRecreatedPod(t *testing.T) {
 	t.Run("the delete is conditional on the resource version that was read", func(t *testing.T) {
 		deployment := stamped(oldUID)
 		deployment.UID, deployment.ResourceVersion = "deployment-uid", "41"
-		client := fake.NewSimpleClientset(deployment)
+		client := withSuccessor(deployment)
 		var preconditions *metav1.Preconditions
 		client.PrependReactor("delete", "deployments", func(action k8stesting.Action) (bool, runtime.Object, error) {
 			preconditions = action.(k8stesting.DeleteAction).GetDeleteOptions().Preconditions
@@ -589,7 +598,7 @@ func TestCleanupKeepsShadowOfRecreatedPod(t *testing.T) {
 		})
 		p := tunnelProvider(client)
 
-		p.cleanupShadowResources(t.Context(), shadowResourceIdentity{Name: name, Namespace: ns, OwnerUID: oldUID})
+		p.cleanupShadowResources(t.Context(), cleanup(oldUID))
 
 		require.NotNil(t, preconditions)
 		require.NotNil(t, preconditions.UID)
@@ -605,33 +614,53 @@ func TestCleanupKeepsOnlyTheCurrentPodsResources(t *testing.T) {
 	const name, podName, staleUID, currentUID = testPodDefaultName, "nb-0", "uid-stale", "uid-live"
 	ns := testNamespaceDefault
 	identity := shadowResourceIdentity{Name: name, Namespace: ns, OwnerUID: "uid-cleaning", PodName: podName, PodNamespace: ns}
-	stampedService := func(owner string) *v1.Service {
-		return &v1.Service{ObjectMeta: metav1.ObjectMeta{Name: name, Namespace: ns, Labels: map[string]string{shadowOwnerUIDLabel: owner}}}
+	stampedService := func(owner, ownerPod string) *v1.Service {
+		meta := metav1.ObjectMeta{Name: name, Namespace: ns}
+		stampShadowOwner(&meta, owner, ownerPod)
+		return &v1.Service{ObjectMeta: meta}
 	}
-	livePod := &v1.Pod{ObjectMeta: metav1.ObjectMeta{Name: podName, Namespace: ns, UID: k8stypes.UID(currentUID)}}
+	pod := func(podName, uid string) *v1.Pod {
+		return &v1.Pod{ObjectMeta: metav1.ObjectMeta{Name: podName, Namespace: ns, UID: k8stypes.UID(uid)}}
+	}
+	serviceLeft := func(t *testing.T, client *fake.Clientset) bool {
+		t.Helper()
+		tunnelProvider(client).cleanupShadowResources(t.Context(), identity)
+		_, err := client.CoreV1().Services(ns).Get(t.Context(), name, metav1.GetOptions{})
+		if err != nil && !apierrors.IsNotFound(err) {
+			t.Fatal(err)
+		}
+		return err == nil
+	}
 
 	t.Run("kept for the pod that now has the name", func(t *testing.T) {
-		client := fake.NewSimpleClientset(stampedService(currentUID), livePod)
-		tunnelProvider(client).cleanupShadowResources(t.Context(), identity)
-		_, err := client.CoreV1().Services(ns).Get(t.Context(), name, metav1.GetOptions{})
-		assert.NoError(t, err)
+		client := fake.NewSimpleClientset(stampedService(currentUID, ns+"/"+podName), pod(podName, currentUID))
+		assert.True(t, serviceLeft(t, client))
 	})
 
-	t.Run("deleted when its pod no longer exists", func(t *testing.T) {
-		client := fake.NewSimpleClientset(stampedService(staleUID), livePod)
-		tunnelProvider(client).cleanupShadowResources(t.Context(), identity)
-		_, err := client.CoreV1().Services(ns).Get(t.Context(), name, metav1.GetOptions{})
-		assert.True(t, apierrors.IsNotFound(err), "a leftover of a pod that is gone stays forever otherwise")
+	t.Run("deleted when another pod now has the name", func(t *testing.T) {
+		client := fake.NewSimpleClientset(stampedService(staleUID, ns+"/"+podName), pod(podName, currentUID))
+		assert.False(t, serviceLeft(t, client), "a leftover of a pod that is gone stays forever otherwise")
+	})
+
+	t.Run("deleted when no pod has the name", func(t *testing.T) {
+		client := fake.NewSimpleClientset(stampedService(staleUID, ns+"/"+podName))
+		assert.False(t, serviceLeft(t, client))
 	})
 
 	t.Run("kept when the pod cannot be read", func(t *testing.T) {
-		client := fake.NewSimpleClientset(stampedService(staleUID))
+		client := fake.NewSimpleClientset(stampedService(staleUID, ns+"/"+podName))
 		client.PrependReactor("get", "pods", func(k8stesting.Action) (bool, runtime.Object, error) {
 			return true, nil, apierrors.NewInternalError(errors.New("etcd timeout"))
 		})
-		tunnelProvider(client).cleanupShadowResources(t.Context(), identity)
-		_, err := client.CoreV1().Services(ns).Get(t.Context(), name, metav1.GetOptions{})
-		assert.NoError(t, err)
+		assert.True(t, serviceLeft(t, client))
+	})
+
+	// web.0 and web-0 get the same shadow name: deleting one must not take the
+	// shadow the other one, still running, took over.
+	t.Run("kept for a live pod of another name that shares the shadow name", func(t *testing.T) {
+		const other, otherUID = "nb.0", "uid-other"
+		client := fake.NewSimpleClientset(stampedService(otherUID, ns+"/"+other), pod(podName, currentUID), pod(other, otherUID))
+		assert.True(t, serviceLeft(t, client))
 	})
 }
 
@@ -694,15 +723,17 @@ func TestApplyShadowStampsOwner(t *testing.T) {
 		"---\napiVersion: v1\nkind: Service\nmetadata:\n  name: " + name + "\n  namespace: " + ns + "\n" +
 		"spec:\n  ports:\n  - port: 80\n"
 
-	_, _, err := p.applyShadowObjects(t.Context(), manifest, &ShadowTemplateData{Name: name, Namespace: ns, OwnerUID: owner})
+	_, _, err := p.applyShadowObjects(t.Context(), manifest, &ShadowTemplateData{Name: name, Namespace: ns, OwnerUID: owner, OwnerPod: ns + "/nb-0"})
 	require.NoError(t, err)
 
 	cm, err := client.CoreV1().ConfigMaps(ns).Get(t.Context(), name, metav1.GetOptions{})
 	require.NoError(t, err)
 	assert.Equal(t, owner, cm.Labels[shadowOwnerUIDLabel], "the previous pod's object is relabelled")
+	assert.Equal(t, ns+"/nb-0", cm.Annotations[shadowOwnerPodAnnotation])
 	svc, err := client.CoreV1().Services(ns).Get(t.Context(), name, metav1.GetOptions{})
 	require.NoError(t, err)
 	assert.Equal(t, owner, svc.Labels[shadowOwnerUIDLabel])
+	assert.Equal(t, ns+"/nb-0", svc.Annotations[shadowOwnerPodAnnotation])
 }
 
 func TestShadowIdentityAndNodeConfigMapCarryOwner(t *testing.T) {

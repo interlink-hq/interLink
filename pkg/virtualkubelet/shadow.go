@@ -163,10 +163,17 @@ type shadowResourceIdentity struct {
 	// after the pod, so a pod recreated under the same name reuses those names; the
 	// UID, stamped as a label, tells which pod a resource belongs to.
 	OwnerUID string
-	// PodName and PodNamespace name that pod, to tell whether another UID stamped on a
-	// resource is the pod that now has the name (see ownerIsCurrentPod).
+	// PodName and PodNamespace name that pod.
 	PodName      string
 	PodNamespace string
+}
+
+// ownerPod is the namespace/name stamped as shadowOwnerPodAnnotation.
+func (identity shadowResourceIdentity) ownerPod() string {
+	if identity.PodName == "" {
+		return ""
+	}
+	return identity.PodNamespace + "/" + identity.PodName
 }
 
 func isShadowSameNamespace(pod *v1.Pod) bool {
@@ -323,7 +330,7 @@ func (p *Provider) resetShadowNodeConfigMap(ctx context.Context, identity shadow
 		},
 		Data: map[string]string{shadowNodeNameKey: "", shadowSocketDirKey: ""},
 	}
-	stampShadowOwner(cm, identity.OwnerUID)
+	stampShadowOwner(cm, identity.OwnerUID, identity.ownerPod())
 
 	configMaps := p.clientSet.CoreV1().ConfigMaps(identity.Namespace)
 	for attempt := 0; ; attempt++ {
@@ -443,9 +450,6 @@ func (p *Provider) releaseShadowOfEndedPod(ctx context.Context, pod *v1.Pod) {
 	p.forgetShadowNodeName(pod)
 }
 
-// indexShadowPods groups the shadow pods by the UID of the pod they stand for, read
-// from shadowOfLabel. The pods of a shadow rendered before that label existed are
-// left out, so their virtual pod keeps the IP it was created with.
 // isShadowPodOf reports whether a shadow pod may serve the pod with UID podUID: it is
 // labelled for that pod, or it predates shadowOfLabel, or the UID is unknown.
 func isShadowPodOf(shadowPod *v1.Pod, podUID string) bool {
@@ -453,26 +457,35 @@ func isShadowPodOf(shadowPod *v1.Pod, podUID string) bool {
 	return of == "" || podUID == "" || of == podUID
 }
 
-// ownerIsCurrentPod reports whether owner, the UID stamped on a shadow resource, is
-// the UID of the pod that now has the name the shadow stands for. Any other UID is a
-// pod that no longer exists, whose cleanup never ran (it was deleted while the virtual
-// kubelet was down, say): its leftovers are deleted. When the pod cannot be read, the
-// resource is kept.
-func (p *Provider) ownerIsCurrentPod(ctx context.Context, identity shadowResourceIdentity, owner string) bool {
-	if identity.PodName == "" {
+// ownerIsCurrentPod reports whether the pod a shadow resource is stamped for still
+// exists: the pod named by its shadowOwnerPodAnnotation (the pod of identity when it
+// has none) has the UID of its shadowOwnerUIDLabel. The name comes from the resource
+// because two pods can share a shadow name: sanitising maps web.0 and web-0 to one.
+// Otherwise the owner is gone and its cleanup never ran (it was deleted while the
+// virtual kubelet was down, say), so its leftovers are deleted. When the pod cannot
+// be read, the resource is kept.
+func (p *Provider) ownerIsCurrentPod(ctx context.Context, identity shadowResourceIdentity, obj metav1.Object) bool {
+	namespace, name, found := strings.Cut(obj.GetAnnotations()[shadowOwnerPodAnnotation], "/")
+	if !found {
+		namespace, name = identity.PodNamespace, identity.PodName
+	}
+	if name == "" {
 		return true
 	}
-	pod, err := p.clientSet.CoreV1().Pods(identity.PodNamespace).Get(ctx, identity.PodName, metav1.GetOptions{})
+	pod, err := p.clientSet.CoreV1().Pods(namespace).Get(ctx, name, metav1.GetOptions{})
 	if apierrors.IsNotFound(err) {
 		return false
 	}
 	if err != nil {
-		log.G(ctx).Warningf("Failed to read pod %s/%s: %v", identity.PodNamespace, identity.PodName, err)
+		log.G(ctx).Warningf("Failed to read pod %s/%s: %v", namespace, name, err)
 		return true
 	}
-	return string(pod.UID) == owner
+	return string(pod.UID) == obj.GetLabels()[shadowOwnerUIDLabel]
 }
 
+// indexShadowPods groups the shadow pods by the UID of the pod they stand for, read
+// from shadowOfLabel. The pods of a shadow rendered before that label existed are
+// left out, so their virtual pod keeps the IP it was created with.
 func indexShadowPods(pods []v1.Pod) map[string][]*v1.Pod {
 	index := make(map[string][]*v1.Pod)
 	for i := range pods {
