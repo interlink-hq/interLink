@@ -452,7 +452,18 @@ func (p *Provider) refreshShadowPodIP(ctx context.Context, pod *v1.Pod, shadowPo
 	if !ok {
 		return
 	}
-	ip := currentShadowPodIP(canonical.Status.PodIP, shadowPods[string(pod.UID)])
+	identity, err := computeShadowResourceIdentity(canonical)
+	if err != nil {
+		return
+	}
+	var candidates []*v1.Pod
+	for _, candidate := range shadowPods[string(pod.UID)] {
+		if candidate.Namespace != identity.Namespace || candidate.Labels[shadowComponentLabel] != identity.Name {
+			continue
+		}
+		candidates = append(candidates, candidate)
+	}
+	ip := currentShadowPodIP(canonical.Status.PodIP, candidates)
 	if ip == "" || ip == canonical.Status.PodIP {
 		return
 	}
