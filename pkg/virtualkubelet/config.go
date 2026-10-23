@@ -54,6 +54,9 @@ type Config struct {
 	TLS TLSConfig `yaml:"TLS,omitempty"`
 	// Network contains network-related settings for the virtual node
 	Network Network `yaml:"Network,omitempty"`
+	// ShadowPauseImage keeps a shadow running when the pod keeps only init containers
+	// on the cluster (default registry.k8s.io/pause:3.10)
+	ShadowPauseImage string `yaml:"ShadowPauseImage,omitempty"`
 	// SkipDownwardAPIResolution disables downward API resolution to enable scheduling pods with downward API
 	SkipDownwardAPIResolution bool `yaml:"SkipDownwardAPIResolution,omitempty"`
 	// DisableCSR disables CSR (CertificateSigningRequest) creation and uses self-signed certificates instead
