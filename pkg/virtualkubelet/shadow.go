@@ -299,7 +299,9 @@ func shadowNodeConfigMapName(shadowName string) string {
 // resetShadowNodeConfigMap creates, or blanks, the per-shadow node ConfigMap.
 // The shadow is rendered before the remote batch system has allocated anything,
 // so the ConfigMap has to exist - and be mountable - while still empty. Blanking
-// an existing one stops a previous run's node from being tunnelled to.
+// an existing one stops a previous run's node from being tunnelled to. The cleanup
+// of a deleted pod with the same name can remove an existing one in between, in
+// which case it is created again.
 func (p *Provider) resetShadowNodeConfigMap(ctx context.Context, identity shadowResourceIdentity) error {
 	cm := &v1.ConfigMap{
 		ObjectMeta: metav1.ObjectMeta{
@@ -310,17 +312,23 @@ func (p *Provider) resetShadowNodeConfigMap(ctx context.Context, identity shadow
 	}
 	stampShadowOwner(cm, identity.OwnerUID)
 
-	_, err := p.clientSet.CoreV1().ConfigMaps(identity.Namespace).Create(ctx, cm, metav1.CreateOptions{})
-	if err == nil {
-		return nil
+	configMaps := p.clientSet.CoreV1().ConfigMaps(identity.Namespace)
+	for attempt := 0; ; attempt++ {
+		_, err := configMaps.Create(ctx, cm, metav1.CreateOptions{})
+		if err == nil {
+			return nil
+		}
+		if !apierrors.IsAlreadyExists(err) {
+			return fmt.Errorf("failed to create shadow node configmap %s/%s: %w", identity.Namespace, cm.Name, err)
+		}
+		_, err = configMaps.Update(ctx, cm, metav1.UpdateOptions{})
+		if err == nil {
+			return nil
+		}
+		if !apierrors.IsNotFound(err) || attempt == 2 {
+			return fmt.Errorf("failed to reset shadow node configmap %s/%s: %w", identity.Namespace, cm.Name, err)
+		}
 	}
-	if !apierrors.IsAlreadyExists(err) {
-		return fmt.Errorf("failed to create shadow node configmap %s/%s: %w", identity.Namespace, cm.Name, err)
-	}
-	if _, err := p.clientSet.CoreV1().ConfigMaps(identity.Namespace).Update(ctx, cm, metav1.UpdateOptions{}); err != nil {
-		return fmt.Errorf("failed to reset shadow node configmap %s/%s: %w", identity.Namespace, cm.Name, err)
-	}
-	return nil
 }
 
 // publishShadowNode records the remote compute node a pod was allocated on, and
@@ -332,7 +340,9 @@ func (p *Provider) resetShadowNodeConfigMap(ctx context.Context, identity shadow
 // patch, so the shadow never sees a new node with the previous job's directory.
 //
 // Repeated calls with unchanged values are dropped, so the status loop does not
-// write on every poll.
+// write on every poll. A ConfigMap stamped with another pod's UID belongs to a pod
+// recreated under the same name and is left alone; the patch carries the
+// resourceVersion read, so it fails rather than overwrite a change made meanwhile.
 func (p *Provider) publishShadowNode(ctx context.Context, pod *v1.Pod, nodeName, socketDir string) {
 	if nodeName == "" || !p.hasShadow(pod) {
 		return
@@ -360,19 +370,32 @@ func (p *Provider) publishShadowNode(ctx context.Context, pod *v1.Pod, nodeName,
 		return
 	}
 
-	patch, err := json.Marshal(map[string]map[string]string{"data": {
-		shadowNodeNameKey:  nodeName,
-		shadowSocketDirKey: socketDir,
-	}})
+	name := shadowNodeConfigMapName(identity.Name)
+	configMaps := p.clientSet.CoreV1().ConfigMaps(identity.Namespace)
+	current, err := configMaps.Get(ctx, name, metav1.GetOptions{})
+	if err != nil {
+		log.G(ctx).Warningf("Failed to read shadow configmap %s/%s: %v", identity.Namespace, name, err)
+		return
+	}
+	if owner := current.Labels[shadowOwnerUIDLabel]; owner != "" && identity.OwnerUID != "" && owner != identity.OwnerUID {
+		log.G(ctx).Infof("Not publishing compute node %q for %s/%s: shadow configmap %s belongs to pod UID %s",
+			nodeName, pod.Namespace, pod.Name, name, owner)
+		return
+	}
+
+	patch, err := json.Marshal(map[string]map[string]string{
+		"metadata": {"resourceVersion": current.ResourceVersion},
+		"data": {
+			shadowNodeNameKey:  nodeName,
+			shadowSocketDirKey: socketDir,
+		},
+	})
 	if err != nil {
 		log.G(ctx).Warningf("Failed to marshal shadow node patch for %s/%s: %v", pod.Namespace, pod.Name, err)
 		return
 	}
 
-	name := shadowNodeConfigMapName(identity.Name)
-	_, err = p.clientSet.CoreV1().ConfigMaps(identity.Namespace).Patch(
-		ctx, name, k8stypes.StrategicMergePatchType, patch, metav1.PatchOptions{},
-	)
+	_, err = configMaps.Patch(ctx, name, k8stypes.StrategicMergePatchType, patch, metav1.PatchOptions{})
 	if err != nil {
 		log.G(ctx).Warningf("Failed to publish compute node %q to shadow configmap %s/%s: %v", nodeName, identity.Namespace, name, err)
 		return

@@ -84,6 +84,30 @@ func TestResetShadowNodeConfigMap(t *testing.T) {
 			"a stale node would make the shadow tunnel to a host whose job is gone")
 		assert.Equal(t, "", cm.Data[shadowSocketDirKey])
 	})
+
+	// The cleanup of a deleted pod with the same name removes its ConfigMap between
+	// this Create (AlreadyExists) and the Update.
+	t.Run("creates it again when it is deleted before the update", func(t *testing.T) {
+		const previousOwner, owner = "uid-previous", "uid-current"
+		client := fake.NewSimpleClientset(&v1.ConfigMap{ObjectMeta: metav1.ObjectMeta{
+			Name: shadowNodeConfigMapName(identity.Name), Namespace: identity.Namespace,
+			Labels: map[string]string{shadowOwnerUIDLabel: previousOwner},
+		}})
+		gvr := v1.SchemeGroupVersion.WithResource("configmaps")
+		client.PrependReactor("update", "configmaps", func(k8stesting.Action) (bool, runtime.Object, error) {
+			require.NoError(t, client.Tracker().Delete(gvr, identity.Namespace, shadowNodeConfigMapName(identity.Name)))
+			return true, nil, apierrors.NewNotFound(gvr.GroupResource(), shadowNodeConfigMapName(identity.Name))
+		})
+		p := tunnelProvider(client)
+		current := identity
+		current.OwnerUID = owner
+
+		require.NoError(t, p.resetShadowNodeConfigMap(t.Context(), current))
+
+		cm, err := client.CoreV1().ConfigMaps(identity.Namespace).Get(t.Context(), shadowNodeConfigMapName(identity.Name), metav1.GetOptions{})
+		require.NoError(t, err)
+		assert.Equal(t, owner, cm.Labels[shadowOwnerUIDLabel])
+	})
 }
 
 func TestPublishShadowNode(t *testing.T) {
@@ -187,6 +211,35 @@ func TestPublishShadowNode(t *testing.T) {
 		p.publishShadowNode(t.Context(), pod, testComputeNode, "")
 
 		assert.Empty(t, configMapPatches(client))
+	})
+
+	// A deleted pod stays tracked while its remote deletion runs, after its cache entry
+	// is forgotten: it must not write its node into its same-name successor's ConfigMap.
+	t.Run("a configmap of a pod recreated under the same name is left alone", func(t *testing.T) {
+		client := fake.NewSimpleClientset(&v1.ConfigMap{
+			ObjectMeta: metav1.ObjectMeta{Name: cmName, Namespace: identity.Namespace,
+				Labels: map[string]string{shadowOwnerUIDLabel: "uid-successor"}},
+			Data: map[string]string{shadowNodeNameKey: ""},
+		})
+		p := tunnelProvider(client)
+
+		p.publishShadowNode(t.Context(), pod, testComputeNode, testSocketDir)
+
+		assert.Empty(t, configMapPatches(client))
+	})
+
+	t.Run("the patch carries the resource version that was read", func(t *testing.T) {
+		client := fake.NewSimpleClientset(&v1.ConfigMap{
+			ObjectMeta: metav1.ObjectMeta{Name: cmName, Namespace: identity.Namespace, ResourceVersion: "7"},
+			Data:       map[string]string{shadowNodeNameKey: ""},
+		})
+		p := tunnelProvider(client)
+
+		p.publishShadowNode(t.Context(), pod, testComputeNode, "")
+
+		patches := configMapPatches(client)
+		require.Len(t, patches, 1)
+		assert.Contains(t, string(patches[0].(k8stesting.PatchAction).GetPatch()), `"resourceVersion":"7"`)
 	})
 
 	t.Run("forgetting a pod lets the same node be published again", func(t *testing.T) {
@@ -590,6 +643,30 @@ func TestShadowCleanupAndApplyAreSerialised(t *testing.T) {
 		_, err := client.CoreV1().ConfigMaps(ns).Get(t.Context(), name, metav1.GetOptions{})
 		assert.NoError(t, err)
 	})
+}
+
+// Applying a shadow stamps every object with the pod's UID, and an object left by a
+// deleted pod with the same name is updated in place with the new pod's UID.
+func TestApplyShadowStampsOwner(t *testing.T) {
+	const name, previousOwner, owner = testPodDefaultName, "uid-before", "uid-after"
+	ns := testNamespaceDefault
+	client := fake.NewSimpleClientset(&v1.ConfigMap{ObjectMeta: metav1.ObjectMeta{
+		Name: name, Namespace: ns, Labels: map[string]string{shadowOwnerUIDLabel: previousOwner},
+	}})
+	p := tunnelProvider(client)
+	manifest := "apiVersion: v1\nkind: ConfigMap\nmetadata:\n  name: " + name + "\n  namespace: " + ns + "\n" +
+		"---\napiVersion: v1\nkind: Service\nmetadata:\n  name: " + name + "\n  namespace: " + ns + "\n" +
+		"spec:\n  ports:\n  - port: 80\n"
+
+	_, _, err := p.applyShadowObjects(t.Context(), manifest, &ShadowTemplateData{Name: name, Namespace: ns, OwnerUID: owner})
+	require.NoError(t, err)
+
+	cm, err := client.CoreV1().ConfigMaps(ns).Get(t.Context(), name, metav1.GetOptions{})
+	require.NoError(t, err)
+	assert.Equal(t, owner, cm.Labels[shadowOwnerUIDLabel], "the previous pod's object is relabelled")
+	svc, err := client.CoreV1().Services(ns).Get(t.Context(), name, metav1.GetOptions{})
+	require.NoError(t, err)
+	assert.Equal(t, owner, svc.Labels[shadowOwnerUIDLabel])
 }
 
 func TestShadowIdentityAndNodeConfigMapCarryOwner(t *testing.T) {
