@@ -76,7 +76,11 @@ func (h *InterLinkHandler) GetLogsHandler(w http.ResponseWriter, r *http.Request
 	log.G(h.Ctx).Info(sessionContextMessage, "InterLink: received GetLogs call")
 	bodyBytes, err := io.ReadAll(r.Body)
 	if err != nil {
-		log.G(h.Ctx).Fatal(sessionContextMessage, err)
+		w.WriteHeader(http.StatusInternalServerError)
+		// Drain the request body to allow connection reuse
+		io.Copy(io.Discard, r.Body)
+		log.G(h.Ctx).Error(sessionContextMessage, "Error reading request body: ", err)
+		return
 	}
 
 	log.G(h.Ctx).Info(sessionContextMessage, "InterLink: unmarshal GetLogs request")

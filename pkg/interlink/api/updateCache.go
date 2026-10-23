@@ -16,7 +16,11 @@ func (h *InterLinkHandler) UpdateCacheHandler(w http.ResponseWriter, r *http.Req
 	statusCode := http.StatusOK
 	if err != nil {
 		statusCode = http.StatusInternalServerError
-		log.G(h.Ctx).Fatal(err)
+		w.WriteHeader(statusCode)
+		// Drain the request body to allow connection reuse
+		io.Copy(io.Discard, r.Body)
+		log.G(h.Ctx).Errorf("Error reading request body: %v", err)
+		return
 	}
 
 	deleteCachedStatus(string(bodyBytes))

@@ -156,11 +156,6 @@ func ReqWithError(
 		log.G(ctx).Errorf("%s Non-OK status from JobScriptBuilder: %d", sessionContextMessage, resp.StatusCode)
 		statusCode := http.StatusInternalServerError
 
-		// ❗This is likely the cause of “superfluous WriteHeader” (double call)
-		// Add a debug to confirm
-		log.G(ctx).Debugf("%s Writing error header: %d (may trigger 'superfluous WriteHeader')", sessionContextMessage, statusCode)
-		w.WriteHeader(statusCode)
-
 		ret, err := io.ReadAll(resp.Body)
 		if err != nil {
 			return nil, fmt.Errorf(sessionContextMessage+

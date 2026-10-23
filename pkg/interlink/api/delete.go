@@ -43,13 +43,16 @@ func (h *InterLinkHandler) DeleteHandler(w http.ResponseWriter, r *http.Request)
 	log.G(h.Ctx).Info("InterLink: received Delete call")
 
 	bodyBytes, err := io.ReadAll(r.Body)
-	var statusCode int
-
 	if err != nil {
-		statusCode = http.StatusInternalServerError
+		var statusCode = http.StatusInternalServerError
 		w.WriteHeader(statusCode)
-		log.G(h.Ctx).Fatal(err)
+		// Drain the request body to allow connection reuse
+		io.Copy(io.Discard, r.Body)
+		log.G(h.Ctx).Errorf("Error reading request body: %v", err)
+		return
 	}
+
+	var statusCode int
 
 	var req *http.Request
 	var pod *v1.Pod
@@ -58,7 +61,8 @@ func (h *InterLinkHandler) DeleteHandler(w http.ResponseWriter, r *http.Request)
 	if err != nil {
 		statusCode = http.StatusInternalServerError
 		w.WriteHeader(statusCode)
-		log.G(h.Ctx).Fatal(err)
+		log.G(h.Ctx).Errorf("Error unmarshaling pod: %v", err)
+		return
 	}
 
 	span.SetAttributes(

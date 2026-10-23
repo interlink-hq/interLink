@@ -48,13 +48,21 @@ func (h *InterLinkHandler) StatusHandler(w http.ResponseWriter, r *http.Request)
 
 	bodyBytes, err := io.ReadAll(r.Body)
 	if err != nil {
-		log.G(h.Ctx).Fatal(err)
+		statusCode = http.StatusInternalServerError
+		w.WriteHeader(statusCode)
+		// Drain the request body to allow connection reuse
+		io.Copy(io.Discard, r.Body)
+		log.G(h.Ctx).Errorf("Error reading request body: %v", err)
+		return
 	}
 
 	err = json.Unmarshal(bodyBytes, &pods)
 	if err != nil {
-		errWithContext := fmt.Errorf("error doing fisrt Unmarshal() in StatusHandler() error detail: %s error: %w", fmt.Sprintf("%#v", err), err)
+		statusCode = http.StatusInternalServerError
+		w.WriteHeader(statusCode)
+		errWithContext := fmt.Errorf("error doing first Unmarshal() in StatusHandler() error detail: %s error: %w", fmt.Sprintf("%#v", err), err)
 		log.G(h.Ctx).Error(errWithContext)
+		return
 	}
 
 	span.SetAttributes(
@@ -84,13 +92,19 @@ func (h *InterLinkHandler) StatusHandler(w http.ResponseWriter, r *http.Request)
 
 		bodyBytes, err = json.Marshal(podsToBeChecked)
 		if err != nil {
-			log.G(h.Ctx).Fatal(err)
+			statusCode = http.StatusInternalServerError
+			w.WriteHeader(statusCode)
+			log.G(h.Ctx).Errorf("Error marshaling pods: %v", err)
+			return
 		}
 
 		reader := bytes.NewReader(bodyBytes)
 		req, err := http.NewRequest(http.MethodGet, h.SidecarEndpoint+"/status", reader)
 		if err != nil {
-			log.G(h.Ctx).Fatal(err)
+			statusCode = http.StatusInternalServerError
+			w.WriteHeader(statusCode)
+			log.G(h.Ctx).Errorf("Error creating request: %v", err)
+			return
 		}
 
 		log.G(h.Ctx).Info("InterLink: forwarding GetStatus call to sidecar")

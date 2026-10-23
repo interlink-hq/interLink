@@ -159,6 +159,8 @@ func deleteCachedStatus(uid string) {
 
 // checkIfCached checks if the uid key is present in the PodStatuses map and returns a bool
 func checkIfCached(uid string) bool {
+	PodStatuses.mu.Lock()
+	defer PodStatuses.mu.Unlock()
 	_, ok := PodStatuses.Statuses[uid]
 
 	return ok
