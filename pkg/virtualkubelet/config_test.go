@@ -464,3 +464,15 @@ func TestUpdateNodeTaints_NilLeavesExistingTaintsUnchangedAndUnknownEffectDefaul
 		},
 	}, provider.node.Spec.Taints)
 }
+
+// A virtual node must advertise ephemeral storage, or a pod whose sidecar requests some
+// (Katib's metrics collector: 500Mi) is never scheduled on it.
+func TestGetResources_EphemeralStorage(t *testing.T) {
+	config := Config{Resources: Resources{CPU: "10", Memory: "10Gi", Pods: "10"}}
+	got := GetResources(config)[v1.ResourceEphemeralStorage]
+	assert.Equal(t, defaultEphemeralStorage, got.String())
+
+	config.Resources.EphemeralStorage = "50Gi"
+	got = GetResources(config)[v1.ResourceEphemeralStorage]
+	assert.Equal(t, "50Gi", got.String())
+}
