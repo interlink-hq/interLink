@@ -44,7 +44,7 @@ import (
 	k8stypes "k8s.io/apimachinery/pkg/types"
 )
 
-//go:embed templates/wstunnel-template.yaml templates/wstunnel-wireguard-template.yaml templates/shadow-ssh-template.yaml
+//go:embed templates/wstunnel-template.yaml templates/wstunnel-wireguard-template.yaml templates/shadow-ssh-template.yaml templates/shadow-kept-template.yaml
 var defaultShadowTemplates embed.FS
 
 //go:embed all:templates/mesh.sh
@@ -121,6 +121,11 @@ type ShadowTemplateData struct {
 	IngressTLS           bool
 	IngressClusterIssuer string
 	FullMesh             bool
+	// KeptOnly marks a shadow that only runs the containers the pod keeps on the
+	// cluster: no tunnel, no mesh, no Service.
+	KeptOnly bool
+	// PauseImage keeps a KeptOnly shadow running once its init containers have ended.
+	PauseImage string
 	// NodeConfigMap is the ConfigMap the shadow can mount to learn which remote
 	// compute node the workload landed on. It exists from the moment the shadow is
 	// created but holds an empty NodeNameKey until the plugin reports the node.
@@ -1001,7 +1006,8 @@ func (p *Provider) createShadowPod(ctx context.Context, originalPod *v1.Pod) (*v
 		return nil, nil, err
 	}
 
-	if p.isSSHShadow() {
+	keptOnly := !p.hasTunnelShadow(originalPod)
+	if p.isSSHShadow() && !keptOnly {
 		if err := p.replicateShadowCredentials(ctx, identity); err != nil {
 			return nil, nil, err
 		}
@@ -1028,6 +1034,8 @@ func (p *Provider) createShadowPod(ctx context.Context, originalPod *v1.Pod) (*v
 		IngressTLS:           p.config.Network.IngressTLS,
 		IngressClusterIssuer: p.config.Network.IngressClusterIssuer,
 		FullMesh:             fullMeshEnabledForPod,
+		KeptOnly:             keptOnly,
+		PauseImage:           p.shadowPauseImage(),
 		NodeConfigMap:        shadowNodeConfigMapName(identity.Name),
 		NodeNameKey:          shadowNodeNameKey,
 		SSH:                  p.config.Network.SSH,
@@ -1140,8 +1148,14 @@ func mergeMaps(dst, src map[string]string) map[string]string {
 func (p *Provider) executeShadowTemplate(ctx context.Context, data ShadowTemplateData) (string, error) {
 	var templateContent string
 
-	// Try to load from custom path first
-	if p.config.Network.WstunnelTemplatePath != "" {
+	// A custom template describes a tunnel, which a KeptOnly shadow does not have.
+	if data.KeptOnly {
+		content, err := defaultShadowTemplates.ReadFile("templates/shadow-kept-template.yaml")
+		if err != nil {
+			return "", fmt.Errorf("failed to read embedded template: %w", err)
+		}
+		templateContent = string(content)
+	} else if p.config.Network.WstunnelTemplatePath != "" {
 		content, err := os.ReadFile(p.config.Network.WstunnelTemplatePath)
 		if err != nil {
 			log.G(ctx).Warningf("Failed to read custom template from %s: %v, using default", p.config.Network.WstunnelTemplatePath, err)
@@ -1752,7 +1766,8 @@ func (p *Provider) handleShadowCreation(ctx context.Context, pod *v1.Pod) (strin
 
 	// The SSH shadow dials in to the login node, so the workload has nothing to set
 	// up on its side: no wstunnel client to launch, no WireGuard config to apply.
-	if !p.isSSHShadow() {
+	// A shadow that only runs kept containers has no tunnel at all.
+	if !p.isSSHShadow() && !templateData.KeptOnly {
 		// Add wstunnel client command annotation to the original pod
 		if err := p.addWstunnelClientAnnotation(ctx, pod, templateData); err != nil {
 			log.G(ctx).Warningf("Failed to add wstunnel client annotation to pod %s/%s: %v", pod.Namespace, pod.Name, err)
@@ -1936,10 +1951,13 @@ func (p *Provider) CreatePod(ctx context.Context, pod *v1.Pod) error {
 
 	// Handle shadow creation if needed
 	if p.hasShadow(pod) {
-		var err error
-		podIP, err = p.handleShadowCreation(ctx, pod)
+		shadowIP, err := p.handleShadowCreation(ctx, pod)
 		if err != nil {
 			return err
+		}
+		// Only a tunnel shadow stands in for the pod on the network.
+		if p.hasTunnelShadow(pod) {
+			podIP = shadowIP
 		}
 
 		if p.config.Network.FullMesh && !isMeshNetworkingDisabled(pod) {
@@ -1971,6 +1989,10 @@ func (p *Provider) CreatePod(ctx context.Context, pod *v1.Pod) error {
 	// Create pod asynchronously on the remote plugin
 	// we don't care, the statusLoop will eventually reconcile the status
 	go func() {
+		if err := p.waitForKeptInitContainers(ctx, pod); err != nil {
+			log.G(ctx).Warningf("Pod %s/%s not submitted: %v", pod.Namespace, pod.Name, err)
+			return
+		}
 		err := RemoteExecution(ctx, p.config, p, pod, CREATE)
 		if err != nil {
 			if err.Error() == "Deleted pod before actual creation" {

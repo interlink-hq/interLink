@@ -1258,6 +1258,7 @@ func RemoteExecution(ctx context.Context, config Config, p *Provider, pod *v1.Po
 	podToOffload := pod.DeepCopy()
 	podToOffload.Spec.Containers = getOffloadContainers(pod)
 	podToOffload.Spec.InitContainers = getOffloadInitContainers(pod)
+	podToOffload.Spec.Volumes = dropKeptOnlyVolumes(pod, podToOffload)
 
 	if len(podToOffload.Spec.Containers) > 0 {
 		var offloadNames []string

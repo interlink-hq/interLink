@@ -263,7 +263,7 @@ func computeShadowResourceNames(podName, podNamespace string) (resourceBaseName,
 // because the pod exposes ports over a tunnel or because mesh networking wraps
 // every offloaded pod.
 func (p *Provider) hasShadow(pod *v1.Pod) bool {
-	return p.shouldCreateShadow(pod) || (p.config.Network.FullMesh && !isMeshNetworkingDisabled(pod))
+	return p.hasTunnelShadow(pod) || hasKeptContainers(pod)
 }
 
 // shadowNodeConfigMapName returns the ConfigMap carrying the compute node name
