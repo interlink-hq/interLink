@@ -619,9 +619,10 @@ func TestCleanupKeepsOnlyTheCurrentPodsResources(t *testing.T) {
 		stampShadowOwner(&meta, owner, ownerPod)
 		return &v1.Service{ObjectMeta: meta}
 	}
-	pod := func(podName, uid string) *v1.Pod {
-		return &v1.Pod{ObjectMeta: metav1.ObjectMeta{Name: podName, Namespace: ns, UID: k8stypes.UID(uid)}}
+	podIn := func(namespace, podName, uid string) *v1.Pod {
+		return &v1.Pod{ObjectMeta: metav1.ObjectMeta{Name: podName, Namespace: namespace, UID: k8stypes.UID(uid)}}
 	}
+	pod := func(podName, uid string) *v1.Pod { return podIn(ns, podName, uid) }
 	serviceLeft := func(t *testing.T, client *fake.Clientset) bool {
 		t.Helper()
 		tunnelProvider(client).cleanupShadowResources(t.Context(), identity)
@@ -652,6 +653,21 @@ func TestCleanupKeepsOnlyTheCurrentPodsResources(t *testing.T) {
 		client.PrependReactor("get", "pods", func(k8stesting.Action) (bool, runtime.Object, error) {
 			return true, nil, apierrors.NewInternalError(errors.New("etcd timeout"))
 		})
+		assert.True(t, serviceLeft(t, client))
+	})
+
+	// Stamped before the annotation existed: the owner is looked up under the
+	// cleaning pod's name.
+	t.Run("without the annotation, deleted when another pod now has the name", func(t *testing.T) {
+		client := fake.NewSimpleClientset(stampedService(staleUID, ""), pod(podName, currentUID))
+		assert.False(t, serviceLeft(t, client))
+	})
+
+	// Namespaces a--b and a-b get the same shadow names too.
+	t.Run("kept for a live pod of another namespace that shares the shadow name", func(t *testing.T) {
+		const otherNamespace, otherUID = "other-ns", "uid-elsewhere"
+		client := fake.NewSimpleClientset(stampedService(otherUID, otherNamespace+"/"+podName),
+			pod(podName, currentUID), podIn(otherNamespace, podName, otherUID))
 		assert.True(t, serviceLeft(t, client))
 	})
 
@@ -748,4 +764,5 @@ func TestShadowIdentityAndNodeConfigMapCarryOwner(t *testing.T) {
 	cm, err := client.CoreV1().ConfigMaps(identity.Namespace).Get(t.Context(), shadowNodeConfigMapName(identity.Name), metav1.GetOptions{})
 	require.NoError(t, err)
 	assert.Equal(t, "uid-7", cm.Labels[shadowOwnerUIDLabel])
+	assert.Equal(t, testNamespaceDefault+"/nb", cm.Annotations[shadowOwnerPodAnnotation])
 }
