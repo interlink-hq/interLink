@@ -1,6 +1,7 @@
 {{- /* ssh client options for the login hop, shared by every ssh the shadow runs
 against the login node. Delegation comes after ExtraOptions, so that
-GSSAPIDelegateCredentials=yes there turns it back on. */ -}}
+GSSAPIDelegateCredentials=yes there turns it back on. It is on only for the
+reverse tunnel's srun carrier, because srun on the login node needs the ticket. */ -}}
 {{- define "sshOptions" -}}
 ssh_opts="\
               -p {{.SSH.Port}} \
@@ -25,7 +26,7 @@ ssh_opts="\
               -o {{.}} \
             {{- end }}
             {{- if eq .SSH.Auth "kerberos" }}
-              -o GSSAPIDelegateCredentials=no \
+              -o GSSAPIDelegateCredentials={{if and .Reverse (eq .Reverse.NodeExec "srun")}}yes{{else}}no{{end}} \
             {{- end }}
               "
 {{- end -}}
@@ -55,6 +56,16 @@ node_opts="\
                 "
 {{- end -}}
 {{- define "nodeHop" -}}
+{{- $srun := and .Reverse (eq .Reverse.NodeExec "srun") -}}
+{{- if $srun -}}
+# The plugin names the batch job after the pod UID.
+            job_id() {
+              # shellcheck disable=SC2086
+              jid=$(ssh $ssh_opts "$target" "squeue -h --me -t R -n $REV_JOB_NAME -o %i" 2>/dev/null | head -n 1)
+              echo "$jid" | grep -Eq '^[0-9]+$' || { echo "no running job named $REV_JOB_NAME" >&2; return 1; }
+            }
+
+            {{ end -}}
 # $w/node-proxy carries a session to the compute node's own sshd through the login
             # node; $w/node_known_hosts is what that session is checked against.
             node_hop() {
@@ -76,6 +87,15 @@ node_opts="\
             {{- else }}
               echo "WARNING: the host key of $node is not verified (NodeHostKeys: accept-new)" >&2
             {{- end }}
+            {{- if $srun }}
+              if [ "${1:-ssh}" = srun ]; then
+                job_id || return 1
+                printf '#!/bin/sh\nexec ssh %s %s "srun --jobid=%s --overlap -u -n1 --cpus-per-task=1 %s 127.0.0.1 22"\n' \
+                  "$ssh_opts" "$target" "$jid" "$connect_cmd" > "$w/node-proxy"
+                chmod +x "$w/node-proxy"
+                return
+              fi
+            {{- end }}
             {{- if eq .SSH.ForwardMode "exec" }}
               printf '#!/bin/sh\nexec ssh %s %s "%s %s 22"\n' "$ssh_opts" "$target" "$connect_cmd" "'$node'" > "$w/node-proxy"
             {{- else }}
@@ -86,6 +106,9 @@ node_opts="\
               chmod +x "$w/node-proxy"
             }
 {{- end -}}
+{{- /* nothing to forward without a TCP port: no forward container, no Service */ -}}
+{{- $hasTCP := false }}
+{{- range .ExposedPorts }}{{ if ne .Protocol "UDP" }}{{ $hasTCP = true }}{{ end }}{{ end }}
 apiVersion: apps/v1
 kind: Deployment
 metadata:
@@ -213,6 +236,7 @@ spec:
           capabilities:
             drop: ["ALL"]
       {{- end }}
+      {{- if $hasTCP }}
       - name: ssh-forward
         image: {{.SSH.Image}}
         command: ["/bin/sh", "-c"]
@@ -473,6 +497,265 @@ spec:
           allowPrivilegeEscalation: false
           capabilities:
             drop: ["ALL"]
+      {{- end }}
+      {{- if .Reverse }}
+      # Connections opened BY the offloaded pod towards cluster endpoints, with no
+      # WireGuard and no network namespace (interlink-hq/interLink#548).
+      #
+      # The job runs a relay on the pod's loopback address that accepts only the
+      # job's user and, for each connection, dials a unix socket in the pod's socket
+      # directory. This container binds those sockets with `ssh -R` on an sshd of
+      # the compute node, so every connection made there is dialled from here,
+      # inside the cluster. That sshd is the node's own (Reverse.Sshd "node"), or a
+      # `sshd -i` started in the job as the job's user, over the stdio of a command
+      # run through the login node ("userspace").
+      - name: ssh-reverse
+        image: {{.SSH.Image}}
+        command: ["/bin/sh", "-c"]
+        args:
+          - |
+            set -u
+            read_node() { tr -d '[:space:]' < /interlink/node/{{.NodeNameKey}} 2>/dev/null || true; }
+            read_sockdir() { tr -d '[:space:]' < /interlink/node/{{.SocketDirKey}} 2>/dev/null || true; }
+
+            target={{.SSH.User}}@{{.SSH.LoginHost}}
+            {{- if or (eq .SSH.ForwardMode "exec") (eq .Reverse.NodeExec "srun") }}
+            connect_cmd='{{.SSH.ExecConnectCommand}}'
+            {{- end }}
+            w=/tmp/interlink-reverse
+            {{ template "sshOptions" . }}
+            ssh_opts="$ssh_opts -o LogLevel=ERROR"
+
+            {{ template "nodeHop" . }}
+
+            pid=
+            socks_pid=
+            socks_t=0
+
+            # One -R per forward, to the socket the job's relay dials.
+            build_rflags() {
+              rflags=
+              for f in $REV_FORWARDS; do
+                lport=${f%%:*}
+                dest=${f#*:}
+                rflags="$rflags -R $sd/rev-$lport.sock:$dest"
+              done
+              # The session holds the forwards until the job removes its directory.
+              # The echo ends it with SIGPIPE once its sshd is gone, so a dropped
+              # session leaves nothing behind on the node.
+              hold="while [ -d $sd ]; do sleep 10; echo; done"
+            }
+            {{- if eq .Reverse.Sshd "node" }}
+
+            # Starts a holding session with the given -R flags in the background.
+            session() {
+              # shellcheck disable=SC2086
+              ssh -n -T -o ExitOnForwardFailure=yes $node_opts "$@" "{{.SSH.User}}@$node" "$hold" >/dev/null &
+            }
+
+            start_reverse() {
+              rm -rf "$w"
+              mkdir -p "$w"
+              {{ template "nodeOptions" . }}
+              node_hop "$REV_NODE_EXEC" || return 1
+              build_rflags
+
+              # The node's sshd keeps a stale socket (StreamLocalBindUnlink no) and -R is
+              # requested before any command runs: clear them in a session of their own.
+              # shellcheck disable=SC2086
+              ssh -n $node_opts "{{.SSH.User}}@$node" "rm -f $sd/rev-*.sock" || { echo "could not clear $sd on $node" >&2; return 1; }
+              # shellcheck disable=SC2086
+              session $rflags
+              pid=$!
+            }
+            {{- else }}
+
+            # Starts a holding session with the given -R flags in the background, on
+            # an sshd -i of its own.
+            session() {
+              ssh -n -T \
+                -o ProxyCommand="$w/proxy.sh" \
+                -o ExitOnForwardFailure=yes \
+                -o BatchMode=yes \
+                -o ServerAliveInterval=30 -o ServerAliveCountMax=3 \
+                -o UserKnownHostsFile="$w/known_hosts" -o StrictHostKeyChecking=yes -o HostKeyAlias=interlink-job \
+                -o GSSAPIAuthentication=no -o PreferredAuthentications=publickey \
+                -i "$w/client" -o IdentitiesOnly=yes \
+                "$@" {{.SSH.User}}@interlink-job "$hold" >/dev/null &
+            }
+
+            start_reverse() {
+              rm -rf "$w"
+              mkdir -p "$w"
+              {{ template "nodeOptions" . }}
+
+              # A fresh key pair for each side on every start: nothing here outlives
+              # the session, and nothing is taken from the site credential.
+              ssh-keygen -q -t ed25519 -N '' -C interlink-reverse -f "$w/client"
+              ssh-keygen -q -t ed25519 -N '' -C interlink-reverse -f "$w/host"
+              echo "interlink-job $(cat "$w/host.pub")" > "$w/known_hosts"
+
+              {
+                echo "umask 077; cd $sd || exit 1; rm -f rev-*.sock rev-host rev-authorized_keys rev-sshd_config"
+                echo "cat > rev-host <<'EOK'"; cat "$w/host"; echo EOK
+                echo "cat > rev-authorized_keys <<'EOK'"; cat "$w/client.pub"; echo EOK
+                echo "cat > rev-sshd_config <<'EOK'"
+                echo "HostKey $sd/rev-host"
+                echo "AuthorizedKeysFile $sd/rev-authorized_keys"
+                echo "PidFile none"
+                echo "UsePAM no"
+                echo "StrictModes no"
+                echo "PasswordAuthentication no"
+                echo "KbdInteractiveAuthentication no"
+                echo "PubkeyAuthentication yes"
+                echo "AllowTcpForwarding remote"
+                echo "AllowStreamLocalForwarding remote"
+                echo "StreamLocalBindUnlink yes"
+                echo "StreamLocalBindMask 0177"
+                echo "AllowAgentForwarding no"
+                echo "PermitTTY no"
+                echo "X11Forwarding no"
+                echo EOK
+              } > "$w/bootstrap.sh"
+
+              # srun goes through Slurm; ssh goes through the same checked hop as the
+              # node's own sshd would.
+              if [ "$REV_NODE_EXEC" = srun ]; then
+                job_id || return 1
+                run="ssh $ssh_opts $target srun --jobid=$jid --overlap -u -n1 --cpus-per-task=1"
+              else
+                node_hop ssh || return 1
+                run="ssh $node_opts {{.SSH.User}}@$node"
+              fi
+              # shellcheck disable=SC2086
+              $run "sh -s" < "$w/bootstrap.sh" || { echo "could not prepare $sd on $node" >&2; return 1; }
+              printf '#!/bin/sh\nexec %s "%s -i -e -f %s/rev-sshd_config"\n' "$run" "$REV_SSHD" "$sd" > "$w/proxy.sh"
+              chmod +x "$w/proxy.sh"
+              build_rflags
+
+              # shellcheck disable=SC2086
+              session $rflags
+              pid=$!
+            }
+            {{- end }}
+
+            # SOCKS has no unix-socket form, so it listens on the node's 127.0.0.1,
+            # where another user can take the port while the tunnel is down. It runs in
+            # a session of its own, retried every 30s, so that a failed SOCKS forward
+            # never takes the listed forwards down with it.
+            keep_socks() {
+              [ -n "$REV_SOCKS_PORT" ] || return 0
+              if [ -n "$socks_pid" ] && kill -0 "$socks_pid" 2>/dev/null; then
+                return 0
+              fi
+              now=$(date +%s)
+              [ $((now - socks_t)) -ge 30 ] || return 0
+              if [ -n "$socks_pid" ]; then
+                echo "the SOCKS forward on $node is down (is 127.0.0.1:$REV_SOCKS_PORT taken?); retrying" >&2
+              fi
+              socks_t=$now
+              session -R "127.0.0.1:$REV_SOCKS_PORT"
+              socks_pid=$!
+            }
+
+            stop_reverse() {
+              for p in $pid $socks_pid; do
+                kill "$p" 2>/dev/null || true
+              done
+              wait 2>/dev/null || true
+              pid=
+              socks_pid=
+              socks_t=0
+            }
+
+            # A requeued job comes back on a different host, and the virtual kubelet
+            # republishes the node and the socket directory into the mounted ConfigMap.
+            moved() {
+              cur=$(read_node)
+              cur_sd=$(read_sockdir)
+              [ -n "$cur" ] || return 1
+              [ "$cur" != "$node" ] || { [ -n "$cur_sd" ] && [ "$cur_sd" != "$sd" ]; }
+            }
+
+            node=$(read_node)
+            sd=$(read_sockdir)
+            [ -n "$node" ] || { echo "no compute node recorded" >&2; exit 1; }
+            [ -n "$sd" ] || { echo "no socket directory reported: set SocketDirRoot in the plugin" >&2; exit 1; }
+
+            while :; do
+              echo "reverse tunnel on $node through {{.SSH.LoginHost}} ({{.Reverse.Sshd}} sshd, $REV_NODE_EXEC carrier): $REV_FORWARDS"
+              if [ -n "$REV_SOCKS_PORT" ]; then
+                echo "WARNING: SOCKS proxy on 127.0.0.1:$REV_SOCKS_PORT on $node, open to every user of that node" >&2
+              fi
+              if start_reverse; then
+                while kill -0 "$pid" 2>/dev/null && ! moved; do
+                  keep_socks
+                  sleep 10
+                done
+              fi
+              stop_reverse
+
+              if moved; then
+                echo "compute node or socket directory changed, rebuilding the reverse tunnel"
+                node=$cur
+                [ -n "$cur_sd" ] && sd=$cur_sd
+                continue
+              fi
+              # The session ends with the job, and a requeued job does not run on $node
+              # yet: retry here rather than crash-loop into minutes of back-off.
+              echo "the reverse tunnel to $node is down; retrying in 30s" >&2
+              sleep 30
+            done
+        env:
+        - name: REV_FORWARDS
+          value: "{{range $i, $f := .Reverse.Forwards}}{{if $i}} {{end}}{{$f.ListenPort}}:{{$f.Host}}:{{$f.Port}}{{end}}"
+        - name: REV_SOCKS_PORT
+          value: "{{if .Reverse.SocksPort}}{{.Reverse.SocksPort}}{{end}}"
+        - name: REV_NODE_EXEC
+          value: "{{.Reverse.NodeExec}}"
+        - name: REV_JOB_NAME
+          value: "{{.Reverse.JobName}}"
+        {{- if eq .Reverse.Sshd "userspace" }}
+        - name: REV_SSHD
+          value: "{{.Reverse.SshdPath}}"
+        {{- end }}
+        {{- if eq .SSH.Auth "kerberos" }}
+        - name: KRB5CCNAME
+          value: FILE:/interlink/krb5cc/ccache
+        {{- end }}
+        volumeMounts:
+        - name: shadow-node
+          mountPath: /interlink/node
+          readOnly: true
+        {{- if eq .SSH.Auth "kerberos" }}
+        - name: shadow-krb5cc
+          mountPath: /interlink/krb5cc
+          readOnly: true
+        {{- if .SSH.Krb5ConfigMap }}
+        - name: shadow-krb5-config
+          mountPath: /etc/krb5.conf
+          subPath: krb5.conf
+          readOnly: true
+        {{- end }}
+        {{- else }}
+        - name: shadow-ssh-key
+          mountPath: /interlink/ssh
+          readOnly: true
+        {{- end }}
+        {{- if .SSH.KnownHostsConfigMap }}
+        - name: shadow-known-hosts
+          mountPath: /interlink/known-hosts
+          readOnly: true
+        {{- end }}
+        resources:
+          requests:
+            cpu: 100m
+            memory: 64Mi
+        securityContext:
+          allowPrivilegeEscalation: false
+          capabilities:
+            drop: ["ALL"]
+      {{- end }}
       volumes:
       # Mounted as a directory, not subPath: only directory mounts are refreshed in
       # place when the VK writes the compute node into this ConfigMap.
@@ -503,6 +786,7 @@ spec:
         configMap:
           name: {{.SSH.KnownHostsConfigMap}}
       {{- end }}
+{{- if $hasTCP }}
 ---
 apiVersion: v1
 kind: Service
@@ -522,3 +806,4 @@ spec:
     protocol: {{.Protocol}}
   {{- end }}
   {{- end }}
+{{- end }}
