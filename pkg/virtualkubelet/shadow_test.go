@@ -205,7 +205,7 @@ func TestCleanupShadowResourcesRemovesNodeConfigMap(t *testing.T) {
 	})
 	p := tunnelProvider(client)
 
-	p.cleanupShadowResources(t.Context(), name, ns)
+	p.cleanupShadowResources(t.Context(), shadowResourceIdentity{Name: name, Namespace: ns})
 
 	_, err := client.CoreV1().ConfigMaps(ns).Get(t.Context(), shadowNodeConfigMapName(name), metav1.GetOptions{})
 	assert.True(t, apierrors.IsNotFound(err), "the node configmap should be deleted with the rest of the shadow")
@@ -386,4 +386,61 @@ func TestReleaseShadowIgnoresPodsWithoutAShadow(t *testing.T) {
 	p.releaseShadowOfEndedPod(t.Context(), pod)
 
 	assert.Zero(t, deletes(client))
+}
+
+// TestCleanupKeepsShadowOfRecreatedPod covers a pod deleted and recreated under the same
+// name: the new pod's shadow has the same names, and the old pod's cleanup can run after
+// it was created. Only resources stamped with the old pod's UID may go.
+func TestCleanupKeepsShadowOfRecreatedPod(t *testing.T) {
+	const name = testPodDefaultName
+	ns := testNamespaceDefault
+	stamped := func(uid string) *appsv1.Deployment {
+		return &appsv1.Deployment{ObjectMeta: metav1.ObjectMeta{
+			Name: name, Namespace: ns, Labels: map[string]string{shadowOwnerUIDLabel: uid},
+		}}
+	}
+
+	t.Run("the old pod's cleanup keeps the new pod's shadow", func(t *testing.T) {
+		client := fake.NewSimpleClientset(stamped("uid-new"))
+		p := tunnelProvider(client)
+
+		p.cleanupShadowResources(t.Context(), shadowResourceIdentity{Name: name, Namespace: ns, OwnerUID: "uid-old"})
+
+		_, err := client.AppsV1().Deployments(ns).Get(t.Context(), name, metav1.GetOptions{})
+		assert.NoError(t, err)
+	})
+
+	t.Run("the owner's cleanup removes it", func(t *testing.T) {
+		client := fake.NewSimpleClientset(stamped("uid-new"))
+		p := tunnelProvider(client)
+
+		p.cleanupShadowResources(t.Context(), shadowResourceIdentity{Name: name, Namespace: ns, OwnerUID: "uid-new"})
+
+		_, err := client.AppsV1().Deployments(ns).Get(t.Context(), name, metav1.GetOptions{})
+		assert.True(t, apierrors.IsNotFound(err))
+	})
+
+	t.Run("an unstamped shadow from an older virtual kubelet is removed", func(t *testing.T) {
+		client := fake.NewSimpleClientset(&appsv1.Deployment{ObjectMeta: metav1.ObjectMeta{Name: name, Namespace: ns}})
+		p := tunnelProvider(client)
+
+		p.cleanupShadowResources(t.Context(), shadowResourceIdentity{Name: name, Namespace: ns, OwnerUID: "uid-old"})
+
+		_, err := client.AppsV1().Deployments(ns).Get(t.Context(), name, metav1.GetOptions{})
+		assert.True(t, apierrors.IsNotFound(err))
+	})
+}
+
+func TestShadowIdentityAndNodeConfigMapCarryOwner(t *testing.T) {
+	pod := podWithPort("nb", testNamespaceDefault, "uid-7")
+	identity, err := computeShadowResourceIdentity(pod)
+	require.NoError(t, err)
+	assert.Equal(t, "uid-7", identity.OwnerUID)
+
+	client := fake.NewSimpleClientset()
+	p := tunnelProvider(client)
+	require.NoError(t, p.resetShadowNodeConfigMap(t.Context(), identity))
+	cm, err := client.CoreV1().ConfigMaps(identity.Namespace).Get(t.Context(), shadowNodeConfigMapName(identity.Name), metav1.GetOptions{})
+	require.NoError(t, err)
+	assert.Equal(t, "uid-7", cm.Labels[shadowOwnerUIDLabel])
 }
