@@ -11,8 +11,10 @@ import (
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+	appsv1 "k8s.io/api/apps/v1"
 	v1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/client-go/kubernetes/fake"
 )
 
@@ -21,10 +23,15 @@ const (
 	testReplacementShadowIP = "10.42.17.106"
 )
 
-// servingShadowPod is a running and ready pod of the given shadow.
-func servingShadowPod(identity shadowResourceIdentity, name, ip string, created time.Time) *v1.Pod {
-	pod := shadowTestPod(name, identity.Name, ip, created)
+// shadowPodOf is a running and ready pod of the given pod's shadow, labelled with that
+// pod's UID like every shadow pod.
+func shadowPodOf(t *testing.T, owner *v1.Pod, suffix, ip string, created time.Time) *v1.Pod {
+	t.Helper()
+	identity, err := computeShadowResourceIdentity(owner)
+	require.NoError(t, err)
+	pod := shadowTestPod(identity.Name+"-6d5c666bc8-"+suffix, identity.Name, ip, created)
 	pod.Namespace = identity.Namespace
+	pod.Labels[shadowOfLabel] = string(owner.UID)
 	pod.Status.Phase = v1.PodRunning
 	pod.Status.Conditions = []v1.PodCondition{{Type: v1.PodReady, Status: v1.ConditionTrue}}
 	return pod
@@ -41,21 +48,18 @@ func markNotReady(pod *v1.Pod) *v1.Pod {
 	return pod
 }
 
-// replacedShadow is an offloaded pod created at now, still reporting the IP of the
-// shadow pod it was created with, together with that shadow pod, now being evicted,
-// and the pod the shadow Deployment started in its place.
+// replacedShadow is an offloaded pod still reporting the IP of the shadow pod it was
+// created with, together with that shadow pod, now being evicted, and the pod the
+// shadow Deployment started in its place.
 func replacedShadow(t *testing.T, now time.Time) (pod, evicted, replacement *v1.Pod) {
 	t.Helper()
 	pod = podWithPort("web-5d8f7c9b4-x2x4z", testNamespaceDefault, "uid-web")
-	pod.CreationTimestamp = metav1.NewTime(now)
 	status, err := PodPhase(nil, "Running", testEvictedShadowIP)
 	require.NoError(t, err)
 	pod.Status = status
 
-	identity, err := computeShadowResourceIdentity(pod)
-	require.NoError(t, err)
-	evicted = markTerminating(servingShadowPod(identity, identity.Name+"-6d5c666bc8-aaaaa", testEvictedShadowIP, now))
-	replacement = servingShadowPod(identity, identity.Name+"-6d5c666bc8-zzzzz", testReplacementShadowIP, now.Add(time.Minute))
+	evicted = markTerminating(shadowPodOf(t, pod, "aaaaa", testEvictedShadowIP, now))
+	replacement = shadowPodOf(t, pod, "zzzzz", testReplacementShadowIP, now.Add(time.Minute))
 	return pod, evicted, replacement
 }
 
@@ -82,6 +86,28 @@ func TestRefreshShadowPodIPFollowsAReplacedShadowPod(t *testing.T) {
 	assert.Equal(t, testReplacementShadowIP, status.HostIP)
 	assert.Equal(t, []v1.HostIP{{IP: testReplacementShadowIP}}, status.HostIPs,
 		"the API server rejects a status whose hostIPs[0] differs from hostIP")
+}
+
+// A pod recreated under its name, like a StatefulSet replica, gets a shadow with the
+// same name as the previous one, whose ReplicaSet can still start a pod, after the new
+// pod was created, until the garbage collector removes it. The new shadow's pod only
+// needs an IP for the pod to be created with it, not to be ready: if the previous
+// shadow's pod is ready first, it must not take the IP over.
+func TestRefreshShadowPodIPIgnoresThePreviousShadow(t *testing.T) {
+	now := time.Now()
+	pod := podWithPort("nb-0", testNamespaceDefault, "uid-nb-0")
+	pod.CreationTimestamp = metav1.NewTime(now)
+	previous := podWithPort(pod.Name, pod.Namespace, "uid-nb-0-previous")
+	stale := shadowPodOf(t, previous, "aaaaa", "10.42.9.12", now.Add(time.Second))
+	current := markNotReady(shadowPodOf(t, pod, "zzzzz", "10.42.21.3", now.Add(2*time.Second)))
+	status, err := PodPhase(nil, "Pending", current.Status.PodIP)
+	require.NoError(t, err)
+	pod.Status = status
+	p := shadowAddressProvider(pod)
+
+	p.refreshShadowPodIP(t.Context(), pod.DeepCopy(), indexShadowPods([]v1.Pod{*stale, *current}))
+
+	assert.Equal(t, current.Status.PodIP, p.pods[string(pod.UID)].Status.PodIP)
 }
 
 // The status loop is what hands the pod's status to the API server, the status the
@@ -135,9 +161,9 @@ func TestStatusLoopReportsTheReplacementShadowPodIP(t *testing.T) {
 
 func TestRefreshShadowPodIPLeavesOtherAddressesAlone(t *testing.T) {
 	tests := []struct {
-		name     string
-		setup    func(p *Provider, pod *v1.Pod)
-		unlisted bool
+		name       string
+		setup      func(p *Provider, pod *v1.Pod)
+		shadowPods func(evicted, replacement *v1.Pod) []v1.Pod
 	}{
 		{
 			// The mesh renders a shadow for every pod, and the VPN still overrides its IP.
@@ -158,12 +184,17 @@ func TestRefreshShadowPodIPLeavesOtherAddressesAlone(t *testing.T) {
 			setup: func(_ *Provider, pod *v1.Pod) { pod.Spec.Containers[0].Ports = nil },
 		},
 		{
-			name:  "pod waiting for its remote deletion",
-			setup: func(p *Provider, pod *v1.Pod) { p.markDeletePending(pod) },
+			// Nothing tells its pods apart from those of a previous shadow with the same name.
+			name: "shadow rendered before the shadow-of label",
+			shadowPods: func(evicted, replacement *v1.Pod) []v1.Pod {
+				delete(evicted.Labels, shadowOfLabel)
+				delete(replacement.Labels, shadowOfLabel)
+				return []v1.Pod{*evicted, *replacement}
+			},
 		},
 		{
-			name:     "pods could not be listed",
-			unlisted: true,
+			name:       "pods could not be listed",
+			shadowPods: func(*v1.Pod, *v1.Pod) []v1.Pod { return nil },
 		},
 	}
 
@@ -174,12 +205,12 @@ func TestRefreshShadowPodIPLeavesOtherAddressesAlone(t *testing.T) {
 			if tc.setup != nil {
 				tc.setup(p, pod)
 			}
-			index := indexShadowPods([]v1.Pod{*evicted, *replacement})
-			if tc.unlisted {
-				index = indexShadowPods(nil)
+			shadowPods := []v1.Pod{*evicted, *replacement}
+			if tc.shadowPods != nil {
+				shadowPods = tc.shadowPods(evicted, replacement)
 			}
 
-			p.refreshShadowPodIP(t.Context(), pod.DeepCopy(), index)
+			p.refreshShadowPodIP(t.Context(), pod.DeepCopy(), indexShadowPods(shadowPods))
 
 			assert.Equal(t, testEvictedShadowIP, p.pods[string(pod.UID)].Status.PodIP)
 		})
@@ -188,14 +219,11 @@ func TestRefreshShadowPodIPLeavesOtherAddressesAlone(t *testing.T) {
 
 func TestCurrentShadowPodIP(t *testing.T) {
 	now := time.Now()
-	identity := shadowResourceIdentity{Name: "web-default", Namespace: testNamespaceDefault + shadowNamespaceSuffix}
+	owner := podWithPort("web", testNamespaceDefault, "uid-web")
 	shadowPod := func(suffix, ip string, created time.Time) *v1.Pod {
-		return servingShadowPod(identity, identity.Name+"-6d5c666bc8-"+suffix, ip, created)
+		return shadowPodOf(t, owner, suffix, ip, created)
 	}
-	pod := &v1.Pod{
-		ObjectMeta: metav1.ObjectMeta{CreationTimestamp: metav1.NewTime(now)},
-		Status:     v1.PodStatus{PodIP: "10.42.0.1"},
-	}
+	const reported = "10.42.0.1"
 
 	tests := []struct {
 		name       string
@@ -203,12 +231,12 @@ func TestCurrentShadowPodIP(t *testing.T) {
 		want       string
 	}{
 		{
-			name: "keeps the address while its pod serves, even next to a newer one",
+			name: "keeps the IP while its pod serves, even next to a newer one",
 			shadowPods: []*v1.Pod{
-				shadowPod("aaaaa", "10.42.0.1", now),
+				shadowPod("aaaaa", reported, now),
 				shadowPod("bbbbb", "10.42.0.2", now.Add(time.Minute)),
 			},
-			want: "10.42.0.1",
+			want: reported,
 		},
 		{
 			name: "moves to the newest serving pod once its pod is gone",
@@ -221,7 +249,7 @@ func TestCurrentShadowPodIP(t *testing.T) {
 		{
 			name: "moves away from its pod once it terminates",
 			shadowPods: []*v1.Pod{
-				markTerminating(shadowPod("aaaaa", "10.42.0.1", now)),
+				markTerminating(shadowPod("aaaaa", reported, now)),
 				shadowPod("bbbbb", "10.42.0.2", now.Add(time.Minute)),
 			},
 			want: "10.42.0.2",
@@ -235,38 +263,80 @@ func TestCurrentShadowPodIP(t *testing.T) {
 			shadowPods: []*v1.Pod{markTerminating(shadowPod("bbbbb", "10.42.0.2", now.Add(time.Minute)))},
 		},
 		{
-			// A StatefulSet replica recreated under its name gets a shadow with the same
-			// name as the previous one, whose pods may still be around and serving.
-			name:       "never moves to a pod of a previous shadow",
-			shadowPods: []*v1.Pod{shadowPod("bbbbb", "10.42.0.2", now.Add(-time.Minute))},
-		},
-		{
 			name: "no shadow pod",
 		},
 	}
 
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
-			assert.Equal(t, tc.want, currentShadowPodIP(pod, tc.shadowPods))
+			assert.Equal(t, tc.want, currentShadowPodIP(reported, tc.shadowPods))
 		})
 	}
 }
 
 func TestIndexShadowPods(t *testing.T) {
 	now := time.Now()
-	web := shadowResourceIdentity{Name: "web-default", Namespace: testNamespaceDefault + shadowNamespaceSuffix}
-	sameNameElsewhere := shadowResourceIdentity{Name: web.Name, Namespace: "other" + shadowNamespaceSuffix}
-	first := servingShadowPod(web, "web-default-6d5c666bc8-aaaaa", "10.42.0.1", now)
-	second := servingShadowPod(web, "web-default-6d5c666bc8-bbbbb", "10.42.0.2", now)
-	elsewhere := servingShadowPod(sameNameElsewhere, "web-default-6d5c666bc8-ccccc", "10.42.0.3", now)
+	web := podWithPort("web", testNamespaceDefault, "uid-web")
+	other := podWithPort("web", "other", "uid-other")
+	first := shadowPodOf(t, web, "aaaaa", "10.42.0.1", now)
+	second := shadowPodOf(t, web, "bbbbb", "10.42.0.2", now)
+	ofOther := shadowPodOf(t, other, "ccccc", "10.42.0.3", now)
+	// A pod of a shadow rendered before shadowOfLabel existed.
+	unlabeled := shadowPodOf(t, web, "ddddd", "10.42.0.4", now)
+	delete(unlabeled.Labels, shadowOfLabel)
 	unrelated := &v1.Pod{ObjectMeta: metav1.ObjectMeta{Name: "coredns", Namespace: "kube-system"}}
 
-	index := indexShadowPods([]v1.Pod{*first, *unrelated, *second, *elsewhere})
+	index := indexShadowPods([]v1.Pod{*first, *unrelated, *second, *unlabeled, *ofOther})
 
 	require.Len(t, index, 2)
-	require.Len(t, index[web], 2)
-	assert.Equal(t, first.Name, index[web][0].Name)
-	assert.Equal(t, second.Name, index[web][1].Name)
-	require.Len(t, index[sameNameElsewhere], 1)
-	assert.Equal(t, elsewhere.Name, index[sameNameElsewhere][0].Name)
+	require.Len(t, index[string(web.UID)], 2)
+	assert.Equal(t, first.Name, index[string(web.UID)][0].Name)
+	assert.Equal(t, second.Name, index[string(web.UID)][1].Name)
+	require.Len(t, index[string(other.UID)], 1)
+	assert.Equal(t, ofOther.Name, index[string(other.UID)][0].Name)
+}
+
+// The label is what ties the pods of a shadow to their pod, so createShadowPod has to
+// put it on them when it creates the shadow, and replace it when the pod, recreated
+// under its name, takes over the Deployment its previous shadow left behind.
+func TestCreateShadowPodLabelsItsPodsWithThePodUID(t *testing.T) {
+	pod := podWithPort("nb-0", testNamespaceDefault, "uid-nb-0")
+	identity, err := computeShadowResourceIdentity(pod)
+	require.NoError(t, err)
+
+	tests := []struct {
+		name     string
+		existing []runtime.Object
+	}{
+		{name: "new shadow"},
+		{
+			name: "Deployment left by the previous shadow",
+			existing: []runtime.Object{&appsv1.Deployment{
+				ObjectMeta: metav1.ObjectMeta{Name: identity.Name, Namespace: identity.Namespace},
+				Spec: appsv1.DeploymentSpec{Template: v1.PodTemplateSpec{ObjectMeta: metav1.ObjectMeta{
+					Labels: map[string]string{shadowComponentLabel: identity.Name, shadowOfLabel: "uid-nb-0-previous"},
+				}}},
+			}},
+		},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			// The pod waitForDeploymentPod returns once the Deployment is applied.
+			running := &v1.Pod{ObjectMeta: metav1.ObjectMeta{
+				Name:      identity.Name + "-0",
+				Namespace: identity.Namespace,
+				Labels:    map[string]string{shadowComponentLabel: identity.Name},
+			}}
+			client := fake.NewSimpleClientset(append([]runtime.Object{running}, tc.existing...)...)
+			p := tunnelProvider(client)
+
+			_, _, err := p.createShadowPod(t.Context(), pod)
+			require.NoError(t, err)
+
+			deployment, err := client.AppsV1().Deployments(identity.Namespace).Get(t.Context(), identity.Name, metav1.GetOptions{})
+			require.NoError(t, err)
+			assert.Equal(t, string(pod.UID), deployment.Spec.Template.Labels[shadowOfLabel])
+		})
+	}
 }

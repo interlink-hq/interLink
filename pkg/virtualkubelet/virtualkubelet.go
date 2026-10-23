@@ -147,6 +147,9 @@ type ShadowTemplateData struct {
 	// SSHNodeWaitSeconds is SSH.NodeWaitTimeout in whole seconds, for the shell loop
 	// that waits on NodeConfigMap.
 	SSHNodeWaitSeconds int
+	// PodUID is the UID of the pod the shadow stands for, put on the shadow's pods as
+	// shadowOfLabel.
+	PodUID string
 }
 
 type PortMapping struct {
@@ -1064,6 +1067,7 @@ func (p *Provider) createShadowPod(ctx context.Context, originalPod *v1.Pod) (*v
 		Volumes:              extractVolumesForLocalContainers(originalPod),
 		PodLabels:            podLabels,
 		PodAnnotations:       podAnnotations,
+		PodUID:               string(originalPod.UID),
 		IngressTLS:           p.config.Network.IngressTLS,
 		IngressClusterIssuer: p.config.Network.IngressClusterIssuer,
 		FullMesh:             fullMeshEnabledForPod,
@@ -1283,6 +1287,8 @@ func (p *Provider) applyOrUpdateDeployment(ctx context.Context, o *appsv1.Deploy
 		}
 		o.Spec.Template.Labels = mergeMaps(o.Spec.Template.Labels, td.PodLabels)
 		o.Spec.Template.Annotations = mergeMaps(o.Spec.Template.Annotations, td.PodAnnotations)
+		// Set here rather than in the templates, so that a custom template carries it too.
+		o.Spec.Template.Labels[shadowOfLabel] = td.PodUID
 		log.G(ctx).Infof("Shadow pod will inherit %d labels and %d annotations from original pod",
 			len(td.PodLabels), len(td.PodAnnotations))
 	}
@@ -1480,8 +1486,8 @@ func (p *Provider) applyShadowManifests(ctx context.Context, manifestYAML string
 // waitForDeploymentPod waits for a deployment to create a pod and returns it.
 //
 // A pod recreated under the same name (a StatefulSet replica) gets a Deployment with the
-// same name, labels and pod-template hash as the one just deleted, and the garbage
-// collector removes that one's pods asynchronously. Pods that are terminating, or older
+// same name and pod selector as the one just deleted, and the garbage collector
+// removes that one's pods asynchronously. Pods that are terminating, or older
 // than the current Deployment, belong to the previous one and are skipped.
 func (p *Provider) waitForDeploymentPod(ctx context.Context, deploymentName, namespace string) (*v1.Pod, error) {
 	timeout := 30 * time.Second
@@ -2273,16 +2279,6 @@ func (p *Provider) markDeletePending(pod *v1.Pod) {
 	if _, ok := p.pendingDeletes[string(pod.UID)]; !ok {
 		p.pendingDeletes[string(pod.UID)] = &pendingDelete{pod: pod.DeepCopy()}
 	}
-}
-
-// isDeletePending reports whether the pod with the given UID is waiting for the
-// plugin to confirm its remote deletion.
-func (p *Provider) isDeletePending(uid string) bool {
-	p.pendingDeletesMu.Lock()
-	defer p.pendingDeletesMu.Unlock()
-
-	_, ok := p.pendingDeletes[uid]
-	return ok
 }
 
 // beginDeleteAttempt claims the right to issue a remote deletion for key. It

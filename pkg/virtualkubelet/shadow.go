@@ -35,6 +35,12 @@ const shadowNodeNameKey = "compute-node"
 // compute node where the pod's unix sockets live.
 const shadowSocketDirKey = "socket-dir"
 
+// shadowOfLabel carries, on the pods of a shadow, the UID of the pod the shadow
+// stands for. The shadow's name cannot tell the generations apart: a pod recreated
+// under its name, such as a StatefulSet replica, gets a shadow with the same name as
+// the previous one, whose pods may still be around.
+const shadowOfLabel = "interlink.eu/shadow-of"
+
 // maxComputeNodeNameLen is the longest DNS name, and so the longest thing a plugin
 // can legitimately report as a compute node.
 const maxComputeNodeNameLen = 253
@@ -402,18 +408,17 @@ func (p *Provider) releaseShadowOfEndedPod(ctx context.Context, pod *v1.Pod) {
 	p.forgetShadowNodeName(pod)
 }
 
-// indexShadowPods groups pods by the shadow they belong to, under the identity of
-// that shadow's resources: the Deployment name, which every shadow template puts on
-// its pods as the component label, and the namespace.
-func indexShadowPods(pods []v1.Pod) map[shadowResourceIdentity][]*v1.Pod {
-	index := make(map[shadowResourceIdentity][]*v1.Pod)
+// indexShadowPods groups the shadow pods by the UID of the pod they stand for, read
+// from shadowOfLabel. The pods of a shadow rendered before that label existed are
+// left out, so their virtual pod keeps the IP it was created with.
+func indexShadowPods(pods []v1.Pod) map[string][]*v1.Pod {
+	index := make(map[string][]*v1.Pod)
 	for i := range pods {
-		name := pods[i].Labels[shadowComponentLabel]
-		if name == "" {
+		uid := pods[i].Labels[shadowOfLabel]
+		if uid == "" {
 			continue
 		}
-		identity := shadowResourceIdentity{Name: name, Namespace: pods[i].Namespace}
-		index[identity] = append(index[identity], &pods[i])
+		index[uid] = append(index[uid], &pods[i])
 	}
 	return index
 }
@@ -427,7 +432,7 @@ func indexShadowPods(pods []v1.Pod) map[shadowResourceIdentity][]*v1.Pod {
 // does not route.
 //
 // shadowPods is the index built by indexShadowPods from the pods of the cluster.
-func (p *Provider) refreshShadowPodIP(ctx context.Context, pod *v1.Pod, shadowPods map[shadowResourceIdentity][]*v1.Pod) {
+func (p *Provider) refreshShadowPodIP(ctx context.Context, pod *v1.Pod, shadowPods map[string][]*v1.Pod) {
 	if !p.hasTunnelShadow(pod) {
 		return
 	}
@@ -439,15 +444,6 @@ func (p *Provider) refreshShadowPodIP(ctx context.Context, pod *v1.Pod, shadowPo
 	if _, ok := pod.Annotations["interlink.eu/pod-ip"]; ok {
 		return
 	}
-	// A pod on its way out keeps its address: its shadow is gone, and a shadow
-	// recreated under the same name belongs to the next pod.
-	if p.isDeletePending(string(pod.UID)) {
-		return
-	}
-	identity, err := computeShadowResourceIdentity(pod)
-	if err != nil {
-		return
-	}
 
 	p.podsMu.Lock()
 	defer p.podsMu.Unlock()
@@ -456,7 +452,7 @@ func (p *Provider) refreshShadowPodIP(ctx context.Context, pod *v1.Pod, shadowPo
 	if !ok {
 		return
 	}
-	ip := currentShadowPodIP(canonical, shadowPods[identity])
+	ip := currentShadowPodIP(canonical.Status.PodIP, shadowPods[string(pod.UID)])
 	if ip == "" || ip == canonical.Status.PodIP {
 		return
 	}
@@ -472,21 +468,17 @@ func (p *Provider) refreshShadowPodIP(ctx context.Context, pod *v1.Pod, shadowPo
 }
 
 // currentShadowPodIP returns the IP a virtual pod should report among the pods of its
-// shadow: the one it reports already while that pod still serves, otherwise the
-// newest serving one. It returns "" when none serves, so the IP only moves once the
-// replacement is ready.
-//
-// A pod created before the virtual pod belongs to a previous shadow with the same
-// name, such as the one of a StatefulSet replica recreated under its name, and is
-// never picked.
-func currentShadowPodIP(pod *v1.Pod, shadowPods []*v1.Pod) string {
+// shadow, given the one it reports: that one while its pod still serves, otherwise
+// the newest serving pod's. It returns "" when none serves, so the IP only moves once
+// the replacement is ready.
+func currentShadowPodIP(reportedIP string, shadowPods []*v1.Pod) string {
 	var newest *v1.Pod
 	for _, shadowPod := range shadowPods {
-		if !isServingShadowPod(shadowPod) || shadowPod.CreationTimestamp.Before(&pod.CreationTimestamp) {
+		if !isServingShadowPod(shadowPod) {
 			continue
 		}
-		if shadowPod.Status.PodIP == pod.Status.PodIP {
-			return shadowPod.Status.PodIP
+		if shadowPod.Status.PodIP == reportedIP {
+			return reportedIP
 		}
 		if newest == nil || newest.CreationTimestamp.Before(&shadowPod.CreationTimestamp) {
 			newest = shadowPod
