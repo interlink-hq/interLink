@@ -54,6 +54,9 @@ type Config struct {
 	TLS TLSConfig `yaml:"TLS,omitempty"`
 	// Network contains network-related settings for the virtual node
 	Network Network `yaml:"Network,omitempty"`
+	// ShadowPauseImage keeps a shadow running when the pod keeps only init containers
+	// on the cluster (default registry.k8s.io/pause:3.10)
+	ShadowPauseImage string `yaml:"ShadowPauseImage,omitempty"`
 	// SkipDownwardAPIResolution disables downward API resolution to enable scheduling pods with downward API
 	SkipDownwardAPIResolution bool `yaml:"SkipDownwardAPIResolution,omitempty"`
 	// DisableCSR disables CSR (CertificateSigningRequest) creation and uses self-signed certificates instead
@@ -102,6 +105,10 @@ type Resources struct {
 	Memory string `yaml:"Memory,omitempty"`
 	// Pods specifies the maximum number of pods this node can handle
 	Pods string `yaml:"Pods,omitempty"`
+	// EphemeralStorage is the ephemeral storage the node advertises (default 1Ti). A node
+	// that advertises none cannot take a pod that requests some, as sidecars often do
+	// (Katib's metrics collector requests 500Mi).
+	EphemeralStorage string `yaml:"EphemeralStorage,omitempty"`
 	// Accelerators lists hardware accelerators available on this node
 	Accelerators []Accelerator `yaml:"Accelerators"`
 }
@@ -193,12 +200,39 @@ const (
 
 // Traffic-forwarding strategies selectable through SSHTunnel.ForwardMode.
 const (
-	// SSHForwardModePortForward uses `ssh -L`, and needs AllowTcpForwarding on the
-	// login node. This is the default.
+	// SSHForwardModePortForward asks sshd to forward: `ssh -L` on the login node,
+	// or `-W` on the login node and `-L` on the compute node. It needs
+	// AllowTcpForwarding on every sshd involved, and AllowStreamLocalForwarding on
+	// the compute node for socket ports. This is the default.
 	SSHForwardModePortForward = "portforward"
-	// SSHForwardModeExec pipes each connection through a command run on the login
-	// node, for sites that do not grant TCP forwarding.
+	// SSHForwardModeExec pipes each connection through a session command instead,
+	// for sites that do not grant TCP forwarding.
 	SSHForwardModeExec = "exec"
+)
+
+// Where the shadow's forwarding session ends, selectable through
+// SSHTunnel.ForwardTarget.
+const (
+	// SSHForwardTargetLogin ends the session on the login node, which then
+	// connects to the compute node in clear TCP. The workload must listen on the
+	// node's network address. This is the default.
+	SSHForwardTargetLogin = "login"
+	// SSHForwardTargetNode ends the session on the compute node's own sshd,
+	// reached through the login node, and opens every forward from inside the
+	// node to 127.0.0.1 or to a unix socket, so the workload never listens on the
+	// network.
+	SSHForwardTargetNode = "node"
+)
+
+// How the shadow checks compute node host keys, selectable through
+// SSHTunnel.NodeHostKeys.
+const (
+	// SSHNodeHostKeysVerify checks every compute node against KnownHostsConfigMap
+	// and the login node's system known_hosts files, and refuses unknown keys.
+	// This is the default.
+	SSHNodeHostKeysVerify = "verify"
+	// SSHNodeHostKeysAcceptNew trusts whatever key a compute node presents.
+	SSHNodeHostKeysAcceptNew = "accept-new"
 )
 
 // DefaultSSHExecConnectCommand relays a connection on stdin/stdout in "exec" mode.
@@ -214,11 +248,14 @@ const (
 
 // SSHTunnel configures the SSH port-forward shadow.
 //
-// The shadow runs `ssh -N -L <port>:<compute node>:<port>` against the site's login
-// node, one -L per exposed port, so cluster traffic reaches services inside an
-// offloaded pod without the compute node needing any outbound connectivity. It
-// covers the same ground as the wstunnel shadow, in the opposite direction; it does
-// not give the offloaded pod access back into the cluster (see Network.FullMesh).
+// The shadow dials in to the site's login node and forwards each exposed port to
+// the compute node the plugin reported, so cluster traffic reaches services inside
+// an offloaded pod without the compute node needing any outbound connectivity.
+// ForwardTarget selects where the forwarding session ends (the login node, or the
+// compute node's own sshd) and ForwardMode whether sshd forwards or session
+// commands relay. It covers the same ground as the wstunnel shadow, in the opposite
+// direction; it does not give the offloaded pod access back into the cluster (see
+// Network.FullMesh).
 type SSHTunnel struct {
 	// LoginHost is the SSH login node to forward through (required)
 	LoginHost string `yaml:"LoginHost,omitempty"`
@@ -231,21 +268,51 @@ type SSHTunnel struct {
 	Image string `yaml:"Image,omitempty"`
 	// Auth selects the authentication method: "publickey" (default) or "kerberos"
 	Auth string `yaml:"Auth,omitempty"`
-	// ForwardMode selects how traffic reaches the compute node:
+	// ForwardTarget selects where the forwarding session ends:
 	//
-	//   "portforward" (default) — one `ssh -L` per exposed port. Cheapest and most
-	//     direct, but the login node must set AllowTcpForwarding yes for this
-	//     account. Sites that disable it refuse every channel with
-	//     "administratively prohibited".
-	//   "exec" — a local listener per exposed port, each connection piped through a
-	//     command run on the login node (see ExecConnectCommand). Needs no
-	//     forwarding privilege at all, at the cost of one ssh process per connection.
+	//   "login" (default): on the login node, which connects to
+	//     <compute node>:<port> in clear TCP. The workload must listen on the
+	//     node's network address, where every host that reaches the node can
+	//     connect to it.
+	//   "node": on the compute node's own sshd, reached through the login node.
+	//     Every forward is opened from inside the node, to 127.0.0.1:<port> or, for
+	//     the ports listed in the interlink.eu/shadow-socket-ports annotation, to a
+	//     unix socket in the directory the plugin reports. The workload never
+	//     listens on the network and the login node relays only ciphertext.
+	ForwardTarget string `yaml:"ForwardTarget,omitempty"`
+	// ForwardMode selects what the login node is asked to do:
+	//
+	//   "portforward" (default): sshd forwarding on the login node. One `ssh -L`
+	//     per exposed port with ForwardTarget "login", or `-W` to the compute
+	//     node's sshd with "node". The login node's sshd must allow TCP forwarding
+	//     for this account, or it refuses every channel with "administratively
+	//     prohibited".
+	//   "exec": no forwarding on the login node, which runs a session command
+	//     instead (see ExecConnectCommand). With ForwardTarget "login", a local
+	//     listener per exposed port pipes each connection through it, at the cost
+	//     of one ssh process per connection; with "node" it relays the one session
+	//     to the compute node's sshd.
+	//
+	// With ForwardTarget "node" the forwards themselves are always `-L` on the
+	// compute node's sshd, which must allow TCP forwarding, and stream-local
+	// forwarding for socket ports (both are sshd defaults).
 	ForwardMode string `yaml:"ForwardMode,omitempty"`
-	// ExecConnectCommand is the command run on the login node in "exec" mode. It is
-	// invoked as `<command> <compute node> <port>` and must relay the connection on
-	// its stdin and stdout. Defaults to "nc".
+	// ExecConnectCommand is the relay command of the "exec" mode, run on the login
+	// node. It must relay a connection on its stdin and stdout, and defaults to
+	// "nc": `<command> <compute node> <port>` with ForwardTarget "login",
+	// `<command> <compute node> 22` with "node".
 	ExecConnectCommand string `yaml:"ExecConnectCommand,omitempty"`
-	// KeySecret is the Secret holding the SSH private key ("publickey" auth)
+	// NodeHostKeys selects how compute node host keys are checked on every session
+	// that ends on a compute node: "verify" (default) checks them against
+	// KnownHostsConfigMap and the login node's /etc/ssh/ssh_known_hosts and
+	// ssh_known_hosts2, and refuses a node it has no key for; "accept-new" trusts
+	// any key and is an explicit opt-out. Without KnownHostsConfigMap, "verify" is
+	// only as strong as the login hop, which then trusts the login node on first
+	// contact.
+	NodeHostKeys string `yaml:"NodeHostKeys,omitempty"`
+	// KeySecret is the Secret holding the SSH private key ("publickey" auth). Only
+	// the shadow uses it, and it is replicated into shadow namespaces, so use a key
+	// dedicated to the tunnel and restricted on the site, never the plugin's own.
 	KeySecret string `yaml:"KeySecret,omitempty"`
 	// KeySecretKey is the key inside KeySecret holding the private key (default "id_ed25519")
 	KeySecretKey string `yaml:"KeySecretKey,omitempty"`
@@ -257,9 +324,12 @@ type SSHTunnel struct {
 	Principal string `yaml:"Principal,omitempty"`
 	// Krb5ConfigMap is an optional ConfigMap holding a krb5.conf to mount at /etc/krb5.conf
 	Krb5ConfigMap string `yaml:"Krb5ConfigMap,omitempty"`
-	// KnownHostsConfigMap is an optional ConfigMap holding a known_hosts file. When
-	// unset the shadow falls back to StrictHostKeyChecking=accept-new, which trusts
-	// whatever key the login node presents on first contact.
+	// KnownHostsConfigMap is an optional ConfigMap holding a known_hosts file. It
+	// pins the login node's key, and may also hold compute node keys, host
+	// patterns or an @cert-authority line that NodeHostKeys "verify" checks nodes
+	// against. When unset the login hop falls back to
+	// StrictHostKeyChecking=accept-new, which trusts whatever key the login node
+	// presents on first contact.
 	KnownHostsConfigMap string `yaml:"KnownHostsConfigMap,omitempty"`
 	// ReplicateCredentials copies the referenced Secret and ConfigMaps from the
 	// virtual kubelet's own namespace into the shadow's namespace, so offloaded pods
@@ -272,5 +342,9 @@ type SSHTunnel struct {
 	// generous by design.
 	NodeWaitTimeout string `yaml:"NodeWaitTimeout,omitempty"`
 	// ExtraOptions are additional ssh client options, each passed verbatim as -o <opt>
+	// on every hop, after the options the shadow sets itself. ssh keeps the first
+	// value it sees for an option, so they cannot override those, with one
+	// exception: GSSAPIDelegateCredentials=yes restores Kerberos delegation on the
+	// login hop.
 	ExtraOptions []string `yaml:"ExtraOptions,omitempty"`
 }

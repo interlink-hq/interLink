@@ -185,7 +185,7 @@ func ReqWithError(
 	}
 
 	if resp.StatusCode != http.StatusOK {
-		log.G(ctx).Errorf("%s Non-OK status from JobScriptBuilder: %d", sessionContextMessage, resp.StatusCode)
+		log.G(ctx).Errorf("%s Non-OK status from %s %s: %d", sessionContextMessage, req.Method, req.URL.Path, resp.StatusCode)
 		statusCode := http.StatusInternalServerError
 
 		// ❗This is likely the cause of “superfluous WriteHeader” (double call)
@@ -199,7 +199,7 @@ func ReqWithError(
 				"HTTP request in error and could not read body response error: %w", err)
 		}
 
-		errHTTP := fmt.Errorf("%s call exit status: %d. Body: %s", sessionContextMessage, statusCode, ret)
+		errHTTP := fmt.Errorf("%s %s %s returned status %d. Body: %s", sessionContextMessage, req.Method, req.URL.Path, resp.StatusCode, ret)
 		log.G(ctx).Error(errHTTP)
 
 		// Prevent XSS by escaping error message

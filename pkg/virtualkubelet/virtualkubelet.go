@@ -14,6 +14,7 @@ import (
 	"net"
 	"net/http"
 	"os"
+	"slices"
 	"strconv"
 	"strings"
 	"sync"
@@ -44,7 +45,7 @@ import (
 	k8stypes "k8s.io/apimachinery/pkg/types"
 )
 
-//go:embed templates/wstunnel-template.yaml templates/wstunnel-wireguard-template.yaml templates/shadow-ssh-template.yaml
+//go:embed templates/wstunnel-template.yaml templates/wstunnel-wireguard-template.yaml templates/shadow-ssh-template.yaml templates/shadow-kept-template.yaml
 var defaultShadowTemplates embed.FS
 
 //go:embed all:templates/mesh.sh
@@ -100,6 +101,7 @@ const (
 	annDisableOffloadContainers     = "interlink.eu/disable-offload-containers"      // comma-separated container names
 	annDisableOffloadInitContainers = "interlink.eu/disable-offload-init-containers" // comma-separated init container names
 	annMeshNetworkDisabled          = "interlink.eu/mesh-network"                    // set to "disabled" to opt out of mesh networking
+	annShadowSocketPorts            = "interlink.eu/shadow-socket-ports"             // comma-separated exposed TCP ports served on unix sockets
 )
 
 type ShadowTemplateData struct {
@@ -121,12 +123,25 @@ type ShadowTemplateData struct {
 	IngressTLS           bool
 	IngressClusterIssuer string
 	FullMesh             bool
+	// KeptOnly marks a shadow that only runs the containers the pod keeps on the
+	// cluster: no tunnel, no mesh, no Service.
+	KeptOnly bool
+	// PauseImage keeps a KeptOnly shadow running once its init containers have ended,
+	// in a container named PauseName, a name no kept init container uses.
+	PauseImage string
+	PauseName  string
 	// NodeConfigMap is the ConfigMap the shadow can mount to learn which remote
 	// compute node the workload landed on. It exists from the moment the shadow is
 	// created but holds an empty NodeNameKey until the plugin reports the node.
 	NodeConfigMap string
 	// NodeNameKey is the key inside NodeConfigMap holding the node name.
 	NodeNameKey string
+	// SocketDirKey is the key inside NodeConfigMap holding the socket directory the
+	// job created on the compute node.
+	SocketDirKey string
+	// NeedsSocketDir is true when the shadow cannot start without a socket
+	// directory, because at least one exposed port is a unix socket.
+	NeedsSocketDir bool
 	// SSH carries the SSH port-forward settings, used by the ssh shadow template.
 	SSH SSHTunnel
 	// SSHNodeWaitSeconds is SSH.NodeWaitTimeout in whole seconds, for the shell loop
@@ -138,6 +153,9 @@ type PortMapping struct {
 	Port     int32
 	Name     string
 	Protocol string
+	// Socket marks a port the workload serves on <socket dir>/fwd-<port>.sock
+	// instead of 127.0.0.1:<port> (interlink.eu/shadow-socket-ports).
+	Socket bool
 }
 
 type MeshScriptTemplateData struct {
@@ -174,12 +192,16 @@ type Provider struct {
 	clientSet            kubernetes.Interface
 	clientHTTPTransport  *http.Transport
 	podIPs               []string
-	// shadowNodeNames caches, per pod UID, the last compute node published to
-	// that pod's shadow, so the status loop only writes on change.
+	// shadowNodeNames caches, per pod UID, the last compute node and socket
+	// directory published to that pod's shadow, so the status loop only writes on
+	// change.
 	shadowNodeNames sync.Map
 	// shadowsReleased marks, per pod UID, shadows already removed because their
 	// pod ended, so the status loop removes each one once.
-	shadowsReleased  sync.Map
+	shadowsReleased sync.Map
+	// keptInitWaits holds, per pod UID, the cancel function of a pending wait for the
+	// pod's kept init containers (see stopKeptInitWait).
+	keptInitWaits    sync.Map
 	pendingDeletes   map[string]*pendingDelete
 	pendingDeletesMu sync.Mutex
 	deleteLoopOnce   sync.Once
@@ -382,6 +404,10 @@ func NodeConditionWithInterlink(ready bool, interlinkStatus v1.ConditionStatus, 
 	return append(conditions, interlinkCondition)
 }
 
+// defaultEphemeralStorage is advertised when Resources.EphemeralStorage is not set: the
+// remote side has its own disks, so the node only must not refuse pods that ask for some.
+const defaultEphemeralStorage = "1Ti"
+
 func GetResources(config Config) v1.ResourceList {
 	gpuCount := map[string]resource.Quantity{}
 	fpgaCount := map[string]resource.Quantity{}
@@ -401,10 +427,15 @@ func GetResources(config Config) v1.ResourceList {
 		}
 	}
 
+	ephemeralStorage := config.Resources.EphemeralStorage
+	if ephemeralStorage == "" {
+		ephemeralStorage = defaultEphemeralStorage
+	}
 	resourceList := v1.ResourceList{
-		"cpu":    resource.MustParse(config.Resources.CPU),
-		"memory": resource.MustParse(config.Resources.Memory),
-		"pods":   resource.MustParse(config.Resources.Pods),
+		"cpu":                       resource.MustParse(config.Resources.CPU),
+		"memory":                    resource.MustParse(config.Resources.Memory),
+		"pods":                      resource.MustParse(config.Resources.Pods),
+		v1.ResourceEphemeralStorage: resource.MustParse(ephemeralStorage),
 	}
 
 	for resourceType, q := range gpuCount {
@@ -649,6 +680,11 @@ func LoadConfig(ctx context.Context, providerConfig string) (config Config, err 
 	}
 	if _, err = resource.ParseQuantity(config.Resources.Pods); err != nil {
 		return config, fmt.Errorf("invalid pods value %v", config.Resources.Pods)
+	}
+	if config.Resources.EphemeralStorage != "" {
+		if _, err = resource.ParseQuantity(config.Resources.EphemeralStorage); err != nil {
+			return config, fmt.Errorf("invalid ephemeral storage value %v", config.Resources.EphemeralStorage)
+		}
 	}
 	for _, accelerator := range config.Resources.Accelerators {
 		if _, err = resource.ParseQuantity(accelerator.Available); err != nil {
@@ -1001,7 +1037,8 @@ func (p *Provider) createShadowPod(ctx context.Context, originalPod *v1.Pod) (*v
 		return nil, nil, err
 	}
 
-	if p.isSSHShadow() {
+	keptOnly := !p.hasTunnelShadow(originalPod)
+	if p.isSSHShadow() && !keptOnly {
 		if err := p.replicateShadowCredentials(ctx, identity); err != nil {
 			return nil, nil, err
 		}
@@ -1013,12 +1050,14 @@ func (p *Provider) createShadowPod(ctx context.Context, originalPod *v1.Pod) (*v
 	podLabels, podAnnotations := copyPodLabelsAndAnnotations(originalPod)
 	log.G(ctx).Infof("Copied %d labels and %d annotations from original pod to shadow pod", len(podLabels), len(podAnnotations))
 
+	exposedPorts := shadowPortMappings(originalPod)
+
 	fullMeshEnabledForPod := p.config.Network.FullMesh && !isMeshNetworkingDisabled(originalPod)
 	templateData := ShadowTemplateData{
 		Name:                 identity.Name,
 		Namespace:            identity.Namespace,
 		RandomPassword:       pathPrefix,
-		ExposedPorts:         extractPortMappings(originalPod),
+		ExposedPorts:         exposedPorts,
 		WildcardDNS:          p.config.Network.WildcardDNS,
 		LocalContainers:      localContainers,
 		LocalInitContainers:  localInitContainers,
@@ -1028,8 +1067,13 @@ func (p *Provider) createShadowPod(ctx context.Context, originalPod *v1.Pod) (*v
 		IngressTLS:           p.config.Network.IngressTLS,
 		IngressClusterIssuer: p.config.Network.IngressClusterIssuer,
 		FullMesh:             fullMeshEnabledForPod,
+		KeptOnly:             keptOnly,
+		PauseImage:           p.shadowPauseImage(),
+		PauseName:            shadowPauseName(localInitContainers),
 		NodeConfigMap:        shadowNodeConfigMapName(identity.Name),
 		NodeNameKey:          shadowNodeNameKey,
+		SocketDirKey:         shadowSocketDirKey,
+		NeedsSocketDir:       hasSocketPorts(exposedPorts),
 		SSH:                  p.config.Network.SSH,
 		SSHNodeWaitSeconds:   p.sshNodeWaitSeconds(),
 	}
@@ -1140,8 +1184,14 @@ func mergeMaps(dst, src map[string]string) map[string]string {
 func (p *Provider) executeShadowTemplate(ctx context.Context, data ShadowTemplateData) (string, error) {
 	var templateContent string
 
-	// Try to load from custom path first
-	if p.config.Network.WstunnelTemplatePath != "" {
+	// A custom template describes a tunnel, which a KeptOnly shadow does not have.
+	if data.KeptOnly {
+		content, err := defaultShadowTemplates.ReadFile("templates/shadow-kept-template.yaml")
+		if err != nil {
+			return "", fmt.Errorf("failed to read embedded template: %w", err)
+		}
+		templateContent = string(content)
+	} else if p.config.Network.WstunnelTemplatePath != "" {
 		content, err := os.ReadFile(p.config.Network.WstunnelTemplatePath)
 		if err != nil {
 			log.G(ctx).Warningf("Failed to read custom template from %s: %v, using default", p.config.Network.WstunnelTemplatePath, err)
@@ -1702,6 +1752,94 @@ func hasExtraPortsAnnotation(pod *v1.Pod) bool {
 	return exists && strings.TrimSpace(extraPorts) != ""
 }
 
+// parseSocketPorts reads the interlink.eu/shadow-socket-ports annotation, a
+// comma-separated list of port numbers.
+func parseSocketPorts(value string) ([]int32, error) {
+	var ports []int32
+	for _, field := range strings.Split(value, ",") {
+		field = strings.TrimSpace(field)
+		n, err := strconv.ParseUint(field, 10, 32)
+		if err != nil {
+			return nil, fmt.Errorf("%q is not a port number", field)
+		}
+		if n < 1 || n > 65535 {
+			return nil, fmt.Errorf("port %d is outside 1-65535", n)
+		}
+		ports = append(ports, int32(n))
+	}
+	return ports, nil
+}
+
+// checkSocketPortsRequest refuses, at creation, a pod whose
+// interlink.eu/shadow-socket-ports annotation cannot be honoured. Forwarding such
+// a port to 127.0.0.1 instead would reach whoever listens there, which is what
+// the socket was meant to rule out.
+func (p *Provider) checkSocketPortsRequest(pod *v1.Pod) error {
+	value := strings.TrimSpace(pod.Annotations[annShadowSocketPorts])
+	if value == "" {
+		return nil
+	}
+	switch {
+	case !p.isSSHShadow():
+		return fmt.Errorf("pod %s/%s sets %s, which needs Network.ShadowMode %q", pod.Namespace, pod.Name, annShadowSocketPorts, ShadowModeSSH)
+	case !p.config.Network.EnableTunnel:
+		return fmt.Errorf("pod %s/%s sets %s, but Network.EnableTunnel is false", pod.Namespace, pod.Name, annShadowSocketPorts)
+	case p.config.Network.SSH.ForwardTarget != SSHForwardTargetNode:
+		return fmt.Errorf("pod %s/%s sets %s, which needs Network.SSH.ForwardTarget %q", pod.Namespace, pod.Name, annShadowSocketPorts, SSHForwardTargetNode)
+	case pod.Annotations["interlink.eu/pod-vpn"] != "":
+		return fmt.Errorf("pod %s/%s sets %s, but interlink.eu/pod-vpn disables its shadow tunnel", pod.Namespace, pod.Name, annShadowSocketPorts)
+	}
+
+	ports, err := parseSocketPorts(value)
+	if err != nil {
+		return fmt.Errorf("pod %s/%s: invalid %s: %w", pod.Namespace, pod.Name, annShadowSocketPorts, err)
+	}
+	exposed := map[int32]bool{}
+	for _, m := range extractPortMappings(pod) {
+		if m.Protocol == DefaultProtocol {
+			exposed[m.Port] = true
+		}
+	}
+	for _, port := range ports {
+		if !exposed[port] {
+			return fmt.Errorf("pod %s/%s: %s lists port %d, which is not an exposed TCP port", pod.Namespace, pod.Name, annShadowSocketPorts, port)
+		}
+	}
+	return nil
+}
+
+// shadowPortMappings returns the ports the shadow forwards, with the ones listed
+// in interlink.eu/shadow-socket-ports marked as unix sockets.
+func shadowPortMappings(pod *v1.Pod) []PortMapping {
+	ports := extractPortMappings(pod)
+	markSocketPorts(pod, ports)
+	return ports
+}
+
+// markSocketPorts flags the exposed TCP ports the pod lists in
+// interlink.eu/shadow-socket-ports. checkSocketPortsRequest has already refused
+// the pod if the annotation is malformed.
+func markSocketPorts(pod *v1.Pod, ports []PortMapping) {
+	value := strings.TrimSpace(pod.Annotations[annShadowSocketPorts])
+	if value == "" {
+		return
+	}
+	listed, err := parseSocketPorts(value)
+	if err != nil {
+		return
+	}
+	for i := range ports {
+		if ports[i].Protocol == DefaultProtocol && slices.Contains(listed, ports[i].Port) {
+			ports[i].Socket = true
+		}
+	}
+}
+
+// hasSocketPorts reports whether any port is served on a unix socket.
+func hasSocketPorts(ports []PortMapping) bool {
+	return slices.ContainsFunc(ports, func(m PortMapping) bool { return m.Socket })
+}
+
 // shouldCreateShadow checks if shadow infrastructure should be created
 func (p *Provider) shouldCreateShadow(pod *v1.Pod) bool {
 	return p.config.Network.EnableTunnel && (hasExposedPorts(pod) || hasExtraPortsAnnotation(pod)) &&
@@ -1752,7 +1890,8 @@ func (p *Provider) handleShadowCreation(ctx context.Context, pod *v1.Pod) (strin
 
 	// The SSH shadow dials in to the login node, so the workload has nothing to set
 	// up on its side: no wstunnel client to launch, no WireGuard config to apply.
-	if !p.isSSHShadow() {
+	// A shadow that only runs kept containers has no tunnel at all.
+	if !p.isSSHShadow() && !templateData.KeptOnly {
 		// Add wstunnel client command annotation to the original pod
 		if err := p.addWstunnelClientAnnotation(ctx, pod, templateData); err != nil {
 			log.G(ctx).Warningf("Failed to add wstunnel client annotation to pod %s/%s: %v", pod.Namespace, pod.Name, err)
@@ -1921,6 +2060,10 @@ func (p *Provider) setPodInitialStatus(ctx context.Context, pod *v1.Pod, podIP s
 func (p *Provider) CreatePod(ctx context.Context, pod *v1.Pod) error {
 	TracerUpdate(&ctx, "CreatePodVK", pod)
 
+	if err := p.checkSocketPortsRequest(pod); err != nil {
+		return err
+	}
+
 	var state v1.ContainerState
 
 	key := pod.UID
@@ -1936,10 +2079,13 @@ func (p *Provider) CreatePod(ctx context.Context, pod *v1.Pod) error {
 
 	// Handle shadow creation if needed
 	if p.hasShadow(pod) {
-		var err error
-		podIP, err = p.handleShadowCreation(ctx, pod)
+		shadowIP, err := p.handleShadowCreation(ctx, pod)
 		if err != nil {
 			return err
+		}
+		// Only a tunnel shadow stands in for the pod on the network.
+		if p.hasTunnelShadow(pod) {
+			podIP = shadowIP
 		}
 
 		if p.config.Network.FullMesh && !isMeshNetworkingDisabled(pod) {
@@ -1968,20 +2114,6 @@ func (p *Provider) CreatePod(ctx context.Context, pod *v1.Pod) error {
 		return err
 	}
 
-	// Create pod asynchronously on the remote plugin
-	// we don't care, the statusLoop will eventually reconcile the status
-	go func() {
-		err := RemoteExecution(ctx, p.config, p, pod, CREATE)
-		if err != nil {
-			if err.Error() == "Deleted pod before actual creation" {
-				log.G(ctx).Warn(err)
-			} else {
-				log.G(ctx).Error(err)
-				p.handleRemoteExecutionFailure(ctx, pod, podIP, err)
-			}
-		}
-	}()
-
 	// set pod containers status to notReady and waiting since they haven't started yet
 	for _, container := range pod.Spec.Containers {
 		pod.Status.ContainerStatuses = append(pod.Status.ContainerStatuses, v1.ContainerStatus{
@@ -1996,6 +2128,27 @@ func (p *Provider) CreatePod(ctx context.Context, pod *v1.Pod) error {
 	p.podsMu.Lock()
 	p.pods[string(key)] = pod
 	p.podsMu.Unlock()
+
+	// Create pod asynchronously on the remote plugin
+	// we don't care, the statusLoop will eventually reconcile the status
+	// The pod is tracked first: the wait for kept init containers mirrors their statuses
+	// onto it, and DeletePod can stop that wait.
+	waitCtx := p.trackKeptInitWait(ctx, pod)
+	go func() {
+		if err := p.waitForKeptInitContainers(waitCtx, pod); err != nil {
+			log.G(ctx).Warningf("Pod %s/%s not submitted: %v", pod.Namespace, pod.Name, err)
+			return
+		}
+		err := RemoteExecution(ctx, p.config, p, pod, CREATE)
+		if err != nil {
+			if err.Error() == "Deleted pod before actual creation" {
+				log.G(ctx).Warn(err)
+			} else {
+				log.G(ctx).Error(err)
+				p.handleRemoteExecutionFailure(ctx, pod, podIP, err)
+			}
+		}
+	}()
 
 	return nil
 }
@@ -2029,6 +2182,9 @@ func (p *Provider) DeletePod(ctx context.Context, pod *v1.Pod) (err error) {
 	if !exists {
 		return errdefs.NotFound("pod not found")
 	}
+
+	// A pod still waiting for its kept init containers is never submitted now.
+	p.stopKeptInitWait(string(key))
 
 	// Clean up shadow resources if tunnel is enabled and they exist and no VPN annotation
 	if p.hasShadow(pod) {
