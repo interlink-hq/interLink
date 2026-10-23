@@ -14,13 +14,15 @@ spec:
         app.kubernetes.io/component: {{.Name}}
     spec:
       # The containers the pod keeps on the cluster are added by the virtual kubelet;
-      # pause keeps the pod running once kept init containers are the only ones.
+      # pause keeps the pod running when it keeps only init containers.
       # A real node (the virtual one is kubernetes.io/os=virtual-kubelet), whatever the
       # pod tolerated.
       nodeSelector:
         kubernetes.io/os: linux
       tolerations: []
       containers:
-      - name: pause
+{{- if not .LocalContainers }}
+      - name: {{.PauseName}}
         image: {{.PauseImage}}
         imagePullPolicy: IfNotPresent
+{{- end }}

@@ -1379,6 +1379,7 @@ func handleInitContainersUpdate(ctx context.Context, podRemoteStatus types.PodSt
 
 		if !foundCt {
 			podRefInCluster.Status.InitContainerStatuses = append(podRefInCluster.Status.InitContainerStatuses, containerRemoteStatus)
+			index = len(podRefInCluster.Status.InitContainerStatuses) - 1
 		} else {
 			podRefInCluster.Status.InitContainerStatuses[index] = containerRemoteStatus
 		}

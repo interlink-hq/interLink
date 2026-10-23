@@ -124,8 +124,10 @@ type ShadowTemplateData struct {
 	// KeptOnly marks a shadow that only runs the containers the pod keeps on the
 	// cluster: no tunnel, no mesh, no Service.
 	KeptOnly bool
-	// PauseImage keeps a KeptOnly shadow running once its init containers have ended.
+	// PauseImage keeps a KeptOnly shadow running once its init containers have ended,
+	// in a container named PauseName, a name no kept init container uses.
 	PauseImage string
+	PauseName  string
 	// NodeConfigMap is the ConfigMap the shadow can mount to learn which remote
 	// compute node the workload landed on. It exists from the moment the shadow is
 	// created but holds an empty NodeNameKey until the plugin reports the node.
@@ -184,7 +186,10 @@ type Provider struct {
 	shadowNodeNames sync.Map
 	// shadowsReleased marks, per pod UID, shadows already removed because their
 	// pod ended, so the status loop removes each one once.
-	shadowsReleased  sync.Map
+	shadowsReleased sync.Map
+	// keptInitWaits holds, per pod UID, the cancel function of a pending wait for the
+	// pod's kept init containers (see stopKeptInitWait).
+	keptInitWaits    sync.Map
 	pendingDeletes   map[string]*pendingDelete
 	pendingDeletesMu sync.Mutex
 	deleteLoopOnce   sync.Once
@@ -1036,6 +1041,7 @@ func (p *Provider) createShadowPod(ctx context.Context, originalPod *v1.Pod) (*v
 		FullMesh:             fullMeshEnabledForPod,
 		KeptOnly:             keptOnly,
 		PauseImage:           p.shadowPauseImage(),
+		PauseName:            shadowPauseName(localInitContainers),
 		NodeConfigMap:        shadowNodeConfigMapName(identity.Name),
 		NodeNameKey:          shadowNodeNameKey,
 		SSH:                  p.config.Network.SSH,
@@ -1986,24 +1992,6 @@ func (p *Provider) CreatePod(ctx context.Context, pod *v1.Pod) error {
 		return err
 	}
 
-	// Create pod asynchronously on the remote plugin
-	// we don't care, the statusLoop will eventually reconcile the status
-	go func() {
-		if err := p.waitForKeptInitContainers(ctx, pod); err != nil {
-			log.G(ctx).Warningf("Pod %s/%s not submitted: %v", pod.Namespace, pod.Name, err)
-			return
-		}
-		err := RemoteExecution(ctx, p.config, p, pod, CREATE)
-		if err != nil {
-			if err.Error() == "Deleted pod before actual creation" {
-				log.G(ctx).Warn(err)
-			} else {
-				log.G(ctx).Error(err)
-				p.handleRemoteExecutionFailure(ctx, pod, podIP, err)
-			}
-		}
-	}()
-
 	// set pod containers status to notReady and waiting since they haven't started yet
 	for _, container := range pod.Spec.Containers {
 		pod.Status.ContainerStatuses = append(pod.Status.ContainerStatuses, v1.ContainerStatus{
@@ -2018,6 +2006,27 @@ func (p *Provider) CreatePod(ctx context.Context, pod *v1.Pod) error {
 	p.podsMu.Lock()
 	p.pods[string(key)] = pod
 	p.podsMu.Unlock()
+
+	// Create pod asynchronously on the remote plugin
+	// we don't care, the statusLoop will eventually reconcile the status
+	// The pod is tracked first: the wait for kept init containers mirrors their statuses
+	// onto it, and DeletePod can stop that wait.
+	waitCtx := p.trackKeptInitWait(ctx, pod)
+	go func() {
+		if err := p.waitForKeptInitContainers(waitCtx, pod); err != nil {
+			log.G(ctx).Warningf("Pod %s/%s not submitted: %v", pod.Namespace, pod.Name, err)
+			return
+		}
+		err := RemoteExecution(ctx, p.config, p, pod, CREATE)
+		if err != nil {
+			if err.Error() == "Deleted pod before actual creation" {
+				log.G(ctx).Warn(err)
+			} else {
+				log.G(ctx).Error(err)
+				p.handleRemoteExecutionFailure(ctx, pod, podIP, err)
+			}
+		}
+	}()
 
 	return nil
 }
@@ -2051,6 +2060,9 @@ func (p *Provider) DeletePod(ctx context.Context, pod *v1.Pod) (err error) {
 	if !exists {
 		return errdefs.NotFound("pod not found")
 	}
+
+	// A pod still waiting for its kept init containers is never submitted now.
+	p.stopKeptInitWait(string(key))
 
 	// Clean up shadow resources if tunnel is enabled and they exist and no VPN annotation
 	if p.hasShadow(pod) {

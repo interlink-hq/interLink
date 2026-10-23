@@ -16,6 +16,10 @@ import (
 // containers on the cluster, so the Deployment has a container to run once they end.
 const defaultShadowPauseImage = "registry.k8s.io/pause:3.10"
 
+// shadowPauseBaseName names the shadow's pause container, with a suffix if a kept init
+// container already uses it.
+const shadowPauseBaseName = "pause"
+
 // shadowComponentLabel selects the pods of a shadow Deployment.
 const shadowComponentLabel = "app.kubernetes.io/component"
 
@@ -44,6 +48,26 @@ func (p *Provider) shadowPauseImage() string {
 		return p.config.ShadowPauseImage
 	}
 	return defaultShadowPauseImage
+}
+
+// shadowPauseName names the shadow's pause container after none of the kept init
+// containers, which share the pod's container names with it.
+func shadowPauseName(keptInit []v1.Container) string {
+	used := make(map[string]bool, len(keptInit))
+	for _, c := range keptInit {
+		used[c.Name] = true
+	}
+	name := shadowPauseBaseName
+	for i := 1; used[name]; i++ {
+		name = fmt.Sprintf("%s-%d", shadowPauseBaseName, i)
+	}
+	return name
+}
+
+// isSidecar reports whether c is a native sidecar: an init container with restartPolicy
+// Always, which keeps running next to the other containers.
+func isSidecar(c v1.Container) bool {
+	return c.RestartPolicy != nil && *c.RestartPolicy == v1.ContainerRestartPolicyAlways
 }
 
 // dropKeptOnlyVolumes returns the pod's volumes without those that only the containers
@@ -84,7 +108,8 @@ type keptInitState struct {
 
 // keptInitProgress reads the kept init containers' statuses from the shadow pod.
 // A container that failed and is being restarted by the shadow's kubelet counts as
-// failed too: it decides the outcome for pods with restartPolicy Never.
+// failed too: it decides the outcome for pods with restartPolicy Never. A kept sidecar
+// is done once started, and its restarts are left to the shadow's kubelet.
 func keptInitProgress(shadow *v1.Pod, kept []v1.Container) keptInitState {
 	byName := make(map[string]v1.ContainerStatus, len(shadow.Status.InitContainerStatuses))
 	for _, s := range shadow.Status.InitContainerStatuses {
@@ -99,6 +124,13 @@ func keptInitProgress(shadow *v1.Pod, kept []v1.Container) keptInitState {
 			continue
 		}
 		state.statuses = append(state.statuses, s)
+
+		if isSidecar(c) {
+			if s.Started == nil || !*s.Started {
+				state.done = false
+			}
+			continue
+		}
 
 		terminated := s.State.Terminated
 		if terminated == nil || terminated.ExitCode != 0 {
@@ -209,13 +241,36 @@ func (p *Provider) failPodOnKeptInit(ctx context.Context, uid string, failed *v1
 	}
 }
 
+// trackKeptInitWait registers the coming wait for the pod's kept init containers, so
+// that DeletePod can stop it, and returns the context the wait runs under.
+func (p *Provider) trackKeptInitWait(ctx context.Context, pod *v1.Pod) context.Context {
+	if len(getLocalInitContainers(pod)) == 0 {
+		return ctx
+	}
+	ctx, cancel := context.WithCancel(ctx)
+	p.keptInitWaits.Store(string(pod.UID), cancel)
+	return ctx
+}
+
+// stopKeptInitWait ends the pod's pending wait for its kept init containers and
+// reports whether there was one. DeletePod calls it before removing the shadow, and
+// the wait before submitting: whichever comes first decides whether the pod is submitted.
+func (p *Provider) stopKeptInitWait(uid string) bool {
+	cancel, ok := p.keptInitWaits.LoadAndDelete(uid)
+	if ok {
+		cancel.(context.CancelFunc)()
+	}
+	return ok
+}
+
 // waitForKeptInitContainers holds the remote submission until the init containers the
 // pod keeps on the cluster have all completed in its shadow, as the kubelet runs init
 // containers before the others. Kept init containers therefore run before every
 // offloaded one, whatever their order in the spec. Their statuses are mirrored on the
 // offloaded pod while it waits. A failure ends a restartPolicy Never pod; with other
 // policies the shadow's kubelet retries the container and the wait goes on. There is
-// no timeout, as with the kubelet.
+// no timeout, as with the kubelet. A kept sidecar (restartPolicy Always) only has to
+// start. ctx comes from trackKeptInitWait.
 func (p *Provider) waitForKeptInitContainers(ctx context.Context, pod *v1.Pod) error {
 	kept := getLocalInitContainers(pod)
 	if len(kept) == 0 {
@@ -226,18 +281,14 @@ func (p *Provider) waitForKeptInitContainers(ctx context.Context, pod *v1.Pod) e
 		return err
 	}
 	uid := string(pod.UID)
+	defer p.stopKeptInitWait(uid)
 	log.G(ctx).Infof("Pod %s/%s: waiting for %d init container(s) kept on the cluster before submitting", pod.Namespace, pod.Name, len(kept))
 
-	// CreatePod registers the pod after starting this wait, so a pod not tracked yet is
-	// still being created; one that was tracked and is gone has been deleted.
-	tracked := false
 	for {
 		p.podsMu.RLock()
 		_, exists := p.pods[uid]
 		p.podsMu.RUnlock()
-		if exists {
-			tracked = true
-		} else if tracked {
+		if !exists {
 			return errPodGoneWhileInitializing
 		}
 
@@ -257,6 +308,9 @@ func (p *Provider) waitForKeptInitContainers(ctx context.Context, pod *v1.Pod) e
 				return fmt.Errorf("init container %s kept on the cluster failed", state.failed.Name)
 			}
 			if state.done {
+				if !p.stopKeptInitWait(uid) {
+					return errPodGoneWhileInitializing
+				}
 				log.G(ctx).Infof("Pod %s/%s: init containers kept on the cluster completed", pod.Namespace, pod.Name)
 				return nil
 			}
@@ -264,6 +318,9 @@ func (p *Provider) waitForKeptInitContainers(ctx context.Context, pod *v1.Pod) e
 
 		select {
 		case <-ctx.Done():
+			if _, pending := p.keptInitWaits.Load(uid); !pending {
+				return errPodGoneWhileInitializing
+			}
 			return ctx.Err()
 		case <-time.After(keptInitPollInterval):
 		}
