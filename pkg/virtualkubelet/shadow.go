@@ -403,13 +403,15 @@ func (p *Provider) publishShadowNode(ctx context.Context, pod *v1.Pod, nodeName,
 		return
 	}
 
-	patch, err := json.Marshal(map[string]map[string]string{
-		"metadata": {"resourceVersion": current.ResourceVersion},
-		"data": {
-			shadowNodeNameKey:  nodeName,
-			shadowSocketDirKey: socketDir,
-		},
-	})
+	var nodePatch struct {
+		Metadata struct {
+			ResourceVersion string `json:"resourceVersion"`
+		} `json:"metadata"`
+		Data map[string]string `json:"data"`
+	}
+	nodePatch.Metadata.ResourceVersion = current.ResourceVersion
+	nodePatch.Data = map[string]string{shadowNodeNameKey: nodeName, shadowSocketDirKey: socketDir}
+	patch, err := json.Marshal(nodePatch)
 	if err != nil {
 		log.G(ctx).Warningf("Failed to marshal shadow node patch for %s/%s: %v", pod.Namespace, pod.Name, err)
 		return
