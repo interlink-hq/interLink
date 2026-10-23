@@ -16,6 +16,9 @@ import (
 // containers on the cluster, so the Deployment has a container to run once they end.
 const defaultShadowPauseImage = "registry.k8s.io/pause:3.10"
 
+// shadowComponentLabel selects the pods of a shadow Deployment.
+const shadowComponentLabel = "app.kubernetes.io/component"
+
 // keptInitPollInterval is how often the shadow is checked while its init containers run.
 var keptInitPollInterval = 2 * time.Second
 
@@ -116,7 +119,7 @@ func keptInitProgress(shadow *v1.Pod, kept []v1.Container) keptInitState {
 // currentShadowPod returns the live pod of the shadow Deployment, or nil while there is none.
 func (p *Provider) currentShadowPod(ctx context.Context, identity shadowResourceIdentity) (*v1.Pod, error) {
 	pods, err := p.clientSet.CoreV1().Pods(identity.Namespace).List(ctx, metav1.ListOptions{
-		LabelSelector: fmt.Sprintf("app.kubernetes.io/component=%s", identity.Name),
+		LabelSelector: shadowComponentLabel + "=" + identity.Name,
 	})
 	if err != nil {
 		return nil, err

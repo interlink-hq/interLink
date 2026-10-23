@@ -42,7 +42,7 @@ func shadowOf(t *testing.T, pod *v1.Pod, status v1.ContainerStatus) *v1.Pod {
 	return &v1.Pod{
 		ObjectMeta: metav1.ObjectMeta{
 			Name: identity.Name + "-abc", Namespace: identity.Namespace,
-			Labels: map[string]string{"app.kubernetes.io/component": identity.Name},
+			Labels: map[string]string{shadowComponentLabel: identity.Name},
 		},
 		Status: v1.PodStatus{InitContainerStatuses: []v1.ContainerStatus{status}},
 	}
