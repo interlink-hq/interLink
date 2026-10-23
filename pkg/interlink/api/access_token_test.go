@@ -246,3 +246,38 @@ func TestDropAccessTokenOnRedirectToAnotherPort(t *testing.T) {
 	require.True(t, ok, "the redirect was never followed")
 	assert.Equal(t, "", token, "a redirect to another port drops it")
 }
+
+func TestDropAccessTokenOnHTTPSDowngradeAndReturn(t *testing.T) {
+	var seen tokenLog
+	var httpRedirectURL string
+	sidecar := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		seen.record(r)
+		if r.URL.Path == "/https-to-http" {
+			http.Redirect(w, r, httpRedirectURL+"/cleartext", http.StatusTemporaryRedirect)
+		}
+	}))
+	defer sidecar.Close()
+	httpRedirect := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		seen.record(r)
+		http.Redirect(w, r, sidecar.URL+"/returned-to-https", http.StatusTemporaryRedirect)
+	}))
+	defer httpRedirect.Close()
+	httpRedirectURL = httpRedirect.URL
+
+	client := sidecar.Client()
+	client.CheckRedirect = DropAccessTokenOnRedirect
+
+	require.NoError(t, sendWithToken(t, client, sidecar.URL+"/https-to-http"))
+
+	for _, want := range []struct {
+		path, token string
+	}{
+		{"/https-to-http", testAccessToken},
+		{"/cleartext", ""},
+		{"/returned-to-https", ""},
+	} {
+		token, ok := seen.at(want.path)
+		require.True(t, ok, "%s was never reached", want.path)
+		assert.Equal(t, want.token, token, "unexpected token at %s", want.path)
+	}
+}
