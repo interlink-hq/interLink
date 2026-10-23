@@ -1258,6 +1258,7 @@ func RemoteExecution(ctx context.Context, config Config, p *Provider, pod *v1.Po
 	podToOffload := pod.DeepCopy()
 	podToOffload.Spec.Containers = getOffloadContainers(pod)
 	podToOffload.Spec.InitContainers = getOffloadInitContainers(pod)
+	podToOffload.Spec.Volumes = dropKeptOnlyVolumes(pod, podToOffload)
 
 	if len(podToOffload.Spec.Containers) > 0 {
 		var offloadNames []string
@@ -1378,6 +1379,7 @@ func handleInitContainersUpdate(ctx context.Context, podRemoteStatus types.PodSt
 
 		if !foundCt {
 			podRefInCluster.Status.InitContainerStatuses = append(podRefInCluster.Status.InitContainerStatuses, containerRemoteStatus)
+			index = len(podRefInCluster.Status.InitContainerStatuses) - 1
 		} else {
 			podRefInCluster.Status.InitContainerStatuses[index] = containerRemoteStatus
 		}
@@ -1539,7 +1541,7 @@ func checkPodsStatus(ctx context.Context, p *Provider, pod *v1.Pod, token string
 		if podRemoteStatus.PodUID == string(podRefInCluster.UID) {
 			// The plugin reports the remote compute node only once the job is actually
 			// running, so this stays a no-op for as long as the job sits in the queue.
-			p.publishShadowNodeName(ctx, podRefInCluster, podRemoteStatus.NodeName)
+			p.publishShadowNode(ctx, podRefInCluster, podRemoteStatus.NodeName, podRemoteStatus.SocketDir)
 
 			// check if the pod is already in a terminal state (Failed or Succeeded)
 			if currentPhase, terminal := p.podTerminalPhase(podRemoteStatus.PodUID); terminal {
