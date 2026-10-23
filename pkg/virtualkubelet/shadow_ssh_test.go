@@ -1,11 +1,14 @@
 package virtualkubelet
 
 import (
+	"bytes"
+	"os/exec"
 	"strings"
 	"testing"
 	"time"
 
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 	appsv1 "k8s.io/api/apps/v1"
 	v1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -17,6 +20,11 @@ import (
 const (
 	testKeytabSecret = "hpc-keytab"
 	testPrincipal    = "alice@EXAMPLE.ORG"
+	testExtraOption  = "ConnectTimeout=7"
+	testSocketPorts  = "8888"
+	testRestartHint  = "letting Kubernetes restart the container"
+	testNotebookPort = "notebook"
+	testNotAPort     = "is not a port number"
 )
 
 func sshConfig() Config {
@@ -32,6 +40,23 @@ func sshConfig() Config {
 			},
 		},
 	}
+}
+
+// kerberosConfig is sshConfig authenticating with a keytab instead of a key.
+func kerberosConfig() Config {
+	config := sshConfig()
+	config.Network.SSH.KeySecret = ""
+	config.Network.SSH.Auth = SSHAuthKerberos
+	config.Network.SSH.KeytabSecret = testKeytabSecret
+	config.Network.SSH.Principal = testPrincipal
+	return config
+}
+
+// withForward sets where the forwarding session ends and how it forwards.
+func withForward(config Config, target, mode string) Config {
+	config.Network.SSH.ForwardTarget = target
+	config.Network.SSH.ForwardMode = mode
+	return config
 }
 
 func normalized(t *testing.T, config Config) Config {
@@ -56,6 +81,9 @@ func TestNormalizeShadowConfigDefaults(t *testing.T) {
 		assert.Equal(t, DefaultSSHKeySecretKey, s.KeySecretKey)
 		assert.Equal(t, DefaultSSHNodeWaitTimeout, s.NodeWaitTimeout)
 		assert.Equal(t, SSHForwardModePortForward, s.ForwardMode)
+		assert.Equal(t, SSHForwardTargetLogin, s.ForwardTarget,
+			"upgrading with unchanged values must keep today's forward")
+		assert.Equal(t, SSHNodeHostKeysVerify, s.NodeHostKeys)
 		assert.Contains(t, s.Image, "ssh-tunnel")
 		assert.NotNil(t, s.ReplicateCredentials)
 		assert.True(t, *s.ReplicateCredentials, "credentials replicate by default so per-user namespaces work")
@@ -71,15 +99,22 @@ func TestNormalizeShadowConfigDefaults(t *testing.T) {
 	})
 
 	t.Run("kerberos defaults", func(t *testing.T) {
-		config := sshConfig()
-		config.Network.SSH.KeySecret = ""
+		config := kerberosConfig()
 		config.Network.SSH.Auth = "KERBEROS"
-		config.Network.SSH.KeytabSecret = testKeytabSecret
-		config.Network.SSH.Principal = testPrincipal
 
 		config = normalized(t, config)
 		assert.Equal(t, SSHAuthKerberos, config.Network.SSH.Auth)
 		assert.Equal(t, DefaultSSHKeytabSecretKey, config.Network.SSH.KeytabSecretKey)
+	})
+
+	t.Run("forward target and node host keys ignore case and spaces", func(t *testing.T) {
+		config := sshConfig()
+		config.Network.SSH.ForwardTarget = " Node "
+		config.Network.SSH.NodeHostKeys = "ACCEPT-NEW"
+
+		config = normalized(t, config)
+		assert.Equal(t, SSHForwardTargetNode, config.Network.SSH.ForwardTarget)
+		assert.Equal(t, SSHNodeHostKeysAcceptNew, config.Network.SSH.NodeHostKeys)
 	})
 }
 
@@ -147,6 +182,16 @@ func TestNormalizeShadowConfigRejects(t *testing.T) {
 			mutate:  func(c *Config) { c.Network.SSH.ForwardMode = "smoke-signal" },
 			wantErr: "unknown Network.SSH.ForwardMode",
 		},
+		{
+			name:    "unknown forward target",
+			mutate:  func(c *Config) { c.Network.SSH.ForwardTarget = "gateway" },
+			wantErr: "unknown Network.SSH.ForwardTarget",
+		},
+		{
+			name:    "unknown node host key policy",
+			mutate:  func(c *Config) { c.Network.SSH.NodeHostKeys = "no" },
+			wantErr: "unknown Network.SSH.NodeHostKeys",
+		},
 	}
 
 	for _, tt := range tests {
@@ -164,6 +209,7 @@ func TestNormalizeShadowConfigRejects(t *testing.T) {
 
 // renderSSHShadow renders the ssh template and returns the manifest plus the
 // Deployment decoded from it, using the same decoder applyShadowManifests uses.
+// Every container script must also parse as shell.
 func renderSSHShadow(t *testing.T, config Config, ports []PortMapping) (string, *appsv1.Deployment) {
 	t.Helper()
 	config = normalized(t, config)
@@ -175,6 +221,8 @@ func renderSSHShadow(t *testing.T, config Config, ports []PortMapping) (string, 
 		ExposedPorts:       ports,
 		NodeConfigMap:      "shadow-nb-user-node",
 		NodeNameKey:        shadowNodeNameKey,
+		SocketDirKey:       shadowSocketDirKey,
+		NeedsSocketDir:     hasSocketPorts(ports),
 		SSH:                config.Network.SSH,
 		SSHNodeWaitSeconds: p.sshNodeWaitSeconds(),
 	})
@@ -193,14 +241,79 @@ func renderSSHShadow(t *testing.T, config Config, ports []PortMapping) (string, 
 		}
 	}
 	assert.NotNil(t, deployment, "the ssh template must render a Deployment")
+	if deployment != nil {
+		spec := deployment.Spec.Template.Spec
+		for _, c := range append(spec.InitContainers, spec.Containers...) {
+			assertShellParses(t, c)
+		}
+	}
 	return manifest, deployment
 }
 
+// assertShellParses runs the container's script through `sh -n` and `bash -n`,
+// so a template change that breaks the quoting fails here rather than in a
+// crash-looping shadow.
+func assertShellParses(t *testing.T, c v1.Container) {
+	t.Helper()
+	if len(c.Args) == 0 {
+		return
+	}
+	for _, shell := range []string{"sh", "bash"} {
+		path, err := exec.LookPath(shell)
+		if err != nil {
+			t.Logf("%s not found, not checking the %s script", shell, c.Name)
+			continue
+		}
+		cmd := exec.Command(path, "-n")
+		cmd.Stdin = strings.NewReader(c.Args[0])
+		var stderr bytes.Buffer
+		cmd.Stderr = &stderr
+		assert.NoError(t, cmd.Run(), "%s -n on the %s script: %s", shell, c.Name, stderr.String())
+	}
+}
+
+// forwardScript returns the script of the ssh-forward container.
+func forwardScript(t *testing.T, deployment *appsv1.Deployment) string {
+	t.Helper()
+	for _, c := range deployment.Spec.Template.Spec.Containers {
+		if c.Name == "ssh-forward" && len(c.Args) > 0 {
+			return c.Args[0]
+		}
+	}
+	t.Fatal("no ssh-forward container")
+	return ""
+}
+
+// initScript returns the script of the wait-for-node init container.
+func initScript(t *testing.T, deployment *appsv1.Deployment) string {
+	t.Helper()
+	for _, c := range deployment.Spec.Template.Spec.InitContainers {
+		if c.Name == "wait-for-node" && len(c.Args) > 0 {
+			return c.Args[0]
+		}
+	}
+	t.Fatal("no wait-for-node init container")
+	return ""
+}
+
+// optionSet returns the body of a `<name>="..."` ssh option assignment in script.
+func optionSet(t *testing.T, script, name string) string {
+	t.Helper()
+	_, rest, found := strings.Cut(script, name+`="\`)
+	if !found {
+		t.Fatalf("%s is not set in the script", name)
+	}
+	body, _, _ := strings.Cut(rest, `"`)
+	return body
+}
+
 func TestSSHShadowTemplate(t *testing.T) {
-	tcp := []PortMapping{{Port: 8888, Name: "notebook", Protocol: "TCP"}}
+	tcp := []PortMapping{{Port: 8888, Name: testNotebookPort, Protocol: "TCP"}}
+
+	login := withForward(sshConfig(), SSHForwardTargetLogin, "")
 
 	t.Run("forwards each exposed port to the node the plugin reported", func(t *testing.T) {
-		manifest, deployment := renderSSHShadow(t, sshConfig(), tcp)
+		manifest, deployment := renderSSHShadow(t, login, tcp)
 
 		assert.Contains(t, manifest, `-L "0.0.0.0:8888:$node:8888"`)
 		assert.Contains(t, manifest, "alice@login.hpc.example.org")
@@ -227,13 +340,7 @@ func TestSSHShadowTemplate(t *testing.T) {
 	})
 
 	t.Run("kerberos renders kinit and no ssh key", func(t *testing.T) {
-		config := sshConfig()
-		config.Network.SSH.KeySecret = ""
-		config.Network.SSH.Auth = SSHAuthKerberos
-		config.Network.SSH.KeytabSecret = testKeytabSecret
-		config.Network.SSH.Principal = testPrincipal
-
-		manifest, deployment := renderSSHShadow(t, config, tcp)
+		manifest, deployment := renderSSHShadow(t, kerberosConfig(), tcp)
 
 		assert.Contains(t, manifest, "kinit -k -t /interlink/keytab/"+DefaultSSHKeytabSecretKey+" alice@EXAMPLE.ORG")
 		assert.Contains(t, manifest, "GSSAPIAuthentication=yes")
@@ -253,10 +360,7 @@ func TestSSHShadowTemplate(t *testing.T) {
 	})
 
 	t.Run("exec mode relays through the login node instead of forwarding", func(t *testing.T) {
-		config := sshConfig()
-		config.Network.SSH.ForwardMode = SSHForwardModeExec
-
-		manifest, deployment := renderSSHShadow(t, config, tcp)
+		manifest, deployment := renderSSHShadow(t, withForward(sshConfig(), SSHForwardTargetLogin, SSHForwardModeExec), tcp)
 
 		// No -L anywhere: sites running the exec mode are exactly the ones whose sshd
 		// refuses to open a forwarded channel at all.
@@ -276,8 +380,8 @@ func TestSSHShadowTemplate(t *testing.T) {
 	})
 
 	t.Run("skips UDP ports, which ssh -L cannot carry", func(t *testing.T) {
-		manifest, _ := renderSSHShadow(t, sshConfig(), []PortMapping{
-			{Port: 8888, Name: "notebook", Protocol: "TCP"},
+		manifest, _ := renderSSHShadow(t, login, []PortMapping{
+			{Port: 8888, Name: testNotebookPort, Protocol: "TCP"},
 			{Port: 9999, Name: "telemetry", Protocol: "UDP"},
 		})
 
@@ -293,13 +397,310 @@ func TestSSHShadowTemplate(t *testing.T) {
 
 		assert.Contains(t, manifest, "StrictHostKeyChecking=yes")
 		assert.Contains(t, manifest, "UserKnownHostsFile=/interlink/known-hosts/known_hosts")
-		assert.NotContains(t, manifest, "accept-new")
+		assert.NotContains(t, manifest, "StrictHostKeyChecking=accept-new")
 	})
 
 	t.Run("falls back to accept-new without one", func(t *testing.T) {
 		manifest, _ := renderSSHShadow(t, sshConfig(), tcp)
 		assert.Contains(t, manifest, "StrictHostKeyChecking=accept-new")
 	})
+}
+
+// socketAndTCPPorts is a notebook served on a unix socket next to a plain TCP port.
+func socketAndTCPPorts() []PortMapping {
+	return []PortMapping{
+		{Port: 8888, Name: testNotebookPort, Protocol: DefaultProtocol, Socket: true},
+		{Port: 6006, Name: "board", Protocol: DefaultProtocol},
+	}
+}
+
+func TestSSHShadowTemplateNodeTarget(t *testing.T) {
+	node := withForward(sshConfig(), SSHForwardTargetNode, SSHForwardModePortForward)
+	nodeExec := withForward(sshConfig(), SSHForwardTargetNode, SSHForwardModeExec)
+
+	t.Run("portforward reaches the node's sshd with -W and forwards from inside it", func(t *testing.T) {
+		manifest, deployment := renderSSHShadow(t, node, socketAndTCPPorts())
+		script := forwardScript(t, deployment)
+
+		assert.Contains(t, script, `-W %s:22`)
+		assert.Contains(t, script, `*:*) w_node="[$node]"`, "an IPv6 node goes to -W in brackets")
+		assert.Contains(t, script, `-L "0.0.0.0:6006:127.0.0.1:6006"`)
+		assert.Contains(t, script, `-L "0.0.0.0:8888:$sd/fwd-8888.sock"`)
+		assert.NotContains(t, manifest, "socat")
+		assert.NotContains(t, script, `:$node:`, "nothing may cross the network to the node in clear")
+	})
+
+	t.Run("exec relays the session through the login node and forwards on the node", func(t *testing.T) {
+		manifest, deployment := renderSSHShadow(t, nodeExec, socketAndTCPPorts())
+		script := forwardScript(t, deployment)
+
+		assert.Contains(t, script, `"%s %s 22"`)
+		assert.Contains(t, script, `-L "0.0.0.0:6006:127.0.0.1:6006"`)
+		assert.Contains(t, script, `-L "0.0.0.0:8888:$sd/fwd-8888.sock"`)
+		assert.NotContains(t, manifest, "socat")
+		assert.NotContains(t, script, "-W ")
+	})
+
+	t.Run("waits for the socket directory only when a port needs it", func(t *testing.T) {
+		_, withSocket := renderSSHShadow(t, node, socketAndTCPPorts())
+		assert.Contains(t, initScript(t, withSocket), "/interlink/node/"+shadowSocketDirKey)
+		assert.Contains(t, forwardScript(t, withSocket), "set SocketDirRoot in the plugin")
+
+		_, tcpOnly := renderSSHShadow(t, node, []PortMapping{{Port: 6006, Protocol: DefaultProtocol}})
+		assert.NotContains(t, initScript(t, tcpOnly), shadowSocketDirKey,
+			"a plugin without SocketDirRoot must still get TCP forwards")
+		assert.NotContains(t, forwardScript(t, tcpOnly), "set SocketDirRoot in the plugin")
+	})
+
+	t.Run("kerberos delegates on neither hop", func(t *testing.T) {
+		_, deployment := renderSSHShadow(t, withForward(kerberosConfig(), SSHForwardTargetNode, ""), socketAndTCPPorts())
+		script := forwardScript(t, deployment)
+
+		for _, set := range []string{"ssh_opts", "node_opts"} {
+			opts := optionSet(t, script, set)
+			assert.Contains(t, opts, "-o GSSAPIDelegateCredentials=no", set)
+			assert.NotContains(t, opts, "GSSAPIDelegateCredentials=yes", set)
+		}
+	})
+
+	t.Run("extra options apply to every hop, after the fixed ones", func(t *testing.T) {
+		config := withForward(kerberosConfig(), SSHForwardTargetNode, "")
+		config.Network.SSH.ExtraOptions = []string{testExtraOption}
+
+		_, deployment := renderSSHShadow(t, config, socketAndTCPPorts())
+		script := forwardScript(t, deployment)
+
+		login := optionSet(t, script, "ssh_opts")
+		extra := strings.Index(login, "-o "+testExtraOption)
+		assert.Greater(t, extra, strings.Index(login, "StrictHostKeyChecking"))
+		// After them on the login hop only, so ExtraOptions can turn delegation back on.
+		assert.Greater(t, strings.Index(login, "GSSAPIDelegateCredentials=no"), extra)
+
+		hop := optionSet(t, script, "node_opts")
+		extra = strings.Index(hop, "-o "+testExtraOption)
+		assert.Greater(t, extra, strings.Index(hop, "ProxyCommand"))
+		assert.Greater(t, extra, strings.Index(hop, "GSSAPIDelegateCredentials=no"))
+	})
+
+	t.Run("verify checks node keys against the ConfigMap and the login node's files", func(t *testing.T) {
+		config := node
+		config.Network.SSH.KnownHostsConfigMap = testKnownHostsConfigMap
+
+		_, deployment := renderSSHShadow(t, config, socketAndTCPPorts())
+		script := forwardScript(t, deployment)
+
+		assert.Contains(t, script, "cat /etc/ssh/ssh_known_hosts")
+		assert.Contains(t, script, "ssh-keygen -F")
+		assert.Contains(t, script, "cat /interlink/known-hosts/known_hosts")
+		assert.Regexp(t, `cat /interlink/known-hosts/known_hosts >> "\$w/node_known_hosts"\n(\s*#.*\n)*\s*echo >> "\$w/node_known_hosts"`, script,
+			"a ConfigMap without a final newline must not join the login node's first line")
+		assert.Contains(t, optionSet(t, script, "node_opts"), "StrictHostKeyChecking=yes")
+		assert.NotContains(t, script, "StrictHostKeyChecking=accept-new")
+	})
+
+	t.Run("accept-new says so on every start", func(t *testing.T) {
+		config := node
+		config.Network.SSH.NodeHostKeys = SSHNodeHostKeysAcceptNew
+
+		_, deployment := renderSSHShadow(t, config, socketAndTCPPorts())
+		script := forwardScript(t, deployment)
+
+		assert.Contains(t, script, "WARNING: the host key of $node is not verified")
+		assert.Contains(t, optionSet(t, script, "node_opts"), "StrictHostKeyChecking=accept-new")
+		assert.NotContains(t, script, "ssh-keygen -F")
+	})
+
+	t.Run("retries instead of crash-looping while a requeued job is away", func(t *testing.T) {
+		_, deployment := renderSSHShadow(t, node, socketAndTCPPorts())
+		script := forwardScript(t, deployment)
+
+		assert.Contains(t, script, "retrying in 30s")
+		assert.NotContains(t, script, testRestartHint)
+	})
+}
+
+// TestSSHShadowTemplateLoginTargetUnchanged pins the login target to the forward
+// it always rendered: only Kerberos delegation on the login hop changed.
+func TestSSHShadowTemplateLoginTargetUnchanged(t *testing.T) {
+	tcp := []PortMapping{{Port: 8888, Protocol: DefaultProtocol}}
+
+	for _, mode := range []string{SSHForwardModePortForward, SSHForwardModeExec} {
+		t.Run(mode, func(t *testing.T) {
+			config := withForward(kerberosConfig(), SSHForwardTargetLogin, mode)
+			config.Network.SSH.ExtraOptions = []string{testExtraOption}
+
+			_, deployment := renderSSHShadow(t, config, tcp)
+			script := forwardScript(t, deployment)
+
+			for _, nodeOnly := range []string{"node_hop", "node_opts", "read_sockdir", "-W ", "fwd-"} {
+				assert.NotContains(t, script, nodeOnly)
+			}
+			assert.Contains(t, script, testRestartHint)
+
+			opts := optionSet(t, script, "ssh_opts")
+			assert.NotContains(t, opts, "GSSAPIDelegateCredentials=yes")
+			assert.Greater(t, strings.Index(opts, "GSSAPIDelegateCredentials=no"), strings.Index(opts, testExtraOption))
+		})
+	}
+}
+
+// TestSSHShadowScriptsParse renders every forward target, forward mode and auth
+// method; renderSSHShadow runs each container script through the shell parser.
+func TestSSHShadowScriptsParse(t *testing.T) {
+	for _, target := range []string{SSHForwardTargetLogin, SSHForwardTargetNode} {
+		for _, mode := range []string{SSHForwardModePortForward, SSHForwardModeExec} {
+			for _, auth := range []string{SSHAuthPublicKey, SSHAuthKerberos} {
+				for _, keys := range []string{SSHNodeHostKeysVerify, SSHNodeHostKeysAcceptNew} {
+					t.Run(strings.Join([]string{target, mode, auth, keys}, "/"), func(t *testing.T) {
+						config := sshConfig()
+						if auth == SSHAuthKerberos {
+							config = kerberosConfig()
+						}
+						config = withForward(config, target, mode)
+						config.Network.SSH.NodeHostKeys = keys
+						config.Network.SSH.KnownHostsConfigMap = testKnownHostsConfigMap
+						config.Network.SSH.ExtraOptions = []string{testExtraOption}
+
+						ports := []PortMapping{{Port: 6006, Protocol: DefaultProtocol}}
+						if target == SSHForwardTargetNode {
+							ports = socketAndTCPPorts()
+						}
+						renderSSHShadow(t, config, ports)
+					})
+				}
+			}
+		}
+	}
+}
+
+// socketPod is an offloaded pod exposing 8888 and 6006 over TCP plus 5353 over
+// UDP, and listing socketPorts in interlink.eu/shadow-socket-ports.
+func socketPod(socketPorts string) *v1.Pod {
+	pod := podWithPort("nb", testNamespaceDefault, "uid-1")
+	pod.Annotations = map[string]string{
+		"interlink.eu/wstunnel-extra-ports": "6006,5353:dns:UDP",
+	}
+	if socketPorts != "" {
+		pod.Annotations[annShadowSocketPorts] = socketPorts
+	}
+	return pod
+}
+
+func TestCheckSocketPortsRequest(t *testing.T) {
+	nodeTarget := normalized(t, withForward(sshConfig(), SSHForwardTargetNode, ""))
+
+	tests := []struct {
+		name    string
+		config  func() Config
+		ports   string
+		wantErr string
+	}{
+		{name: "no annotation", config: func() Config { return Config{} }},
+		{name: "one socket port", ports: testSocketPorts},
+		{name: "a port from wstunnel-extra-ports, with spaces", ports: " 8888 , 6006 "},
+		{name: "not a number", ports: "jupyter", wantErr: testNotAPort},
+		{name: "empty entry", ports: "8888,,6006", wantErr: testNotAPort},
+		{name: "negative", ports: "-1", wantErr: testNotAPort},
+		{name: "port zero", ports: "0", wantErr: "outside 1-65535"},
+		{name: "beyond 65535", ports: "65536", wantErr: "outside 1-65535"},
+		{name: "a port the pod does not expose", ports: "9000", wantErr: "not an exposed TCP port"},
+		{name: "a UDP port", ports: "5353", wantErr: "not an exposed TCP port"},
+		{
+			name:    "the wstunnel shadow",
+			config:  func() Config { c := nodeTarget; c.Network.ShadowMode = ShadowModeWstunnel; return c },
+			ports:   testSocketPorts,
+			wantErr: "Network.ShadowMode",
+		},
+		{
+			name:    "tunnels switched off",
+			config:  func() Config { c := nodeTarget; c.Network.EnableTunnel = false; return c },
+			ports:   testSocketPorts,
+			wantErr: "EnableTunnel is false",
+		},
+		{
+			name:    "the login target",
+			config:  func() Config { return normalized(t, sshConfig()) },
+			ports:   testSocketPorts,
+			wantErr: "Network.SSH.ForwardTarget",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			config := nodeTarget
+			if tt.config != nil {
+				config = tt.config()
+			}
+			p := &Provider{config: config}
+
+			err := p.checkSocketPortsRequest(socketPod(tt.ports))
+
+			if tt.wantErr == "" {
+				assert.NoError(t, err)
+				return
+			}
+			assert.ErrorContains(t, err, tt.wantErr, "a pod whose socket ports cannot be honoured must be refused at creation")
+		})
+	}
+}
+
+// TestCreatePodRefusesUnhonouredSocketPorts checks that CreatePod runs the
+// check before anything else, so the pod never reaches the plugin.
+func TestCreatePodRefusesUnhonouredSocketPorts(t *testing.T) {
+	p := &Provider{config: normalized(t, withForward(sshConfig(), SSHForwardTargetLogin, ""))}
+
+	err := p.CreatePod(t.Context(), socketPod(testSocketPorts))
+
+	assert.ErrorContains(t, err, "Network.SSH.ForwardTarget")
+}
+
+// TestCreateShadowPodServesListedPortsOnSockets runs createShadowPod against a
+// fake API server already holding the credential and the shadow's pod, and checks
+// what the template received.
+func TestCreateShadowPodServesListedPortsOnSockets(t *testing.T) {
+	config := normalized(t, withForward(sshConfig(), SSHForwardTargetNode, ""))
+	pod := socketPod(testSocketPorts)
+	identity, err := computeShadowResourceIdentity(pod)
+	require.NoError(t, err)
+	key := &v1.Secret{ObjectMeta: metav1.ObjectMeta{Name: testSSHKeySecret, Namespace: config.Namespace}}
+	running := &v1.Pod{ObjectMeta: metav1.ObjectMeta{
+		Name:      identity.Name + "-0",
+		Namespace: identity.Namespace,
+		Labels:    map[string]string{"app.kubernetes.io/component": identity.Name},
+	}}
+	p := &Provider{clientSet: fake.NewSimpleClientset(key, running), config: config}
+
+	_, data, err := p.createShadowPod(t.Context(), pod)
+
+	require.NoError(t, err)
+	// extractPortMappings walks a map, so the order is not fixed.
+	assert.ElementsMatch(t, []PortMapping{
+		{Port: 8888, Protocol: DefaultProtocol, Socket: true},
+		{Port: 6006, Protocol: DefaultProtocol},
+		{Port: 5353, Name: "dns", Protocol: "UDP"},
+	}, data.ExposedPorts)
+	assert.True(t, data.NeedsSocketDir, "the shadow must wait for the socket directory")
+}
+
+func TestMarkSocketPorts(t *testing.T) {
+	sockets := func(pod *v1.Pod) []int32 {
+		var marked []int32
+		for _, m := range shadowPortMappings(pod) {
+			if m.Socket {
+				marked = append(marked, m.Port)
+			}
+		}
+		return marked
+	}
+
+	assert.Equal(t, []int32{8888}, sockets(socketPod(testSocketPorts)))
+	assert.ElementsMatch(t, []int32{8888, 6006}, sockets(socketPod("8888,6006")))
+	assert.Empty(t, sockets(socketPod("")))
+	assert.Empty(t, sockets(socketPod("5353")), "a UDP port is never a socket")
+	assert.Empty(t, sockets(socketPod("8888,x")), "a malformed list marks nothing")
+
+	assert.True(t, hasSocketPorts(socketAndTCPPorts()))
+	assert.False(t, hasSocketPorts([]PortMapping{{Port: 6006, Protocol: DefaultProtocol}}))
 }
 
 func TestReplicateShadowCredentials(t *testing.T) {
