@@ -105,6 +105,10 @@ type Resources struct {
 	Memory string `yaml:"Memory,omitempty"`
 	// Pods specifies the maximum number of pods this node can handle
 	Pods string `yaml:"Pods,omitempty"`
+	// EphemeralStorage is the ephemeral storage the node advertises (default 1Ti). A node
+	// that advertises none cannot take a pod that requests some, as sidecars often do
+	// (Katib's metrics collector requests 500Mi).
+	EphemeralStorage string `yaml:"EphemeralStorage,omitempty"`
 	// Accelerators lists hardware accelerators available on this node
 	Accelerators []Accelerator `yaml:"Accelerators"`
 }

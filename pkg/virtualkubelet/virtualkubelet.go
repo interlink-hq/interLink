@@ -404,6 +404,10 @@ func NodeConditionWithInterlink(ready bool, interlinkStatus v1.ConditionStatus, 
 	return append(conditions, interlinkCondition)
 }
 
+// defaultEphemeralStorage is advertised when Resources.EphemeralStorage is not set: the
+// remote side has its own disks, so the node only must not refuse pods that ask for some.
+const defaultEphemeralStorage = "1Ti"
+
 func GetResources(config Config) v1.ResourceList {
 	gpuCount := map[string]resource.Quantity{}
 	fpgaCount := map[string]resource.Quantity{}
@@ -423,10 +427,15 @@ func GetResources(config Config) v1.ResourceList {
 		}
 	}
 
+	ephemeralStorage := config.Resources.EphemeralStorage
+	if ephemeralStorage == "" {
+		ephemeralStorage = defaultEphemeralStorage
+	}
 	resourceList := v1.ResourceList{
-		"cpu":    resource.MustParse(config.Resources.CPU),
-		"memory": resource.MustParse(config.Resources.Memory),
-		"pods":   resource.MustParse(config.Resources.Pods),
+		"cpu":                       resource.MustParse(config.Resources.CPU),
+		"memory":                    resource.MustParse(config.Resources.Memory),
+		"pods":                      resource.MustParse(config.Resources.Pods),
+		v1.ResourceEphemeralStorage: resource.MustParse(ephemeralStorage),
 	}
 
 	for resourceType, q := range gpuCount {
@@ -671,6 +680,11 @@ func LoadConfig(ctx context.Context, providerConfig string) (config Config, err 
 	}
 	if _, err = resource.ParseQuantity(config.Resources.Pods); err != nil {
 		return config, fmt.Errorf("invalid pods value %v", config.Resources.Pods)
+	}
+	if config.Resources.EphemeralStorage != "" {
+		if _, err = resource.ParseQuantity(config.Resources.EphemeralStorage); err != nil {
+			return config, fmt.Errorf("invalid ephemeral storage value %v", config.Resources.EphemeralStorage)
+		}
 	}
 	for _, accelerator := range config.Resources.Accelerators {
 		if _, err = resource.ParseQuantity(accelerator.Available); err != nil {
