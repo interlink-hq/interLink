@@ -39,6 +39,7 @@ import (
 	"k8s.io/client-go/kubernetes"
 	"k8s.io/client-go/kubernetes/scheme"
 	"k8s.io/client-go/tools/clientcmd"
+	"k8s.io/client-go/util/retry"
 	stats "k8s.io/kubelet/pkg/apis/stats/v1alpha1"
 
 	types "github.com/interlink-hq/interlink/pkg/interlink"
@@ -1531,34 +1532,40 @@ func (p *Provider) cleanupShadowResources(ctx context.Context, identity shadowRe
 }
 
 // deleteOwnedShadowResource deletes one shadow resource unless it is stamped with a
-// pod UID other than identity.OwnerUID, and reports whether it was kept for that
-// reason. The delete is conditional on the resource's UID and resourceVersion, so
-// neither a replacement created nor an in-place update for a recreated pod made
-// between the read and the delete is removed. Unstamped resources (from before the
-// stamp existed) are deleted as before.
+// pod UID other than identity.OwnerUID, and reports whether it was kept because it
+// serves another pod. The delete is conditional on the UID and resourceVersion that
+// were read, so a replacement or an in-place update for a recreated pod made in
+// between is never removed: on a conflict the resource is read again and the owner
+// checked again. Unstamped resources (from before the stamp existed) are deleted as
+// before.
 func (p *Provider) deleteOwnedShadowResource(ctx context.Context, identity shadowResourceIdentity, kind, name string,
 	get func(string) (metav1.Object, error), del func(string, metav1.DeleteOptions) error) bool {
-	obj, err := get(name)
-	if err != nil {
-		if !apierrors.IsNotFound(err) {
-			log.G(ctx).Warningf("Failed to read shadow %s %s/%s: %v", kind, identity.Namespace, name, err)
+	kept := false
+	err := retry.RetryOnConflict(retry.DefaultRetry, func() error {
+		obj, err := get(name)
+		if err != nil {
+			return err
 		}
-		return false
-	}
-	if owner := obj.GetLabels()[shadowOwnerUIDLabel]; owner != "" && identity.OwnerUID != "" && owner != identity.OwnerUID {
-		log.G(ctx).Infof("Keeping shadow %s %s/%s: it belongs to pod UID %s, not %s", kind, identity.Namespace, name, owner, identity.OwnerUID)
-		return true
-	}
-	uid, resourceVersion := obj.GetUID(), obj.GetResourceVersion()
-	preconditions := &metav1.Preconditions{UID: &uid, ResourceVersion: &resourceVersion}
-	if err := del(name, metav1.DeleteOptions{Preconditions: preconditions}); err != nil {
-		if !apierrors.IsNotFound(err) && !apierrors.IsConflict(err) {
-			log.G(ctx).Warningf("Failed to delete shadow %s %s/%s: %v", kind, identity.Namespace, name, err)
+		if owner := obj.GetLabels()[shadowOwnerUIDLabel]; owner != "" && identity.OwnerUID != "" && owner != identity.OwnerUID {
+			log.G(ctx).Infof("Keeping shadow %s %s/%s: it belongs to pod UID %s, not %s", kind, identity.Namespace, name, owner, identity.OwnerUID)
+			kept = true
+			return nil
 		}
-		return false
+		uid, resourceVersion := obj.GetUID(), obj.GetResourceVersion()
+		return del(name, metav1.DeleteOptions{Preconditions: &metav1.Preconditions{UID: &uid, ResourceVersion: &resourceVersion}})
+	})
+	switch {
+	case err == nil:
+		if !kept {
+			log.G(ctx).Infof("Successfully deleted shadow %s %s/%s", kind, identity.Namespace, name)
+		}
+	case apierrors.IsConflict(err):
+		log.G(ctx).Warningf("Keeping shadow %s %s/%s: it kept changing while being deleted", kind, identity.Namespace, name)
+		kept = true
+	case !apierrors.IsNotFound(err):
+		log.G(ctx).Warningf("Failed to delete shadow %s %s/%s: %v", kind, identity.Namespace, name, err)
 	}
-	log.G(ctx).Infof("Successfully deleted shadow %s %s/%s", kind, identity.Namespace, name)
-	return false
+	return kept
 }
 
 // stampShadowOwner labels a shadow resource with the UID of the pod it serves.

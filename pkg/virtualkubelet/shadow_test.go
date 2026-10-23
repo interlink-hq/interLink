@@ -1,6 +1,7 @@
 package virtualkubelet
 
 import (
+	"errors"
 	"strings"
 	"testing"
 
@@ -12,6 +13,7 @@ import (
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
+	"k8s.io/apimachinery/pkg/runtime/schema"
 	k8stypes "k8s.io/apimachinery/pkg/types"
 	"k8s.io/client-go/kubernetes/fake"
 	k8stesting "k8s.io/client-go/testing"
@@ -461,6 +463,52 @@ func TestCleanupKeepsShadowOfRecreatedPod(t *testing.T) {
 			}
 		})
 	}
+
+	// conflictOnce makes the first delete of resource fail with a conflict, after
+	// changing the stored object with change, as an update landing between read and delete.
+	conflictOnce := func(client *fake.Clientset, resource string, gvr schema.GroupVersionResource, change func(metav1.Object)) {
+		first := true
+		client.PrependReactor("delete", resource, func(k8stesting.Action) (bool, runtime.Object, error) {
+			if !first {
+				return false, nil, nil
+			}
+			first = false
+			obj, err := client.Tracker().Get(gvr, ns, name)
+			require.NoError(t, err)
+			change(obj.(metav1.Object))
+			require.NoError(t, client.Tracker().Update(gvr, obj, ns))
+			return true, nil, apierrors.NewConflict(gvr.GroupResource(), name, errors.New("resourceVersion changed"))
+		})
+	}
+
+	t.Run("an ingress taken over between read and delete keeps it and its TLS secret", func(t *testing.T) {
+		client := fake.NewSimpleClientset(tlsObjects(oldUID)...)
+		conflictOnce(client, "ingresses", networkingv1.SchemeGroupVersion.WithResource("ingresses"), func(o metav1.Object) {
+			o.SetLabels(map[string]string{shadowOwnerUIDLabel: newUID})
+		})
+		p := tunnelProvider(client)
+		p.config.Network.IngressTLS = true
+
+		p.cleanupShadowResources(t.Context(), shadowResourceIdentity{Name: name, Namespace: ns, OwnerUID: oldUID})
+
+		_, err := client.NetworkingV1().Ingresses(ns).Get(t.Context(), name, metav1.GetOptions{})
+		assert.NoError(t, err)
+		_, err = client.CoreV1().Secrets(ns).Get(t.Context(), name+"-tls", metav1.GetOptions{})
+		assert.NoError(t, err)
+	})
+
+	t.Run("any other change between read and delete is retried", func(t *testing.T) {
+		client := fake.NewSimpleClientset(stamped(oldUID))
+		conflictOnce(client, "deployments", appsv1.SchemeGroupVersion.WithResource("deployments"), func(o metav1.Object) {
+			o.SetAnnotations(map[string]string{"status": "updated"})
+		})
+		p := tunnelProvider(client)
+
+		p.cleanupShadowResources(t.Context(), shadowResourceIdentity{Name: name, Namespace: ns, OwnerUID: oldUID})
+
+		_, err := client.AppsV1().Deployments(ns).Get(t.Context(), name, metav1.GetOptions{})
+		assert.True(t, apierrors.IsNotFound(err))
+	})
 
 	t.Run("the delete is conditional on the resource version that was read", func(t *testing.T) {
 		deployment := stamped(oldUID)
