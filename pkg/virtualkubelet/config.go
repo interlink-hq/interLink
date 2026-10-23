@@ -54,6 +54,9 @@ type Config struct {
 	TLS TLSConfig `yaml:"TLS,omitempty"`
 	// Network contains network-related settings for the virtual node
 	Network Network `yaml:"Network,omitempty"`
+	// ShadowPauseImage keeps a shadow running when the pod keeps only init containers
+	// on the cluster (default registry.k8s.io/pause:3.10)
+	ShadowPauseImage string `yaml:"ShadowPauseImage,omitempty"`
 	// SkipDownwardAPIResolution disables downward API resolution to enable scheduling pods with downward API
 	SkipDownwardAPIResolution bool `yaml:"SkipDownwardAPIResolution,omitempty"`
 	// DisableCSR disables CSR (CertificateSigningRequest) creation and uses self-signed certificates instead
@@ -102,6 +105,10 @@ type Resources struct {
 	Memory string `yaml:"Memory,omitempty"`
 	// Pods specifies the maximum number of pods this node can handle
 	Pods string `yaml:"Pods,omitempty"`
+	// EphemeralStorage is the ephemeral storage the node advertises (default 1Ti). A node
+	// that advertises none cannot take a pod that requests some, as sidecars often do
+	// (Katib's metrics collector requests 500Mi).
+	EphemeralStorage string `yaml:"EphemeralStorage,omitempty"`
 	// Accelerators lists hardware accelerators available on this node
 	Accelerators []Accelerator `yaml:"Accelerators"`
 }
