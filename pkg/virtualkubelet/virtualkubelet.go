@@ -1499,7 +1499,7 @@ func (p *Provider) waitForDeploymentPod(ctx context.Context, deploymentName, nam
 			LabelSelector: fmt.Sprintf("app.kubernetes.io/component=%s", deploymentName),
 		})
 		if err != nil {
-			log.G(ctx).Debugf("No pod yet for deployment %s/%s: %v", namespace, deploymentName, err)
+			log.G(ctx).Warningf("Failed to list pods for deployment %s: %v", deploymentName, err)
 			time.Sleep(1 * time.Second)
 			continue
 		}
@@ -1879,27 +1879,15 @@ func (p *Provider) handleShadowCreation(ctx context.Context, pod *v1.Pod) (strin
 		}
 	}
 
-	shadowIdentity := shadowResourceIdentity{
+	// This is the address the virtual pod starts with: if the shadow pod is replaced
+	// later, the status loop moves it to the replacement (see refreshShadowPodIP).
+	podIP, err := p.waitForShadowPodIP(ctx, shadowPod, timeout, shadowResourceIdentity{
 		Name:      templateData.Name,
 		Namespace: templateData.Namespace,
-	}
-
-	// Waited for first even when the service address is the one handed out: it is
-	// the only signal that the shadow is actually coming up, and the failure path
-	// cleans up the shadow resources.
-	podIP, err := p.waitForShadowPodIP(ctx, shadowPod, timeout, shadowIdentity)
+	})
 	if err != nil {
 		log.G(ctx).Errorf("Failed to get shadow pod IP for %s/%s: %v", pod.Namespace, pod.Name, err)
 		return "", err
-	}
-
-	// Prefer the service address: it stays valid for as long as the service
-	// exists, while the shadow pod IP changes whenever the pod is replaced (a new
-	// session, a rescheduling) and is never updated on the virtual pod afterwards,
-	// leaving whoever connects to it talking to nothing.
-	if serviceIP := p.shadowServiceIP(ctx, shadowIdentity); serviceIP != "" {
-		log.G(ctx).Infof("Using shadow service IP %s for virtual pod %s/%s", serviceIP, pod.Namespace, pod.Name)
-		podIP = serviceIP
 	}
 
 	// The SSH shadow dials in to the login node, so the workload has nothing to set
@@ -1915,33 +1903,6 @@ func (p *Provider) handleShadowCreation(ctx context.Context, pod *v1.Pod) (strin
 	}
 
 	return podIP, nil
-}
-
-// shadowServiceIP returns the ClusterIP of the shadow service, or "" when there
-// is no usable one (no service, a headless service, or a service exposing no
-// port, as happens when a pod exposes UDP ports only), in which case the caller
-// keeps the shadow pod IP.
-func (p *Provider) shadowServiceIP(ctx context.Context, identity shadowResourceIdentity) string {
-	service, err := p.clientSet.CoreV1().Services(identity.Namespace).Get(ctx, identity.Name, metav1.GetOptions{})
-	if err != nil {
-		log.G(ctx).Warningf("Failed to get shadow service %s/%s, falling back to the shadow pod IP: %v",
-			identity.Namespace, identity.Name, err)
-		return ""
-	}
-
-	if service.Spec.ClusterIP == "" || service.Spec.ClusterIP == v1.ClusterIPNone {
-		log.G(ctx).Warningf("Shadow service %s/%s has no ClusterIP (%q), falling back to the shadow pod IP",
-			identity.Namespace, identity.Name, service.Spec.ClusterIP)
-		return ""
-	}
-
-	if len(service.Spec.Ports) == 0 {
-		log.G(ctx).Warningf("Shadow service %s/%s exposes no port, falling back to the shadow pod IP",
-			identity.Namespace, identity.Name)
-		return ""
-	}
-
-	return service.Spec.ClusterIP
 }
 
 // waitForShadowPodIP waits for shadow pod to get an IP
@@ -2314,6 +2275,16 @@ func (p *Provider) markDeletePending(pod *v1.Pod) {
 	}
 }
 
+// isDeletePending reports whether the pod with the given UID is waiting for the
+// plugin to confirm its remote deletion.
+func (p *Provider) isDeletePending(uid string) bool {
+	p.pendingDeletesMu.Lock()
+	defer p.pendingDeletesMu.Unlock()
+
+	_, ok := p.pendingDeletes[uid]
+	return ok
+}
+
 // beginDeleteAttempt claims the right to issue a remote deletion for key. It
 // returns false when another attempt is already in flight, which keeps the
 // controller-driven retries and the sweep from issuing duplicate /delete calls.
@@ -2522,16 +2493,19 @@ func (p *Provider) NotifyPods(_ context.Context, f func(*v1.Pod)) {
 	p.notifier = f
 }
 
+// statusLoopInterval is how often statusLoop polls the plugin for the pods' status.
+var statusLoopInterval = 5 * time.Second
+
 // statusLoop preiodically monitoring the status of all the pods in p.pods
 func (p *Provider) statusLoop(ctx context.Context) {
-	t := time.NewTimer(5 * time.Second)
+	t := time.NewTimer(statusLoopInterval)
 	if !t.Stop() {
 		<-t.C
 	}
 
 	for {
 		log.G(ctx).Info("statusLoop")
-		t.Reset(5 * time.Second)
+		t.Reset(statusLoopInterval)
 		select {
 		case <-ctx.Done():
 			return
@@ -2540,18 +2514,22 @@ func (p *Provider) statusLoop(ctx context.Context) {
 
 		p.podIPs = []string{}
 
-		podsVPN, err := p.clientSet.CoreV1().Pods("").List(ctx, metav1.ListOptions{})
+		clusterPods, err := p.clientSet.CoreV1().Pods("").List(ctx, metav1.ListOptions{})
 		if err != nil {
 			log.G(ctx).Error(err)
 		}
 
-		log.G(ctx).Debug("Pod lists with pod-vpn enabled has len ", len(podsVPN.Items))
+		log.G(ctx).Debug("Pod lists with pod-vpn enabled has len ", len(clusterPods.Items))
 
-		for _, podVPN := range podsVPN.Items {
+		for _, podVPN := range clusterPods.Items {
 			if ip, ok := podVPN.Annotations["interlink.eu/pod-ip"]; ok {
 				p.podIPs = append(p.podIPs, ip)
 			}
 		}
+
+		// The same list holds the shadow pods, so following a replaced one costs no
+		// extra API call. A failed list comes back empty, which moves no address.
+		shadowPods := indexShadowPods(clusterPods.Items)
 
 		token := ""
 		if p.config.VKTokenFile != "" {
@@ -2584,9 +2562,10 @@ func (p *Provider) statusLoop(ctx context.Context) {
 				if err != nil {
 					log.G(ctx).Error(err)
 				}
+				p.refreshShadowPodIP(ctx, pod, shadowPods)
 				// Use a fresh snapshot of the canonical pod (updated by checkPodsStatus
-				// under podsMu.Lock) rather than the pre-snapshot deep copy, so the
-				// notifier sees the latest status.
+				// and refreshShadowPodIP under podsMu.Lock) rather than the pre-snapshot
+				// deep copy, so the notifier sees the latest status.
 				p.podsMu.RLock()
 				canonical, exists := p.pods[string(pod.UID)]
 				var notifyPod *v1.Pod
