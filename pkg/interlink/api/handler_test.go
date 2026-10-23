@@ -356,3 +356,33 @@ func TestReqWithError_ResponseModes(t *testing.T) {
 		})
 	}
 }
+
+func TestReqWithError_NonOKErrorNamesTarget(t *testing.T) {
+	tp, cleanup := setupTestTracer()
+	defer cleanup()
+
+	tracer := tp.Tracer("test")
+	ctx, span := tracer.Start(context.Background(), "test-span")
+	defer span.End()
+
+	testServer, baseURL, client := newUnixTestServer(t, http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.WriteHeader(http.StatusUnprocessableEntity)
+		if _, err := io.WriteString(w, "plugin rejected the pod"); err != nil {
+			panic(err)
+		}
+	}))
+	defer testServer.Close()
+
+	req, err := http.NewRequest(http.MethodPost, baseURL+"create", nil)
+	require.NoError(t, err)
+
+	_, err = ReqWithError(ctx, req, httptest.NewRecorder(), time.Now().UnixMicro(), span, true, false, "Request-test", client)
+
+	require.Error(t, err)
+	// The error must name the endpoint that failed and the status it returned,
+	// not blame the JobScriptBuilder for every non-OK response.
+	assert.Contains(t, err.Error(), "POST /create")
+	assert.Contains(t, err.Error(), "422")
+	assert.Contains(t, err.Error(), "plugin rejected the pod")
+	assert.NotContains(t, err.Error(), "JobScriptBuilder")
+}
