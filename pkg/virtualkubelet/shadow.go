@@ -163,6 +163,10 @@ type shadowResourceIdentity struct {
 	// after the pod, so a pod recreated under the same name reuses those names; the
 	// UID, stamped as a label, tells which pod a resource belongs to.
 	OwnerUID string
+	// PodName and PodNamespace name that pod, to tell whether another UID stamped on a
+	// resource is the pod that now has the name (see ownerIsCurrentPod).
+	PodName      string
+	PodNamespace string
 }
 
 func isShadowSameNamespace(pod *v1.Pod) bool {
@@ -187,7 +191,10 @@ func computeShadowResourceIdentity(pod *v1.Pod) (shadowResourceIdentity, error) 
 		name, namespace = computeShadowResourceNames(pod.Name, pod.Namespace)
 	}
 
-	identity := shadowResourceIdentity{Name: name, Namespace: namespace, OwnerUID: string(pod.UID)}
+	identity := shadowResourceIdentity{
+		Name: name, Namespace: namespace,
+		OwnerUID: string(pod.UID), PodName: pod.Name, PodNamespace: pod.Namespace,
+	}
 	if len(fmt.Sprintf("%s-%s", identity.Name, identity.Namespace)) > 63 {
 		return shadowResourceIdentity{}, fmt.Errorf("shadow ingress hostname label %q exceeds 63 characters; shorten pod/namespace or disable interlink.eu/shadow-same-ns", fmt.Sprintf("%s-%s", identity.Name, identity.Namespace))
 	}
@@ -439,6 +446,33 @@ func (p *Provider) releaseShadowOfEndedPod(ctx context.Context, pod *v1.Pod) {
 // indexShadowPods groups the shadow pods by the UID of the pod they stand for, read
 // from shadowOfLabel. The pods of a shadow rendered before that label existed are
 // left out, so their virtual pod keeps the IP it was created with.
+// isShadowPodOf reports whether a shadow pod may serve the pod with UID podUID: it is
+// labelled for that pod, or it predates shadowOfLabel, or the UID is unknown.
+func isShadowPodOf(shadowPod *v1.Pod, podUID string) bool {
+	of := shadowPod.Labels[shadowOfLabel]
+	return of == "" || podUID == "" || of == podUID
+}
+
+// ownerIsCurrentPod reports whether owner, the UID stamped on a shadow resource, is
+// the UID of the pod that now has the name the shadow stands for. Any other UID is a
+// pod that no longer exists, whose cleanup never ran (it was deleted while the virtual
+// kubelet was down, say): its leftovers are deleted. When the pod cannot be read, the
+// resource is kept.
+func (p *Provider) ownerIsCurrentPod(ctx context.Context, identity shadowResourceIdentity, owner string) bool {
+	if identity.PodName == "" {
+		return true
+	}
+	pod, err := p.clientSet.CoreV1().Pods(identity.PodNamespace).Get(ctx, identity.PodName, metav1.GetOptions{})
+	if apierrors.IsNotFound(err) {
+		return false
+	}
+	if err != nil {
+		log.G(ctx).Warningf("Failed to read pod %s/%s: %v", identity.PodNamespace, identity.PodName, err)
+		return true
+	}
+	return string(pod.UID) == owner
+}
+
 func indexShadowPods(pods []v1.Pod) map[string][]*v1.Pod {
 	index := make(map[string][]*v1.Pod)
 	for i := range pods {

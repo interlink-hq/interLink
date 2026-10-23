@@ -270,6 +270,28 @@ func TestWaitForKeptInitContainers(t *testing.T) {
 		assert.Equal(t, "/delete", path.Load())
 	})
 
+	// The recreated pod took the shadow over in place: the previous pod's shadow pod,
+	// whose kept init container already completed, must not count for this pod.
+	t.Run("a shadow pod of the previous pod with the same name does not count", func(t *testing.T) {
+		pod := podKeepingInit(v1.RestartPolicyNever)
+		previous := shadowOf(t, pod, exited(0))
+		previous.Labels[shadowOfLabel] = "uid-previous-generation"
+		client := fake.NewSimpleClientset(previous)
+		p := keptProvider(client, pod)
+
+		ctx := p.trackKeptInitWait(t.Context(), pod)
+		done := make(chan error, 1)
+		go func() { done <- p.waitForKeptInitContainers(ctx, pod) }()
+
+		select {
+		case err := <-done:
+			t.Fatalf("returned on the previous pod's shadow: %v", err)
+		case <-time.After(100 * time.Millisecond):
+		}
+		p.stopKeptInitWait(string(pod.UID))
+		<-done
+	})
+
 	t.Run("no kept init container: nothing to wait for", func(t *testing.T) {
 		pod := podKeepingInit(v1.RestartPolicyNever)
 		delete(pod.Annotations, annDisableOffloadInitContainers)

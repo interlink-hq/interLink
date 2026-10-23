@@ -599,6 +599,42 @@ func TestCleanupKeepsShadowOfRecreatedPod(t *testing.T) {
 	})
 }
 
+// A resource stamped with another pod's UID is kept only while that pod is the one
+// that has the name; the leftovers of a pod whose cleanup never ran are deleted.
+func TestCleanupKeepsOnlyTheCurrentPodsResources(t *testing.T) {
+	const name, podName, staleUID, currentUID = testPodDefaultName, "nb-0", "uid-stale", "uid-live"
+	ns := testNamespaceDefault
+	identity := shadowResourceIdentity{Name: name, Namespace: ns, OwnerUID: "uid-cleaning", PodName: podName, PodNamespace: ns}
+	stampedService := func(owner string) *v1.Service {
+		return &v1.Service{ObjectMeta: metav1.ObjectMeta{Name: name, Namespace: ns, Labels: map[string]string{shadowOwnerUIDLabel: owner}}}
+	}
+	livePod := &v1.Pod{ObjectMeta: metav1.ObjectMeta{Name: podName, Namespace: ns, UID: k8stypes.UID(currentUID)}}
+
+	t.Run("kept for the pod that now has the name", func(t *testing.T) {
+		client := fake.NewSimpleClientset(stampedService(currentUID), livePod)
+		tunnelProvider(client).cleanupShadowResources(t.Context(), identity)
+		_, err := client.CoreV1().Services(ns).Get(t.Context(), name, metav1.GetOptions{})
+		assert.NoError(t, err)
+	})
+
+	t.Run("deleted when its pod no longer exists", func(t *testing.T) {
+		client := fake.NewSimpleClientset(stampedService(staleUID), livePod)
+		tunnelProvider(client).cleanupShadowResources(t.Context(), identity)
+		_, err := client.CoreV1().Services(ns).Get(t.Context(), name, metav1.GetOptions{})
+		assert.True(t, apierrors.IsNotFound(err), "a leftover of a pod that is gone stays forever otherwise")
+	})
+
+	t.Run("kept when the pod cannot be read", func(t *testing.T) {
+		client := fake.NewSimpleClientset(stampedService(staleUID))
+		client.PrependReactor("get", "pods", func(k8stesting.Action) (bool, runtime.Object, error) {
+			return true, nil, apierrors.NewInternalError(errors.New("etcd timeout"))
+		})
+		tunnelProvider(client).cleanupShadowResources(t.Context(), identity)
+		_, err := client.CoreV1().Services(ns).Get(t.Context(), name, metav1.GetOptions{})
+		assert.NoError(t, err)
+	})
+}
+
 // The cleanup of a deleted pod and the shadow of its same-name successor must not
 // interleave: the new Ingress could otherwise appear between the old Ingress and the
 // TLS Secret being deleted, and lose the Secret.

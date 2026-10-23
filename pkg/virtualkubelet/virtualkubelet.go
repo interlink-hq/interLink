@@ -1428,7 +1428,11 @@ func (p *Provider) applyShadowManifests(ctx context.Context, manifestYAML string
 		return nil, err
 	}
 	if deploymentName != "" {
-		return p.waitForDeploymentPod(ctx, deploymentName, namespace)
+		podUID := ""
+		if td != nil {
+			podUID = td.PodUID
+		}
+		return p.waitForDeploymentPod(ctx, deploymentName, namespace, podUID)
 	}
 
 	return nil, fmt.Errorf("no deployment found in manifests")
@@ -1514,8 +1518,10 @@ func (p *Provider) applyShadowObjects(ctx context.Context, manifestYAML string, 
 // A pod recreated under the same name (a StatefulSet replica) gets a Deployment with the
 // same name and pod selector as the one just deleted, and the garbage collector
 // removes that one's pods asynchronously. Pods that are terminating, or older
-// than the current Deployment, belong to the previous one and are skipped.
-func (p *Provider) waitForDeploymentPod(ctx context.Context, deploymentName, namespace string) (*v1.Pod, error) {
+// than the current Deployment, belong to the previous one and are skipped. So are
+// pods labelled for another pod than podUID: when the recreated pod takes the
+// Deployment over in place, the previous pod's shadow pod is newer than it.
+func (p *Provider) waitForDeploymentPod(ctx context.Context, deploymentName, namespace, podUID string) (*v1.Pod, error) {
 	timeout := 30 * time.Second
 	start := time.Now()
 
@@ -1539,6 +1545,9 @@ func (p *Provider) waitForDeploymentPod(ctx context.Context, deploymentName, nam
 		for i := range pods.Items {
 			pod := &pods.Items[i]
 			if pod.DeletionTimestamp != nil || pod.CreationTimestamp.Before(&deployment.CreationTimestamp) {
+				continue
+			}
+			if !isShadowPodOf(pod, podUID) {
 				continue
 			}
 			return pod, nil
@@ -1606,7 +1615,8 @@ func (p *Provider) deleteOwnedShadowResource(ctx context.Context, identity shado
 		if err != nil {
 			return err
 		}
-		if owner := obj.GetLabels()[shadowOwnerUIDLabel]; owner != "" && identity.OwnerUID != "" && owner != identity.OwnerUID {
+		if owner := obj.GetLabels()[shadowOwnerUIDLabel]; owner != "" && identity.OwnerUID != "" && owner != identity.OwnerUID &&
+			p.ownerIsCurrentPod(ctx, identity, owner) {
 			log.G(ctx).Infof("Keeping shadow %s %s/%s: it belongs to pod UID %s, not %s", kind, identity.Namespace, name, owner, identity.OwnerUID)
 			kept = true
 			return nil
