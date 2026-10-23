@@ -159,7 +159,7 @@ func (p *Provider) currentShadowPod(ctx context.Context, identity shadowResource
 	var newest *v1.Pod
 	for i := range pods.Items {
 		pod := &pods.Items[i]
-		if pod.DeletionTimestamp != nil {
+		if pod.DeletionTimestamp != nil || !isShadowPodOf(pod, identity.OwnerUID) {
 			continue
 		}
 		if newest == nil || newest.CreationTimestamp.Before(&pod.CreationTimestamp) {

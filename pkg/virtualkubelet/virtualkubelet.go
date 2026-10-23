@@ -9,6 +9,7 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
+	"hash/fnv"
 	"io"
 	mathrand "math/rand"
 	"net"
@@ -39,6 +40,7 @@ import (
 	"k8s.io/client-go/kubernetes"
 	"k8s.io/client-go/kubernetes/scheme"
 	"k8s.io/client-go/tools/clientcmd"
+	"k8s.io/client-go/util/retry"
 	stats "k8s.io/kubelet/pkg/apis/stats/v1alpha1"
 
 	types "github.com/interlink-hq/interlink/pkg/interlink"
@@ -102,6 +104,8 @@ const (
 	annDisableOffloadInitContainers = "interlink.eu/disable-offload-init-containers" // comma-separated init container names
 	annMeshNetworkDisabled          = "interlink.eu/mesh-network"                    // set to "disabled" to opt out of mesh networking
 	annShadowSocketPorts            = "interlink.eu/shadow-socket-ports"             // comma-separated exposed TCP ports served on unix sockets
+	shadowOwnerUIDLabel             = "interlink.eu/shadow-owner-uid"
+	shadowOwnerPodAnnotation        = "interlink.eu/shadow-owner-pod" // namespace/name of the pod in shadowOwnerUIDLabel
 )
 
 type ShadowTemplateData struct {
@@ -130,6 +134,10 @@ type ShadowTemplateData struct {
 	// in a container named PauseName, a name no kept init container uses.
 	PauseImage string
 	PauseName  string
+	// OwnerUID and OwnerPod are stamped on every shadow resource (see
+	// shadowResourceIdentity).
+	OwnerUID string
+	OwnerPod string
 	// NodeConfigMap is the ConfigMap the shadow can mount to learn which remote
 	// compute node the workload landed on. It exists from the moment the shadow is
 	// created but holds an empty NodeNameKey until the plugin reports the node.
@@ -204,7 +212,10 @@ type Provider struct {
 	shadowsReleased sync.Map
 	// keptInitWaits holds, per pod UID, the cancel function of a pending wait for the
 	// pod's kept init containers (see stopKeptInitWait).
-	keptInitWaits    sync.Map
+	keptInitWaits sync.Map
+	// shadowLocks serialise applying a shadow's manifests and cleaning them up, per
+	// shadow name (see lockShadow).
+	shadowLocks      [64]sync.Mutex
 	pendingDeletes   map[string]*pendingDelete
 	pendingDeletesMu sync.Mutex
 	deleteLoopOnce   sync.Once
@@ -1074,6 +1085,8 @@ func (p *Provider) createShadowPod(ctx context.Context, originalPod *v1.Pod) (*v
 		KeptOnly:             keptOnly,
 		PauseImage:           p.shadowPauseImage(),
 		PauseName:            shadowPauseName(localInitContainers),
+		OwnerUID:             identity.OwnerUID,
+		OwnerPod:             identity.ownerPod(),
 		NodeConfigMap:        shadowNodeConfigMapName(identity.Name),
 		NodeNameKey:          shadowNodeNameKey,
 		SocketDirKey:         shadowSocketDirKey,
@@ -1414,6 +1427,28 @@ func (p *Provider) applyOrUpdateSecret(ctx context.Context, o *v1.Secret) error 
 
 // applyShadowManifests applies the generated manifests and returns the first created pod
 func (p *Provider) applyShadowManifests(ctx context.Context, manifestYAML string, td *ShadowTemplateData) (*v1.Pod, error) {
+	deploymentName, namespace, err := p.applyShadowObjects(ctx, manifestYAML, td)
+	if err != nil {
+		return nil, err
+	}
+	if deploymentName != "" {
+		podUID := ""
+		if td != nil {
+			podUID = td.PodUID
+		}
+		return p.waitForDeploymentPod(ctx, deploymentName, namespace, podUID)
+	}
+
+	return nil, fmt.Errorf("no deployment found in manifests")
+}
+
+// applyShadowObjects creates or updates the objects of the shadow manifests and returns
+// the name and namespace of its Deployment. It holds the shadow's lock meanwhile, so the
+// cleanup of a deleted pod with the same name never runs in between.
+func (p *Provider) applyShadowObjects(ctx context.Context, manifestYAML string, td *ShadowTemplateData) (string, string, error) {
+	if td != nil {
+		defer p.lockShadow(td.Namespace, td.Name)()
+	}
 	resources := strings.Split(manifestYAML, "---")
 	decoder := serializer.NewCodecFactory(scheme.Scheme).UniversalDeserializer()
 	var deploymentName string
@@ -1431,13 +1466,16 @@ func (p *Provider) applyShadowManifests(ctx context.Context, manifestYAML string
 			log.G(ctx).Warningf("Failed to decode resource: %v", err)
 			continue
 		}
+		if meta, ok := obj.(metav1.Object); ok && td != nil {
+			stampShadowOwner(meta, td.OwnerUID, td.OwnerPod)
+		}
 
 		switch o := obj.(type) {
 		case *appsv1.Deployment:
 			name, ns, err := p.applyOrUpdateDeployment(ctx, o, td)
 			if err != nil {
 				p.cleanupPartialShadowResources(ctx, createdResources, o.Namespace)
-				return nil, err
+				return "", "", err
 			}
 			deploymentName = name
 			namespace = ns
@@ -1446,28 +1484,28 @@ func (p *Provider) applyShadowManifests(ctx context.Context, manifestYAML string
 		case *v1.Service:
 			if err := p.applyOrUpdateService(ctx, o); err != nil {
 				p.cleanupPartialShadowResources(ctx, createdResources, o.Namespace)
-				return nil, err
+				return "", "", err
 			}
 			createdResources = append(createdResources, "service:"+o.Name)
 
 		case *networkingv1.Ingress:
 			if err := p.applyOrUpdateIngress(ctx, o); err != nil {
 				p.cleanupPartialShadowResources(ctx, createdResources, o.Namespace)
-				return nil, err
+				return "", "", err
 			}
 			createdResources = append(createdResources, "ingress:"+o.Name)
 
 		case *v1.ConfigMap:
 			if err := p.applyOrUpdateConfigMap(ctx, o); err != nil {
 				p.cleanupPartialShadowResources(ctx, createdResources, o.Namespace)
-				return nil, err
+				return "", "", err
 			}
 			createdResources = append(createdResources, "configmap:"+o.Name)
 
 		case *v1.Secret:
 			if err := p.applyOrUpdateSecret(ctx, o); err != nil {
 				p.cleanupPartialShadowResources(ctx, createdResources, o.Namespace)
-				return nil, err
+				return "", "", err
 			}
 			createdResources = append(createdResources, "secret:"+o.Name)
 
@@ -1476,11 +1514,7 @@ func (p *Provider) applyShadowManifests(ctx context.Context, manifestYAML string
 		}
 	}
 
-	if deploymentName != "" {
-		return p.waitForDeploymentPod(ctx, deploymentName, namespace)
-	}
-
-	return nil, fmt.Errorf("no deployment found in manifests")
+	return deploymentName, namespace, nil
 }
 
 // waitForDeploymentPod waits for a deployment to create a pod and returns it.
@@ -1488,8 +1522,10 @@ func (p *Provider) applyShadowManifests(ctx context.Context, manifestYAML string
 // A pod recreated under the same name (a StatefulSet replica) gets a Deployment with the
 // same name and pod selector as the one just deleted, and the garbage collector
 // removes that one's pods asynchronously. Pods that are terminating, or older
-// than the current Deployment, belong to the previous one and are skipped.
-func (p *Provider) waitForDeploymentPod(ctx context.Context, deploymentName, namespace string) (*v1.Pod, error) {
+// than the current Deployment, belong to the previous one and are skipped. So are
+// pods labelled for another pod than podUID: when the recreated pod takes the
+// Deployment over in place, the previous pod's shadow pod is newer than it.
+func (p *Provider) waitForDeploymentPod(ctx context.Context, deploymentName, namespace, podUID string) (*v1.Pod, error) {
 	timeout := 30 * time.Second
 	start := time.Now()
 
@@ -1515,6 +1551,9 @@ func (p *Provider) waitForDeploymentPod(ctx context.Context, deploymentName, nam
 			if pod.DeletionTimestamp != nil || pod.CreationTimestamp.Before(&deployment.CreationTimestamp) {
 				continue
 			}
+			if !isShadowPodOf(pod, podUID) {
+				continue
+			}
 			return pod, nil
 		}
 
@@ -1524,61 +1563,119 @@ func (p *Provider) waitForDeploymentPod(ctx context.Context, deploymentName, nam
 	return nil, fmt.Errorf("no pod found for deployment %s within timeout", deploymentName)
 }
 
-// cleanupShadowResources removes all shadow resources for a given name and namespace
-func (p *Provider) cleanupShadowResources(ctx context.Context, shadowName, namespace string) {
+// cleanupShadowResources removes the shadow resources of the pod identity names. A
+// resource stamped with another pod's UID is left alone: it belongs to a pod recreated
+// under the same name, whose shadow can exist before this pod's cleanup runs. The
+// shadow's lock keeps that shadow from being applied while the cleanup runs.
+func (p *Provider) cleanupShadowResources(ctx context.Context, identity shadowResourceIdentity) {
+	shadowName, namespace := identity.Name, identity.Namespace
+	defer p.lockShadow(namespace, shadowName)()
 	log.G(ctx).Infof("Cleaning up shadow resources for %s/%s", namespace, shadowName)
 
-	// Delete deployment
-	err := p.clientSet.AppsV1().Deployments(namespace).Delete(ctx, shadowName, metav1.DeleteOptions{})
-	if err != nil {
-		log.G(ctx).Warningf("Failed to delete shadow deployment %s/%s: %v", namespace, shadowName, err)
-	} else {
-		log.G(ctx).Infof("Successfully deleted shadow deployment %s/%s", namespace, shadowName)
+	deployments := p.clientSet.AppsV1().Deployments(namespace)
+	p.deleteOwnedShadowResource(ctx, identity, "deployment", shadowName,
+		func(name string) (metav1.Object, error) { return deployments.Get(ctx, name, metav1.GetOptions{}) },
+		func(name string, opts metav1.DeleteOptions) error { return deployments.Delete(ctx, name, opts) })
+
+	services := p.clientSet.CoreV1().Services(namespace)
+	p.deleteOwnedShadowResource(ctx, identity, "service", shadowName,
+		func(name string) (metav1.Object, error) { return services.Get(ctx, name, metav1.GetOptions{}) },
+		func(name string, opts metav1.DeleteOptions) error { return services.Delete(ctx, name, opts) })
+
+	ingresses := p.clientSet.NetworkingV1().Ingresses(namespace)
+	ingressKept := p.deleteOwnedShadowResource(ctx, identity, "ingress", shadowName,
+		func(name string) (metav1.Object, error) { return ingresses.Get(ctx, name, metav1.GetOptions{}) },
+		func(name string, opts metav1.DeleteOptions) error { return ingresses.Delete(ctx, name, opts) })
+
+	configMaps := p.clientSet.CoreV1().ConfigMaps(namespace)
+	for _, name := range []string{shadowName + "-wg-config", shadowNodeConfigMapName(shadowName)} {
+		p.deleteOwnedShadowResource(ctx, identity, "configmap", name,
+			func(name string) (metav1.Object, error) { return configMaps.Get(ctx, name, metav1.GetOptions{}) },
+			func(name string, opts metav1.DeleteOptions) error { return configMaps.Delete(ctx, name, opts) })
 	}
 
-	// Delete service
-	err = p.clientSet.CoreV1().Services(namespace).Delete(ctx, shadowName, metav1.DeleteOptions{})
-	if err != nil {
-		log.G(ctx).Warningf("Failed to delete shadow service %s/%s: %v", namespace, shadowName, err)
-	} else {
-		log.G(ctx).Infof("Successfully deleted shadow service %s/%s", namespace, shadowName)
+	// Delete cert-manager-provisioned TLS secret. cert-manager creates it without the
+	// owner label, so it goes with its Ingress: kept when another pod's Ingress is.
+	if p.config.Network.IngressTLS && !ingressKept {
+		secrets := p.clientSet.CoreV1().Secrets(namespace)
+		p.deleteOwnedShadowResource(ctx, identity, "secret", shadowName+"-tls",
+			func(name string) (metav1.Object, error) { return secrets.Get(ctx, name, metav1.GetOptions{}) },
+			func(name string, opts metav1.DeleteOptions) error { return secrets.Delete(ctx, name, opts) })
 	}
+}
 
-	// Delete ingress
-	err = p.clientSet.NetworkingV1().Ingresses(namespace).Delete(ctx, shadowName, metav1.DeleteOptions{})
-	if err != nil {
-		log.G(ctx).Warningf("Failed to delete shadow ingress %s/%s: %v", namespace, shadowName, err)
-	} else {
-		log.G(ctx).Infof("Successfully deleted shadow ingress %s/%s", namespace, shadowName)
-	}
-
-	// Delete configmap
-	err = p.clientSet.CoreV1().ConfigMaps(namespace).Delete(ctx, shadowName+"-wg-config", metav1.DeleteOptions{})
-	if err != nil {
-		log.G(ctx).Warningf("Failed to delete shadow configmap %s/%s: %v", namespace, shadowName+"-wg-config", err)
-	} else {
-		log.G(ctx).Infof("Successfully deleted shadow configmap %s/%s", namespace, shadowName+"-wg-config")
-	}
-
-	// Delete the compute node configmap
-	nodeCM := shadowNodeConfigMapName(shadowName)
-	err = p.clientSet.CoreV1().ConfigMaps(namespace).Delete(ctx, nodeCM, metav1.DeleteOptions{})
-	if err != nil {
-		log.G(ctx).Warningf("Failed to delete shadow configmap %s/%s: %v", namespace, nodeCM, err)
-	} else {
-		log.G(ctx).Infof("Successfully deleted shadow configmap %s/%s", namespace, nodeCM)
-	}
-
-	// Delete cert-manager-provisioned TLS secret.
-	if p.config.Network.IngressTLS {
-		secretName := shadowName + "-tls"
-		err = p.clientSet.CoreV1().Secrets(namespace).Delete(ctx, secretName, metav1.DeleteOptions{})
+// deleteOwnedShadowResource deletes one shadow resource unless it is stamped with a
+// pod UID other than identity.OwnerUID, and reports whether it may still serve another
+// pod: kept for its owner, changed meanwhile, or left in place by an error. The delete
+// is conditional on the UID and resourceVersion that were read, so a replacement or an
+// in-place update for a recreated pod made in between is never removed: on a conflict
+// the resource is read again and the owner checked again. Unstamped resources (from
+// before the stamp existed) are deleted as before.
+func (p *Provider) deleteOwnedShadowResource(ctx context.Context, identity shadowResourceIdentity, kind, name string,
+	get func(string) (metav1.Object, error), del func(string, metav1.DeleteOptions) error) bool {
+	kept := false
+	err := retry.RetryOnConflict(retry.DefaultRetry, func() error {
+		obj, err := get(name)
 		if err != nil {
-			log.G(ctx).Warningf("Failed to delete shadow TLS secret %s/%s: %v", namespace, secretName, err)
-		} else {
-			log.G(ctx).Infof("Successfully deleted shadow TLS secret %s/%s", namespace, secretName)
+			return err
 		}
+		if owner := obj.GetLabels()[shadowOwnerUIDLabel]; owner != "" && identity.OwnerUID != "" && owner != identity.OwnerUID &&
+			p.ownerIsCurrentPod(ctx, identity, obj) {
+			log.G(ctx).Infof("Keeping shadow %s %s/%s: it belongs to pod UID %s, not %s", kind, identity.Namespace, name, owner, identity.OwnerUID)
+			kept = true
+			return nil
+		}
+		uid, resourceVersion := obj.GetUID(), obj.GetResourceVersion()
+		return del(name, metav1.DeleteOptions{Preconditions: &metav1.Preconditions{UID: &uid, ResourceVersion: &resourceVersion}})
+	})
+	switch {
+	case err == nil:
+		if !kept {
+			log.G(ctx).Infof("Successfully deleted shadow %s %s/%s", kind, identity.Namespace, name)
+		}
+	case apierrors.IsConflict(err):
+		log.G(ctx).Warningf("Keeping shadow %s %s/%s: it kept changing while being deleted", kind, identity.Namespace, name)
+		kept = true
+	case !apierrors.IsNotFound(err):
+		// Its owner is unknown, so it may serve another pod.
+		log.G(ctx).Warningf("Failed to delete shadow %s %s/%s: %v", kind, identity.Namespace, name, err)
+		kept = true
 	}
+	return kept
+}
+
+// lockShadow locks the shadow named name in namespace and returns the unlock function.
+// The lock is one of a fixed set, chosen by name, so it is shared with unrelated shadows
+// now and then; it only orders a cleanup and an apply within this virtual kubelet.
+func (p *Provider) lockShadow(namespace, name string) func() {
+	h := fnv.New32a()
+	_, _ = h.Write([]byte(namespace + "/" + name))
+	mu := &p.shadowLocks[h.Sum32()%uint32(len(p.shadowLocks))]
+	mu.Lock()
+	return mu.Unlock
+}
+
+// stampShadowOwner labels a shadow resource with the UID of the pod it serves and
+// annotates it with that pod's namespace/name.
+func stampShadowOwner(obj metav1.Object, ownerUID, ownerPod string) {
+	if ownerUID == "" {
+		return
+	}
+	labels := obj.GetLabels()
+	if labels == nil {
+		labels = map[string]string{}
+	}
+	labels[shadowOwnerUIDLabel] = ownerUID
+	obj.SetLabels(labels)
+	if ownerPod == "" {
+		return
+	}
+	annotations := obj.GetAnnotations()
+	if annotations == nil {
+		annotations = map[string]string{}
+	}
+	annotations[shadowOwnerPodAnnotation] = ownerPod
+	obj.SetAnnotations(annotations)
 }
 
 // cleanupPartialShadowResources removes specific resources that were created before a failure
@@ -1873,7 +1970,7 @@ func (p *Provider) handleShadowCreation(ctx context.Context, pod *v1.Pod) (strin
 	if err != nil {
 		log.G(ctx).Errorf("Failed to create shadow infrastructure for %s/%s: %v", pod.Namespace, pod.Name, err)
 		// Clean up any partially created resources
-		p.cleanupShadowResources(ctx, identity.Name, identity.Namespace)
+		p.cleanupShadowResources(ctx, identity)
 		return "", fmt.Errorf("failed to create shadow infrastructure for exposed ports: %w", err)
 	}
 
@@ -1887,10 +1984,7 @@ func (p *Provider) handleShadowCreation(ctx context.Context, pod *v1.Pod) (strin
 
 	// This is the address the virtual pod starts with: if the shadow pod is replaced
 	// later, the status loop moves it to the replacement (see refreshShadowPodIP).
-	podIP, err := p.waitForShadowPodIP(ctx, shadowPod, timeout, shadowResourceIdentity{
-		Name:      templateData.Name,
-		Namespace: templateData.Namespace,
-	})
+	podIP, err := p.waitForShadowPodIP(ctx, shadowPod, timeout, identity)
 	if err != nil {
 		log.G(ctx).Errorf("Failed to get shadow pod IP for %s/%s: %v", pod.Namespace, pod.Name, err)
 		return "", err
@@ -1934,7 +2028,7 @@ func (p *Provider) waitForShadowPodIP(ctx context.Context, shadowPod *v1.Pod, ti
 	}
 
 	// Clean up the shadow infrastructure since it didn't get an IP
-	p.cleanupShadowResources(ctx, identity.Name, identity.Namespace)
+	p.cleanupShadowResources(ctx, identity)
 	return "", fmt.Errorf("shadow pod %s/%s failed to get an IP within %v timeout", shadowPod.Namespace, shadowPod.Name, timeout)
 }
 
@@ -2201,7 +2295,7 @@ func (p *Provider) DeletePod(ctx context.Context, pod *v1.Pod) (err error) {
 			if identityErr != nil {
 				log.G(ctx).Warningf("Failed to compute shadow resource identity for %s/%s: %v", pod.Namespace, pod.Name, identityErr)
 			} else {
-				p.cleanupShadowResources(ctx, identity.Name, identity.Namespace)
+				p.cleanupShadowResources(ctx, identity)
 			}
 		}
 		p.forgetShadowNodeName(pod)
