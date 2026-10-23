@@ -6,6 +6,7 @@ package api
 import (
 	"bufio"
 	"context"
+	"errors"
 	"fmt"
 	"html"
 	"io"
@@ -94,6 +95,23 @@ func ForwardAccessToken(in *http.Request, out *http.Request) {
 	out.Header.Set(accessTokenHeader, token)
 }
 
+// DropAccessTokenOnRedirect is the redirect policy of the client that talks to the
+// sidecar plugin. net/http drops Authorization and cookies when a redirect leaves the
+// host it was sent to, but copies every other header, the access token included: a
+// redirect from the sidecar's address, such as a proxy in front of it sending to a
+// login page, would hand the caller's token to whatever host it names. Redirects are
+// otherwise followed as net/http does by default.
+func DropAccessTokenOnRedirect(req *http.Request, via []*http.Request) error {
+	// The cap of net/http's default policy, which setting CheckRedirect replaces.
+	if len(via) >= 10 {
+		return errors.New("stopped after 10 redirects")
+	}
+	if req.URL.Host != via[0].URL.Host {
+		req.Header.Del(accessTokenHeader)
+	}
+	return nil
+}
+
 // GetSessionContext retrieves or generates a session context identifier for request tracing.
 // If no session context exists in the request headers, a new UUID-based identifier is generated.
 // Returns the session context string for use in logging and tracing.
@@ -148,7 +166,8 @@ func ReqWithError(
 	req.Header.Set("Content-Type", "application/json")
 
 	sessionContextMessage := GetSessionContextMessage(sessionContext)
-	log.G(ctx).Debug(sessionContextMessage, "doing request: ", fmt.Sprintf("%#v", req))
+	// Never the whole request: its headers carry the caller's access token.
+	log.G(ctx).Debugf("%s doing request: %s %s", sessionContextMessage, req.Method, req.URL.Path)
 
 	// Add session number for end-to-end trace
 	AddSessionContext(req, sessionContext)

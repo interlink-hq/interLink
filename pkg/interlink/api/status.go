@@ -108,7 +108,8 @@ func (h *InterLinkHandler) StatusHandler(w http.ResponseWriter, r *http.Request)
 		if err != nil {
 			statusCode = http.StatusInternalServerError
 			w.WriteHeader(statusCode)
-			errWithContext := fmt.Errorf("error doing Unmarshal() in StatusHandler() of req %s error detail: %s error: %w", fmt.Sprintf("%#v", req), fmt.Sprintf("%#v", err), err)
+			// Not the request itself: its headers carry the caller's access token.
+			errWithContext := fmt.Errorf("error doing Unmarshal() in StatusHandler() of %s %s error detail: %s error: %w", req.Method, req.URL.Path, fmt.Sprintf("%#v", err), err)
 			log.G(h.Ctx).Error(errWithContext)
 			return
 		}
