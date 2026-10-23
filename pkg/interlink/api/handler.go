@@ -12,6 +12,7 @@ import (
 	"io"
 	"net/http"
 	"net/url"
+	"slices"
 
 	"github.com/containerd/containerd/log"
 	"github.com/google/uuid"
@@ -106,7 +107,11 @@ func DropAccessTokenOnRedirect(req *http.Request, via []*http.Request) error {
 	if len(via) >= 10 {
 		return errors.New("stopped after 10 redirects")
 	}
-	if req.URL.Host != via[0].URL.Host {
+	// net/http copies the headers of the original request again on every hop. As it
+	// does for Authorization, once the chain has left the original host the token
+	// stays off, even on a hop that comes back to it.
+	original := via[0].URL.Host
+	if req.URL.Host != original || slices.ContainsFunc(via, func(hop *http.Request) bool { return hop.URL.Host != original }) {
 		req.Header.Del(accessTokenHeader)
 	}
 	return nil
