@@ -26,8 +26,7 @@ func shadowTestPod(name, deploymentName, ip string, created time.Time) *v1.Pod {
 }
 
 // A StatefulSet replica (a Kubeflow notebook) is recreated under the same name, so its
-// shadow Deployment has the same name, labels and pod-template hash as the one just
-// deleted. The garbage collector removes the old Deployment's pods asynchronously; if
+// shadow Deployment has the same name and pod selector as the one just deleted. The garbage collector removes the old Deployment's pods asynchronously; if
 // one of them is picked, its IP is reported as the new pod's IP and goes stale as soon
 // as it terminates.
 func TestWaitForDeploymentPodIgnoresPodsOfAPreviousDeployment(t *testing.T) {

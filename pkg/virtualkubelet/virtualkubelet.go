@@ -147,6 +147,9 @@ type ShadowTemplateData struct {
 	// SSHNodeWaitSeconds is SSH.NodeWaitTimeout in whole seconds, for the shell loop
 	// that waits on NodeConfigMap.
 	SSHNodeWaitSeconds int
+	// PodUID is the UID of the pod the shadow stands for, put on the shadow's pods as
+	// shadowOfLabel.
+	PodUID string
 }
 
 type PortMapping struct {
@@ -1064,6 +1067,7 @@ func (p *Provider) createShadowPod(ctx context.Context, originalPod *v1.Pod) (*v
 		Volumes:              extractVolumesForLocalContainers(originalPod),
 		PodLabels:            podLabels,
 		PodAnnotations:       podAnnotations,
+		PodUID:               string(originalPod.UID),
 		IngressTLS:           p.config.Network.IngressTLS,
 		IngressClusterIssuer: p.config.Network.IngressClusterIssuer,
 		FullMesh:             fullMeshEnabledForPod,
@@ -1283,6 +1287,8 @@ func (p *Provider) applyOrUpdateDeployment(ctx context.Context, o *appsv1.Deploy
 		}
 		o.Spec.Template.Labels = mergeMaps(o.Spec.Template.Labels, td.PodLabels)
 		o.Spec.Template.Annotations = mergeMaps(o.Spec.Template.Annotations, td.PodAnnotations)
+		// Set here rather than in the templates, so that a custom template carries it too.
+		o.Spec.Template.Labels[shadowOfLabel] = td.PodUID
 		log.G(ctx).Infof("Shadow pod will inherit %d labels and %d annotations from original pod",
 			len(td.PodLabels), len(td.PodAnnotations))
 	}
@@ -1480,8 +1486,8 @@ func (p *Provider) applyShadowManifests(ctx context.Context, manifestYAML string
 // waitForDeploymentPod waits for a deployment to create a pod and returns it.
 //
 // A pod recreated under the same name (a StatefulSet replica) gets a Deployment with the
-// same name, labels and pod-template hash as the one just deleted, and the garbage
-// collector removes that one's pods asynchronously. Pods that are terminating, or older
+// same name and pod selector as the one just deleted, and the garbage collector
+// removes that one's pods asynchronously. Pods that are terminating, or older
 // than the current Deployment, belong to the previous one and are skipped.
 func (p *Provider) waitForDeploymentPod(ctx context.Context, deploymentName, namespace string) (*v1.Pod, error) {
 	timeout := 30 * time.Second
@@ -1879,6 +1885,8 @@ func (p *Provider) handleShadowCreation(ctx context.Context, pod *v1.Pod) (strin
 		}
 	}
 
+	// This is the address the virtual pod starts with: if the shadow pod is replaced
+	// later, the status loop moves it to the replacement (see refreshShadowPodIP).
 	podIP, err := p.waitForShadowPodIP(ctx, shadowPod, timeout, shadowResourceIdentity{
 		Name:      templateData.Name,
 		Namespace: templateData.Namespace,
@@ -2481,16 +2489,19 @@ func (p *Provider) NotifyPods(_ context.Context, f func(*v1.Pod)) {
 	p.notifier = f
 }
 
+// statusLoopInterval is how often statusLoop polls the plugin for the pods' status.
+var statusLoopInterval = 5 * time.Second
+
 // statusLoop preiodically monitoring the status of all the pods in p.pods
 func (p *Provider) statusLoop(ctx context.Context) {
-	t := time.NewTimer(5 * time.Second)
+	t := time.NewTimer(statusLoopInterval)
 	if !t.Stop() {
 		<-t.C
 	}
 
 	for {
 		log.G(ctx).Info("statusLoop")
-		t.Reset(5 * time.Second)
+		t.Reset(statusLoopInterval)
 		select {
 		case <-ctx.Done():
 			return
@@ -2499,18 +2510,22 @@ func (p *Provider) statusLoop(ctx context.Context) {
 
 		p.podIPs = []string{}
 
-		podsVPN, err := p.clientSet.CoreV1().Pods("").List(ctx, metav1.ListOptions{})
+		clusterPods, err := p.clientSet.CoreV1().Pods("").List(ctx, metav1.ListOptions{})
 		if err != nil {
 			log.G(ctx).Error(err)
 		}
 
-		log.G(ctx).Debug("Pod lists with pod-vpn enabled has len ", len(podsVPN.Items))
+		log.G(ctx).Debug("Pod lists with pod-vpn enabled has len ", len(clusterPods.Items))
 
-		for _, podVPN := range podsVPN.Items {
+		for _, podVPN := range clusterPods.Items {
 			if ip, ok := podVPN.Annotations["interlink.eu/pod-ip"]; ok {
 				p.podIPs = append(p.podIPs, ip)
 			}
 		}
+
+		// The same list holds the shadow pods, so following a replaced one costs no
+		// extra API call. A failed list comes back empty, which moves no address.
+		shadowPods := indexShadowPods(clusterPods.Items)
 
 		token := ""
 		if p.config.VKTokenFile != "" {
@@ -2543,9 +2558,10 @@ func (p *Provider) statusLoop(ctx context.Context) {
 				if err != nil {
 					log.G(ctx).Error(err)
 				}
+				p.refreshShadowPodIP(ctx, pod, shadowPods)
 				// Use a fresh snapshot of the canonical pod (updated by checkPodsStatus
-				// under podsMu.Lock) rather than the pre-snapshot deep copy, so the
-				// notifier sees the latest status.
+				// and refreshShadowPodIP under podsMu.Lock) rather than the pre-snapshot
+				// deep copy, so the notifier sees the latest status.
 				p.podsMu.RLock()
 				canonical, exists := p.pods[string(pod.UID)]
 				var notifyPod *v1.Pod

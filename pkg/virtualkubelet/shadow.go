@@ -35,6 +35,12 @@ const shadowNodeNameKey = "compute-node"
 // compute node where the pod's unix sockets live.
 const shadowSocketDirKey = "socket-dir"
 
+// shadowOfLabel carries, on the pods of a shadow, the UID of the pod the shadow
+// stands for. The shadow's name cannot tell the generations apart: a pod recreated
+// under its name, such as a StatefulSet replica, gets a shadow with the same name as
+// the previous one, whose pods may still be around.
+const shadowOfLabel = "interlink.eu/shadow-of"
+
 // maxComputeNodeNameLen is the longest DNS name, and so the longest thing a plugin
 // can legitimately report as a compute node.
 const maxComputeNodeNameLen = 253
@@ -400,6 +406,112 @@ func (p *Provider) releaseShadowOfEndedPod(ctx context.Context, pod *v1.Pod) {
 	log.G(ctx).Infof("Pod %s/%s is %s: removing its shadow", pod.Namespace, pod.Name, pod.Status.Phase)
 	p.cleanupShadowResources(ctx, identity.Name, identity.Namespace)
 	p.forgetShadowNodeName(pod)
+}
+
+// indexShadowPods groups the shadow pods by the UID of the pod they stand for, read
+// from shadowOfLabel. The pods of a shadow rendered before that label existed are
+// left out, so their virtual pod keeps the IP it was created with.
+func indexShadowPods(pods []v1.Pod) map[string][]*v1.Pod {
+	index := make(map[string][]*v1.Pod)
+	for i := range pods {
+		uid := pods[i].Labels[shadowOfLabel]
+		if uid == "" {
+			continue
+		}
+		index[uid] = append(index[uid], &pods[i])
+	}
+	return index
+}
+
+// refreshShadowPodIP moves the virtual pod's IP to the pod that now runs its shadow.
+// The IP is taken from the shadow pod at creation, and that pod can be replaced at
+// any time afterwards (an eviction, a node drain, a rescheduling): the virtual pod
+// would keep reporting an address nothing answers on, and every Service selecting it
+// would keep sending traffic there. Reporting the shadow Service's ClusterIP instead
+// would break those Services: their endpoint would be a Service IP, which kube-proxy
+// does not route.
+//
+// shadowPods is the index built by indexShadowPods from the pods of the cluster.
+func (p *Provider) refreshShadowPodIP(ctx context.Context, pod *v1.Pod, shadowPods map[string][]*v1.Pod) {
+	if !p.hasTunnelShadow(pod) {
+		return
+	}
+	// These pods get their address from the VPN or from the annotation, not from the
+	// shadow (see CreatePod).
+	if _, ok := pod.Annotations["interlink.eu/pod-vpn"]; ok {
+		return
+	}
+	if _, ok := pod.Annotations["interlink.eu/pod-ip"]; ok {
+		return
+	}
+
+	p.podsMu.Lock()
+	defer p.podsMu.Unlock()
+
+	canonical, ok := p.pods[string(pod.UID)]
+	if !ok {
+		return
+	}
+	identity, err := computeShadowResourceIdentity(canonical)
+	if err != nil {
+		return
+	}
+	var candidates []*v1.Pod
+	for _, candidate := range shadowPods[string(pod.UID)] {
+		if candidate.Namespace != identity.Namespace || candidate.Labels[shadowComponentLabel] != identity.Name {
+			continue
+		}
+		candidates = append(candidates, candidate)
+	}
+	ip := currentShadowPodIP(canonical.Status.PodIP, candidates)
+	if ip == "" || ip == canonical.Status.PodIP {
+		return
+	}
+
+	log.G(ctx).Infof("Shadow pod of %s/%s replaced: moving the pod IP from %s to %s",
+		pod.Namespace, pod.Name, canonical.Status.PodIP, ip)
+	// PodPhase puts the shadow pod IP in both fields at creation. The lists follow
+	// them: the API server rejects a status whose hostIPs[0] differs from hostIP.
+	canonical.Status.PodIP = ip
+	canonical.Status.PodIPs = []v1.PodIP{{IP: ip}}
+	canonical.Status.HostIP = ip
+	canonical.Status.HostIPs = []v1.HostIP{{IP: ip}}
+}
+
+// currentShadowPodIP returns the IP a virtual pod should report among the pods of its
+// shadow, given the one it reports: that one while its pod still serves, otherwise
+// the newest serving pod's. It returns "" when none serves, so the IP only moves once
+// the replacement is ready.
+func currentShadowPodIP(reportedIP string, shadowPods []*v1.Pod) string {
+	var newest *v1.Pod
+	for _, shadowPod := range shadowPods {
+		if !isServingShadowPod(shadowPod) {
+			continue
+		}
+		if shadowPod.Status.PodIP == reportedIP {
+			return reportedIP
+		}
+		if newest == nil || newest.CreationTimestamp.Before(&shadowPod.CreationTimestamp) {
+			newest = shadowPod
+		}
+	}
+	if newest == nil {
+		return ""
+	}
+	return newest.Status.PodIP
+}
+
+// isServingShadowPod reports whether a shadow pod can take the virtual pod's traffic.
+func isServingShadowPod(pod *v1.Pod) bool {
+	if pod.DeletionTimestamp != nil || pod.Status.Phase != v1.PodRunning || pod.Status.PodIP == "" {
+		return false
+	}
+	for _, condition := range pod.Status.Conditions {
+		if condition.Type == v1.PodReady {
+			return condition.Status == v1.ConditionTrue
+		}
+	}
+	return false
 }
 
 // forgetShadowNodeName drops the cached node and socket directory for a pod that is
