@@ -659,6 +659,11 @@ func LoadConfig(ctx context.Context, providerConfig string) (config Config, err 
 	if _, err = resource.ParseQuantity(config.Resources.Pods); err != nil {
 		return config, fmt.Errorf("invalid pods value %v", config.Resources.Pods)
 	}
+	if config.Resources.EphemeralStorage != "" {
+		if _, err = resource.ParseQuantity(config.Resources.EphemeralStorage); err != nil {
+			return config, fmt.Errorf("invalid ephemeral storage value %v", config.Resources.EphemeralStorage)
+		}
+	}
 	for _, accelerator := range config.Resources.Accelerators {
 		if _, err = resource.ParseQuantity(accelerator.Available); err != nil {
 			return config, fmt.Errorf("invalid value for accelerator %v (model: %v): %v", accelerator.ResourceType, accelerator.Model, err)
