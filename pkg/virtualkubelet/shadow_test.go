@@ -8,8 +8,10 @@ import (
 	"github.com/stretchr/testify/require"
 	appsv1 "k8s.io/api/apps/v1"
 	v1 "k8s.io/api/core/v1"
+	networkingv1 "k8s.io/api/networking/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/runtime"
 	k8stypes "k8s.io/apimachinery/pkg/types"
 	"k8s.io/client-go/kubernetes/fake"
 	k8stesting "k8s.io/client-go/testing"
@@ -393,6 +395,7 @@ func TestReleaseShadowIgnoresPodsWithoutAShadow(t *testing.T) {
 // it was created. Only resources stamped with the old pod's UID may go.
 func TestCleanupKeepsShadowOfRecreatedPod(t *testing.T) {
 	const name = testPodDefaultName
+	const oldUID, newUID = "uid-old", "uid-new"
 	ns := testNamespaceDefault
 	stamped := func(uid string) *appsv1.Deployment {
 		return &appsv1.Deployment{ObjectMeta: metav1.ObjectMeta{
@@ -401,20 +404,20 @@ func TestCleanupKeepsShadowOfRecreatedPod(t *testing.T) {
 	}
 
 	t.Run("the old pod's cleanup keeps the new pod's shadow", func(t *testing.T) {
-		client := fake.NewSimpleClientset(stamped("uid-new"))
+		client := fake.NewSimpleClientset(stamped(newUID))
 		p := tunnelProvider(client)
 
-		p.cleanupShadowResources(t.Context(), shadowResourceIdentity{Name: name, Namespace: ns, OwnerUID: "uid-old"})
+		p.cleanupShadowResources(t.Context(), shadowResourceIdentity{Name: name, Namespace: ns, OwnerUID: oldUID})
 
 		_, err := client.AppsV1().Deployments(ns).Get(t.Context(), name, metav1.GetOptions{})
 		assert.NoError(t, err)
 	})
 
 	t.Run("the owner's cleanup removes it", func(t *testing.T) {
-		client := fake.NewSimpleClientset(stamped("uid-new"))
+		client := fake.NewSimpleClientset(stamped(newUID))
 		p := tunnelProvider(client)
 
-		p.cleanupShadowResources(t.Context(), shadowResourceIdentity{Name: name, Namespace: ns, OwnerUID: "uid-new"})
+		p.cleanupShadowResources(t.Context(), shadowResourceIdentity{Name: name, Namespace: ns, OwnerUID: newUID})
 
 		_, err := client.AppsV1().Deployments(ns).Get(t.Context(), name, metav1.GetOptions{})
 		assert.True(t, apierrors.IsNotFound(err))
@@ -424,10 +427,59 @@ func TestCleanupKeepsShadowOfRecreatedPod(t *testing.T) {
 		client := fake.NewSimpleClientset(&appsv1.Deployment{ObjectMeta: metav1.ObjectMeta{Name: name, Namespace: ns}})
 		p := tunnelProvider(client)
 
-		p.cleanupShadowResources(t.Context(), shadowResourceIdentity{Name: name, Namespace: ns, OwnerUID: "uid-old"})
+		p.cleanupShadowResources(t.Context(), shadowResourceIdentity{Name: name, Namespace: ns, OwnerUID: oldUID})
 
 		_, err := client.AppsV1().Deployments(ns).Get(t.Context(), name, metav1.GetOptions{})
 		assert.True(t, apierrors.IsNotFound(err))
+	})
+
+	// cert-manager creates the TLS Secret without the owner label: it follows its Ingress.
+	tlsObjects := func(owner string) []runtime.Object {
+		return []runtime.Object{
+			&networkingv1.Ingress{ObjectMeta: metav1.ObjectMeta{
+				Name: name, Namespace: ns, Labels: map[string]string{shadowOwnerUIDLabel: owner},
+			}},
+			&v1.Secret{ObjectMeta: metav1.ObjectMeta{Name: name + "-tls", Namespace: ns}},
+		}
+	}
+	for _, tc := range []struct {
+		cleanup string
+		kept    bool
+	}{{cleanup: oldUID, kept: true}, {cleanup: newUID, kept: false}} {
+		t.Run("the TLS secret follows its ingress, cleanup by "+tc.cleanup, func(t *testing.T) {
+			client := fake.NewSimpleClientset(tlsObjects(newUID)...)
+			p := tunnelProvider(client)
+			p.config.Network.IngressTLS = true
+
+			p.cleanupShadowResources(t.Context(), shadowResourceIdentity{Name: name, Namespace: ns, OwnerUID: tc.cleanup})
+
+			_, err := client.CoreV1().Secrets(ns).Get(t.Context(), name+"-tls", metav1.GetOptions{})
+			if tc.kept {
+				assert.NoError(t, err)
+			} else {
+				assert.True(t, apierrors.IsNotFound(err))
+			}
+		})
+	}
+
+	t.Run("the delete is conditional on the resource version that was read", func(t *testing.T) {
+		deployment := stamped(oldUID)
+		deployment.UID, deployment.ResourceVersion = "deployment-uid", "41"
+		client := fake.NewSimpleClientset(deployment)
+		var preconditions *metav1.Preconditions
+		client.PrependReactor("delete", "deployments", func(action k8stesting.Action) (bool, runtime.Object, error) {
+			preconditions = action.(k8stesting.DeleteAction).GetDeleteOptions().Preconditions
+			return false, nil, nil
+		})
+		p := tunnelProvider(client)
+
+		p.cleanupShadowResources(t.Context(), shadowResourceIdentity{Name: name, Namespace: ns, OwnerUID: oldUID})
+
+		require.NotNil(t, preconditions)
+		require.NotNil(t, preconditions.UID)
+		require.NotNil(t, preconditions.ResourceVersion)
+		assert.Equal(t, k8stypes.UID("deployment-uid"), *preconditions.UID)
+		assert.Equal(t, "41", *preconditions.ResourceVersion)
 	})
 }
 

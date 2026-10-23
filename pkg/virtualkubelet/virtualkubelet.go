@@ -1509,7 +1509,7 @@ func (p *Provider) cleanupShadowResources(ctx context.Context, identity shadowRe
 		func(name string, opts metav1.DeleteOptions) error { return services.Delete(ctx, name, opts) })
 
 	ingresses := p.clientSet.NetworkingV1().Ingresses(namespace)
-	p.deleteOwnedShadowResource(ctx, identity, "ingress", shadowName,
+	ingressKept := p.deleteOwnedShadowResource(ctx, identity, "ingress", shadowName,
 		func(name string) (metav1.Object, error) { return ingresses.Get(ctx, name, metav1.GetOptions{}) },
 		func(name string, opts metav1.DeleteOptions) error { return ingresses.Delete(ctx, name, opts) })
 
@@ -1520,8 +1520,9 @@ func (p *Provider) cleanupShadowResources(ctx context.Context, identity shadowRe
 			func(name string, opts metav1.DeleteOptions) error { return configMaps.Delete(ctx, name, opts) })
 	}
 
-	// Delete cert-manager-provisioned TLS secret.
-	if p.config.Network.IngressTLS {
+	// Delete cert-manager-provisioned TLS secret. cert-manager creates it without the
+	// owner label, so it goes with its Ingress: kept when another pod's Ingress is.
+	if p.config.Network.IngressTLS && !ingressKept {
 		secrets := p.clientSet.CoreV1().Secrets(namespace)
 		p.deleteOwnedShadowResource(ctx, identity, "secret", shadowName+"-tls",
 			func(name string) (metav1.Object, error) { return secrets.Get(ctx, name, metav1.GetOptions{}) },
@@ -1530,30 +1531,34 @@ func (p *Provider) cleanupShadowResources(ctx context.Context, identity shadowRe
 }
 
 // deleteOwnedShadowResource deletes one shadow resource unless it is stamped with a
-// pod UID other than identity.OwnerUID. The delete is conditional on the resource's
-// own UID, so a replacement created between the read and the delete survives.
-// Unstamped resources (from before the stamp existed) are deleted as before.
+// pod UID other than identity.OwnerUID, and reports whether it was kept for that
+// reason. The delete is conditional on the resource's UID and resourceVersion, so
+// neither a replacement created nor an in-place update for a recreated pod made
+// between the read and the delete is removed. Unstamped resources (from before the
+// stamp existed) are deleted as before.
 func (p *Provider) deleteOwnedShadowResource(ctx context.Context, identity shadowResourceIdentity, kind, name string,
-	get func(string) (metav1.Object, error), del func(string, metav1.DeleteOptions) error) {
+	get func(string) (metav1.Object, error), del func(string, metav1.DeleteOptions) error) bool {
 	obj, err := get(name)
 	if err != nil {
 		if !apierrors.IsNotFound(err) {
 			log.G(ctx).Warningf("Failed to read shadow %s %s/%s: %v", kind, identity.Namespace, name, err)
 		}
-		return
+		return false
 	}
 	if owner := obj.GetLabels()[shadowOwnerUIDLabel]; owner != "" && identity.OwnerUID != "" && owner != identity.OwnerUID {
 		log.G(ctx).Infof("Keeping shadow %s %s/%s: it belongs to pod UID %s, not %s", kind, identity.Namespace, name, owner, identity.OwnerUID)
-		return
+		return true
 	}
-	uid := obj.GetUID()
-	if err := del(name, metav1.DeleteOptions{Preconditions: &metav1.Preconditions{UID: &uid}}); err != nil {
+	uid, resourceVersion := obj.GetUID(), obj.GetResourceVersion()
+	preconditions := &metav1.Preconditions{UID: &uid, ResourceVersion: &resourceVersion}
+	if err := del(name, metav1.DeleteOptions{Preconditions: preconditions}); err != nil {
 		if !apierrors.IsNotFound(err) && !apierrors.IsConflict(err) {
 			log.G(ctx).Warningf("Failed to delete shadow %s %s/%s: %v", kind, identity.Namespace, name, err)
 		}
-		return
+		return false
 	}
 	log.G(ctx).Infof("Successfully deleted shadow %s %s/%s", kind, identity.Namespace, name)
+	return false
 }
 
 // stampShadowOwner labels a shadow resource with the UID of the pod it serves.
