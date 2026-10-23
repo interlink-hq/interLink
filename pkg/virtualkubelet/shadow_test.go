@@ -4,6 +4,7 @@ import (
 	"errors"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -510,6 +511,20 @@ func TestCleanupKeepsShadowOfRecreatedPod(t *testing.T) {
 		assert.True(t, apierrors.IsNotFound(err))
 	})
 
+	t.Run("the TLS secret stays when its ingress cannot be read", func(t *testing.T) {
+		client := fake.NewSimpleClientset(tlsObjects(newUID)...)
+		client.PrependReactor("get", "ingresses", func(k8stesting.Action) (bool, runtime.Object, error) {
+			return true, nil, apierrors.NewInternalError(errors.New("etcd timeout"))
+		})
+		p := tunnelProvider(client)
+		p.config.Network.IngressTLS = true
+
+		p.cleanupShadowResources(t.Context(), shadowResourceIdentity{Name: name, Namespace: ns, OwnerUID: oldUID})
+
+		_, err := client.CoreV1().Secrets(ns).Get(t.Context(), name+"-tls", metav1.GetOptions{})
+		assert.NoError(t, err)
+	})
+
 	t.Run("the delete is conditional on the resource version that was read", func(t *testing.T) {
 		deployment := stamped(oldUID)
 		deployment.UID, deployment.ResourceVersion = "deployment-uid", "41"
@@ -528,6 +543,52 @@ func TestCleanupKeepsShadowOfRecreatedPod(t *testing.T) {
 		require.NotNil(t, preconditions.ResourceVersion)
 		assert.Equal(t, k8stypes.UID("deployment-uid"), *preconditions.UID)
 		assert.Equal(t, "41", *preconditions.ResourceVersion)
+	})
+}
+
+// The cleanup of a deleted pod and the shadow of its same-name successor must not
+// interleave: the new Ingress could otherwise appear between the old Ingress and the
+// TLS Secret being deleted, and lose the Secret.
+func TestShadowCleanupAndApplyAreSerialised(t *testing.T) {
+	const name = testPodDefaultName
+	ns := testNamespaceDefault
+	waitsForLock := func(t *testing.T, p *Provider, run func()) {
+		t.Helper()
+		unlock := p.lockShadow(ns, name)
+		done := make(chan struct{})
+		go func() { run(); close(done) }()
+		select {
+		case <-done:
+			unlock()
+			t.Fatal("ran while the shadow's lock was held")
+		case <-time.After(100 * time.Millisecond):
+		}
+		unlock()
+		select {
+		case <-done:
+		case <-time.After(2 * time.Second):
+			t.Fatal("did not run once the lock was released")
+		}
+	}
+
+	t.Run("cleanup", func(t *testing.T) {
+		client := fake.NewSimpleClientset()
+		p := tunnelProvider(client)
+		waitsForLock(t, p, func() {
+			p.cleanupShadowResources(t.Context(), shadowResourceIdentity{Name: name, Namespace: ns})
+		})
+	})
+
+	t.Run("apply", func(t *testing.T) {
+		client := fake.NewSimpleClientset()
+		p := tunnelProvider(client)
+		manifest := "apiVersion: v1\nkind: ConfigMap\nmetadata:\n  name: " + name + "\n  namespace: " + ns + "\n"
+		waitsForLock(t, p, func() {
+			_, _, err := p.applyShadowObjects(t.Context(), manifest, &ShadowTemplateData{Name: name, Namespace: ns})
+			assert.NoError(t, err)
+		})
+		_, err := client.CoreV1().ConfigMaps(ns).Get(t.Context(), name, metav1.GetOptions{})
+		assert.NoError(t, err)
 	})
 }
 
