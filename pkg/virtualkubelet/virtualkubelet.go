@@ -8,6 +8,7 @@ import (
 	"encoding/base64"
 	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	mathrand "math/rand"
@@ -2149,8 +2150,8 @@ func (p *Provider) CreatePod(ctx context.Context, pod *v1.Pod) error {
 		}
 		err := RemoteExecution(ctx, p.config, p, pod, CREATE)
 		if err != nil {
-			if err.Error() == "Deleted pod before actual creation" {
-				log.G(ctx).Warn(err)
+			if errors.Is(err, errPodDeletedBeforeCreation) {
+				log.G(ctx).Warningf("Pod %s/%s not submitted: %v", pod.Namespace, pod.Name, err)
 			} else {
 				log.G(ctx).Error(err)
 				p.handleRemoteExecutionFailure(ctx, pod, podIP, err)
