@@ -865,7 +865,19 @@ func formatDownwardAPIMetadataMap(data map[string]string) string {
 	return b.String()
 }
 
+// downwardAPISubscriptRE matches the metadata.labels['<KEY>'] and
+// metadata.annotations['<KEY>'] field paths, which select a single label or annotation.
+var downwardAPISubscriptRE = regexp.MustCompile(`^metadata\.(labels|annotations)\[['"]?(.+?)['"]?\]$`)
+
 func resolveDownwardAPIFieldPath(pod *v1.Pod, fieldPath string) (string, bool) {
+	if matches := downwardAPISubscriptRE.FindStringSubmatch(fieldPath); matches != nil {
+		// Like the kubelet, a missing label or annotation resolves to an empty value.
+		if matches[1] == "labels" {
+			return pod.Labels[matches[2]], true
+		}
+		return pod.Annotations[matches[2]], true
+	}
+
 	switch fieldPath {
 	case "metadata.name":
 		return pod.Name, true
@@ -881,9 +893,11 @@ func resolveDownwardAPIFieldPath(pod *v1.Pod, fieldPath string) (string, bool) {
 		return pod.Spec.NodeName, true
 	case "spec.serviceAccountName":
 		return pod.Spec.ServiceAccountName, true
-	case "status.podIP":
+	// The virtual kubelet reports a single pod and host IP (see PodPhase), so the
+	// IP lists hold just that one.
+	case "status.podIP", "status.podIPs":
 		return pod.Status.PodIP, true
-	case "status.hostIP":
+	case "status.hostIP", "status.hostIPs":
 		return pod.Status.HostIP, true
 	default:
 		return "", false
@@ -1057,41 +1071,21 @@ func resolveEnvRefs(
 	pod *v1.Pod,
 	container *v1.Container,
 ) {
-	var annotationFieldRefRE = regexp.MustCompile(`^metadata\.annotations\[['"]?(.+?)['"]?\]$`)
-
 	for i, env := range container.Env {
 		if env.ValueFrom == nil {
 			continue
 		}
 
 		if fr := env.ValueFrom.FieldRef; fr != nil {
-
-			var resolved string
-			switch fr.FieldPath {
-			case "status.podIP":
-				resolved = pod.Status.PodIP
-			case "metadata.name":
-				resolved = pod.Name
-			case "metadata.namespace":
-				resolved = pod.Namespace
-			case "metadata.uid":
-				resolved = string(pod.UID)
-
-			default:
-				if matches := annotationFieldRefRE.FindStringSubmatch(fr.FieldPath); len(matches) == 2 {
-					annKey := matches[1]
-					val, ok := pod.Annotations[annKey]
-					if !ok {
-						continue
-					}
-					resolved = val
-				}
+			resolved, ok := resolveDownwardAPIFieldPath(pod, fr.FieldPath)
+			if !ok {
+				log.G(ctx).Warningf("in pod %s unsupported FieldPath %s for env var %q in InterLink, skipping", pod.Name, fr.FieldPath, env.Name)
+				continue
 			}
 
 			container.Env[i].Value = resolved
 			container.Env[i].ValueFrom = nil
 			continue
-
 		}
 
 		if sk := env.ValueFrom.SecretKeyRef; sk != nil {
