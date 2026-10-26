@@ -107,9 +107,9 @@ func DropAccessTokenOnRedirect(req *http.Request, via []*http.Request) error {
 	if len(via) >= 10 {
 		return errors.New("stopped after 10 redirects")
 	}
-	// net/http copies the headers of the original request again on every hop. As it
-	// does for Authorization, once the chain has left the original scheme and host
-	// the token stays off, even on a hop that comes back to them.
+	// net/http copies the headers of the original request again on every hop. Once the
+	// chain has left the original scheme and host, the token stays off, even on a hop
+	// that comes back to them, as Authorization does once it has left the host.
 	original := via[0].URL
 	if req.URL.Scheme != original.Scheme || req.URL.Host != original.Host ||
 		slices.ContainsFunc(via, func(hop *http.Request) bool {

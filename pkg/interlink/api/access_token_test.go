@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/json"
 	"io"
+	"net"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -247,37 +248,41 @@ func TestDropAccessTokenOnRedirectToAnotherPort(t *testing.T) {
 	assert.Equal(t, "", token, "a redirect to another port drops it")
 }
 
-func TestDropAccessTokenOnHTTPSDowngradeAndReturn(t *testing.T) {
+// With their ports implicit, https://example.com and http://example.com have the same
+// host in their URLs, but they are two services, on 443 and 80, the second in cleartext.
+func TestDropAccessTokenOnRedirectToAnotherScheme(t *testing.T) {
 	var seen tokenLog
-	var httpRedirectURL string
 	sidecar := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		seen.record(r)
-		if r.URL.Path == "/https-to-http" {
-			http.Redirect(w, r, httpRedirectURL+"/cleartext", http.StatusTemporaryRedirect)
+		if r.URL.Path == "/status" {
+			http.Redirect(w, r, "http://example.com/cleartext", http.StatusTemporaryRedirect)
 		}
 	}))
 	defer sidecar.Close()
-	httpRedirect := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	cleartext := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		seen.record(r)
-		http.Redirect(w, r, sidecar.URL+"/returned-to-https", http.StatusTemporaryRedirect)
+		http.Redirect(w, r, "https://example.com/back", http.StatusTemporaryRedirect)
 	}))
-	defer httpRedirect.Close()
-	httpRedirectURL = httpRedirect.URL
-
+	defer cleartext.Close()
 	client := sidecar.Client()
+	// httptest's certificate is valid for example.com.
+	client.Transport.(*http.Transport).DialContext = func(ctx context.Context, network, addr string) (net.Conn, error) {
+		to := map[string]*httptest.Server{"example.com:443": sidecar, "example.com:80": cleartext}[addr]
+		return (&net.Dialer{}).DialContext(ctx, network, to.Listener.Addr().String())
+	}
 	client.CheckRedirect = DropAccessTokenOnRedirect
 
-	require.NoError(t, sendWithToken(t, client, sidecar.URL+"/https-to-http"))
+	require.NoError(t, sendWithToken(t, client, "https://example.com/status"))
 
 	for _, want := range []struct {
-		path, token string
+		path, token, why string
 	}{
-		{"/https-to-http", testAccessToken},
-		{"/cleartext", ""},
-		{"/returned-to-https", ""},
+		{"/status", testAccessToken, "the sidecar gets the token"},
+		{"/cleartext", "", "a redirect to another scheme drops it"},
+		{"/back", "", "once the chain has left the sidecar's scheme, it stays off, even back on it"},
 	} {
 		token, ok := seen.at(want.path)
 		require.True(t, ok, "%s was never reached", want.path)
-		assert.Equal(t, want.token, token, "unexpected token at %s", want.path)
+		assert.Equal(t, want.token, token, want.why)
 	}
 }
