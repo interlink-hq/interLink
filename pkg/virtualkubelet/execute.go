@@ -221,6 +221,12 @@ func traceExecute(ctx context.Context, pod *v1.Pod, name string, startHTTPCall i
 	return &spanHTTP
 }
 
+// APIIdleConnTimeout is how long the virtual kubelet keeps an idle connection to the interLink
+// API. The API server closes a connection idle for its ReadTimeout (30 s, cmd/interlink): a
+// request sent on a connection it is closing fails with EOF, and a POST such as the ping is not
+// retried, so the node went NotReady until the next ping. Keep it below the server's.
+const APIIdleConnTimeout = 20 * time.Second
+
 // createTLSHTTPClient creates an HTTP client with TLS/mTLS configuration
 func createTLSHTTPClient(ctx context.Context, tlsConfig TLSConfig) (*http.Client, error) {
 	if !tlsConfig.Enabled {
@@ -231,6 +237,7 @@ func createTLSHTTPClient(ctx context.Context, tlsConfig TLSConfig) (*http.Client
 		TLSClientConfig: &tls.Config{
 			MinVersion: tls.VersionTLS12,
 		},
+		IdleConnTimeout: APIIdleConnTimeout,
 	}
 
 	// Load CA certificate if provided
