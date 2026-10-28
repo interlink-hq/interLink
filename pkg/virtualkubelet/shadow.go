@@ -159,6 +159,21 @@ func uniqueTruncate(s string, maxLen int, full string) string {
 type shadowResourceIdentity struct {
 	Name      string
 	Namespace string
+	// OwnerUID is the UID of the pod the shadow serves. Shadow resources are named
+	// after the pod, so a pod recreated under the same name reuses those names; the
+	// UID, stamped as a label, tells which pod a resource belongs to.
+	OwnerUID string
+	// PodName and PodNamespace name that pod.
+	PodName      string
+	PodNamespace string
+}
+
+// ownerPod is the namespace/name stamped as shadowOwnerPodAnnotation.
+func (identity shadowResourceIdentity) ownerPod() string {
+	if identity.PodName == "" {
+		return ""
+	}
+	return identity.PodNamespace + "/" + identity.PodName
 }
 
 func isShadowSameNamespace(pod *v1.Pod) bool {
@@ -183,7 +198,10 @@ func computeShadowResourceIdentity(pod *v1.Pod) (shadowResourceIdentity, error) 
 		name, namespace = computeShadowResourceNames(pod.Name, pod.Namespace)
 	}
 
-	identity := shadowResourceIdentity{Name: name, Namespace: namespace}
+	identity := shadowResourceIdentity{
+		Name: name, Namespace: namespace,
+		OwnerUID: string(pod.UID), PodName: pod.Name, PodNamespace: pod.Namespace,
+	}
 	if len(fmt.Sprintf("%s-%s", identity.Name, identity.Namespace)) > 63 {
 		return shadowResourceIdentity{}, fmt.Errorf("shadow ingress hostname label %q exceeds 63 characters; shorten pod/namespace or disable interlink.eu/shadow-same-ns", fmt.Sprintf("%s-%s", identity.Name, identity.Namespace))
 	}
@@ -301,7 +319,9 @@ func shadowNodeConfigMapName(shadowName string) string {
 // resetShadowNodeConfigMap creates, or blanks, the per-shadow node ConfigMap.
 // The shadow is rendered before the remote batch system has allocated anything,
 // so the ConfigMap has to exist - and be mountable - while still empty. Blanking
-// an existing one stops a previous run's node from being tunnelled to.
+// an existing one stops a previous run's node from being tunnelled to. The cleanup
+// of a deleted pod with the same name can remove an existing one in between, in
+// which case it is created again.
 func (p *Provider) resetShadowNodeConfigMap(ctx context.Context, identity shadowResourceIdentity) error {
 	cm := &v1.ConfigMap{
 		ObjectMeta: metav1.ObjectMeta{
@@ -310,18 +330,25 @@ func (p *Provider) resetShadowNodeConfigMap(ctx context.Context, identity shadow
 		},
 		Data: map[string]string{shadowNodeNameKey: "", shadowSocketDirKey: ""},
 	}
+	stampShadowOwner(cm, identity.OwnerUID, identity.ownerPod())
 
-	_, err := p.clientSet.CoreV1().ConfigMaps(identity.Namespace).Create(ctx, cm, metav1.CreateOptions{})
-	if err == nil {
-		return nil
+	configMaps := p.clientSet.CoreV1().ConfigMaps(identity.Namespace)
+	for attempt := 0; ; attempt++ {
+		_, err := configMaps.Create(ctx, cm, metav1.CreateOptions{})
+		if err == nil {
+			return nil
+		}
+		if !apierrors.IsAlreadyExists(err) {
+			return fmt.Errorf("failed to create shadow node configmap %s/%s: %w", identity.Namespace, cm.Name, err)
+		}
+		_, err = configMaps.Update(ctx, cm, metav1.UpdateOptions{})
+		if err == nil {
+			return nil
+		}
+		if !apierrors.IsNotFound(err) || attempt == 2 {
+			return fmt.Errorf("failed to reset shadow node configmap %s/%s: %w", identity.Namespace, cm.Name, err)
+		}
 	}
-	if !apierrors.IsAlreadyExists(err) {
-		return fmt.Errorf("failed to create shadow node configmap %s/%s: %w", identity.Namespace, cm.Name, err)
-	}
-	if _, err := p.clientSet.CoreV1().ConfigMaps(identity.Namespace).Update(ctx, cm, metav1.UpdateOptions{}); err != nil {
-		return fmt.Errorf("failed to reset shadow node configmap %s/%s: %w", identity.Namespace, cm.Name, err)
-	}
-	return nil
 }
 
 // publishShadowNode records the remote compute node a pod was allocated on, and
@@ -333,7 +360,9 @@ func (p *Provider) resetShadowNodeConfigMap(ctx context.Context, identity shadow
 // patch, so the shadow never sees a new node with the previous job's directory.
 //
 // Repeated calls with unchanged values are dropped, so the status loop does not
-// write on every poll.
+// write on every poll. A ConfigMap stamped with another pod's UID belongs to a pod
+// recreated under the same name and is left alone; the patch carries the
+// resourceVersion read, so it fails rather than overwrite a change made meanwhile.
 func (p *Provider) publishShadowNode(ctx context.Context, pod *v1.Pod, nodeName, socketDir string) {
 	if nodeName == "" || !p.hasShadow(pod) {
 		return
@@ -361,19 +390,34 @@ func (p *Provider) publishShadowNode(ctx context.Context, pod *v1.Pod, nodeName,
 		return
 	}
 
-	patch, err := json.Marshal(map[string]map[string]string{"data": {
-		shadowNodeNameKey:  nodeName,
-		shadowSocketDirKey: socketDir,
-	}})
+	name := shadowNodeConfigMapName(identity.Name)
+	configMaps := p.clientSet.CoreV1().ConfigMaps(identity.Namespace)
+	current, err := configMaps.Get(ctx, name, metav1.GetOptions{})
+	if err != nil {
+		log.G(ctx).Warningf("Failed to read shadow configmap %s/%s: %v", identity.Namespace, name, err)
+		return
+	}
+	if owner := current.Labels[shadowOwnerUIDLabel]; owner != "" && identity.OwnerUID != "" && owner != identity.OwnerUID {
+		log.G(ctx).Infof("Not publishing compute node %q for %s/%s: shadow configmap %s belongs to pod UID %s",
+			nodeName, pod.Namespace, pod.Name, name, owner)
+		return
+	}
+
+	var nodePatch struct {
+		Metadata struct {
+			ResourceVersion string `json:"resourceVersion"`
+		} `json:"metadata"`
+		Data map[string]string `json:"data"`
+	}
+	nodePatch.Metadata.ResourceVersion = current.ResourceVersion
+	nodePatch.Data = map[string]string{shadowNodeNameKey: nodeName, shadowSocketDirKey: socketDir}
+	patch, err := json.Marshal(nodePatch)
 	if err != nil {
 		log.G(ctx).Warningf("Failed to marshal shadow node patch for %s/%s: %v", pod.Namespace, pod.Name, err)
 		return
 	}
 
-	name := shadowNodeConfigMapName(identity.Name)
-	_, err = p.clientSet.CoreV1().ConfigMaps(identity.Namespace).Patch(
-		ctx, name, k8stypes.StrategicMergePatchType, patch, metav1.PatchOptions{},
-	)
+	_, err = configMaps.Patch(ctx, name, k8stypes.StrategicMergePatchType, patch, metav1.PatchOptions{})
 	if err != nil {
 		log.G(ctx).Warningf("Failed to publish compute node %q to shadow configmap %s/%s: %v", nodeName, identity.Namespace, name, err)
 		return
@@ -404,8 +448,41 @@ func (p *Provider) releaseShadowOfEndedPod(ctx context.Context, pod *v1.Pod) {
 		return
 	}
 	log.G(ctx).Infof("Pod %s/%s is %s: removing its shadow", pod.Namespace, pod.Name, pod.Status.Phase)
-	p.cleanupShadowResources(ctx, identity.Name, identity.Namespace)
+	p.cleanupShadowResources(ctx, identity)
 	p.forgetShadowNodeName(pod)
+}
+
+// isShadowPodOf reports whether a shadow pod may serve the pod with UID podUID: it is
+// labelled for that pod, or it predates shadowOfLabel, or the UID is unknown.
+func isShadowPodOf(shadowPod *v1.Pod, podUID string) bool {
+	of := shadowPod.Labels[shadowOfLabel]
+	return of == "" || podUID == "" || of == podUID
+}
+
+// ownerIsCurrentPod reports whether the pod a shadow resource is stamped for still
+// exists: the pod named by its shadowOwnerPodAnnotation (the pod of identity when it
+// has none) has the UID of its shadowOwnerUIDLabel. The name comes from the resource
+// because two pods can share a shadow name: sanitising maps web.0 and web-0 to one.
+// Otherwise the owner is gone and its cleanup never ran (it was deleted while the
+// virtual kubelet was down, say), so its leftovers are deleted. When the pod cannot
+// be read, the resource is kept.
+func (p *Provider) ownerIsCurrentPod(ctx context.Context, identity shadowResourceIdentity, obj metav1.Object) bool {
+	namespace, name, found := strings.Cut(obj.GetAnnotations()[shadowOwnerPodAnnotation], "/")
+	if !found {
+		namespace, name = identity.PodNamespace, identity.PodName
+	}
+	if name == "" {
+		return true
+	}
+	pod, err := p.clientSet.CoreV1().Pods(namespace).Get(ctx, name, metav1.GetOptions{})
+	if apierrors.IsNotFound(err) {
+		return false
+	}
+	if err != nil {
+		log.G(ctx).Warningf("Failed to read pod %s/%s: %v", namespace, name, err)
+		return true
+	}
+	return string(pod.UID) == obj.GetLabels()[shadowOwnerUIDLabel]
 }
 
 // indexShadowPods groups the shadow pods by the UID of the pod they stand for, read
