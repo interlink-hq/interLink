@@ -28,6 +28,7 @@ import (
 	"go.opentelemetry.io/otel/attribute"
 	trace "go.opentelemetry.io/otel/trace"
 	v1 "k8s.io/api/core/v1"
+	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/api/resource"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 )
@@ -61,6 +62,14 @@ const (
 	PodPhaseInitialize = "Initializing"
 	PodPhaseCompleted  = "Completed"
 )
+
+// volumeRetryInterval is how often a missing ConfigMap or Secret is looked up again
+// before the pod is submitted.
+var volumeRetryInterval = 2 * time.Second
+
+// errPodDeletedBeforeCreation tells the caller the pod was deleted before it was
+// submitted to the plugin, so there is nothing left to create.
+var errPodDeletedBeforeCreation = errors.New("pod deleted before its remote creation")
 
 func parseDisableOffloadContainers(pod *v1.Pod) map[string]bool {
 	disabledContainers := make(map[string]bool)
@@ -914,9 +923,11 @@ func remoteExecutionHandleVolumes(ctx context.Context, p *Provider, pod *v1.Pod,
 	endTime := startTime.Add(5 * time.Minute)
 
 	_, err := p.clientSet.CoreV1().Pods(pod.Namespace).Get(ctx, pod.Name, metav1.GetOptions{})
+	if apierrors.IsNotFound(err) {
+		return errPodDeletedBeforeCreation
+	}
 	if err != nil {
-		log.G(ctx).Warning("Deleted Pod before actual creation")
-		return nil
+		log.G(ctx).Warningf("unable to check that pod %s still exists before resolving its volumes: %v", pod.Name, err)
 	}
 	// Sometime the get secret or configmap can fail because it didn't have time to initialize, thus this
 	// is not a true failure. We use this flag to wait.
@@ -1024,8 +1035,17 @@ func remoteExecutionHandleVolumes(ctx context.Context, p *Provider, pod *v1.Pod,
 				}
 
 				if failedAndWait {
-					log.G(ctx).Warningf("volume %s not ready, sleeping 2s, attempt %f / 5 minutes max", volume.Name, time.Since(startTime).Minutes())
-					time.Sleep(2 * time.Second)
+					log.G(ctx).Warningf("volume %s not ready, sleeping %s, attempt %f / 5 minutes max", volume.Name, volumeRetryInterval, time.Since(startTime).Minutes())
+					time.Sleep(volumeRetryInterval)
+					// A pod deleted while it waits for its volumes is dropped from p.pods. Stop
+					// waiting then: submitting it once the volume shows up would leave a remote
+					// job that nothing deletes.
+					p.podsMu.RLock()
+					_, tracked := p.pods[string(pod.UID)]
+					p.podsMu.RUnlock()
+					if !tracked {
+						return errPodDeletedBeforeCreation
+					}
 					continue
 				}
 				pod.Status.Phase = v1.PodPending

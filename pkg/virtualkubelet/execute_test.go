@@ -749,3 +749,97 @@ func TestResolveEnvFromRefsOptionalMissingSecret(t *testing.T) {
 	assert.Empty(t, container.Env)
 	assert.Empty(t, container.EnvFrom)
 }
+
+func TestRemoteExecutionHandleVolumesPodDeletedBeforeCreation(t *testing.T) {
+	pod := &v1.Pod{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      testPodName,
+			Namespace: testNamespace,
+		},
+	}
+	p := &Provider{
+		clientSet: fake.NewSimpleClientset(),
+		notifier:  func(*v1.Pod) {},
+	}
+
+	err := remoteExecutionHandleVolumes(t.Context(), p, pod, &types.PodCreateRequests{})
+	assert.ErrorIs(t, err, errPodDeletedBeforeCreation)
+}
+
+func TestRemoteExecutionHandleVolumesWaitingForConfigMap(t *testing.T) {
+	volumeRetryInterval = 10 * time.Millisecond
+	t.Cleanup(func() { volumeRetryInterval = 2 * time.Second })
+
+	newPod := func() *v1.Pod {
+		return &v1.Pod{
+			ObjectMeta: metav1.ObjectMeta{
+				Name:      testPodName,
+				Namespace: testNamespace,
+				UID:       "uid-waiting-for-volumes",
+			},
+			Spec: v1.PodSpec{
+				Volumes: []v1.Volume{
+					{
+						Name: "config",
+						VolumeSource: v1.VolumeSource{
+							ConfigMap: &v1.ConfigMapVolumeSource{
+								LocalObjectReference: v1.LocalObjectReference{Name: testConfigMapName},
+							},
+						},
+					},
+				},
+			},
+		}
+	}
+	newProvider := func(pod *v1.Pod) *Provider {
+		return &Provider{
+			clientSet: fake.NewSimpleClientset(pod.DeepCopy()),
+			notifier:  func(*v1.Pod) {},
+			pods:      map[string]*v1.Pod{string(pod.UID): pod},
+		}
+	}
+
+	t.Run("submits the volume once it shows up", func(t *testing.T) {
+		pod := newPod()
+		p := newProvider(pod)
+		req := &types.PodCreateRequests{}
+
+		done := make(chan error, 1)
+		go func() { done <- remoteExecutionHandleVolumes(t.Context(), p, pod.DeepCopy(), req) }()
+		time.Sleep(50 * time.Millisecond)
+		_, err := p.clientSet.CoreV1().ConfigMaps(testNamespace).Create(t.Context(), &v1.ConfigMap{
+			ObjectMeta: metav1.ObjectMeta{Name: testConfigMapName, Namespace: testNamespace},
+		}, metav1.CreateOptions{})
+		require.NoError(t, err)
+
+		select {
+		case err := <-done:
+			require.NoError(t, err)
+			require.Len(t, req.ConfigMaps, 1)
+			assert.Equal(t, testConfigMapName, req.ConfigMaps[0].Name)
+		case <-time.After(2 * time.Second):
+			t.Fatal("still waiting for a ConfigMap that exists")
+		}
+	})
+
+	t.Run("stops when the pod is deleted while waiting", func(t *testing.T) {
+		pod := newPod()
+		p := newProvider(pod)
+		req := &types.PodCreateRequests{}
+
+		done := make(chan error, 1)
+		go func() { done <- remoteExecutionHandleVolumes(t.Context(), p, pod.DeepCopy(), req) }()
+		time.Sleep(50 * time.Millisecond)
+		p.podsMu.Lock()
+		delete(p.pods, string(pod.UID))
+		p.podsMu.Unlock()
+
+		select {
+		case err := <-done:
+			assert.ErrorIs(t, err, errPodDeletedBeforeCreation)
+			assert.Empty(t, req.ConfigMaps)
+		case <-time.After(2 * time.Second):
+			t.Fatal("still waiting for the volumes of a deleted pod")
+		}
+	})
+}
