@@ -6,11 +6,13 @@ package api
 import (
 	"bufio"
 	"context"
+	"errors"
 	"fmt"
 	"html"
 	"io"
 	"net/http"
 	"net/url"
+	"slices"
 
 	"github.com/containerd/containerd/log"
 	"github.com/google/uuid"
@@ -60,6 +62,62 @@ type InterLinkHandler struct {
 // interLink API to the sidecar plugin.
 func AddSessionContext(req *http.Request, sessionContext string) {
 	req.Header.Set("InterLink-Http-Session", sessionContext)
+}
+
+// accessTokenHeader carries the caller's OIDC access token as handed over by
+// the authenticating proxy that fronts interLink (oauth2-proxy's
+// pass_access_token option, or the equivalent in another proxy).
+const accessTokenHeader = "X-Forwarded-Access-Token"
+
+// ForwardAccessToken copies the caller's access token from the inbound request
+// onto an outbound request to the sidecar plugin, so that the plugin can act
+// on behalf of the identity that made the call. It is a no-op when the header
+// is absent, which is the case for any deployment that does not put an
+// authenticating proxy in front of interLink.
+//
+// The token is only trustworthy because the proxy verified it and, by default,
+// strips any client-supplied copy of this header before setting its own.
+// interLink does not re-verify it.
+//
+// Only ever call this for requests to the sidecar plugin. Sending it anywhere
+// outside the deployment's trust boundary hands a live bearer credential to
+// the other end.
+func ForwardAccessToken(in *http.Request, out *http.Request) {
+	if in == nil || out == nil {
+		return
+	}
+
+	token := in.Header.Get(accessTokenHeader)
+	if token == "" {
+		log.G(in.Context()).Debug("ForwardAccessToken: no " + accessTokenHeader + " on the inbound request, nothing to forward")
+		return
+	}
+
+	out.Header.Set(accessTokenHeader, token)
+}
+
+// DropAccessTokenOnRedirect is the redirect policy of the client that talks to the
+// sidecar plugin. net/http drops Authorization and cookies when a redirect leaves the
+// host it was sent to, but copies every other header, the access token included: a
+// redirect from the sidecar's address, such as a proxy in front of it sending to a
+// login page, would hand the caller's token to whatever host it names. Redirects are
+// otherwise followed as net/http does by default.
+func DropAccessTokenOnRedirect(req *http.Request, via []*http.Request) error {
+	// The cap of net/http's default policy, which setting CheckRedirect replaces.
+	if len(via) >= 10 {
+		return errors.New("stopped after 10 redirects")
+	}
+	// net/http copies the headers of the original request again on every hop. Once the
+	// chain has left the original scheme and host, the token stays off, even on a hop
+	// that comes back to them, as Authorization does once it has left the host.
+	original := via[0].URL
+	if req.URL.Scheme != original.Scheme || req.URL.Host != original.Host ||
+		slices.ContainsFunc(via, func(hop *http.Request) bool {
+			return hop.URL.Scheme != original.Scheme || hop.URL.Host != original.Host
+		}) {
+		req.Header.Del(accessTokenHeader)
+	}
+	return nil
 }
 
 // GetSessionContext retrieves or generates a session context identifier for request tracing.
@@ -116,7 +174,8 @@ func ReqWithError(
 	req.Header.Set("Content-Type", "application/json")
 
 	sessionContextMessage := GetSessionContextMessage(sessionContext)
-	log.G(ctx).Debug(sessionContextMessage, "doing request: ", fmt.Sprintf("%#v", req))
+	// Never the whole request: its headers carry the caller's access token.
+	log.G(ctx).Debugf("%s doing request: %s %s", sessionContextMessage, req.Method, req.URL.Path)
 
 	// Add session number for end-to-end trace
 	AddSessionContext(req, sessionContext)
