@@ -24,7 +24,11 @@ func TestAPITransportDropsIdleConnectionsBeforeTheServer(t *testing.T) {
 		Handler:           http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) { w.WriteHeader(http.StatusOK) }),
 		ReadHeaderTimeout: 10 * time.Second,
 	}
-	go func() { _ = server.Serve(listener) }()
+	go func() {
+		if err := server.Serve(listener); err != nil && err != http.ErrServerClosed {
+			t.Errorf("serve: %v", err)
+		}
+	}()
 	defer server.Close()
 
 	transport := createHTTPTransport(context.Background(), commonIL.Config{InterlinkURL: "unix://" + sock}, commonIL.Config{})
