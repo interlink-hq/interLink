@@ -15,6 +15,7 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	v1 "k8s.io/api/core/v1"
+	"k8s.io/apimachinery/pkg/api/resource"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/client-go/kubernetes/fake"
 )
@@ -882,6 +883,98 @@ func TestResolveEnvRefsFieldRef(t *testing.T) {
 	for _, env := range container.Env {
 		if env.Name == "UNSUPPORTED" {
 			assert.NotNil(t, env.ValueFrom, "an unsupported field path is left unresolved")
+			continue
+		}
+		assert.Nil(t, env.ValueFrom, env.Name)
+		assert.Equal(t, expected[env.Name], env.Value, env.Name)
+	}
+}
+
+func TestResolveEnvRefsResourceFieldRef(t *testing.T) {
+	const (
+		sidecarName = "sidecar"
+		initName    = "setup"
+	)
+	resourceFieldRef := func(name, containerName, resourceName, divisor string) v1.EnvVar {
+		selector := &v1.ResourceFieldSelector{ContainerName: containerName, Resource: resourceName}
+		if divisor != "" {
+			selector.Divisor = resource.MustParse(divisor)
+		}
+		return v1.EnvVar{Name: name, ValueFrom: &v1.EnvVarSource{ResourceFieldRef: selector}}
+	}
+	resources := func(cpuRequest, cpuLimit, memoryRequest, memoryLimit string) v1.ResourceRequirements {
+		return v1.ResourceRequirements{
+			Requests: v1.ResourceList{
+				v1.ResourceCPU:    resource.MustParse(cpuRequest),
+				v1.ResourceMemory: resource.MustParse(memoryRequest),
+			},
+			Limits: v1.ResourceList{
+				v1.ResourceCPU:    resource.MustParse(cpuLimit),
+				v1.ResourceMemory: resource.MustParse(memoryLimit),
+			},
+		}
+	}
+	pod := &v1.Pod{
+		ObjectMeta: metav1.ObjectMeta{Name: testPodName, Namespace: testNamespace},
+		Spec: v1.PodSpec{
+			InitContainers: []v1.Container{
+				{
+					Name:      initName,
+					Resources: resources("100m", "1500m", "64Mi", "128Mi"),
+					Env: []v1.EnvVar{
+						resourceFieldRef("INIT_CPU_LIMIT", "", "limits.cpu", ""),
+						resourceFieldRef("INIT_MEMORY_LIMIT_MI", "", "limits.memory", "1Mi"),
+					},
+				},
+			},
+			Containers: []v1.Container{
+				{
+					Name:      deleteTestContainer,
+					Resources: resources("250m", "2", "1Gi", "4Gi"),
+					Env: []v1.EnvVar{
+						resourceFieldRef("CPU_REQUEST", "", "requests.cpu", ""),
+						resourceFieldRef("CPU_REQUEST_MILLI", "", "requests.cpu", "1m"),
+						resourceFieldRef("CPU_LIMIT", "", "limits.cpu", ""),
+						resourceFieldRef("MEMORY_REQUEST", "", "requests.memory", ""),
+						resourceFieldRef("MEMORY_LIMIT_MI", "", "limits.memory", "1Mi"),
+						resourceFieldRef("MEMORY_LIMIT_GI", "", "limits.memory", "1Gi"),
+						resourceFieldRef("SIDECAR_MEMORY_LIMIT_MI", sidecarName, "limits.memory", "1Mi"),
+						resourceFieldRef("INIT_CPU_REQUEST_MILLI", initName, "requests.cpu", "1m"),
+						resourceFieldRef("UNKNOWN_CONTAINER", "absent", "limits.cpu", ""),
+					},
+				},
+				{
+					Name:      sidecarName,
+					Resources: resources("50m", "100m", "100Mi", "300Mi"),
+				},
+			},
+		},
+	}
+
+	for i := range pod.Spec.InitContainers {
+		resolveEnvRefs(context.Background(), &Provider{}, pod, &pod.Spec.InitContainers[i])
+	}
+	for i := range pod.Spec.Containers {
+		resolveEnvRefs(context.Background(), &Provider{}, pod, &pod.Spec.Containers[i])
+	}
+
+	// The values the kubelet sets for the same pod.
+	expected := map[string]string{
+		"INIT_CPU_LIMIT":          "2",
+		"INIT_MEMORY_LIMIT_MI":    "128",
+		"CPU_REQUEST":             "1",
+		"CPU_REQUEST_MILLI":       "250",
+		"CPU_LIMIT":               "2",
+		"MEMORY_REQUEST":          "1073741824",
+		"MEMORY_LIMIT_MI":         "4096",
+		"MEMORY_LIMIT_GI":         "4",
+		"SIDECAR_MEMORY_LIMIT_MI": "300",
+		"INIT_CPU_REQUEST_MILLI":  "100",
+	}
+	allEnv := append(append([]v1.EnvVar{}, pod.Spec.InitContainers[0].Env...), pod.Spec.Containers[0].Env...)
+	for _, env := range allEnv {
+		if env.Name == "UNKNOWN_CONTAINER" {
+			assert.NotNil(t, env.ValueFrom, "a reference to an unknown container is left unresolved")
 			continue
 		}
 		assert.Nil(t, env.ValueFrom, env.Name)
