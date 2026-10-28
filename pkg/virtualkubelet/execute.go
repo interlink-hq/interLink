@@ -766,10 +766,14 @@ func remoteExecutionHandleProjectedSource(
 		}
 		tokenRequest := &authenticationv1.TokenRequest{
 			Spec: authenticationv1.TokenRequestSpec{
-				// No need to set audience field. If set with wrong value, it might break token validity!
 				ExpirationSeconds: &expirationSeconds,
 				BoundObjectRef:    bountObjectRef,
 			},
+		}
+		// Like the kubelet, request the audience the pod asks for. Without one, the token is
+		// issued for the API server's default audiences, which is what the Kubernetes API expects.
+		if source.ServiceAccountToken.Audience != "" {
+			tokenRequest.Spec.Audiences = []string{source.ServiceAccountToken.Audience}
 		}
 
 		tokenRequestResult, err := p.clientSet.CoreV1().ServiceAccounts(pod.Namespace).CreateToken(

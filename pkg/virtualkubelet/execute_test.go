@@ -14,9 +14,12 @@ import (
 	types "github.com/interlink-hq/interlink/pkg/interlink"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+	authenticationv1 "k8s.io/api/authentication/v1"
 	v1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/client-go/kubernetes/fake"
+	k8stesting "k8s.io/client-go/testing"
 )
 
 const testNamespace = "test-ns"
@@ -358,6 +361,73 @@ func TestGetSessionContextMessage(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			got := GetSessionContextMessage(tt.sessionContext)
 			assert.Equal(t, tt.expected, got)
+		})
+	}
+}
+
+func TestRemoteExecutionHandleProjectedSourceServiceAccountToken(t *testing.T) {
+	const testTokenPath = "token"
+	ctx := context.Background()
+	pod := &v1.Pod{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      testPodName,
+			Namespace: testNamespace,
+			UID:       "token-pod-uid",
+		},
+		Spec: v1.PodSpec{
+			ServiceAccountName: "svc-account",
+		},
+	}
+
+	tests := []struct {
+		name              string
+		audience          string
+		expectedAudiences []string
+	}{
+		{
+			name:              "no audience requests the API server default audiences",
+			audience:          "",
+			expectedAudiences: nil,
+		},
+		{
+			name:              "audience is requested for the token",
+			audience:          "vault",
+			expectedAudiences: []string{"vault"},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			fakeClient := fake.NewSimpleClientset()
+			var requested *authenticationv1.TokenRequest
+			fakeClient.PrependReactor("create", "serviceaccounts", func(action k8stesting.Action) (bool, runtime.Object, error) {
+				createAction, ok := action.(k8stesting.CreateAction)
+				if !ok || createAction.GetSubresource() != "token" {
+					return false, nil, nil
+				}
+				requested = createAction.GetObject().(*authenticationv1.TokenRequest).DeepCopy()
+				response := requested.DeepCopy()
+				response.Status.Token = "token-for-" + strings.Join(requested.Spec.Audiences, ",")
+				return true, response, nil
+			})
+
+			source := v1.VolumeProjection{
+				ServiceAccountToken: &v1.ServiceAccountTokenProjection{
+					Audience: tt.audience,
+					Path:     testTokenPath,
+				},
+			}
+			projectedVolume := &v1.ConfigMap{Data: map[string]string{}}
+
+			err := remoteExecutionHandleProjectedSource(ctx, &Provider{clientSet: fakeClient}, pod, source, projectedVolume)
+			require.NoError(t, err)
+
+			require.NotNil(t, requested)
+			assert.Equal(t, tt.expectedAudiences, requested.Spec.Audiences)
+			require.NotNil(t, requested.Spec.BoundObjectRef)
+			assert.Equal(t, "Pod", requested.Spec.BoundObjectRef.Kind)
+			assert.Equal(t, pod.UID, requested.Spec.BoundObjectRef.UID)
+			assert.Equal(t, "token-for-"+tt.audience, projectedVolume.Data[testTokenPath])
 		})
 	}
 }
