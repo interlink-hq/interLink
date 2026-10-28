@@ -43,6 +43,8 @@ const (
 	testKnownHostsConfigMap = "hpc-known-hosts"
 	testConfigValue1        = "value1"
 	testConfigValue2        = "value2"
+	testMappedKey1          = "mapped-key1"
+	testMissingKey          = "missing-key"
 
 	// Downward API field paths and projected volume entries.
 	testFieldPathMetadataName        = "metadata.name"
@@ -406,13 +408,13 @@ func TestRemoteExecutionHandleProjectedSourceConfigMap(t *testing.T) {
 				"key3":         "value3",
 			},
 			sourceItems: []v1.KeyToPath{
-				{Key: testConfigKey1, Path: "mapped-key1"},
+				{Key: testConfigKey1, Path: testMappedKey1},
 				{Key: testConfigKey2, Path: "mapped-key2"},
 			},
 			overrideCaCrt: "",
 			expectedData: map[string]string{
-				"mapped-key1": testConfigValue1,
-				"mapped-key2": testConfigValue2,
+				testMappedKey1: testConfigValue1,
+				"mapped-key2":  testConfigValue2,
 			},
 		},
 		{
@@ -456,7 +458,7 @@ func TestRemoteExecutionHandleProjectedSourceConfigMap(t *testing.T) {
 				testConfigKey1: testConfigValue1,
 			},
 			sourceItems: []v1.KeyToPath{
-				{Key: "missing-key", Path: "some-path"},
+				{Key: testMissingKey, Path: "some-path"},
 			},
 			overrideCaCrt: "",
 			expectedData:  nil,
@@ -470,7 +472,7 @@ func TestRemoteExecutionHandleProjectedSourceConfigMap(t *testing.T) {
 			},
 			sourceItems: []v1.KeyToPath{
 				{Key: testConfigKey1, Path: testConfigKey1},
-				{Key: "missing-key", Path: "some-path"},
+				{Key: testMissingKey, Path: "some-path"},
 			},
 			optional: true,
 			expectedData: map[string]string{
@@ -520,6 +522,132 @@ func TestRemoteExecutionHandleProjectedSourceConfigMap(t *testing.T) {
 			source := v1.VolumeProjection{
 				ConfigMap: &v1.ConfigMapProjection{
 					LocalObjectReference: v1.LocalObjectReference{Name: tt.configMapName},
+					Items:                tt.sourceItems,
+					Optional:             &optional,
+				},
+			}
+
+			projectedVolume := &v1.ConfigMap{
+				Data: make(map[string]string),
+			}
+
+			err := remoteExecutionHandleProjectedSource(ctx, p, pod, source, projectedVolume)
+
+			if tt.expectErr {
+				assert.Error(t, err)
+				return
+			}
+
+			require.NoError(t, err)
+			assert.Equal(t, tt.expectedData, projectedVolume.Data)
+		})
+	}
+}
+
+func TestRemoteExecutionHandleProjectedSourceSecret(t *testing.T) {
+	const testSecretName = "my-secret"
+	ctx := context.Background()
+	namespace := testNamespace
+
+	pod := &v1.Pod{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      testPodName,
+			Namespace: namespace,
+		},
+	}
+
+	tests := []struct {
+		name         string
+		secretData   map[string][]byte
+		sourceItems  []v1.KeyToPath
+		optional     bool
+		expectedData map[string]string
+		expectErr    bool
+	}{
+		{
+			name: "secret without items projects all keys",
+			secretData: map[string][]byte{
+				testConfigKey1: []byte(testConfigValue1),
+				testConfigKey2: []byte(testConfigValue2),
+			},
+			expectedData: map[string]string{
+				testConfigKey1: testConfigValue1,
+				testConfigKey2: testConfigValue2,
+			},
+		},
+		{
+			name: "secret with items projects only specified keys",
+			secretData: map[string][]byte{
+				testConfigKey1: []byte(testConfigValue1),
+				testConfigKey2: []byte(testConfigValue2),
+				"key3":         []byte("value3"),
+			},
+			sourceItems: []v1.KeyToPath{
+				{Key: testConfigKey1, Path: testMappedKey1},
+				{Key: testConfigKey2, Path: "nested/mapped-key2"},
+			},
+			expectedData: map[string]string{
+				testMappedKey1:       testConfigValue1,
+				"nested/mapped-key2": testConfigValue2,
+			},
+		},
+		{
+			name: "missing key in items returns error",
+			secretData: map[string][]byte{
+				testConfigKey1: []byte(testConfigValue1),
+			},
+			sourceItems: []v1.KeyToPath{
+				{Key: testMissingKey, Path: testMissingKey},
+			},
+			expectErr: true,
+		},
+		{
+			name: "missing key in items of optional secret is skipped",
+			secretData: map[string][]byte{
+				testConfigKey1: []byte(testConfigValue1),
+			},
+			sourceItems: []v1.KeyToPath{
+				{Key: testConfigKey1, Path: testConfigKey1},
+				{Key: testMissingKey, Path: testMissingKey},
+			},
+			optional: true,
+			expectedData: map[string]string{
+				testConfigKey1: testConfigValue1,
+			},
+		},
+		{
+			name:      "missing secret returns error",
+			expectErr: true,
+		},
+		{
+			name:         "missing optional secret projects no keys",
+			optional:     true,
+			expectedData: map[string]string{},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Create a fake k8s client and pre-populate it with the Secret.
+			fakeClient := fake.NewSimpleClientset()
+			if tt.secretData != nil {
+				secret := &v1.Secret{
+					ObjectMeta: metav1.ObjectMeta{
+						Name:      testSecretName,
+						Namespace: namespace,
+					},
+					Data: tt.secretData,
+				}
+				_, err := fakeClient.CoreV1().Secrets(namespace).Create(ctx, secret, metav1.CreateOptions{})
+				require.NoError(t, err)
+			}
+
+			p := &Provider{clientSet: fakeClient}
+
+			optional := tt.optional
+			source := v1.VolumeProjection{
+				Secret: &v1.SecretProjection{
+					LocalObjectReference: v1.LocalObjectReference{Name: testSecretName},
 					Items:                tt.sourceItems,
 					Optional:             &optional,
 				},
@@ -649,6 +777,76 @@ func TestRemoteExecutionHandleVolumesDownwardAPI(t *testing.T) {
 		{Path: testLabelsPath, FieldRef: &v1.ObjectFieldSelector{FieldPath: testFieldPathMetadataLabels}},
 		{Path: testAnnotationsPath, FieldRef: &v1.ObjectFieldSelector{FieldPath: testFieldPathMetadataAnnotations}},
 	})
+}
+
+func TestRemoteExecutionHandleVolumesProjectedSecret(t *testing.T) {
+	const testSecretName = "db-credentials"
+	ctx := context.Background()
+	namespace := testNamespace
+	pod := &v1.Pod{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      testPodName,
+			Namespace: namespace,
+		},
+		Spec: v1.PodSpec{
+			Volumes: []v1.Volume{
+				{
+					Name: "bundle",
+					VolumeSource: v1.VolumeSource{
+						Projected: &v1.ProjectedVolumeSource{
+							Sources: []v1.VolumeProjection{
+								{
+									ConfigMap: &v1.ConfigMapProjection{
+										LocalObjectReference: v1.LocalObjectReference{Name: testConfigMapName},
+									},
+								},
+								{
+									Secret: &v1.SecretProjection{
+										LocalObjectReference: v1.LocalObjectReference{Name: testSecretName},
+										Items:                []v1.KeyToPath{{Key: testConfigKey2, Path: "db/password"}},
+									},
+								},
+								{
+									DownwardAPI: &v1.DownwardAPIProjection{
+										Items: []v1.DownwardAPIVolumeFile{
+											{Path: testPodNamePath, FieldRef: &v1.ObjectFieldSelector{FieldPath: testFieldPathMetadataName}},
+										},
+									},
+								},
+							},
+						},
+					},
+				},
+			},
+		},
+	}
+
+	fakeClient := fake.NewSimpleClientset(
+		pod.DeepCopy(),
+		&v1.ConfigMap{
+			ObjectMeta: metav1.ObjectMeta{Name: testConfigMapName, Namespace: namespace},
+			Data:       map[string]string{testConfigKey1: testConfigValue1},
+		},
+		&v1.Secret{
+			ObjectMeta: metav1.ObjectMeta{Name: testSecretName, Namespace: namespace},
+			Data:       map[string][]byte{testConfigKey1: []byte("admin"), testConfigKey2: []byte("s3cr3t")},
+		},
+	)
+	p := &Provider{
+		clientSet: fakeClient,
+		notifier:  func(*v1.Pod) {},
+	}
+	req := &types.PodCreateRequests{}
+
+	err := remoteExecutionHandleVolumes(ctx, p, pod, req)
+	require.NoError(t, err)
+	require.Len(t, req.ProjectedVolumeMaps, 1)
+	assert.Equal(t, "bundle", req.ProjectedVolumeMaps[0].Name)
+	assert.Equal(t, map[string]string{
+		testConfigKey1:  testConfigValue1,
+		"db/password":   "s3cr3t",
+		testPodNamePath: testPodName,
+	}, req.ProjectedVolumeMaps[0].Data)
 }
 
 func TestRemoteExecutionHandleVolumesDownwardAPIDisabledProjectedVolumes(t *testing.T) {

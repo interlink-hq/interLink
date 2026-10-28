@@ -838,6 +838,43 @@ func remoteExecutionHandleProjectedSource(
 			}
 		}
 
+	case source.Secret != nil:
+		/* Case
+		   - secret:
+		       items:
+		         - key: password
+		           path: db/password
+		       name: db-credentials
+		   Or without items (project all keys):
+		   - secret:
+		       name: db-credentials
+		*/
+		optional := source.Secret.Optional != nil && *source.Secret.Optional
+		// Fetch the Secret once, then iterate over items (or all keys if no items are specified).
+		secret, err := p.clientSet.CoreV1().Secrets(pod.Namespace).Get(ctx, source.Secret.Name, metav1.GetOptions{})
+		if err != nil {
+			if optional && apierrors.IsNotFound(err) {
+				// Like the kubelet, a missing optional Secret projects no keys.
+				log.G(ctx).Infof("optional Secret %s of pod %s not found, projecting no keys from it", source.Secret.Name, pod.Name)
+				return nil
+			}
+			return fmt.Errorf("error during retrieval of Secret %s error: %w", source.Secret.Name, err)
+		}
+		if len(source.Secret.Items) == 0 {
+			// No items specified: project all keys from the Secret, using key name as path.
+			for key, value := range secret.Data {
+				projectedVolume.Data[key] = string(value)
+			}
+		} else {
+			for _, item := range source.Secret.Items {
+				if value, ok := secret.Data[item.Key]; ok {
+					projectedVolume.Data[item.Path] = string(value)
+				} else if !optional {
+					return fmt.Errorf("error during retrieval of key %s of (existing) Secret %s", item.Key, source.Secret.Name)
+				}
+			}
+		}
+
 	case source.DownwardAPI != nil:
 		/* Case
 		- downwardAPI:
