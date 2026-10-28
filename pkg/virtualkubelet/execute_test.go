@@ -379,6 +379,7 @@ func TestRemoteExecutionHandleProjectedSourceConfigMap(t *testing.T) {
 		configMapData map[string]string
 		sourceItems   []v1.KeyToPath
 		overrideCaCrt string
+		optional      bool
 		expectedData  map[string]string
 		expectErr     bool
 	}{
@@ -461,6 +462,35 @@ func TestRemoteExecutionHandleProjectedSourceConfigMap(t *testing.T) {
 			expectedData:  nil,
 			expectErr:     true,
 		},
+		{
+			name:          "missing key in items of optional configmap is skipped",
+			configMapName: testConfigMapName,
+			configMapData: map[string]string{
+				testConfigKey1: testConfigValue1,
+			},
+			sourceItems: []v1.KeyToPath{
+				{Key: testConfigKey1, Path: testConfigKey1},
+				{Key: "missing-key", Path: "some-path"},
+			},
+			optional: true,
+			expectedData: map[string]string{
+				testConfigKey1: testConfigValue1,
+			},
+		},
+		{
+			name:          "missing configmap returns error",
+			configMapName: testConfigMapName,
+			configMapData: nil,
+			expectedData:  nil,
+			expectErr:     true,
+		},
+		{
+			name:          "missing optional configmap projects no keys",
+			configMapName: testConfigMapName,
+			configMapData: nil,
+			optional:      true,
+			expectedData:  map[string]string{},
+		},
 	}
 
 	for _, tt := range tests {
@@ -486,10 +516,12 @@ func TestRemoteExecutionHandleProjectedSourceConfigMap(t *testing.T) {
 				},
 			}
 
+			optional := tt.optional
 			source := v1.VolumeProjection{
 				ConfigMap: &v1.ConfigMapProjection{
 					LocalObjectReference: v1.LocalObjectReference{Name: tt.configMapName},
 					Items:                tt.sourceItems,
+					Optional:             &optional,
 				},
 			}
 
@@ -655,6 +687,64 @@ func TestRemoteExecutionHandleVolumesDownwardAPIDisabledProjectedVolumes(t *test
 	require.Len(t, pod.Spec.Volumes, 1)
 	require.NotNil(t, pod.Spec.Volumes[0].DownwardAPI)
 	assert.Nil(t, pod.Spec.Volumes[0].Projected)
+}
+
+func TestRemoteExecutionHandleVolumesOptionalMissing(t *testing.T) {
+	const (
+		missingConfigMap = "missing-config"
+		missingSecret    = "missing-secret"
+	)
+	ctx := context.Background()
+	namespace := testNamespace
+	optional := true
+	pod := &v1.Pod{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      testPodName,
+			Namespace: namespace,
+		},
+		Spec: v1.PodSpec{
+			Volumes: []v1.Volume{
+				{
+					Name: "config",
+					VolumeSource: v1.VolumeSource{
+						ConfigMap: &v1.ConfigMapVolumeSource{
+							LocalObjectReference: v1.LocalObjectReference{Name: missingConfigMap},
+							Optional:             &optional,
+						},
+					},
+				},
+				{
+					Name: "secret",
+					VolumeSource: v1.VolumeSource{
+						Secret: &v1.SecretVolumeSource{
+							SecretName: missingSecret,
+							Optional:   &optional,
+						},
+					},
+				},
+			},
+		},
+	}
+
+	fakeClient := fake.NewSimpleClientset(pod.DeepCopy())
+	p := &Provider{
+		clientSet: fakeClient,
+		notifier:  func(*v1.Pod) {},
+	}
+	req := &types.PodCreateRequests{}
+
+	// Without the optional handling this waits five minutes for the objects to appear.
+	err := remoteExecutionHandleVolumes(ctx, p, pod, req)
+	require.NoError(t, err)
+	assert.Equal(t, v1.PodPending, pod.Status.Phase)
+	require.Len(t, req.ConfigMaps, 1)
+	assert.Equal(t, missingConfigMap, req.ConfigMaps[0].Name)
+	assert.Equal(t, namespace, req.ConfigMaps[0].Namespace)
+	assert.Empty(t, req.ConfigMaps[0].Data)
+	require.Len(t, req.Secrets, 1)
+	assert.Equal(t, missingSecret, req.Secrets[0].Name)
+	assert.Equal(t, namespace, req.Secrets[0].Namespace)
+	assert.Empty(t, req.Secrets[0].Data)
 }
 
 func TestResolveEnvFromRefs(t *testing.T) {

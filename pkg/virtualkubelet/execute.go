@@ -28,6 +28,7 @@ import (
 	"go.opentelemetry.io/otel/attribute"
 	trace "go.opentelemetry.io/otel/trace"
 	v1 "k8s.io/api/core/v1"
+	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/api/resource"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 )
@@ -803,9 +804,15 @@ func remoteExecutionHandleProjectedSource(
 				// With InterLink, the Kubernetes internal network is not accessible so this default ca.crt is probably useless.
 				log.G(ctx).Warning("using default Kubernetes API kube-root-ca.crt (no override found), but the default one might not be compatible with the subject: ", p.config.KubernetesAPIAddr)
 			}
+			optional := source.ConfigMap.Optional != nil && *source.ConfigMap.Optional
 			// Fetch the ConfigMap once, then iterate over items (or all keys if no items are specified).
 			cfgmap, err := p.clientSet.CoreV1().ConfigMaps(pod.Namespace).Get(ctx, source.ConfigMap.Name, metav1.GetOptions{})
 			if err != nil {
+				if optional && apierrors.IsNotFound(err) {
+					// Like the kubelet, a missing optional ConfigMap projects no keys.
+					log.G(ctx).Infof("optional ConfigMap %s of pod %s not found, projecting no keys from it", source.ConfigMap.Name, pod.Name)
+					return nil
+				}
 				return fmt.Errorf("error during retrieval of ConfigMap %s error: %w", source.ConfigMap.Name, err)
 			}
 			if len(source.ConfigMap.Items) == 0 {
@@ -817,7 +824,7 @@ func remoteExecutionHandleProjectedSource(
 				for _, item := range source.ConfigMap.Items {
 					if value, ok := cfgmap.Data[item.Key]; ok {
 						projectedVolume.Data[item.Path] = value
-					} else {
+					} else if !optional {
 						return fmt.Errorf("error during retrieval of key %s of (existing) ConfigMap %s", item.Key, source.ConfigMap.Name)
 					}
 				}
@@ -931,13 +938,21 @@ func remoteExecutionHandleVolumes(ctx context.Context, p *Provider, pod *v1.Pod,
 				switch {
 				case volume.ConfigMap != nil:
 					cfgmap, err := p.clientSet.CoreV1().ConfigMaps(pod.Namespace).Get(ctx, volume.ConfigMap.Name, metav1.GetOptions{})
-					if err != nil {
+					switch {
+					case err == nil:
+						req.ConfigMaps = append(req.ConfigMaps, *cfgmap)
+					case volume.ConfigMap.Optional != nil && *volume.ConfigMap.Optional && apierrors.IsNotFound(err):
+						// Like the kubelet, mount an empty volume for a missing optional ConfigMap
+						// instead of waiting for it. The plugin still gets an object to mount by name.
+						log.G(ctx).Infof("optional ConfigMap %s of pod %s not found, mounting an empty volume", volume.ConfigMap.Name, pod.Name)
+						req.ConfigMaps = append(req.ConfigMaps, v1.ConfigMap{
+							ObjectMeta: metav1.ObjectMeta{Name: volume.ConfigMap.Name, Namespace: pod.Namespace},
+						})
+					default:
 						err = failedMount(ctx, &failedAndWait, volume.ConfigMap.Name, pod, p, err)
 						if err != nil {
 							return err
 						}
-					} else {
-						req.ConfigMaps = append(req.ConfigMaps, *cfgmap)
 					}
 
 				case volume.Projected != nil:
@@ -1007,13 +1022,21 @@ func remoteExecutionHandleVolumes(ctx context.Context, p *Provider, pod *v1.Pod,
 
 				case volume.Secret != nil:
 					scrt, err := p.clientSet.CoreV1().Secrets(pod.Namespace).Get(ctx, volume.Secret.SecretName, metav1.GetOptions{})
-					if err != nil {
+					switch {
+					case err == nil:
+						req.Secrets = append(req.Secrets, *scrt)
+					case volume.Secret.Optional != nil && *volume.Secret.Optional && apierrors.IsNotFound(err):
+						// Like the kubelet, mount an empty volume for a missing optional Secret
+						// instead of waiting for it. The plugin still gets an object to mount by name.
+						log.G(ctx).Infof("optional Secret %s of pod %s not found, mounting an empty volume", volume.Secret.SecretName, pod.Name)
+						req.Secrets = append(req.Secrets, v1.Secret{
+							ObjectMeta: metav1.ObjectMeta{Name: volume.Secret.SecretName, Namespace: pod.Namespace},
+						})
+					default:
 						err = failedMount(ctx, &failedAndWait, volume.Secret.SecretName, pod, p, err)
 						if err != nil {
 							return err
 						}
-					} else {
-						req.Secrets = append(req.Secrets, *scrt)
 					}
 
 				case volume.EmptyDir != nil:
