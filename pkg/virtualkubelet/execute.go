@@ -9,6 +9,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"math"
 	"math/rand"
 	"net/http"
 	"net/url"
@@ -1153,46 +1154,79 @@ func resolveEnvRefs(
 		}
 
 		if rfr := env.ValueFrom.ResourceFieldRef; rfr != nil {
-			targetName := rfr.ContainerName
-			if targetName == "" {
-				targetName = container.Name
-			}
-			var target *v1.Container
-			for idx := range pod.Spec.Containers {
-				if pod.Spec.Containers[idx].Name == targetName {
-					target = &pod.Spec.Containers[idx]
-					break
-				}
+			// Like the kubelet, the container defaults to the one the env var belongs to,
+			// and a named one can be an init container.
+			target := container
+			if rfr.ContainerName != "" {
+				target = findPodContainer(pod, rfr.ContainerName)
 			}
 			if target == nil {
-				log.G(ctx).Errorf("resourceFieldRef: container %q not found", targetName)
+				log.G(ctx).Errorf("resourceFieldRef: container %q not found", rfr.ContainerName)
 				continue
 			}
 
-			parts := strings.Split(rfr.Resource, ".")
-			if len(parts) != 2 {
-				log.G(ctx).Errorf("unsupported ResourceFieldRef %q", rfr.Resource)
+			value, err := resolveResourceFieldRef(rfr, target)
+			if err != nil {
+				log.G(ctx).Error(err)
 				continue
 			}
 
-			var qty resource.Quantity
-			switch parts[0] {
-			case "requests":
-				qty = target.Resources.Requests[v1.ResourceName(parts[1])]
-			case "limits":
-				qty = target.Resources.Limits[v1.ResourceName(parts[1])]
-			default:
-				log.G(ctx).Errorf("unsupported ResourceFieldRef scope %q", parts[0])
-				continue
-			}
-
-			container.Env[i].Value = qty.String()
+			container.Env[i].Value = value
 			container.Env[i].ValueFrom = nil
 			continue
 		}
 
 		log.G(ctx).Warnf("env var %q has unhandled ValueFrom, skipping", env.Name)
 	}
+}
+
+// findPodContainer returns the container or init container of the pod with the given name, or nil.
+func findPodContainer(pod *v1.Pod, name string) *v1.Container {
+	for i := range pod.Spec.Containers {
+		if pod.Spec.Containers[i].Name == name {
+			return &pod.Spec.Containers[i]
+		}
+	}
+	for i := range pod.Spec.InitContainers {
+		if pod.Spec.InitContainers[i].Name == name {
+			return &pod.Spec.InitContainers[i]
+		}
+	}
+	return nil
+}
+
+// resolveResourceFieldRef returns the value of a resourceFieldRef the way the kubelet
+// formats it: the container's request or limit divided by the divisor (1 when unset) and
+// rounded up to an integer. CPU is divided in millicores, so a 500m limit gives "1" and a
+// divisor of 1m gives "500"; memory with a divisor of 1Mi gives the size in MiB.
+func resolveResourceFieldRef(rfr *v1.ResourceFieldSelector, container *v1.Container) (string, error) {
+	scope, name, ok := strings.Cut(rfr.Resource, ".")
+	if !ok {
+		return "", fmt.Errorf("unsupported ResourceFieldRef %q", rfr.Resource)
+	}
+
+	var qty resource.Quantity
+	switch scope {
+	case "requests":
+		qty = container.Resources.Requests[v1.ResourceName(name)]
+	case "limits":
+		qty = container.Resources.Limits[v1.ResourceName(name)]
+	default:
+		return "", fmt.Errorf("unsupported ResourceFieldRef scope %q", scope)
+	}
+
+	divisor := rfr.Divisor
+	if divisor.IsZero() {
+		divisor = resource.MustParse("1")
+	}
+
+	var value float64
+	if v1.ResourceName(name) == v1.ResourceCPU {
+		value = float64(qty.MilliValue()) / float64(divisor.MilliValue())
+	} else {
+		value = float64(qty.Value()) / float64(divisor.Value())
+	}
+	return strconv.FormatInt(int64(math.Ceil(value)), 10), nil
 }
 
 func resolveEnvFromRefs(
