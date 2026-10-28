@@ -275,6 +275,20 @@ func (p *Provider) replicateSecret(ctx context.Context, source, target, name str
 		return err
 	}
 
+	// The API server refuses to change a Secret's type on update, so a copy whose
+	// source changed type (Opaque to kubernetes.io/ssh-auth, say) is created again.
+	// Only a copy marked as ours gets here with a different type. A conflict means
+	// another writer replaced the copy since it was read; the update below takes over.
+	if found.exists && existing.Type != src.Type {
+		uid := existing.UID
+		err := p.clientSet.CoreV1().Secrets(target).Delete(ctx, name, metav1.DeleteOptions{
+			Preconditions: &metav1.Preconditions{UID: &uid},
+		})
+		if err != nil && !apierrors.IsNotFound(err) && !apierrors.IsConflict(err) {
+			return fmt.Errorf("failed to delete secret %s/%s to change its type: %w", target, name, err)
+		}
+	}
+
 	copied := &v1.Secret{
 		ObjectMeta: replicatedMeta(name, target, source),
 		Type:       src.Type,
