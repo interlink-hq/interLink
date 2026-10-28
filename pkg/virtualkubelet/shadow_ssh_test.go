@@ -912,7 +912,7 @@ func TestReplicateCredentialsAfterTypeChange(t *testing.T) {
 	t.Run("a copy another writer replaced in the meantime is kept and updated", func(t *testing.T) {
 		client := fake.NewSimpleClientset(credential, copyOf(v1.SecretTypeOpaque, "old-key", "old"))
 		p := newProvider(client)
-		client.PrependReactor("delete", "secrets", func(action k8stesting.Action) (bool, runtime.Object, error) {
+		client.PrependReactor("delete", "secrets", func(_ k8stesting.Action) (bool, runtime.Object, error) {
 			return false, nil, client.Tracker().Update(secrets, copyOf(v1.SecretTypeSSHAuth, "new-key", "theirs"), target)
 		})
 
