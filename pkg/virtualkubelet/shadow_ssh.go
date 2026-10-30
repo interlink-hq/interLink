@@ -11,6 +11,7 @@ import (
 	v1 "k8s.io/api/core/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/client-go/util/retry"
 )
 
 const (
@@ -262,6 +263,25 @@ func (p *Provider) replicateSecret(ctx context.Context, source, target, name str
 		return fmt.Errorf("failed to read SSH credential secret %s/%s: %w", source, name, err)
 	}
 
+	// Another writer changing the target between the check and the write makes the
+	// write fail with a conflict or AlreadyExists; the target is then checked again.
+	err = retry.OnError(retry.DefaultRetry, func(err error) bool {
+		return apierrors.IsConflict(err) || apierrors.IsAlreadyExists(err)
+	}, func() error {
+		return p.writeReplicatedSecret(ctx, src, source, target, name)
+	})
+	if err != nil {
+		return err
+	}
+	log.G(ctx).Infof("Replicated SSH credential secret %s from %s to %s", name, source, target)
+	return nil
+}
+
+// writeReplicatedSecret makes one attempt at copying src into target. Every write
+// is bound to the object checkReplicationTarget accepted: an update carries its
+// resourceVersion, a delete its UID and resourceVersion, and a create fails if
+// anything appeared since.
+func (p *Provider) writeReplicatedSecret(ctx context.Context, src *v1.Secret, source, target, name string) error {
 	existing, err := p.clientSet.CoreV1().Secrets(target).Get(ctx, name, metav1.GetOptions{})
 	if err != nil && !apierrors.IsNotFound(err) {
 		return fmt.Errorf("failed to inspect secret %s/%s: %w", target, name, err)
@@ -280,10 +300,29 @@ func (p *Provider) replicateSecret(ctx context.Context, source, target, name str
 		Type:       src.Type,
 		Data:       src.Data,
 	}
-	if err := p.applyOrUpdateSecret(ctx, copied); err != nil {
+	if found.exists && existing.Type == src.Type {
+		copied.ResourceVersion, copied.UID = existing.ResourceVersion, existing.UID
+		if _, err := p.clientSet.CoreV1().Secrets(target).Update(ctx, copied, metav1.UpdateOptions{}); err != nil {
+			return fmt.Errorf("failed to replicate secret %s into %s: %w", name, target, err)
+		}
+		return nil
+	}
+
+	// The API server refuses to change a Secret's type on update, so a copy whose
+	// source changed type (Opaque to kubernetes.io/ssh-auth, say) is created again.
+	// Only a copy marked as ours gets here with a different type.
+	if found.exists {
+		uid, rv := existing.UID, existing.ResourceVersion
+		err := p.clientSet.CoreV1().Secrets(target).Delete(ctx, name, metav1.DeleteOptions{
+			Preconditions: &metav1.Preconditions{UID: &uid, ResourceVersion: &rv},
+		})
+		if err != nil && !apierrors.IsNotFound(err) {
+			return fmt.Errorf("failed to delete secret %s/%s to change its type: %w", target, name, err)
+		}
+	}
+	if _, err := p.clientSet.CoreV1().Secrets(target).Create(ctx, copied, metav1.CreateOptions{}); err != nil {
 		return fmt.Errorf("failed to replicate secret %s into %s: %w", name, target, err)
 	}
-	log.G(ctx).Infof("Replicated SSH credential secret %s from %s to %s", name, source, target)
 	return nil
 }
 
