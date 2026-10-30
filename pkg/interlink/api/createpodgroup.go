@@ -20,14 +20,14 @@ import (
 	trace "go.opentelemetry.io/otel/trace"
 )
 
-// CreatePodSetsHandler handles HTTP POST requests to create the pods of one group in a
-// single call, so that the sidecar plugin can run the whole group as one job.
+// CreatePodGroupHandler handles HTTP POST requests to create the pods of one pod group in
+// a single call, so that the sidecar plugin can run the whole group as one job.
 // Every pod is prepared as CreateHandler prepares it (ConfigMaps, Secrets and projected
 // volumes split by container, optional job script), and the group is forwarded to the
-// plugin's /createPodSets. It is meant for plugins that list "podset-create" in their
+// plugin's /createPodGroup. It is meant for plugins that list "pod-group-create" in their
 // ping answer; status, logs and delete stay per pod.
 //
-// Request body: JSON-encoded PodSetsCreateRequests
+// Request body: JSON-encoded PodGroupCreateRequests
 // Response: JSON-encoded CreateStruct array, one entry per pod in the order of the
 // request, all with the job ID of the group
 //
@@ -36,17 +36,17 @@ import (
 //   - 400: Bad request (malformed body, no pods, or a permanent refusal of the plugin)
 //   - 503: The plugin cannot take the group now
 //   - 500: Internal server error (job script or sidecar communication failures)
-func (h *InterLinkHandler) CreatePodSetsHandler(w http.ResponseWriter, r *http.Request) {
+func (h *InterLinkHandler) CreatePodGroupHandler(w http.ResponseWriter, r *http.Request) {
 	start := time.Now().UnixMicro()
 	tracer := otel.Tracer("interlink-API")
-	_, span := tracer.Start(h.Ctx, "CreatePodSetsAPI", trace.WithAttributes(
+	_, span := tracer.Start(h.Ctx, "CreatePodGroupAPI", trace.WithAttributes(
 		attribute.Int64("start.timestamp", start),
 	))
 	defer span.End()
 	defer types.SetDurationSpan(start, span)
 	defer types.SetInfoFromHeaders(span, &r.Header)
 
-	log.G(h.Ctx).Info("InterLink: received CreatePodSets call")
+	log.G(h.Ctx).Info("InterLink: received CreatePodGroup call")
 
 	bodyBytes, err := io.ReadAll(r.Body)
 	if err != nil {
@@ -55,58 +55,45 @@ func (h *InterLinkHandler) CreatePodSetsHandler(w http.ResponseWriter, r *http.R
 		return
 	}
 
-	var request types.PodSetsCreateRequests
+	var request types.PodGroupCreateRequests
 	if err := json.Unmarshal(bodyBytes, &request); err != nil {
-		writePodSetsError(h.Ctx, w, http.StatusBadRequest, fmt.Errorf("invalid request body: %w", err))
+		writePodGroupError(h.Ctx, w, http.StatusBadRequest, fmt.Errorf("invalid request body: %w", err))
 		return
 	}
-
-	pods := 0
-	for _, podSet := range request.PodSets {
-		pods += len(podSet.Pods)
-	}
-	if pods == 0 {
-		writePodSetsError(h.Ctx, w, http.StatusBadRequest, fmt.Errorf("group %s has no pods", request.GroupUID))
+	if len(request.Pods) == 0 {
+		writePodGroupError(h.Ctx, w, http.StatusBadRequest, fmt.Errorf("pod group %s has no pods", request.GroupUID))
 		return
 	}
 
 	span.SetAttributes(
 		attribute.String("group.uid", request.GroupUID),
-		attribute.Int("group.podsets", len(request.PodSets)),
-		attribute.Int("group.pods", pods),
+		attribute.Int("group.pods", len(request.Pods)),
 	)
 
 	// One session for the whole group: GetSessionContext makes up a new one on every
 	// call when the request has none.
 	sessionContext := GetSessionContext(r)
 
-	retrievedData := types.RetrievedPodSetsData{
+	retrievedData := types.RetrievedPodGroupData{
 		GroupUID: request.GroupUID,
-		PodSets:  make([]types.RetrievedPodSetData, 0, len(request.PodSets)),
+		Pods:     make([]types.RetrievedPodData, 0, len(request.Pods)),
 	}
-	for _, podSet := range request.PodSets {
-		retrievedPodSet := types.RetrievedPodSetData{
-			Name: podSet.Name,
-			Pods: make([]types.RetrievedPodData, 0, len(podSet.Pods)),
+	for _, pod := range request.Pods {
+		log.G(h.Ctx).Infof("InterLink: preparing pod %s/%s of pod group %s", pod.Pod.Namespace, pod.Pod.Name, request.GroupUID)
+
+		data, err := getData(h.Ctx, h.Config, pod, span)
+		if err != nil {
+			writePodGroupError(h.Ctx, w, http.StatusInternalServerError, fmt.Errorf("pod %s/%s: %w", pod.Pod.Namespace, pod.Pod.Name, err))
+			return
 		}
-		for _, pod := range podSet.Pods {
-			log.G(h.Ctx).Infof("InterLink: preparing pod %s/%s of PodSet %s", pod.Pod.Namespace, pod.Pod.Name, podSet.Name)
 
-			data, err := getData(h.Ctx, h.Config, pod, span)
-			if err != nil {
-				writePodSetsError(h.Ctx, w, http.StatusInternalServerError, fmt.Errorf("pod %s/%s: %w", pod.Pod.Namespace, pod.Pod.Name, err))
-				return
-			}
-
-			statusCode, err := h.podSetJobScript(pod, &data, start, span, sessionContext)
-			if err != nil {
-				writePodSetsError(h.Ctx, w, statusCode, fmt.Errorf("pod %s/%s: job script: %w", pod.Pod.Namespace, pod.Pod.Name, err))
-				return
-			}
-
-			retrievedPodSet.Pods = append(retrievedPodSet.Pods, data)
+		statusCode, err := h.podGroupJobScript(pod, &data, start, span, sessionContext)
+		if err != nil {
+			writePodGroupError(h.Ctx, w, statusCode, fmt.Errorf("pod %s/%s: job script: %w", pod.Pod.Namespace, pod.Pod.Name, err))
+			return
 		}
-		retrievedData.PodSets = append(retrievedData.PodSets, retrievedPodSet)
+
+		retrievedData.Pods = append(retrievedData.Pods, data)
 	}
 
 	bodyBytes, err = json.Marshal(retrievedData)
@@ -117,14 +104,14 @@ func (h *InterLinkHandler) CreatePodSetsHandler(w http.ResponseWriter, r *http.R
 	}
 	log.G(h.Ctx).Debug(string(bodyBytes))
 
-	req, err := http.NewRequest(http.MethodPost, h.SidecarEndpoint+"/createPodSets", bytes.NewReader(bodyBytes))
+	req, err := http.NewRequest(http.MethodPost, h.SidecarEndpoint+"/createPodGroup", bytes.NewReader(bodyBytes))
 	if err != nil {
 		w.WriteHeader(http.StatusInternalServerError)
 		log.G(h.Ctx).Error(err)
 		return
 	}
 
-	log.G(h.Ctx).Infof("InterLink: forwarding CreatePodSets call to sidecar (group %s, %d pods)", request.GroupUID, pods)
+	log.G(h.Ctx).Infof("InterLink: forwarding CreatePodGroup call to sidecar (group %s, %d pods)", request.GroupUID, len(request.Pods))
 
 	ForwardAccessToken(r, req)
 	_, err = ReqWithError(h.Ctx, req, w, start, span, true, false, sessionContext, h.ClientHTTP)
@@ -134,11 +121,11 @@ func (h *InterLinkHandler) CreatePodSetsHandler(w http.ResponseWriter, r *http.R
 	}
 }
 
-// podSetJobScript fills the job script of one pod of a group as CreateHandler does, from
+// podGroupJobScript fills the job script of one pod of a group as CreateHandler does, from
 // the JobScriptBuilderURL of the pod or from the configured JobScriptTemplate. Unlike
 // CreateHandler it does not answer the caller: the group gets one answer, so it returns
 // the status code to answer with when it fails.
-func (h *InterLinkHandler) podSetJobScript(
+func (h *InterLinkHandler) podGroupJobScript(
 	pod types.PodCreateRequests,
 	data *types.RetrievedPodData,
 	start int64,
@@ -192,9 +179,9 @@ func (h *InterLinkHandler) podSetJobScript(
 	return http.StatusOK, nil
 }
 
-// writePodSetsError answers the caller with statusCode and the error text, escaped as
+// writePodGroupError answers the caller with statusCode and the error text, escaped as
 // ReqWithError escapes the errors of the sidecar.
-func writePodSetsError(ctx context.Context, w http.ResponseWriter, statusCode int, err error) {
+func writePodGroupError(ctx context.Context, w http.ResponseWriter, statusCode int, err error) {
 	log.G(ctx).Error(err)
 	w.WriteHeader(statusCode)
 	if _, werr := w.Write([]byte(html.EscapeString(err.Error()))); werr != nil {
