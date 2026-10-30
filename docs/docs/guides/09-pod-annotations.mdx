@@ -344,7 +344,7 @@ spec:
 - The virtual kubelet adds the names to the container's `/etc/hosts` and waits for the tunnel before the workload starts
 - A Service FQDN also resolves as `name.namespace.svc` and `name.namespace`, and as `name` in the pod's own namespace
 - An entry that does not parse, or a listen port below 1024, is refused when the pod is created
-- Needs `Network.SSH.Reverse.Enabled: true`; otherwise the pod is refused rather than run without its tunnel
+- Needs `Network.SSH.Reverse.Enabled: true` and no `interlink.eu/pod-vpn` on the pod; otherwise the pod is refused rather than run without its tunnel
 - Needs a plugin that gives the job a socket directory (`SocketDirRoot` in the Slurm plugin); otherwise the job fails at start
 
 **Default:** Not set (no connections back into the cluster)
@@ -385,7 +385,7 @@ metadata:
 The `127.x.y.z` address of the owner-only relay: the forwards listen there, inside the job.
 
 **Behavior:**
-- Derived from the pod UID when unset, so two pods on one node never share it
+- Derived from the pod UID when unset, which makes two pods on one node unlikely to share it, though not impossible: if they do and forward the same listen port, the second job fails at start, and setting this annotation on one of them resolves it
 - Must be in `127.0.0.0/8` and not `127.0.0.1`
 - The job fails at start if something else already listens on that address and a forward's port
 

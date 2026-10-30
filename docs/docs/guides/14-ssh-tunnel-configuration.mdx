@@ -119,7 +119,8 @@ The login node needs no route to the pod's own ports: the last hop happens insid
 the compute node.
 
 `ssh -L` carries TCP only. UDP ports on the offloaded pod are skipped, with a
-warning in the virtual kubelet log.
+warning in the virtual kubelet log, and a pod that exposes only UDP ports gets no
+shadow unless it asks for the [reverse tunnel](#pod-to-cluster-the-reverse-tunnel).
 
 ---
 
@@ -866,10 +867,11 @@ It does not keep out other jobs of the same account, or the node's administrator
 With `Reverse.Sshd: userspace` the forwards are made by an sshd the shadow starts on
 the compute node, as the job's user, instead of the node's own. It runs as `sshd -i`,
 with an ssh session's stdin and stdout as its transport, so it listens on no port. Its
-host key and the one client key it accepts are generated for each start and never
-leave the shadow, and its configuration, written to the socket directory, allows
-remote forwarding and nothing else. The relay, the sockets and the owner check are the
-same as above.
+host key and the one client key it accepts are generated for each start. The client's
+private key never leaves the shadow; the host's private key and the client's public
+key are written to the socket directory, next to a configuration that allows remote
+forwarding and nothing else, and go away with it. The relay, the sockets and the
+owner check are the same as above.
 
 It needs the sshd binary on the node (`Reverse.SshdPath`), and a key allowed to run
 any command on the node, or on the login node with `Reverse.NodeExec: srun`, because
@@ -885,20 +887,25 @@ which it sends through the login node.
 With the default `Reverse.Sshd: node`, a
 [key for the tunnel only](#a-key-for-the-tunnel-only) works. Keep `port-forwarding`
 in its `authorized_keys` line, since `-R` needs it in both forward modes. In the
-wrapper, define the directory pattern next to `h=`:
+wrapper, define the directory pattern next to `h=`, with the plugin's
+`SocketDirRoot` in place of `/gpfs/projects/example/interlink`, its regex
+metacharacters escaped:
 
 ```sh
-d='/[A-Za-z0-9._/-]+'
+d='/gpfs/projects/example/interlink/[0-9a-f]{12}'
 ```
+
+Keep it this narrow: the `rm -f` line below lets the key delete any `rev-*.sock` the
+account owns under a directory `d` matches.
 
 and insert these lines into its `if`, before its last condition, the
 `ok 'cat /etc/ssh/ssh_known_hosts ...'; then` line:
 
 ```sh
    ok "rm -f $d/rev-\*\.sock" ||
-   ok "while \[ -d $d \]; do sleep 10; echo; done" ||
-   ok "squeue -h --me -t R -n [0-9a-f-]{36} -o %i" ||
-   ok "srun --jobid=[0-9]+ --overlap -u -n1 --cpus-per-task=1 $NC 127\.0\.0\.1 22" ||
+   ok "while \[ -d $d \]( && \[ -S $d/rev-[0-9]{1,5}\.sock \])*; do sleep 10; echo; done" ||
+   ok "squeue -h --me -t R -n [0-9a-f-]{36} -o '%i %B'" ||
+   ok "srun --jobid=[0-9]+ --overlap -u -n1 -w [A-Za-z0-9][A-Za-z0-9._-]* --cpus-per-task=1 $NC 127\.0\.0\.1 22" ||
 ```
 
 The first two run on the compute node: one clears the sockets a previous session left
@@ -926,9 +933,10 @@ compute node's sshd sees the session come from `127.0.0.1`, so add that address 
 
 ### Performance
 
-`Reverse.NodeExec: srun` reaches the compute node with `srun --jobid=<job> --overlap`
-on the login node, running inside the allocation `ExecConnectCommand` to
-`127.0.0.1:22` with `Reverse.Sshd: node`, or the user-space sshd itself with
+`Reverse.NodeExec: srun` reaches the compute node with
+`srun --jobid=<job> --overlap -w <batch host>` on the login node, running inside the
+allocation `ExecConnectCommand` to `127.0.0.1:22` with `Reverse.Sshd: node`, or the
+user-space sshd itself with
 `userspace`, so the tunnel goes through Slurm's I/O forwarding, which has lower
 throughput than ssh. It is a last resort, for nodes the login node cannot reach over
 ssh. Under Kerberos it is also the one case where the login hop delegates the ticket,
