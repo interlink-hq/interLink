@@ -3,8 +3,8 @@
 
 A TCP listener on a loopback address can be reached by every user of the compute
 node. This relay accepts a connection only when the connecting socket belongs to the
-user running it, read from /proc/net/tcp, and then pipes it to a unix socket that
-only that user can open.
+user running it, read from /proc/net/tcp or tcp6, and then pipes it to a unix
+socket that only that user can open.
 
 The job starts it before its workload and it holds the addresses for the whole job,
 so nobody else can take them while the tunnel is down. It refuses to start when one
@@ -35,13 +35,21 @@ def hexip(ip):
 
 def peer_uid(conn):
     (pip, pport), (lip, lport) = conn.getpeername(), conn.getsockname()
-    want_local, want_remote = "%s:%04X" % (hexip(pip), pport), "%s:%04X" % (hexip(lip), lport)
-    with open("/proc/net/tcp") as f:
-        next(f)
-        for line in f:
-            c = line.split()
-            if c[1] == want_local and c[2] == want_remote:
-                return int(c[7])
+    # A client on an IPv6 socket reaches this IPv4 listener through a v4-mapped
+    # address and is listed in tcp6, as ::ffff:<ip> in the same word order.
+    for table, prefix in (("/proc/net/tcp", ""), ("/proc/net/tcp6", "0000000000000000FFFF0000")):
+        want_local = "%s%s:%04X" % (prefix, hexip(pip), pport)
+        want_remote = "%s%s:%04X" % (prefix, hexip(lip), lport)
+        try:
+            f = open(table)
+        except FileNotFoundError:
+            continue
+        with f:
+            next(f)
+            for line in f:
+                c = line.split()
+                if c[1] == want_local and c[2] == want_remote:
+                    return int(c[7])
     return None
 
 

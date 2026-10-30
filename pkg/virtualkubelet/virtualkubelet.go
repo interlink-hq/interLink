@@ -1966,7 +1966,17 @@ func (p *Provider) shouldCreateShadow(pod *v1.Pod) bool {
 	if !p.config.Network.EnableTunnel || pod.Annotations["interlink.eu/pod-vpn"] != "" {
 		return false
 	}
-	return hasExposedPorts(pod) || hasExtraPortsAnnotation(pod) || p.reverseRequested(pod)
+	if p.reverseRequested(pod) {
+		return true
+	}
+	if !hasExposedPorts(pod) && !hasExtraPortsAnnotation(pod) {
+		return false
+	}
+	// ssh carries TCP only: a pod exposing nothing else would get a shadow with no
+	// container to run (see warnOnUDPPorts)
+	return !p.isSSHShadow() || slices.ContainsFunc(extractPortMappings(pod), func(m PortMapping) bool {
+		return !strings.EqualFold(m.Protocol, "UDP")
+	})
 }
 
 // isMeshNetworkingDisabled returns true when the pod has opted out of mesh networking

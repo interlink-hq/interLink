@@ -124,6 +124,8 @@ func (p *Provider) checkReverseRequest(pod *v1.Pod) error {
 		return fmt.Errorf("pod %s/%s sets %s, but Network.EnableTunnel is false", pod.Namespace, pod.Name, annReverseForwards)
 	case !p.config.Network.SSH.Reverse.Enabled:
 		return fmt.Errorf("pod %s/%s sets %s, but this virtual kubelet does not allow it (Network.SSH.Reverse.Enabled)", pod.Namespace, pod.Name, annReverseForwards)
+	case pod.Annotations["interlink.eu/pod-vpn"] != "":
+		return fmt.Errorf("pod %s/%s sets %s, but interlink.eu/pod-vpn disables its shadow tunnel", pod.Namespace, pod.Name, annReverseForwards)
 	case strings.TrimSpace(pod.Annotations[annReverseSocksPort]) != "" && !p.config.Network.SSH.Reverse.AllowSocks:
 		return fmt.Errorf("pod %s/%s sets %s, but this virtual kubelet does not allow a SOCKS proxy (Network.SSH.Reverse.AllowSocks)", pod.Namespace, pod.Name, annReverseSocksPort)
 	}
@@ -277,6 +279,14 @@ var reverseRelay string
 // The hosts file stays in node-local temporary space and never goes into
 // $INTERLINK_SOCKET_DIR: only the batch node runs the relay, so ranks on other
 // nodes must not resolve the names to an address nobody holds there.
+// reverseHostsBind mounts the hosts file for Singularity and Apptainer. Apptainer
+// reads SINGULARITY_BIND only while APPTAINER_BIND is unset, so the job's own
+// binds from the legacy variable are carried into APPTAINER_BIND.
+const reverseHostsBind = `il_rev_ab=${APPTAINER_BIND:-${SINGULARITY_BIND:-}}
+export SINGULARITY_BIND="${SINGULARITY_BIND:+$SINGULARITY_BIND,}$il_rev_hosts:/etc/hosts"
+export APPTAINER_BIND="${il_rev_ab:+$il_rev_ab,}$il_rev_hosts:/etc/hosts"
+`
+
 func reversePreExec(rt *ReverseTunnel, podNamespace string) string {
 	seen := map[string]bool{}
 	var hosts []string
@@ -300,8 +310,7 @@ func reversePreExec(rt *ReverseTunnel, podNamespace string) string {
 		fmt.Fprintf(&b, "# Node-local on purpose: only the batch node has a relay behind %s.\n", rt.Bind)
 		b.WriteString("il_rev_hosts=$(mktemp \"${TMPDIR:-/tmp}/interlink-hosts.XXXXXX\") || exit 1\n")
 		fmt.Fprintf(&b, "{ cat /etc/hosts; echo '%s %s'; } > \"$il_rev_hosts\"\n", rt.Bind, strings.Join(hosts, " "))
-		b.WriteString("export SINGULARITY_BIND=\"${SINGULARITY_BIND:+$SINGULARITY_BIND,}$il_rev_hosts:/etc/hosts\"\n")
-		b.WriteString("export APPTAINER_BIND=\"${APPTAINER_BIND:+$APPTAINER_BIND,}$il_rev_hosts:/etc/hosts\"\n")
+		b.WriteString(reverseHostsBind)
 		b.WriteString("cat > \"$il_rev_d/rev-relay.py\" <<'EORELAY'\n")
 		b.WriteString(reverseRelay)
 		if !strings.HasSuffix(reverseRelay, "\n") {

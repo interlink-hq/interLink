@@ -58,11 +58,14 @@ node_opts="\
 {{- define "nodeHop" -}}
 {{- $srun := and .Reverse (eq .Reverse.NodeExec "srun") -}}
 {{- if $srun -}}
-# The plugin names the batch job after the pod UID.
+# The plugin names the batch job after the pod UID. Steps are pinned to the
+            # batch host, where the job's relay and socket directory are.
             job_id() {
               # shellcheck disable=SC2086
-              jid=$(ssh $ssh_opts "$target" "squeue -h --me -t R -n $REV_JOB_NAME -o %i" 2>/dev/null | head -n 1)
+              out=$(ssh $ssh_opts "$target" "squeue -h --me -t R -n $REV_JOB_NAME -o '%i %B'" 2>/dev/null | head -n 1)
+              jid=${out%% *} bhost=${out#"$jid"} bhost=${bhost# }
               echo "$jid" | grep -Eq '^[0-9]+$' || { echo "no running job named $REV_JOB_NAME" >&2; return 1; }
+              echo "$bhost" | grep -Eq '^[A-Za-z0-9][A-Za-z0-9._-]*$' || { echo "no batch host for job $jid" >&2; return 1; }
             }
 
             {{ end -}}
@@ -90,8 +93,8 @@ node_opts="\
             {{- if $srun }}
               if [ "${1:-ssh}" = srun ]; then
                 job_id || return 1
-                printf '#!/bin/sh\nexec ssh %s %s "srun --jobid=%s --overlap -u -n1 --cpus-per-task=1 %s 127.0.0.1 22"\n' \
-                  "$ssh_opts" "$target" "$jid" "$connect_cmd" > "$w/node-proxy"
+                printf '#!/bin/sh\nexec ssh %s %s "srun --jobid=%s --overlap -u -n1 -w %s --cpus-per-task=1 %s 127.0.0.1 22"\n' \
+                  "$ssh_opts" "$target" "$jid" "$bhost" "$connect_cmd" > "$w/node-proxy"
                 chmod +x "$w/node-proxy"
                 return
               fi
@@ -535,22 +538,30 @@ spec:
             # One -R per forward, to the socket the job's relay dials.
             build_rflags() {
               rflags=
+              held="[ -d $sd ]"
               for f in $REV_FORWARDS; do
                 lport=${f%%:*}
                 dest=${f#*:}
                 rflags="$rflags -R $sd/rev-$lport.sock:$dest"
+                held="$held && [ -S $sd/rev-$lport.sock ]"
               done
-              # The session holds the forwards until the job removes its directory.
+              # A session holds its forwards until the job removes its directory; the
+              # one holding the sockets also ends when one is gone, as after a requeue
+              # on the same node recreated the directory, so that they are bound again.
               # The echo ends it with SIGPIPE once its sshd is gone, so a dropped
               # session leaves nothing behind on the node.
-              hold="while [ -d $sd ]; do sleep 10; echo; done"
+              hold="while $held; do sleep 10; echo; done"
+              hold_dir="while [ -d $sd ]; do sleep 10; echo; done"
             }
             {{- if eq .Reverse.Sshd "node" }}
 
-            # Starts a holding session with the given -R flags in the background.
+            # Starts a session running the hold command $1 with the -R flags that
+            # follow, in the background.
             session() {
+              h=$1
+              shift
               # shellcheck disable=SC2086
-              ssh -n -T -o ExitOnForwardFailure=yes $node_opts "$@" "{{.SSH.User}}@$node" "$hold" >/dev/null &
+              ssh -n -T -o ExitOnForwardFailure=yes $node_opts "$@" "{{.SSH.User}}@$node" "$h" >/dev/null &
             }
 
             start_reverse() {
@@ -565,14 +576,16 @@ spec:
               # shellcheck disable=SC2086
               ssh -n $node_opts "{{.SSH.User}}@$node" "rm -f $sd/rev-*.sock" || { echo "could not clear $sd on $node" >&2; return 1; }
               # shellcheck disable=SC2086
-              session $rflags
+              session "$hold" $rflags
               pid=$!
             }
             {{- else }}
 
-            # Starts a holding session with the given -R flags in the background, on
-            # an sshd -i of its own.
+            # Starts a session running the hold command $1 with the -R flags that
+            # follow, in the background, on an sshd -i of its own.
             session() {
+              h=$1
+              shift
               ssh -n -T \
                 -o ProxyCommand="$w/proxy.sh" \
                 -o ExitOnForwardFailure=yes \
@@ -581,7 +594,7 @@ spec:
                 -o UserKnownHostsFile="$w/known_hosts" -o StrictHostKeyChecking=yes -o HostKeyAlias=interlink-job \
                 -o GSSAPIAuthentication=no -o PreferredAuthentications=publickey \
                 -i "$w/client" -o IdentitiesOnly=yes \
-                "$@" {{.SSH.User}}@interlink-job "$hold" >/dev/null &
+                "$@" {{.SSH.User}}@interlink-job "$h" >/dev/null &
             }
 
             start_reverse() {
@@ -622,7 +635,7 @@ spec:
               # node's own sshd would.
               if [ "$REV_NODE_EXEC" = srun ]; then
                 job_id || return 1
-                run="ssh $ssh_opts $target srun --jobid=$jid --overlap -u -n1 --cpus-per-task=1"
+                run="ssh $ssh_opts $target srun --jobid=$jid --overlap -u -n1 -w $bhost --cpus-per-task=1"
               else
                 node_hop ssh || return 1
                 run="ssh $node_opts {{.SSH.User}}@$node"
@@ -634,7 +647,7 @@ spec:
               build_rflags
 
               # shellcheck disable=SC2086
-              session $rflags
+              session "$hold" $rflags
               pid=$!
             }
             {{- end }}
@@ -654,7 +667,7 @@ spec:
                 echo "the SOCKS forward on $node is down (is 127.0.0.1:$REV_SOCKS_PORT taken?); retrying" >&2
               fi
               socks_t=$now
-              session -R "127.0.0.1:$REV_SOCKS_PORT"
+              session "$hold_dir" -R "127.0.0.1:$REV_SOCKS_PORT"
               socks_pid=$!
             }
 

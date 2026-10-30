@@ -180,6 +180,26 @@ func TestReversePreExec(t *testing.T) {
 	assertBashParses(t, socksOnly)
 }
 
+func TestReverseHostsBind(t *testing.T) {
+	path, err := exec.LookPath("bash")
+	if err != nil {
+		t.Skip("bash not found")
+	}
+	binds := func(env ...string) string {
+		cmd := exec.Command(path, "-c", "il_rev_hosts=/tmp/h\n"+reverseHostsBind+`echo "$SINGULARITY_BIND|$APPTAINER_BIND"`)
+		cmd.Env = append([]string{}, env...)
+		out, err := cmd.Output()
+		require.NoError(t, err)
+		return strings.TrimSpace(string(out))
+	}
+
+	assert.Equal(t, "/tmp/h:/etc/hosts|/tmp/h:/etc/hosts", binds())
+	assert.Equal(t, "/data:/data,/tmp/h:/etc/hosts|/data:/data,/tmp/h:/etc/hosts", binds("SINGULARITY_BIND=/data:/data"),
+		"Apptainer ignores SINGULARITY_BIND once APPTAINER_BIND is set, so the job's binds move over")
+	assert.Equal(t, "/tmp/h:/etc/hosts|/data:/data,/tmp/h:/etc/hosts", binds("APPTAINER_BIND=/data:/data"))
+	assert.Equal(t, "/a:/a,/tmp/h:/etc/hosts|/b:/b,/tmp/h:/etc/hosts", binds("SINGULARITY_BIND=/a:/a", "APPTAINER_BIND=/b:/b"))
+}
+
 func TestShouldCreateShadowForReverse(t *testing.T) {
 	pod := reversePod(map[string]string{annReverseForwards: "minio.user.svc:9000"})
 
@@ -203,6 +223,25 @@ func TestShouldCreateShadowForReverse(t *testing.T) {
 		p := &Provider{config: config}
 		assert.False(t, p.shouldCreateShadow(pod))
 		assert.Error(t, p.checkReverseRequest(pod))
+	})
+
+	t.Run("not with interlink.eu/pod-vpn, which disables the shadow", func(t *testing.T) {
+		p := &Provider{config: normalized(t, reverseConfig())}
+		vpn := reversePod(map[string]string{annReverseForwards: "minio.user.svc:9000", "interlink.eu/pod-vpn": "true"})
+		assert.False(t, p.shouldCreateShadow(vpn))
+		err := p.checkReverseRequest(vpn)
+		assert.Error(t, err, "refused at creation rather than run without its tunnel")
+		assert.Contains(t, err.Error(), "interlink.eu/pod-vpn")
+	})
+
+	t.Run("a UDP-only pod gets a shadow only for its reverse forwards", func(t *testing.T) {
+		p := &Provider{config: normalized(t, reverseConfig())}
+		udp := reversePod(nil)
+		udp.Spec.Containers = []v1.Container{{Name: "dns", Ports: []v1.ContainerPort{{ContainerPort: 5353, Protocol: v1.ProtocolUDP}}}}
+		assert.False(t, p.shouldCreateShadow(udp), "nothing for ssh to carry")
+
+		udp.Annotations = map[string]string{annReverseForwards: "minio.user.svc:9000"}
+		assert.True(t, p.shouldCreateShadow(udp))
 	})
 
 	t.Run("a pod without the annotations is untouched", func(t *testing.T) {
@@ -350,6 +389,54 @@ func containerNames(deployment *appsv1.Deployment) []string {
 }
 
 // reverseScript returns the script of the ssh-reverse container.
+// TestReverseHoldEndsWithItsSockets runs build_rflags from the rendered script: a
+// requeue on the same node recreates the socket directory under the same path, so
+// the session holding the forwards must end once their sockets are gone.
+func TestReverseHoldEndsWithItsSockets(t *testing.T) {
+	sh, err := exec.LookPath("sh")
+	if err != nil {
+		t.Skip("sh not found")
+	}
+	config := normalized(t, withReverse(sshConfig(), SSHReverseSshdNode, SSHReverseNodeExecSSH))
+	_, deployment, _ := renderReverseShadow(t, config, reverseTunnelFor(config), nil)
+	script := reverseScript(t, deployment)
+	start := strings.Index(script, "build_rflags() {\n")
+	require.GreaterOrEqual(t, start, 0)
+	end := strings.Index(script[start:], "\n}\n")
+	require.Positive(t, end)
+	buildRflags := script[start : start+end+3]
+
+	dir, err := os.MkdirTemp("", "rh")
+	require.NoError(t, err)
+	defer os.RemoveAll(dir)
+	for _, port := range []string{"9000", "6379"} {
+		l, err := net.Listen("unix", filepath.Join(dir, "rev-"+port+".sock"))
+		require.NoError(t, err)
+		l.(*net.UnixListener).SetUnlinkOnClose(false)
+		defer l.Close()
+	}
+	held := func() (bool, bool) {
+		cmd := exec.Command(sh, "-c", buildRflags+`build_rflags
+# the loop condition of each hold command
+c=${hold#while } && eval "${c%%; do*}" && echo hold
+c=${hold_dir#while } && eval "${c%%; do*}" && echo dir
+exit 0`)
+		cmd.Env = []string{"REV_FORWARDS=9000:minio.user.svc:9000 6379:redis.user.svc:6379", "sd=" + dir}
+		out, err := cmd.CombinedOutput()
+		require.NoError(t, err, "%s", out)
+		return strings.Contains(string(out), "hold"), strings.Contains(string(out), "dir")
+	}
+
+	forwards, socks := held()
+	assert.True(t, forwards)
+	assert.True(t, socks)
+
+	require.NoError(t, os.Remove(filepath.Join(dir, "rev-6379.sock")))
+	forwards, socks = held()
+	assert.False(t, forwards, "a forward whose socket is gone must end its session")
+	assert.True(t, socks, "the SOCKS session holds no socket in the directory")
+}
+
 func reverseScript(t *testing.T, deployment *appsv1.Deployment) string {
 	t.Helper()
 	for _, c := range deployment.Spec.Template.Spec.Containers {
@@ -412,11 +499,11 @@ func TestSSHShadowTemplateReverse(t *testing.T) {
 		assert.NotContains(t, manifest, "REV_SSHD", "the node's own sshd needs no path")
 		assert.Contains(t, script, `"rm -f $sd/rev-*.sock"`, "a stale socket would fail the -R")
 		assert.Contains(t, script, `rflags="$rflags -R $sd/rev-$lport.sock:$dest"`)
-		assert.Contains(t, script, `hold="while [ -d $sd ]; do sleep 10; echo; done"`,
+		assert.Contains(t, script, `hold="while $held; do sleep 10; echo; done"`,
 			"the hold loop must write to its session, or it outlives a dropped one")
 		assert.Contains(t, script, `node_hop "$REV_NODE_EXEC"`)
-		assert.Contains(t, script, `-o ExitOnForwardFailure=yes $node_opts "$@" "alice@$node" "$hold" >/dev/null &`)
-		assert.Contains(t, script, "session $rflags\n")
+		assert.Contains(t, script, `-o ExitOnForwardFailure=yes $node_opts "$@" "alice@$node" "$h" >/dev/null &`)
+		assert.Contains(t, script, `session "$hold" $rflags`+"\n")
 		assert.Contains(t, script, "retrying in 30s")
 		assert.NotContains(t, script, testRestartHint)
 		assert.NotContains(t, script, "StrictHostKeyChecking=accept-new $node", "no unchecked hop from the login node")
@@ -436,7 +523,7 @@ func TestSSHShadowTemplateReverse(t *testing.T) {
 		assert.NotContains(t, script, "GatewayPorts")
 		assert.NotContains(t, script, "ForceCommand")
 		assert.NotContains(t, script, "rm -rf $sd", "the job owns its directory")
-		assert.Contains(t, script, `"$@" alice@interlink-job "$hold" >/dev/null &`)
+		assert.Contains(t, script, `"$@" alice@interlink-job "$h" >/dev/null &`)
 		assert.Contains(t, manifest, `name: REV_SSHD
           value: "/usr/sbin/sshd"`)
 	})
@@ -446,8 +533,9 @@ func TestSSHShadowTemplateReverse(t *testing.T) {
 		_, deployment, _ := renderReverseShadow(t, srun, reverseTunnelFor(srun), nil)
 		script := reverseScript(t, deployment)
 
-		assert.Contains(t, script, `exec ssh %s %s "srun --jobid=%s --overlap -u -n1 --cpus-per-task=1 %s 127.0.0.1 22"`)
-		assert.Contains(t, script, "squeue -h --me -t R -n $REV_JOB_NAME")
+		assert.Contains(t, script, `exec ssh %s %s "srun --jobid=%s --overlap -u -n1 -w %s --cpus-per-task=1 %s 127.0.0.1 22"`,
+			"pinned to the batch host, where the relay runs")
+		assert.Contains(t, script, `squeue -h --me -t R -n $REV_JOB_NAME -o '%i %B'`)
 		assert.Contains(t, script, "connect_cmd='nc'")
 	})
 
@@ -458,7 +546,8 @@ func TestSSHShadowTemplateReverse(t *testing.T) {
 		assert.Contains(t, manifest, `name: REV_SOCKS_PORT
           value: "1080"`)
 		script := reverseScript(t, deployment)
-		assert.Contains(t, script, `session -R "127.0.0.1:$REV_SOCKS_PORT"`)
+		assert.Contains(t, script, `session "$hold_dir" -R "127.0.0.1:$REV_SOCKS_PORT"`,
+			"the SOCKS listener is not in the socket directory")
 		assert.NotContains(t, script, `rflags="$rflags -R 127.0.0.1`,
 			"a port another user takes must not fail the session holding the forwards")
 		assert.Contains(t, script, "keep_socks\n")
@@ -656,6 +745,49 @@ func TestReverseRelay(t *testing.T) {
 
 		require.NoError(t, os.RemoveAll(dir))
 		assert.Equal(t, 0, waitExit(cmd, 15*time.Second), "the relay must not outlive the job's directory")
+	})
+
+	// A client on an IPv6 socket, as a JVM opens by default, reaches the IPv4
+	// listener through a v4-mapped address and is listed in /proc/net/tcp6.
+	t.Run("accepts the job user's own IPv6 socket on a v4-mapped address", func(t *testing.T) {
+		if _, err := os.Stat("/proc/net/tcp6"); err != nil {
+			t.Skip("no /proc/net/tcp6")
+		}
+		port := freeLoopbackPort(t)
+		dir, err := os.MkdirTemp("", "rr")
+		require.NoError(t, err)
+		defer os.RemoveAll(dir)
+		sock := filepath.Join(dir, "rev-"+port+".sock")
+		upstream, err := net.Listen("unix", sock)
+		if err != nil {
+			t.Skipf("cannot listen on %s: %v", sock, err)
+		}
+		defer upstream.Close()
+		go func() {
+			conn, err := upstream.Accept()
+			if err != nil {
+				return
+			}
+			defer conn.Close()
+			_, _ = io.Copy(conn, conn)
+		}()
+
+		cmd, stderr := startRelay(t, dir, "127.0.0.1", port+"="+sock)
+		require.Eventually(t, func() bool {
+			_, err := os.Stat(filepath.Join(dir, reverseTestReady))
+			return err == nil
+		}, 15*time.Second, 100*time.Millisecond, "no ready file: %s", stderr)
+
+		// Go dials a v4-mapped address on an IPv4 socket, so the client is python's
+		client := exec.Command(cmd.Path, "-I", "-c", `import socket, sys
+s = socket.socket(socket.AF_INET6)
+s.settimeout(10)
+s.connect(("::ffff:127.0.0.1", int(sys.argv[1])))
+s.sendall(b"ping")
+print(s.recv(4).decode())`, port)
+		out, err := client.CombinedOutput()
+		require.NoError(t, err, "%s", out)
+		assert.Equal(t, "ping", strings.TrimSpace(string(out)), "relay log: %s", stderr)
 	})
 
 	t.Run("keeps serving while the tunnel is down and logs that once", func(t *testing.T) {
