@@ -151,6 +151,26 @@ Retrieves logs from a specific container.
 **Query Parameters**: Pod UID, container name, log options **Response**:
 Container logs (plain text)
 
+### POST /createPodGroup (optional)
+
+Creates the pods of one pod group as a single job. A plugin that implements it
+lists `pod-group-create` in the `capabilities` of its ping answer, and it is
+used only then; status, logs and delete stay per pod.
+
+**Request Body**: `RetrievedPodGroupData` **Response**: `List[CreateStruct]`,
+one per pod in the order of the request, all with the job ID of the group
+
+```json
+{
+  "groupUID": "workload-uid",
+  "pods": [...]  // each pod as sent to /create, in rank order
+}
+```
+
+The order of the pods gives their ranks; rank 0 is the head. Answer 400 with a
+text body for a bad request or a permanent refusal, and 503 when the group
+cannot be taken now.
+
 ## Developing with the Python SDK
 
 ### Basic Plugin Structure

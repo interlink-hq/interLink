@@ -101,6 +101,27 @@ type RetrievedPodData struct {
 	JobScript string `json:"jobScript,omitempty"`
 }
 
+// PodGroupCreateRequests represents a request to create the pods of one pod group in a
+// single call, so that the plugin can run them as one job. The order of the pods gives their
+// ranks, and rank 0 is the head. Each pod carries its own ConfigMaps, Secrets and projected
+// volumes, because projected and downward API files differ from pod to pod.
+type PodGroupCreateRequests struct {
+	// GroupUID identifies the pod group, for instance the UID of the workload it runs
+	GroupUID string `json:"groupUID"`
+	// Pods contains the pods of the group in rank order, each as it is sent to /create
+	Pods []PodCreateRequests `json:"pods"`
+}
+
+// RetrievedPodGroupData represents the pods of one pod group with all their associated data.
+// It is what interLink sends to the plugin's /createPodGroup: each pod is prepared as for
+// /create, in the order of the PodGroupCreateRequests.
+type RetrievedPodGroupData struct {
+	// GroupUID identifies the pod group, as in PodGroupCreateRequests
+	GroupUID string `json:"groupUID"`
+	// Pods contains the pods of the group in rank order, each as it is sent to the plugin's /create
+	Pods []RetrievedPodData `json:"pods"`
+}
+
 // ContainerLogOpts specifies options for retrieving container logs from sidecar plugins.
 // These options control how logs are fetched, filtered, and formatted, matching
 // Kubernetes' standard log retrieval parameters.
