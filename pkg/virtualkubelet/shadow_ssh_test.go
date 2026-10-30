@@ -860,29 +860,43 @@ func TestReplicateCredentialsAfterTypeChange(t *testing.T) {
 	copyOf := func(secretType v1.SecretType, key, uid string) *v1.Secret {
 		meta := replicatedMeta(testSSHKeySecret, target, source)
 		meta.UID = types.UID(uid)
+		meta.ResourceVersion = uid
 		return &v1.Secret{ObjectMeta: meta, Type: secretType, Data: map[string][]byte{v1.SSHAuthPrivateKey: []byte(key)}}
 	}
+	unmarked := copyOf(v1.SecretTypeSSHAuth, "their-key", "unmarked")
+	unmarked.Annotations = nil
+	stale := func(stored runtime.Object, uid *types.UID, rv *string) bool {
+		meta := stored.(*v1.Secret).ObjectMeta
+		return (uid != nil && meta.UID != *uid) || (rv != nil && *rv != "" && meta.ResourceVersion != *rv)
+	}
 	newProvider := func(client *fake.Clientset) *Provider {
-		// the fake clientset accepts any update; refuse a type change as the API server does
+		// the fake clientset accepts any update; refuse a stale resourceVersion with 409
+		// and a type change as the API server does
 		client.PrependReactor("update", "secrets", func(action k8stesting.Action) (bool, runtime.Object, error) {
 			updated := action.(k8stesting.UpdateAction).GetObject().(*v1.Secret)
 			stored, err := client.Tracker().Get(secrets, updated.Namespace, updated.Name)
-			if err == nil && stored.(*v1.Secret).Type != updated.Type {
+			if err != nil {
+				return false, nil, nil
+			}
+			if stale(stored, nil, &updated.ResourceVersion) {
+				return true, nil, apierrors.NewConflict(secrets.GroupResource(), updated.Name, errors.New("object has been modified"))
+			}
+			if stored.(*v1.Secret).Type != updated.Type {
 				return true, nil, apierrors.NewInvalid(v1.SchemeGroupVersion.WithKind("Secret").GroupKind(), updated.Name,
 					field.ErrorList{field.Invalid(field.NewPath("type"), updated.Type, "field is immutable")})
 			}
 			return false, nil, nil
 		})
-		// the fake tracker ignores delete preconditions; refuse a stale UID with 409 as the API server does
+		// the fake tracker ignores delete preconditions; refuse stale ones with 409 as the API server does
 		client.PrependReactor("delete", "secrets", func(action k8stesting.Action) (bool, runtime.Object, error) {
 			deleted := action.(k8stesting.DeleteAction)
 			pre := action.(interface{ GetDeleteOptions() metav1.DeleteOptions }).GetDeleteOptions().Preconditions
-			if pre == nil || pre.UID == nil {
+			if pre == nil {
 				return false, nil, nil
 			}
 			stored, err := client.Tracker().Get(secrets, deleted.GetNamespace(), deleted.GetName())
-			if err == nil && stored.(*v1.Secret).UID != *pre.UID {
-				return true, nil, apierrors.NewConflict(secrets.GroupResource(), deleted.GetName(), errors.New("UID precondition failed"))
+			if err == nil && stale(stored, pre.UID, pre.ResourceVersion) {
+				return true, nil, apierrors.NewConflict(secrets.GroupResource(), deleted.GetName(), errors.New("precondition failed"))
 			}
 			return false, nil, nil
 		})
@@ -921,5 +935,36 @@ func TestReplicateCredentialsAfterTypeChange(t *testing.T) {
 		kept, err := client.CoreV1().Secrets(target).Get(t.Context(), testSSHKeySecret, metav1.GetOptions{})
 		require.NoError(t, err)
 		assert.Equal(t, types.UID("theirs"), kept.UID, "the other writer's copy must not be deleted")
+	})
+
+	assertUntouched := func(t *testing.T, client *fake.Clientset, err error) {
+		require.ErrorContains(t, err, "refusing to overwrite")
+		kept, getErr := client.CoreV1().Secrets(target).Get(t.Context(), testSSHKeySecret, metav1.GetOptions{})
+		require.NoError(t, getErr)
+		assert.Equal(t, unmarked, kept)
+	}
+
+	// An unmarked Secret with other data replaced the copy between the read and the
+	// delete: the delete gets 409 and the Secret is checked again, then refused.
+	t.Run("an unmarked Secret that replaced the copy before the delete is not overwritten", func(t *testing.T) {
+		client := fake.NewSimpleClientset(credential, copyOf(v1.SecretTypeOpaque, "old-key", "old"))
+		p := newProvider(client)
+		client.PrependReactor("delete", "secrets", func(_ k8stesting.Action) (bool, runtime.Object, error) {
+			return false, nil, client.Tracker().Update(secrets, unmarked.DeepCopy(), target)
+		})
+
+		assertUntouched(t, client, p.replicateShadowCredentials(t.Context(), identity))
+	})
+
+	// An unmarked Secret appeared between the delete and the create: the create gets
+	// AlreadyExists and the Secret is checked again, then refused.
+	t.Run("an unmarked Secret created after the delete is not overwritten", func(t *testing.T) {
+		client := fake.NewSimpleClientset(credential, copyOf(v1.SecretTypeOpaque, "old-key", "old"))
+		p := newProvider(client)
+		client.PrependReactor("create", "secrets", func(_ k8stesting.Action) (bool, runtime.Object, error) {
+			return false, nil, client.Tracker().Add(unmarked.DeepCopy())
+		})
+
+		assertUntouched(t, client, p.replicateShadowCredentials(t.Context(), identity))
 	})
 }
