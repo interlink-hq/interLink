@@ -44,6 +44,48 @@
         }
       }
     },
+    "/createPodSets": {
+      "post": {
+        "summary": "Create Pod Sets",
+        "operationId": "create_pod_sets_createPodSets_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/RetrievedPodSetsData"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "items": {
+                    "$ref": "#/components/schemas/CreateStruct"
+                  },
+                  "type": "array",
+                  "title": "Response Create Pod Sets Createpodsets Post"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/delete": {
       "post": {
         "summary": "Delete Pod",
@@ -983,6 +1025,48 @@
           "name"
         ],
         "title": "PodVolume"
+      },
+      "RetrievedPodSetData": {
+        "properties": {
+          "name": {
+            "type": "string",
+            "title": "Name"
+          },
+          "pods": {
+            "items": {
+              "$ref": "#/components/schemas/Pod"
+            },
+            "type": "array",
+            "title": "Pods"
+          }
+        },
+        "type": "object",
+        "required": [
+          "name",
+          "pods"
+        ],
+        "title": "RetrievedPodSetData"
+      },
+      "RetrievedPodSetsData": {
+        "properties": {
+          "groupUID": {
+            "type": "string",
+            "title": "Group Uid"
+          },
+          "podSets": {
+            "items": {
+              "$ref": "#/components/schemas/RetrievedPodSetData"
+            },
+            "type": "array",
+            "title": "Pod Sets"
+          }
+        },
+        "type": "object",
+        "required": [
+          "groupUID",
+          "podSets"
+        ],
+        "title": "RetrievedPodSetsData"
       },
       "Secret": {
         "properties": {

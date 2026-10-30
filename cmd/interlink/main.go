@@ -190,6 +190,7 @@ func main() {
 	mutex := http.NewServeMux()
 	mutex.HandleFunc("/status", interLinkAPIs.StatusHandler)
 	mutex.HandleFunc("/create", interLinkAPIs.CreateHandler)
+	mutex.HandleFunc("/createPodSets", interLinkAPIs.CreatePodSetsHandler)
 	mutex.HandleFunc("/delete", interLinkAPIs.DeleteHandler)
 	mutex.HandleFunc("/pinglink", interLinkAPIs.Ping)
 	mutex.HandleFunc("/getLogs", interLinkAPIs.GetLogsHandler)

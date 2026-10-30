@@ -38,6 +38,20 @@ func main() {
 		panic(err)
 	}
 
+	// CREATE PODSETS
+	createPodSetsOp, err := reflector.NewOperationContext(http.MethodPost, "/createPodSets")
+	if err != nil {
+		panic(err)
+	}
+
+	createPodSetsOp.AddReqStructure(new(interlink.PodSetsCreateRequests))
+	createPodSetsOp.AddRespStructure(new([]interlink.CreateStruct), func(cu *openapi.ContentUnit) { cu.HTTPStatus = http.StatusOK })
+
+	err = reflector.AddOperation(createPodSetsOp)
+	if err != nil {
+		panic(err)
+	}
+
 	// DELETE
 	deleteOp, err := reflector.NewOperationContext(http.MethodPost, "/delete")
 	if err != nil {
