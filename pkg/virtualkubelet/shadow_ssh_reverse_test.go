@@ -27,6 +27,8 @@ import (
 const (
 	reverseTestNamespace = "user"
 	reverseTestService   = "minio.user.svc.cluster.local"
+	reverseTestForward   = "minio.user.svc:9000"
+	reverseTestPodVPN    = "interlink.eu/pod-vpn"
 	reverseTestBind      = "127.77.1.2"
 	reverseTestUID       = "0d9b2d4a-6f6e-4a5f-9a66-2c1c5a4e9f10"
 	reverseTestSocks     = "1080"
@@ -201,7 +203,7 @@ func TestReverseHostsBind(t *testing.T) {
 }
 
 func TestShouldCreateShadowForReverse(t *testing.T) {
-	pod := reversePod(map[string]string{annReverseForwards: "minio.user.svc:9000"})
+	pod := reversePod(map[string]string{annReverseForwards: reverseTestForward})
 
 	t.Run("a reverse-only pod gets a shadow", func(t *testing.T) {
 		p := &Provider{config: normalized(t, reverseConfig())}
@@ -227,11 +229,11 @@ func TestShouldCreateShadowForReverse(t *testing.T) {
 
 	t.Run("not with interlink.eu/pod-vpn, which disables the shadow", func(t *testing.T) {
 		p := &Provider{config: normalized(t, reverseConfig())}
-		vpn := reversePod(map[string]string{annReverseForwards: "minio.user.svc:9000", "interlink.eu/pod-vpn": "true"})
+		vpn := reversePod(map[string]string{annReverseForwards: reverseTestForward, reverseTestPodVPN: "true"})
 		assert.False(t, p.shouldCreateShadow(vpn))
 		err := p.checkReverseRequest(vpn)
 		assert.Error(t, err, "refused at creation rather than run without its tunnel")
-		assert.Contains(t, err.Error(), "interlink.eu/pod-vpn")
+		assert.Contains(t, err.Error(), reverseTestPodVPN)
 	})
 
 	t.Run("a UDP-only pod gets a shadow only for its reverse forwards", func(t *testing.T) {
@@ -240,7 +242,7 @@ func TestShouldCreateShadowForReverse(t *testing.T) {
 		udp.Spec.Containers = []v1.Container{{Name: "dns", Ports: []v1.ContainerPort{{ContainerPort: 5353, Protocol: v1.ProtocolUDP}}}}
 		assert.False(t, p.shouldCreateShadow(udp), "nothing for ssh to carry")
 
-		udp.Annotations = map[string]string{annReverseForwards: "minio.user.svc:9000"}
+		udp.Annotations = map[string]string{annReverseForwards: reverseTestForward}
 		assert.True(t, p.shouldCreateShadow(udp))
 	})
 
@@ -416,11 +418,12 @@ func TestReverseHoldEndsWithItsSockets(t *testing.T) {
 		defer l.Close()
 	}
 	held := func() (bool, bool) {
-		cmd := exec.Command(sh, "-c", buildRflags+`build_rflags
+		script := buildRflags + `build_rflags
 # the loop condition of each hold command
 c=${hold#while } && eval "${c%%; do*}" && echo hold
 c=${hold_dir#while } && eval "${c%%; do*}" && echo dir
-exit 0`)
+exit 0`
+		cmd := exec.Command(sh, "-c", script) // #nosec G204 -- the script this test rendered
 		cmd.Env = []string{"REV_FORWARDS=9000:minio.user.svc:9000 6379:redis.user.svc:6379", "sd=" + dir}
 		out, err := cmd.CombinedOutput()
 		require.NoError(t, err, "%s", out)
@@ -769,7 +772,9 @@ func TestReverseRelay(t *testing.T) {
 				return
 			}
 			defer conn.Close()
-			_, _ = io.Copy(conn, conn)
+			if _, err := io.Copy(conn, conn); err != nil {
+				return
+			}
 		}()
 
 		cmd, stderr := startRelay(t, dir, "127.0.0.1", port+"="+sock)
@@ -779,12 +784,13 @@ func TestReverseRelay(t *testing.T) {
 		}, 15*time.Second, 100*time.Millisecond, "no ready file: %s", stderr)
 
 		// Go dials a v4-mapped address on an IPv4 socket, so the client is python's
-		client := exec.Command(cmd.Path, "-I", "-c", `import socket, sys
+		probe := `import socket, sys
 s = socket.socket(socket.AF_INET6)
 s.settimeout(10)
 s.connect(("::ffff:127.0.0.1", int(sys.argv[1])))
 s.sendall(b"ping")
-print(s.recv(4).decode())`, port)
+print(s.recv(4).decode())`
+		client := exec.Command(cmd.Path, "-I", "-c", probe, port) // #nosec G204 -- python3 found by startRelay
 		out, err := client.CombinedOutput()
 		require.NoError(t, err, "%s", out)
 		assert.Equal(t, "ping", strings.TrimSpace(string(out)), "relay log: %s", stderr)
