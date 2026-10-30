@@ -101,6 +101,45 @@ type RetrievedPodData struct {
 	JobScript string `json:"jobScript,omitempty"`
 }
 
+// PodSetsCreateRequests represents a request to create the pods of one group in a single call,
+// so that the plugin can run them as one job. The pods are grouped by PodSet; their order,
+// PodSet after PodSet, gives their ranks, and rank 0 is the head.
+type PodSetsCreateRequests struct {
+	// GroupUID identifies the group (the Workload UID), and is also the value of the
+	// pod-group label set on its pods
+	GroupUID string `json:"groupUID"`
+	// PodSets contains the PodSets of the group, in rank order
+	PodSets []PodSetCreateRequests `json:"podSets"`
+}
+
+// PodSetCreateRequests represents one PodSet of a group to create.
+// Each pod carries its own ConfigMaps, Secrets and projected volumes, because projected
+// and downward API files differ from pod to pod (pod name, UID, rank annotations).
+type PodSetCreateRequests struct {
+	// Name is the name of the PodSet
+	Name string `json:"name"`
+	// Pods contains the pods of the PodSet, each as it is sent to /create
+	Pods []PodCreateRequests `json:"pods"`
+}
+
+// RetrievedPodSetsData represents the pods of one group with all their associated data.
+// It is what interLink sends to the plugin's /createPodSets: each pod is prepared as for
+// /create, and the order of the pods is the one of the PodSetsCreateRequests.
+type RetrievedPodSetsData struct {
+	// GroupUID identifies the group, as in PodSetsCreateRequests
+	GroupUID string `json:"groupUID"`
+	// PodSets contains the PodSets of the group, in rank order
+	PodSets []RetrievedPodSetData `json:"podSets"`
+}
+
+// RetrievedPodSetData represents one PodSet of a group with the data of its pods.
+type RetrievedPodSetData struct {
+	// Name is the name of the PodSet
+	Name string `json:"name"`
+	// Pods contains the pods of the PodSet, each as it is sent to the plugin's /create
+	Pods []RetrievedPodData `json:"pods"`
+}
+
 // ContainerLogOpts specifies options for retrieving container logs from sidecar plugins.
 // These options control how logs are fetched, filtered, and formatted, matching
 // Kubernetes' standard log retrieval parameters.
