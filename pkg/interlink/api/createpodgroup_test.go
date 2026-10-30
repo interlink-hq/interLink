@@ -21,16 +21,14 @@ import (
 )
 
 const (
-	testGroupUID          = "0b7c6f6e-5c1d-4d6a-9f3e-2a1b0c9d8e7f"
-	testPodSetsSession    = "Request-podsets-123"
-	testPodSetLauncher    = "launcher"
-	testPodSetWorker      = "worker"
-	testMainContainer     = "main"
-	testSidecarContainer  = "sidecar"
-	testConfigMapName     = "settings"
-	testSecretName        = "creds"
-	testProjectedVolume   = "token"
-	testCreatePodSetsPath = "/createPodSets"
+	testGroupUID           = "0b7c6f6e-5c1d-4d6a-9f3e-2a1b0c9d8e7f"
+	testPodGroupSession    = "Request-podgroup-123"
+	testMainContainer      = "main"
+	testSidecarContainer   = "sidecar"
+	testConfigMapName      = "settings"
+	testSecretName         = "creds"
+	testProjectedVolume    = "token"
+	testCreatePodGroupPath = "/createPodGroup"
 )
 
 // sidecarCall is what the fake sidecar received in one call.
@@ -38,12 +36,12 @@ type sidecarCall struct {
 	path    string
 	session string
 	token   string
-	body    types.RetrievedPodSetsData
+	body    types.RetrievedPodGroupData
 }
 
-// newPodSetsSidecar starts a fake sidecar that records every call and answers each one
+// newPodGroupSidecar starts a fake sidecar that records every call and answers each one
 // with statusCode and answer, and returns an InterLinkHandler pointed at it.
-func newPodSetsSidecar(t *testing.T, statusCode int, answer string) (*InterLinkHandler, chan sidecarCall) {
+func newPodGroupSidecar(t *testing.T, statusCode int, answer string) (*InterLinkHandler, chan sidecarCall) {
 	t.Helper()
 	calls := make(chan sidecarCall, 4)
 	sidecar := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -66,10 +64,10 @@ func newPodSetsSidecar(t *testing.T, statusCode int, answer string) (*InterLinkH
 	return handler, calls
 }
 
-// podSetPod returns a pod of the test group with two containers: the main one mounts
+// podGroupPod returns a pod of the test group with two containers: the main one mounts
 // the ConfigMap and the projected volume, the sidecar one mounts the Secret only. The
 // projected volume holds the pod name, as downward API files do.
-func podSetPod(name string) types.PodCreateRequests {
+func podGroupPod(name string) types.PodCreateRequests {
 	return types.PodCreateRequests{
 		Pod: v1.Pod{
 			ObjectMeta: metav1.ObjectMeta{
@@ -100,65 +98,47 @@ func podSetPod(name string) types.PodCreateRequests {
 	}
 }
 
-// podSetsRequest returns a POST /createPodSets of the test group: a launcher PodSet with
-// one pod and a worker PodSet with two.
-func podSetsRequest(t *testing.T, mutate func(*types.PodCreateRequests)) *http.Request {
+// podGroupRequest returns a POST /createPodGroup of the test group: a launcher pod and two
+// workers, in rank order.
+func podGroupRequest(t *testing.T, mutate func(*types.PodCreateRequests)) *http.Request {
 	t.Helper()
-	request := types.PodSetsCreateRequests{
+	request := types.PodGroupCreateRequests{
 		GroupUID: testGroupUID,
-		PodSets: []types.PodSetCreateRequests{
-			{Name: testPodSetLauncher, Pods: []types.PodCreateRequests{podSetPod("launcher-0")}},
-			{Name: testPodSetWorker, Pods: []types.PodCreateRequests{podSetPod("worker-0"), podSetPod("worker-1")}},
-		},
+		Pods:     []types.PodCreateRequests{podGroupPod("launcher-0"), podGroupPod("worker-0"), podGroupPod("worker-1")},
 	}
 	if mutate != nil {
-		for i := range request.PodSets {
-			for j := range request.PodSets[i].Pods {
-				mutate(&request.PodSets[i].Pods[j])
-			}
+		for i := range request.Pods {
+			mutate(&request.Pods[i])
 		}
 	}
 	body, err := json.Marshal(request)
 	require.NoError(t, err)
 
-	r := httptest.NewRequest(http.MethodPost, testCreatePodSetsPath, bytes.NewReader(body))
-	r.Header.Set("InterLink-Http-Session", testPodSetsSession)
+	r := httptest.NewRequest(http.MethodPost, testCreatePodGroupPath, bytes.NewReader(body))
+	r.Header.Set("InterLink-Http-Session", testPodGroupSession)
 	return r
 }
 
-// groupPods flattens the PodSets the sidecar received, in their order.
-func groupPods(data types.RetrievedPodSetsData) []types.RetrievedPodData {
-	var pods []types.RetrievedPodData
-	for _, podSet := range data.PodSets {
-		pods = append(pods, podSet.Pods...)
-	}
-	return pods
-}
-
-func TestCreatePodSetsHandler_ForwardsGroup(t *testing.T) {
+func TestCreatePodGroupHandler_ForwardsGroup(t *testing.T) {
 	_, cleanup := setupTestTracer()
 	defer cleanup()
 
 	answer := `[{"PodUID":"uid-launcher-0","PodJID":"42"},{"PodUID":"uid-worker-0","PodJID":"42"},{"PodUID":"uid-worker-1","PodJID":"42"}]`
-	handler, calls := newPodSetsSidecar(t, http.StatusOK, answer)
+	handler, calls := newPodGroupSidecar(t, http.StatusOK, answer)
 
 	w := httptest.NewRecorder()
-	handler.CreatePodSetsHandler(w, podSetsRequest(t, nil))
+	handler.CreatePodGroupHandler(w, podGroupRequest(t, nil))
 
 	assert.Equal(t, http.StatusOK, w.Code)
 	assert.Equal(t, answer, w.Body.String())
 
 	require.Len(t, calls, 1)
 	call := <-calls
-	assert.Equal(t, testCreatePodSetsPath, call.path)
-	assert.Equal(t, testPodSetsSession, call.session)
+	assert.Equal(t, testCreatePodGroupPath, call.path)
+	assert.Equal(t, testPodGroupSession, call.session)
 	assert.Equal(t, testGroupUID, call.body.GroupUID)
 
-	require.Len(t, call.body.PodSets, 2)
-	assert.Equal(t, testPodSetLauncher, call.body.PodSets[0].Name)
-	assert.Equal(t, testPodSetWorker, call.body.PodSets[1].Name)
-
-	pods := groupPods(call.body)
+	pods := call.body.Pods
 	require.Len(t, pods, 3)
 	for i, name := range []string{"launcher-0", "worker-0", "worker-1"} {
 		pod := pods[i]
@@ -181,7 +161,7 @@ func TestCreatePodSetsHandler_ForwardsGroup(t *testing.T) {
 	}
 }
 
-func TestCreatePodSetsHandler_RelaysSidecarErrors(t *testing.T) {
+func TestCreatePodGroupHandler_RelaysSidecarErrors(t *testing.T) {
 	_, cleanup := setupTestTracer()
 	defer cleanup()
 
@@ -204,10 +184,10 @@ func TestCreatePodSetsHandler_RelaysSidecarErrors(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			handler, calls := newPodSetsSidecar(t, tt.statusCode, tt.answer)
+			handler, calls := newPodGroupSidecar(t, tt.statusCode, tt.answer)
 
 			w := httptest.NewRecorder()
-			handler.CreatePodSetsHandler(w, podSetsRequest(t, nil))
+			handler.CreatePodGroupHandler(w, podGroupRequest(t, nil))
 
 			assert.Equal(t, tt.statusCode, w.Code)
 			assert.Contains(t, w.Body.String(), tt.answer)
@@ -216,7 +196,7 @@ func TestCreatePodSetsHandler_RelaysSidecarErrors(t *testing.T) {
 	}
 }
 
-func TestCreatePodSetsHandler_RefusesBadRequests(t *testing.T) {
+func TestCreatePodGroupHandler_RefusesBadRequests(t *testing.T) {
 	_, cleanup := setupTestTracer()
 	defer cleanup()
 
@@ -229,22 +209,22 @@ func TestCreatePodSetsHandler_RefusesBadRequests(t *testing.T) {
 			body: `{"groupUID":`,
 		},
 		{
-			name: "no PodSets",
+			name: "no pods",
 			body: `{"groupUID":"` + testGroupUID + `"}`,
 		},
 		{
-			name: "PodSets without pods",
-			body: `{"groupUID":"` + testGroupUID + `","podSets":[{"name":"worker","pods":[]}]}`,
+			name: "empty pods",
+			body: `{"groupUID":"` + testGroupUID + `","pods":[]}`,
 		},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			handler, calls := newPodSetsSidecar(t, http.StatusOK, "[]")
+			handler, calls := newPodGroupSidecar(t, http.StatusOK, "[]")
 
-			r := httptest.NewRequest(http.MethodPost, testCreatePodSetsPath, bytes.NewBufferString(tt.body))
+			r := httptest.NewRequest(http.MethodPost, testCreatePodGroupPath, bytes.NewBufferString(tt.body))
 			w := httptest.NewRecorder()
-			handler.CreatePodSetsHandler(w, r)
+			handler.CreatePodGroupHandler(w, r)
 
 			assert.Equal(t, http.StatusBadRequest, w.Code)
 			assert.NotEmpty(t, w.Body.String())
@@ -253,27 +233,27 @@ func TestCreatePodSetsHandler_RefusesBadRequests(t *testing.T) {
 	}
 }
 
-func TestCreatePodSetsHandler_JobScriptTemplate(t *testing.T) {
+func TestCreatePodGroupHandler_JobScriptTemplate(t *testing.T) {
 	_, cleanup := setupTestTracer()
 	defer cleanup()
 
 	templatePath := filepath.Join(t.TempDir(), "job.sh.tmpl")
 	require.NoError(t, os.WriteFile(templatePath, []byte("run {{.Pod.Name}}"), 0o600))
 
-	handler, calls := newPodSetsSidecar(t, http.StatusOK, "[]")
+	handler, calls := newPodGroupSidecar(t, http.StatusOK, "[]")
 	handler.Config.JobScriptTemplate = templatePath
 
 	w := httptest.NewRecorder()
-	handler.CreatePodSetsHandler(w, podSetsRequest(t, nil))
+	handler.CreatePodGroupHandler(w, podGroupRequest(t, nil))
 
 	assert.Equal(t, http.StatusOK, w.Code)
 	require.Len(t, calls, 1)
-	for _, pod := range groupPods((<-calls).body) {
+	for _, pod := range (<-calls).body.Pods {
 		assert.Equal(t, "run "+pod.Pod.Name, pod.JobScript)
 	}
 }
 
-func TestCreatePodSetsHandler_JobScriptBuilder(t *testing.T) {
+func TestCreatePodGroupHandler_JobScriptBuilder(t *testing.T) {
 	_, cleanup := setupTestTracer()
 	defer cleanup()
 
@@ -299,7 +279,7 @@ func TestCreatePodSetsHandler_JobScriptBuilder(t *testing.T) {
 			builder := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 				var data types.RetrievedPodData
 				assert.NoError(t, json.NewDecoder(r.Body).Decode(&data))
-				assert.Equal(t, testPodSetsSession, r.Header.Get("InterLink-Http-Session"))
+				assert.Equal(t, testPodGroupSession, r.Header.Get("InterLink-Http-Session"))
 
 				w.WriteHeader(tt.builderStatus)
 				if _, err := io.WriteString(w, "built for "+data.Pod.Name); err != nil {
@@ -308,11 +288,11 @@ func TestCreatePodSetsHandler_JobScriptBuilder(t *testing.T) {
 			}))
 			defer builder.Close()
 
-			handler, calls := newPodSetsSidecar(t, http.StatusOK, "[]")
+			handler, calls := newPodGroupSidecar(t, http.StatusOK, "[]")
 			handler.Config.JobScriptBuildConfig = &types.ScriptBuildConfig{}
 
 			w := httptest.NewRecorder()
-			handler.CreatePodSetsHandler(w, podSetsRequest(t, func(pod *types.PodCreateRequests) {
+			handler.CreatePodGroupHandler(w, podGroupRequest(t, func(pod *types.PodCreateRequests) {
 				pod.JobScriptBuilderURL = builder.URL
 			}))
 
@@ -323,7 +303,7 @@ func TestCreatePodSetsHandler_JobScriptBuilder(t *testing.T) {
 				return
 			}
 			require.Len(t, calls, 1)
-			for _, pod := range groupPods((<-calls).body) {
+			for _, pod := range (<-calls).body.Pods {
 				assert.Equal(t, "built for "+pod.Pod.Name, pod.JobScript)
 			}
 		})
@@ -332,7 +312,7 @@ func TestCreatePodSetsHandler_JobScriptBuilder(t *testing.T) {
 
 // The caller's access token reaches the sidecar, as on /create, and never the job script
 // builder, whose URL comes from the pod spec.
-func TestCreatePodSetsHandler_ForwardsAccessTokenToSidecarOnly(t *testing.T) {
+func TestCreatePodGroupHandler_ForwardsAccessTokenToSidecarOnly(t *testing.T) {
 	_, cleanup := setupTestTracer()
 	defer cleanup()
 
@@ -345,15 +325,15 @@ func TestCreatePodSetsHandler_ForwardsAccessTokenToSidecarOnly(t *testing.T) {
 	}))
 	defer builder.Close()
 
-	handler, calls := newPodSetsSidecar(t, http.StatusOK, "[]")
+	handler, calls := newPodGroupSidecar(t, http.StatusOK, "[]")
 	handler.Config.JobScriptBuildConfig = &types.ScriptBuildConfig{}
 
-	r := podSetsRequest(t, func(pod *types.PodCreateRequests) {
+	r := podGroupRequest(t, func(pod *types.PodCreateRequests) {
 		pod.JobScriptBuilderURL = builder.URL
 	})
 	r.Header.Set(accessTokenHeader, testAccessToken)
 	w := httptest.NewRecorder()
-	handler.CreatePodSetsHandler(w, r)
+	handler.CreatePodGroupHandler(w, r)
 
 	assert.Equal(t, http.StatusOK, w.Code)
 	require.Len(t, calls, 1)

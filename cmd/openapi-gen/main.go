@@ -38,16 +38,16 @@ func main() {
 		panic(err)
 	}
 
-	// CREATE PODSETS
-	createPodSetsOp, err := reflector.NewOperationContext(http.MethodPost, "/createPodSets")
+	// CREATE POD GROUP
+	createPodGroupOp, err := reflector.NewOperationContext(http.MethodPost, "/createPodGroup")
 	if err != nil {
 		panic(err)
 	}
 
-	createPodSetsOp.AddReqStructure(new(interlink.PodSetsCreateRequests))
-	createPodSetsOp.AddRespStructure(new([]interlink.CreateStruct), func(cu *openapi.ContentUnit) { cu.HTTPStatus = http.StatusOK })
+	createPodGroupOp.AddReqStructure(new(interlink.PodGroupCreateRequests))
+	createPodGroupOp.AddRespStructure(new([]interlink.CreateStruct), func(cu *openapi.ContentUnit) { cu.HTTPStatus = http.StatusOK })
 
-	err = reflector.AddOperation(createPodSetsOp)
+	err = reflector.AddOperation(createPodGroupOp)
 	if err != nil {
 		panic(err)
 	}

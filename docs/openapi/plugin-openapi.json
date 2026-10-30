@@ -44,15 +44,15 @@
         }
       }
     },
-    "/createPodSets": {
+    "/createPodGroup": {
       "post": {
-        "summary": "Create Pod Sets",
-        "operationId": "create_pod_sets_createPodSets_post",
+        "summary": "Create Pod Group",
+        "operationId": "create_pod_group_createPodGroup_post",
         "requestBody": {
           "content": {
             "application/json": {
               "schema": {
-                "$ref": "#/components/schemas/RetrievedPodSetsData"
+                "$ref": "#/components/schemas/RetrievedPodGroupData"
               }
             }
           },
@@ -68,7 +68,7 @@
                     "$ref": "#/components/schemas/CreateStruct"
                   },
                   "type": "array",
-                  "title": "Response Create Pod Sets Createpodsets Post"
+                  "title": "Response Create Pod Group Createpodgroup Post"
                 }
               }
             }
@@ -1026,11 +1026,11 @@
         ],
         "title": "PodVolume"
       },
-      "RetrievedPodSetData": {
+      "RetrievedPodGroupData": {
         "properties": {
-          "name": {
+          "groupUID": {
             "type": "string",
-            "title": "Name"
+            "title": "Group Uid"
           },
           "pods": {
             "items": {
@@ -1042,31 +1042,10 @@
         },
         "type": "object",
         "required": [
-          "name",
+          "groupUID",
           "pods"
         ],
-        "title": "RetrievedPodSetData"
-      },
-      "RetrievedPodSetsData": {
-        "properties": {
-          "groupUID": {
-            "type": "string",
-            "title": "Group Uid"
-          },
-          "podSets": {
-            "items": {
-              "$ref": "#/components/schemas/RetrievedPodSetData"
-            },
-            "type": "array",
-            "title": "Pod Sets"
-          }
-        },
-        "type": "object",
-        "required": [
-          "groupUID",
-          "podSets"
-        ],
-        "title": "RetrievedPodSetsData"
+        "title": "RetrievedPodGroupData"
       },
       "Secret": {
         "properties": {
