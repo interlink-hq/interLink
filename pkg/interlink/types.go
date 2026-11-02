@@ -48,6 +48,10 @@ type PodStatus struct {
 	// while the job is still queued, and empty for plugins that do not track it.
 	// interLink uses it to point per-pod shadow tunnels at the right host.
 	NodeName string `json:"nodeName,omitempty"`
+	// SocketDir is an absolute directory on the compute node, private to the pod's
+	// job, for the shadow's unix sockets. It is empty while the job is queued, and
+	// empty when the plugin has none. interLink publishes it next to NodeName.
+	SocketDir string `json:"socketDir,omitempty"`
 	// Containers holds the status of all regular containers in the pod
 	Containers []v1.ContainerStatus `json:"containers"`
 	// InitContainers holds the status of all init containers in the pod

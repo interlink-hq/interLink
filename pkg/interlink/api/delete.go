@@ -88,6 +88,7 @@ func (h *InterLinkHandler) DeleteHandler(w http.ResponseWriter, r *http.Request)
 
 	req.Header.Set("Content-Type", "application/json")
 	log.G(h.Ctx).Info("InterLink: forwarding Delete call to sidecar")
+	ForwardAccessToken(r, req)
 	_, err = ReqWithError(ctx, req, w, start, span, true, false, sessionContext, h.ClientHTTP)
 	if err != nil {
 		// ReqWithError has already marked the span as failed.

@@ -177,6 +177,7 @@ func main() {
 		Transport: &UnixSocketRoundTripper{
 			Transport: transport,
 		},
+		CheckRedirect: api.DropAccessTokenOnRedirect,
 	}
 
 	interLinkAPIs := api.InterLinkHandler{

@@ -9,11 +9,13 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
+	"hash/fnv"
 	"io"
 	mathrand "math/rand"
 	"net"
 	"net/http"
 	"os"
+	"slices"
 	"strconv"
 	"strings"
 	"sync"
@@ -38,13 +40,14 @@ import (
 	"k8s.io/client-go/kubernetes"
 	"k8s.io/client-go/kubernetes/scheme"
 	"k8s.io/client-go/tools/clientcmd"
+	"k8s.io/client-go/util/retry"
 	stats "k8s.io/kubelet/pkg/apis/stats/v1alpha1"
 
 	types "github.com/interlink-hq/interlink/pkg/interlink"
 	k8stypes "k8s.io/apimachinery/pkg/types"
 )
 
-//go:embed templates/wstunnel-template.yaml templates/wstunnel-wireguard-template.yaml templates/shadow-ssh-template.yaml
+//go:embed templates/wstunnel-template.yaml templates/wstunnel-wireguard-template.yaml templates/shadow-ssh-template.yaml templates/shadow-kept-template.yaml
 var defaultShadowTemplates embed.FS
 
 //go:embed all:templates/mesh.sh
@@ -100,6 +103,9 @@ const (
 	annDisableOffloadContainers     = "interlink.eu/disable-offload-containers"      // comma-separated container names
 	annDisableOffloadInitContainers = "interlink.eu/disable-offload-init-containers" // comma-separated init container names
 	annMeshNetworkDisabled          = "interlink.eu/mesh-network"                    // set to "disabled" to opt out of mesh networking
+	annShadowSocketPorts            = "interlink.eu/shadow-socket-ports"             // comma-separated exposed TCP ports served on unix sockets
+	shadowOwnerUIDLabel             = "interlink.eu/shadow-owner-uid"
+	shadowOwnerPodAnnotation        = "interlink.eu/shadow-owner-pod" // namespace/name of the pod in shadowOwnerUIDLabel
 )
 
 type ShadowTemplateData struct {
@@ -121,23 +127,46 @@ type ShadowTemplateData struct {
 	IngressTLS           bool
 	IngressClusterIssuer string
 	FullMesh             bool
+	// KeptOnly marks a shadow that only runs the containers the pod keeps on the
+	// cluster: no tunnel, no mesh, no Service.
+	KeptOnly bool
+	// PauseImage keeps a KeptOnly shadow running once its init containers have ended,
+	// in a container named PauseName, a name no kept init container uses.
+	PauseImage string
+	PauseName  string
+	// OwnerUID and OwnerPod are stamped on every shadow resource (see
+	// shadowResourceIdentity).
+	OwnerUID string
+	OwnerPod string
 	// NodeConfigMap is the ConfigMap the shadow can mount to learn which remote
 	// compute node the workload landed on. It exists from the moment the shadow is
 	// created but holds an empty NodeNameKey until the plugin reports the node.
 	NodeConfigMap string
 	// NodeNameKey is the key inside NodeConfigMap holding the node name.
 	NodeNameKey string
+	// SocketDirKey is the key inside NodeConfigMap holding the socket directory the
+	// job created on the compute node.
+	SocketDirKey string
+	// NeedsSocketDir is true when the shadow cannot start without a socket
+	// directory, because at least one exposed port is a unix socket.
+	NeedsSocketDir bool
 	// SSH carries the SSH port-forward settings, used by the ssh shadow template.
 	SSH SSHTunnel
 	// SSHNodeWaitSeconds is SSH.NodeWaitTimeout in whole seconds, for the shell loop
 	// that waits on NodeConfigMap.
 	SSHNodeWaitSeconds int
+	// PodUID is the UID of the pod the shadow stands for, put on the shadow's pods as
+	// shadowOfLabel.
+	PodUID string
 }
 
 type PortMapping struct {
 	Port     int32
 	Name     string
 	Protocol string
+	// Socket marks a port the workload serves on <socket dir>/fwd-<port>.sock
+	// instead of 127.0.0.1:<port> (interlink.eu/shadow-socket-ports).
+	Socket bool
 }
 
 type MeshScriptTemplateData struct {
@@ -174,12 +203,19 @@ type Provider struct {
 	clientSet            kubernetes.Interface
 	clientHTTPTransport  *http.Transport
 	podIPs               []string
-	// shadowNodeNames caches, per pod UID, the last compute node published to
-	// that pod's shadow, so the status loop only writes on change.
+	// shadowNodeNames caches, per pod UID, the last compute node and socket
+	// directory published to that pod's shadow, so the status loop only writes on
+	// change.
 	shadowNodeNames sync.Map
 	// shadowsReleased marks, per pod UID, shadows already removed because their
 	// pod ended, so the status loop removes each one once.
-	shadowsReleased  sync.Map
+	shadowsReleased sync.Map
+	// keptInitWaits holds, per pod UID, the cancel function of a pending wait for the
+	// pod's kept init containers (see stopKeptInitWait).
+	keptInitWaits sync.Map
+	// shadowLocks serialise applying a shadow's manifests and cleaning them up, per
+	// shadow name (see lockShadow).
+	shadowLocks      [64]sync.Mutex
 	pendingDeletes   map[string]*pendingDelete
 	pendingDeletesMu sync.Mutex
 	deleteLoopOnce   sync.Once
@@ -382,6 +418,10 @@ func NodeConditionWithInterlink(ready bool, interlinkStatus v1.ConditionStatus, 
 	return append(conditions, interlinkCondition)
 }
 
+// defaultEphemeralStorage is advertised when Resources.EphemeralStorage is not set: the
+// remote side has its own disks, so the node only must not refuse pods that ask for some.
+const defaultEphemeralStorage = "1Ti"
+
 func GetResources(config Config) v1.ResourceList {
 	gpuCount := map[string]resource.Quantity{}
 	fpgaCount := map[string]resource.Quantity{}
@@ -401,10 +441,15 @@ func GetResources(config Config) v1.ResourceList {
 		}
 	}
 
+	ephemeralStorage := config.Resources.EphemeralStorage
+	if ephemeralStorage == "" {
+		ephemeralStorage = defaultEphemeralStorage
+	}
 	resourceList := v1.ResourceList{
-		"cpu":    resource.MustParse(config.Resources.CPU),
-		"memory": resource.MustParse(config.Resources.Memory),
-		"pods":   resource.MustParse(config.Resources.Pods),
+		"cpu":                       resource.MustParse(config.Resources.CPU),
+		"memory":                    resource.MustParse(config.Resources.Memory),
+		"pods":                      resource.MustParse(config.Resources.Pods),
+		v1.ResourceEphemeralStorage: resource.MustParse(ephemeralStorage),
 	}
 
 	for resourceType, q := range gpuCount {
@@ -649,6 +694,11 @@ func LoadConfig(ctx context.Context, providerConfig string) (config Config, err 
 	}
 	if _, err = resource.ParseQuantity(config.Resources.Pods); err != nil {
 		return config, fmt.Errorf("invalid pods value %v", config.Resources.Pods)
+	}
+	if config.Resources.EphemeralStorage != "" {
+		if _, err = resource.ParseQuantity(config.Resources.EphemeralStorage); err != nil {
+			return config, fmt.Errorf("invalid ephemeral storage value %v", config.Resources.EphemeralStorage)
+		}
 	}
 	for _, accelerator := range config.Resources.Accelerators {
 		if _, err = resource.ParseQuantity(accelerator.Available); err != nil {
@@ -1005,7 +1055,8 @@ func (p *Provider) createShadowPod(ctx context.Context, originalPod *v1.Pod) (*v
 		return nil, nil, err
 	}
 
-	if p.isSSHShadow() {
+	keptOnly := !p.hasTunnelShadow(originalPod)
+	if p.isSSHShadow() && !keptOnly {
 		if err := p.replicateShadowCredentials(ctx, identity); err != nil {
 			return nil, nil, err
 		}
@@ -1017,23 +1068,33 @@ func (p *Provider) createShadowPod(ctx context.Context, originalPod *v1.Pod) (*v
 	podLabels, podAnnotations := copyPodLabelsAndAnnotations(originalPod)
 	log.G(ctx).Infof("Copied %d labels and %d annotations from original pod to shadow pod", len(podLabels), len(podAnnotations))
 
+	exposedPorts := shadowPortMappings(originalPod)
+
 	fullMeshEnabledForPod := p.config.Network.FullMesh && !isMeshNetworkingDisabled(originalPod)
 	templateData := ShadowTemplateData{
 		Name:                 identity.Name,
 		Namespace:            identity.Namespace,
 		RandomPassword:       pathPrefix,
-		ExposedPorts:         extractPortMappings(originalPod),
+		ExposedPorts:         exposedPorts,
 		WildcardDNS:          p.config.Network.WildcardDNS,
 		LocalContainers:      localContainers,
 		LocalInitContainers:  localInitContainers,
 		Volumes:              extractVolumesForLocalContainers(originalPod),
 		PodLabels:            podLabels,
 		PodAnnotations:       podAnnotations,
+		PodUID:               string(originalPod.UID),
 		IngressTLS:           p.config.Network.IngressTLS,
 		IngressClusterIssuer: p.config.Network.IngressClusterIssuer,
 		FullMesh:             fullMeshEnabledForPod,
+		KeptOnly:             keptOnly,
+		PauseImage:           p.shadowPauseImage(),
+		PauseName:            shadowPauseName(localInitContainers),
+		OwnerUID:             identity.OwnerUID,
+		OwnerPod:             identity.ownerPod(),
 		NodeConfigMap:        shadowNodeConfigMapName(identity.Name),
 		NodeNameKey:          shadowNodeNameKey,
+		SocketDirKey:         shadowSocketDirKey,
+		NeedsSocketDir:       hasSocketPorts(exposedPorts),
 		SSH:                  p.config.Network.SSH,
 		SSHNodeWaitSeconds:   p.sshNodeWaitSeconds(),
 	}
@@ -1144,8 +1205,14 @@ func mergeMaps(dst, src map[string]string) map[string]string {
 func (p *Provider) executeShadowTemplate(ctx context.Context, data ShadowTemplateData) (string, error) {
 	var templateContent string
 
-	// Try to load from custom path first
-	if p.config.Network.WstunnelTemplatePath != "" {
+	// A custom template describes a tunnel, which a KeptOnly shadow does not have.
+	if data.KeptOnly {
+		content, err := defaultShadowTemplates.ReadFile("templates/shadow-kept-template.yaml")
+		if err != nil {
+			return "", fmt.Errorf("failed to read embedded template: %w", err)
+		}
+		templateContent = string(content)
+	} else if p.config.Network.WstunnelTemplatePath != "" {
 		content, err := os.ReadFile(p.config.Network.WstunnelTemplatePath)
 		if err != nil {
 			log.G(ctx).Warningf("Failed to read custom template from %s: %v, using default", p.config.Network.WstunnelTemplatePath, err)
@@ -1237,6 +1304,8 @@ func (p *Provider) applyOrUpdateDeployment(ctx context.Context, o *appsv1.Deploy
 		}
 		o.Spec.Template.Labels = mergeMaps(o.Spec.Template.Labels, td.PodLabels)
 		o.Spec.Template.Annotations = mergeMaps(o.Spec.Template.Annotations, td.PodAnnotations)
+		// Set here rather than in the templates, so that a custom template carries it too.
+		o.Spec.Template.Labels[shadowOfLabel] = td.PodUID
 		log.G(ctx).Infof("Shadow pod will inherit %d labels and %d annotations from original pod",
 			len(td.PodLabels), len(td.PodAnnotations))
 	}
@@ -1362,6 +1431,28 @@ func (p *Provider) applyOrUpdateSecret(ctx context.Context, o *v1.Secret) error 
 
 // applyShadowManifests applies the generated manifests and returns the first created pod
 func (p *Provider) applyShadowManifests(ctx context.Context, manifestYAML string, td *ShadowTemplateData) (*v1.Pod, error) {
+	deploymentName, namespace, err := p.applyShadowObjects(ctx, manifestYAML, td)
+	if err != nil {
+		return nil, err
+	}
+	if deploymentName != "" {
+		podUID := ""
+		if td != nil {
+			podUID = td.PodUID
+		}
+		return p.waitForDeploymentPod(ctx, deploymentName, namespace, podUID)
+	}
+
+	return nil, fmt.Errorf("no deployment found in manifests")
+}
+
+// applyShadowObjects creates or updates the objects of the shadow manifests and returns
+// the name and namespace of its Deployment. It holds the shadow's lock meanwhile, so the
+// cleanup of a deleted pod with the same name never runs in between.
+func (p *Provider) applyShadowObjects(ctx context.Context, manifestYAML string, td *ShadowTemplateData) (string, string, error) {
+	if td != nil {
+		defer p.lockShadow(td.Namespace, td.Name)()
+	}
 	resources := strings.Split(manifestYAML, "---")
 	decoder := serializer.NewCodecFactory(scheme.Scheme).UniversalDeserializer()
 	var deploymentName string
@@ -1379,13 +1470,16 @@ func (p *Provider) applyShadowManifests(ctx context.Context, manifestYAML string
 			log.G(ctx).Warningf("Failed to decode resource: %v", err)
 			continue
 		}
+		if meta, ok := obj.(metav1.Object); ok && td != nil {
+			stampShadowOwner(meta, td.OwnerUID, td.OwnerPod)
+		}
 
 		switch o := obj.(type) {
 		case *appsv1.Deployment:
 			name, ns, err := p.applyOrUpdateDeployment(ctx, o, td)
 			if err != nil {
 				p.cleanupPartialShadowResources(ctx, createdResources, o.Namespace)
-				return nil, err
+				return "", "", err
 			}
 			deploymentName = name
 			namespace = ns
@@ -1394,28 +1488,28 @@ func (p *Provider) applyShadowManifests(ctx context.Context, manifestYAML string
 		case *v1.Service:
 			if err := p.applyOrUpdateService(ctx, o); err != nil {
 				p.cleanupPartialShadowResources(ctx, createdResources, o.Namespace)
-				return nil, err
+				return "", "", err
 			}
 			createdResources = append(createdResources, "service:"+o.Name)
 
 		case *networkingv1.Ingress:
 			if err := p.applyOrUpdateIngress(ctx, o); err != nil {
 				p.cleanupPartialShadowResources(ctx, createdResources, o.Namespace)
-				return nil, err
+				return "", "", err
 			}
 			createdResources = append(createdResources, "ingress:"+o.Name)
 
 		case *v1.ConfigMap:
 			if err := p.applyOrUpdateConfigMap(ctx, o); err != nil {
 				p.cleanupPartialShadowResources(ctx, createdResources, o.Namespace)
-				return nil, err
+				return "", "", err
 			}
 			createdResources = append(createdResources, "configmap:"+o.Name)
 
 		case *v1.Secret:
 			if err := p.applyOrUpdateSecret(ctx, o); err != nil {
 				p.cleanupPartialShadowResources(ctx, createdResources, o.Namespace)
-				return nil, err
+				return "", "", err
 			}
 			createdResources = append(createdResources, "secret:"+o.Name)
 
@@ -1424,20 +1518,18 @@ func (p *Provider) applyShadowManifests(ctx context.Context, manifestYAML string
 		}
 	}
 
-	if deploymentName != "" {
-		return p.waitForDeploymentPod(ctx, deploymentName, namespace)
-	}
-
-	return nil, fmt.Errorf("no deployment found in manifests")
+	return deploymentName, namespace, nil
 }
 
 // waitForDeploymentPod waits for a deployment to create a pod and returns it.
 //
 // A pod recreated under the same name (a StatefulSet replica) gets a Deployment with the
-// same name, labels and pod-template hash as the one just deleted, and the garbage
-// collector removes that one's pods asynchronously. Pods that are terminating, or older
-// than the current Deployment, belong to the previous one and are skipped.
-func (p *Provider) waitForDeploymentPod(ctx context.Context, deploymentName, namespace string) (*v1.Pod, error) {
+// same name and pod selector as the one just deleted, and the garbage collector
+// removes that one's pods asynchronously. Pods that are terminating, or older
+// than the current Deployment, belong to the previous one and are skipped. So are
+// pods labelled for another pod than podUID: when the recreated pod takes the
+// Deployment over in place, the previous pod's shadow pod is newer than it.
+func (p *Provider) waitForDeploymentPod(ctx context.Context, deploymentName, namespace, podUID string) (*v1.Pod, error) {
 	timeout := 30 * time.Second
 	start := time.Now()
 
@@ -1463,6 +1555,9 @@ func (p *Provider) waitForDeploymentPod(ctx context.Context, deploymentName, nam
 			if pod.DeletionTimestamp != nil || pod.CreationTimestamp.Before(&deployment.CreationTimestamp) {
 				continue
 			}
+			if !isShadowPodOf(pod, podUID) {
+				continue
+			}
 			return pod, nil
 		}
 
@@ -1472,61 +1567,119 @@ func (p *Provider) waitForDeploymentPod(ctx context.Context, deploymentName, nam
 	return nil, fmt.Errorf("no pod found for deployment %s within timeout", deploymentName)
 }
 
-// cleanupShadowResources removes all shadow resources for a given name and namespace
-func (p *Provider) cleanupShadowResources(ctx context.Context, shadowName, namespace string) {
+// cleanupShadowResources removes the shadow resources of the pod identity names. A
+// resource stamped with another pod's UID is left alone: it belongs to a pod recreated
+// under the same name, whose shadow can exist before this pod's cleanup runs. The
+// shadow's lock keeps that shadow from being applied while the cleanup runs.
+func (p *Provider) cleanupShadowResources(ctx context.Context, identity shadowResourceIdentity) {
+	shadowName, namespace := identity.Name, identity.Namespace
+	defer p.lockShadow(namespace, shadowName)()
 	log.G(ctx).Infof("Cleaning up shadow resources for %s/%s", namespace, shadowName)
 
-	// Delete deployment
-	err := p.clientSet.AppsV1().Deployments(namespace).Delete(ctx, shadowName, metav1.DeleteOptions{})
-	if err != nil {
-		log.G(ctx).Warningf("Failed to delete shadow deployment %s/%s: %v", namespace, shadowName, err)
-	} else {
-		log.G(ctx).Infof("Successfully deleted shadow deployment %s/%s", namespace, shadowName)
+	deployments := p.clientSet.AppsV1().Deployments(namespace)
+	p.deleteOwnedShadowResource(ctx, identity, "deployment", shadowName,
+		func(name string) (metav1.Object, error) { return deployments.Get(ctx, name, metav1.GetOptions{}) },
+		func(name string, opts metav1.DeleteOptions) error { return deployments.Delete(ctx, name, opts) })
+
+	services := p.clientSet.CoreV1().Services(namespace)
+	p.deleteOwnedShadowResource(ctx, identity, "service", shadowName,
+		func(name string) (metav1.Object, error) { return services.Get(ctx, name, metav1.GetOptions{}) },
+		func(name string, opts metav1.DeleteOptions) error { return services.Delete(ctx, name, opts) })
+
+	ingresses := p.clientSet.NetworkingV1().Ingresses(namespace)
+	ingressKept := p.deleteOwnedShadowResource(ctx, identity, "ingress", shadowName,
+		func(name string) (metav1.Object, error) { return ingresses.Get(ctx, name, metav1.GetOptions{}) },
+		func(name string, opts metav1.DeleteOptions) error { return ingresses.Delete(ctx, name, opts) })
+
+	configMaps := p.clientSet.CoreV1().ConfigMaps(namespace)
+	for _, name := range []string{shadowName + "-wg-config", shadowNodeConfigMapName(shadowName)} {
+		p.deleteOwnedShadowResource(ctx, identity, "configmap", name,
+			func(name string) (metav1.Object, error) { return configMaps.Get(ctx, name, metav1.GetOptions{}) },
+			func(name string, opts metav1.DeleteOptions) error { return configMaps.Delete(ctx, name, opts) })
 	}
 
-	// Delete service
-	err = p.clientSet.CoreV1().Services(namespace).Delete(ctx, shadowName, metav1.DeleteOptions{})
-	if err != nil {
-		log.G(ctx).Warningf("Failed to delete shadow service %s/%s: %v", namespace, shadowName, err)
-	} else {
-		log.G(ctx).Infof("Successfully deleted shadow service %s/%s", namespace, shadowName)
+	// Delete cert-manager-provisioned TLS secret. cert-manager creates it without the
+	// owner label, so it goes with its Ingress: kept when another pod's Ingress is.
+	if p.config.Network.IngressTLS && !ingressKept {
+		secrets := p.clientSet.CoreV1().Secrets(namespace)
+		p.deleteOwnedShadowResource(ctx, identity, "secret", shadowName+"-tls",
+			func(name string) (metav1.Object, error) { return secrets.Get(ctx, name, metav1.GetOptions{}) },
+			func(name string, opts metav1.DeleteOptions) error { return secrets.Delete(ctx, name, opts) })
 	}
+}
 
-	// Delete ingress
-	err = p.clientSet.NetworkingV1().Ingresses(namespace).Delete(ctx, shadowName, metav1.DeleteOptions{})
-	if err != nil {
-		log.G(ctx).Warningf("Failed to delete shadow ingress %s/%s: %v", namespace, shadowName, err)
-	} else {
-		log.G(ctx).Infof("Successfully deleted shadow ingress %s/%s", namespace, shadowName)
-	}
-
-	// Delete configmap
-	err = p.clientSet.CoreV1().ConfigMaps(namespace).Delete(ctx, shadowName+"-wg-config", metav1.DeleteOptions{})
-	if err != nil {
-		log.G(ctx).Warningf("Failed to delete shadow configmap %s/%s: %v", namespace, shadowName+"-wg-config", err)
-	} else {
-		log.G(ctx).Infof("Successfully deleted shadow configmap %s/%s", namespace, shadowName+"-wg-config")
-	}
-
-	// Delete the compute node configmap
-	nodeCM := shadowNodeConfigMapName(shadowName)
-	err = p.clientSet.CoreV1().ConfigMaps(namespace).Delete(ctx, nodeCM, metav1.DeleteOptions{})
-	if err != nil {
-		log.G(ctx).Warningf("Failed to delete shadow configmap %s/%s: %v", namespace, nodeCM, err)
-	} else {
-		log.G(ctx).Infof("Successfully deleted shadow configmap %s/%s", namespace, nodeCM)
-	}
-
-	// Delete cert-manager-provisioned TLS secret.
-	if p.config.Network.IngressTLS {
-		secretName := shadowName + "-tls"
-		err = p.clientSet.CoreV1().Secrets(namespace).Delete(ctx, secretName, metav1.DeleteOptions{})
+// deleteOwnedShadowResource deletes one shadow resource unless it is stamped with a
+// pod UID other than identity.OwnerUID, and reports whether it may still serve another
+// pod: kept for its owner, changed meanwhile, or left in place by an error. The delete
+// is conditional on the UID and resourceVersion that were read, so a replacement or an
+// in-place update for a recreated pod made in between is never removed: on a conflict
+// the resource is read again and the owner checked again. Unstamped resources (from
+// before the stamp existed) are deleted as before.
+func (p *Provider) deleteOwnedShadowResource(ctx context.Context, identity shadowResourceIdentity, kind, name string,
+	get func(string) (metav1.Object, error), del func(string, metav1.DeleteOptions) error) bool {
+	kept := false
+	err := retry.RetryOnConflict(retry.DefaultRetry, func() error {
+		obj, err := get(name)
 		if err != nil {
-			log.G(ctx).Warningf("Failed to delete shadow TLS secret %s/%s: %v", namespace, secretName, err)
-		} else {
-			log.G(ctx).Infof("Successfully deleted shadow TLS secret %s/%s", namespace, secretName)
+			return err
 		}
+		if owner := obj.GetLabels()[shadowOwnerUIDLabel]; owner != "" && identity.OwnerUID != "" && owner != identity.OwnerUID &&
+			p.ownerIsCurrentPod(ctx, identity, obj) {
+			log.G(ctx).Infof("Keeping shadow %s %s/%s: it belongs to pod UID %s, not %s", kind, identity.Namespace, name, owner, identity.OwnerUID)
+			kept = true
+			return nil
+		}
+		uid, resourceVersion := obj.GetUID(), obj.GetResourceVersion()
+		return del(name, metav1.DeleteOptions{Preconditions: &metav1.Preconditions{UID: &uid, ResourceVersion: &resourceVersion}})
+	})
+	switch {
+	case err == nil:
+		if !kept {
+			log.G(ctx).Infof("Successfully deleted shadow %s %s/%s", kind, identity.Namespace, name)
+		}
+	case apierrors.IsConflict(err):
+		log.G(ctx).Warningf("Keeping shadow %s %s/%s: it kept changing while being deleted", kind, identity.Namespace, name)
+		kept = true
+	case !apierrors.IsNotFound(err):
+		// Its owner is unknown, so it may serve another pod.
+		log.G(ctx).Warningf("Failed to delete shadow %s %s/%s: %v", kind, identity.Namespace, name, err)
+		kept = true
 	}
+	return kept
+}
+
+// lockShadow locks the shadow named name in namespace and returns the unlock function.
+// The lock is one of a fixed set, chosen by name, so it is shared with unrelated shadows
+// now and then; it only orders a cleanup and an apply within this virtual kubelet.
+func (p *Provider) lockShadow(namespace, name string) func() {
+	h := fnv.New32a()
+	_, _ = h.Write([]byte(namespace + "/" + name))
+	mu := &p.shadowLocks[h.Sum32()%uint32(len(p.shadowLocks))]
+	mu.Lock()
+	return mu.Unlock
+}
+
+// stampShadowOwner labels a shadow resource with the UID of the pod it serves and
+// annotates it with that pod's namespace/name.
+func stampShadowOwner(obj metav1.Object, ownerUID, ownerPod string) {
+	if ownerUID == "" {
+		return
+	}
+	labels := obj.GetLabels()
+	if labels == nil {
+		labels = map[string]string{}
+	}
+	labels[shadowOwnerUIDLabel] = ownerUID
+	obj.SetLabels(labels)
+	if ownerPod == "" {
+		return
+	}
+	annotations := obj.GetAnnotations()
+	if annotations == nil {
+		annotations = map[string]string{}
+	}
+	annotations[shadowOwnerPodAnnotation] = ownerPod
+	obj.SetAnnotations(annotations)
 }
 
 // cleanupPartialShadowResources removes specific resources that were created before a failure
@@ -1706,6 +1859,94 @@ func hasExtraPortsAnnotation(pod *v1.Pod) bool {
 	return exists && strings.TrimSpace(extraPorts) != ""
 }
 
+// parseSocketPorts reads the interlink.eu/shadow-socket-ports annotation, a
+// comma-separated list of port numbers.
+func parseSocketPorts(value string) ([]int32, error) {
+	var ports []int32
+	for _, field := range strings.Split(value, ",") {
+		field = strings.TrimSpace(field)
+		n, err := strconv.ParseUint(field, 10, 32)
+		if err != nil {
+			return nil, fmt.Errorf("%q is not a port number", field)
+		}
+		if n < 1 || n > 65535 {
+			return nil, fmt.Errorf("port %d is outside 1-65535", n)
+		}
+		ports = append(ports, int32(n))
+	}
+	return ports, nil
+}
+
+// checkSocketPortsRequest refuses, at creation, a pod whose
+// interlink.eu/shadow-socket-ports annotation cannot be honoured. Forwarding such
+// a port to 127.0.0.1 instead would reach whoever listens there, which is what
+// the socket was meant to rule out.
+func (p *Provider) checkSocketPortsRequest(pod *v1.Pod) error {
+	value := strings.TrimSpace(pod.Annotations[annShadowSocketPorts])
+	if value == "" {
+		return nil
+	}
+	switch {
+	case !p.isSSHShadow():
+		return fmt.Errorf("pod %s/%s sets %s, which needs Network.ShadowMode %q", pod.Namespace, pod.Name, annShadowSocketPorts, ShadowModeSSH)
+	case !p.config.Network.EnableTunnel:
+		return fmt.Errorf("pod %s/%s sets %s, but Network.EnableTunnel is false", pod.Namespace, pod.Name, annShadowSocketPorts)
+	case p.config.Network.SSH.ForwardTarget != SSHForwardTargetNode:
+		return fmt.Errorf("pod %s/%s sets %s, which needs Network.SSH.ForwardTarget %q", pod.Namespace, pod.Name, annShadowSocketPorts, SSHForwardTargetNode)
+	case pod.Annotations["interlink.eu/pod-vpn"] != "":
+		return fmt.Errorf("pod %s/%s sets %s, but interlink.eu/pod-vpn disables its shadow tunnel", pod.Namespace, pod.Name, annShadowSocketPorts)
+	}
+
+	ports, err := parseSocketPorts(value)
+	if err != nil {
+		return fmt.Errorf("pod %s/%s: invalid %s: %w", pod.Namespace, pod.Name, annShadowSocketPorts, err)
+	}
+	exposed := map[int32]bool{}
+	for _, m := range extractPortMappings(pod) {
+		if m.Protocol == DefaultProtocol {
+			exposed[m.Port] = true
+		}
+	}
+	for _, port := range ports {
+		if !exposed[port] {
+			return fmt.Errorf("pod %s/%s: %s lists port %d, which is not an exposed TCP port", pod.Namespace, pod.Name, annShadowSocketPorts, port)
+		}
+	}
+	return nil
+}
+
+// shadowPortMappings returns the ports the shadow forwards, with the ones listed
+// in interlink.eu/shadow-socket-ports marked as unix sockets.
+func shadowPortMappings(pod *v1.Pod) []PortMapping {
+	ports := extractPortMappings(pod)
+	markSocketPorts(pod, ports)
+	return ports
+}
+
+// markSocketPorts flags the exposed TCP ports the pod lists in
+// interlink.eu/shadow-socket-ports. checkSocketPortsRequest has already refused
+// the pod if the annotation is malformed.
+func markSocketPorts(pod *v1.Pod, ports []PortMapping) {
+	value := strings.TrimSpace(pod.Annotations[annShadowSocketPorts])
+	if value == "" {
+		return
+	}
+	listed, err := parseSocketPorts(value)
+	if err != nil {
+		return
+	}
+	for i := range ports {
+		if ports[i].Protocol == DefaultProtocol && slices.Contains(listed, ports[i].Port) {
+			ports[i].Socket = true
+		}
+	}
+}
+
+// hasSocketPorts reports whether any port is served on a unix socket.
+func hasSocketPorts(ports []PortMapping) bool {
+	return slices.ContainsFunc(ports, func(m PortMapping) bool { return m.Socket })
+}
+
 // shouldCreateShadow checks if shadow infrastructure should be created
 func (p *Provider) shouldCreateShadow(pod *v1.Pod) bool {
 	return p.config.Network.EnableTunnel && (hasExposedPorts(pod) || hasExtraPortsAnnotation(pod)) &&
@@ -1733,7 +1974,7 @@ func (p *Provider) handleShadowCreation(ctx context.Context, pod *v1.Pod) (strin
 	if err != nil {
 		log.G(ctx).Errorf("Failed to create shadow infrastructure for %s/%s: %v", pod.Namespace, pod.Name, err)
 		// Clean up any partially created resources
-		p.cleanupShadowResources(ctx, identity.Name, identity.Namespace)
+		p.cleanupShadowResources(ctx, identity)
 		return "", fmt.Errorf("failed to create shadow infrastructure for exposed ports: %w", err)
 	}
 
@@ -1745,10 +1986,9 @@ func (p *Provider) handleShadowCreation(ctx context.Context, pod *v1.Pod) (strin
 		}
 	}
 
-	podIP, err := p.waitForShadowPodIP(ctx, shadowPod, timeout, shadowResourceIdentity{
-		Name:      templateData.Name,
-		Namespace: templateData.Namespace,
-	})
+	// This is the address the virtual pod starts with: if the shadow pod is replaced
+	// later, the status loop moves it to the replacement (see refreshShadowPodIP).
+	podIP, err := p.waitForShadowPodIP(ctx, shadowPod, timeout, identity)
 	if err != nil {
 		log.G(ctx).Errorf("Failed to get shadow pod IP for %s/%s: %v", pod.Namespace, pod.Name, err)
 		return "", err
@@ -1756,7 +1996,8 @@ func (p *Provider) handleShadowCreation(ctx context.Context, pod *v1.Pod) (strin
 
 	// The SSH shadow dials in to the login node, so the workload has nothing to set
 	// up on its side: no wstunnel client to launch, no WireGuard config to apply.
-	if !p.isSSHShadow() {
+	// A shadow that only runs kept containers has no tunnel at all.
+	if !p.isSSHShadow() && !templateData.KeptOnly {
 		// Add wstunnel client command annotation to the original pod
 		if err := p.addWstunnelClientAnnotation(ctx, pod, templateData); err != nil {
 			log.G(ctx).Warningf("Failed to add wstunnel client annotation to pod %s/%s: %v", pod.Namespace, pod.Name, err)
@@ -1791,7 +2032,7 @@ func (p *Provider) waitForShadowPodIP(ctx context.Context, shadowPod *v1.Pod, ti
 	}
 
 	// Clean up the shadow infrastructure since it didn't get an IP
-	p.cleanupShadowResources(ctx, identity.Name, identity.Namespace)
+	p.cleanupShadowResources(ctx, identity)
 	return "", fmt.Errorf("shadow pod %s/%s failed to get an IP within %v timeout", shadowPod.Namespace, shadowPod.Name, timeout)
 }
 
@@ -1925,6 +2166,10 @@ func (p *Provider) setPodInitialStatus(ctx context.Context, pod *v1.Pod, podIP s
 func (p *Provider) CreatePod(ctx context.Context, pod *v1.Pod) error {
 	TracerUpdate(&ctx, "CreatePodVK", pod)
 
+	if err := p.checkSocketPortsRequest(pod); err != nil {
+		return err
+	}
+
 	var state v1.ContainerState
 
 	key := pod.UID
@@ -1940,10 +2185,13 @@ func (p *Provider) CreatePod(ctx context.Context, pod *v1.Pod) error {
 
 	// Handle shadow creation if needed
 	if p.hasShadow(pod) {
-		var err error
-		podIP, err = p.handleShadowCreation(ctx, pod)
+		shadowIP, err := p.handleShadowCreation(ctx, pod)
 		if err != nil {
 			return err
+		}
+		// Only a tunnel shadow stands in for the pod on the network.
+		if p.hasTunnelShadow(pod) {
+			podIP = shadowIP
 		}
 
 		if p.config.Network.FullMesh && !isMeshNetworkingDisabled(pod) {
@@ -1972,20 +2220,6 @@ func (p *Provider) CreatePod(ctx context.Context, pod *v1.Pod) error {
 		return err
 	}
 
-	// Create pod asynchronously on the remote plugin
-	// we don't care, the statusLoop will eventually reconcile the status
-	go func() {
-		err := RemoteExecution(ctx, p.config, p, pod, CREATE)
-		if err != nil {
-			if err.Error() == "Deleted pod before actual creation" {
-				log.G(ctx).Warn(err)
-			} else {
-				log.G(ctx).Error(err)
-				p.handleRemoteExecutionFailure(ctx, pod, podIP, err)
-			}
-		}
-	}()
-
 	// set pod containers status to notReady and waiting since they haven't started yet
 	for _, container := range pod.Spec.Containers {
 		pod.Status.ContainerStatuses = append(pod.Status.ContainerStatuses, v1.ContainerStatus{
@@ -2000,6 +2234,27 @@ func (p *Provider) CreatePod(ctx context.Context, pod *v1.Pod) error {
 	p.podsMu.Lock()
 	p.pods[string(key)] = pod
 	p.podsMu.Unlock()
+
+	// Create pod asynchronously on the remote plugin
+	// we don't care, the statusLoop will eventually reconcile the status
+	// The pod is tracked first: the wait for kept init containers mirrors their statuses
+	// onto it, and DeletePod can stop that wait.
+	waitCtx := p.trackKeptInitWait(ctx, pod)
+	go func() {
+		if err := p.waitForKeptInitContainers(waitCtx, pod); err != nil {
+			log.G(ctx).Warningf("Pod %s/%s not submitted: %v", pod.Namespace, pod.Name, err)
+			return
+		}
+		err := RemoteExecution(ctx, p.config, p, pod, CREATE)
+		if err != nil {
+			if err.Error() == "Deleted pod before actual creation" {
+				log.G(ctx).Warn(err)
+			} else {
+				log.G(ctx).Error(err)
+				p.handleRemoteExecutionFailure(ctx, pod, podIP, err)
+			}
+		}
+	}()
 
 	return nil
 }
@@ -2034,6 +2289,9 @@ func (p *Provider) DeletePod(ctx context.Context, pod *v1.Pod) (err error) {
 		return errdefs.NotFound("pod not found")
 	}
 
+	// A pod still waiting for its kept init containers is never submitted now.
+	p.stopKeptInitWait(string(key))
+
 	// Clean up shadow resources if tunnel is enabled and they exist and no VPN annotation
 	if p.hasShadow(pod) {
 		if _, released := p.shadowsReleased.LoadAndDelete(string(pod.UID)); !released {
@@ -2041,7 +2299,7 @@ func (p *Provider) DeletePod(ctx context.Context, pod *v1.Pod) (err error) {
 			if identityErr != nil {
 				log.G(ctx).Warningf("Failed to compute shadow resource identity for %s/%s: %v", pod.Namespace, pod.Name, identityErr)
 			} else {
-				p.cleanupShadowResources(ctx, identity.Name, identity.Namespace)
+				p.cleanupShadowResources(ctx, identity)
 			}
 		}
 		p.forgetShadowNodeName(pod)
@@ -2329,16 +2587,19 @@ func (p *Provider) NotifyPods(_ context.Context, f func(*v1.Pod)) {
 	p.notifier = f
 }
 
+// statusLoopInterval is how often statusLoop polls the plugin for the pods' status.
+var statusLoopInterval = 5 * time.Second
+
 // statusLoop preiodically monitoring the status of all the pods in p.pods
 func (p *Provider) statusLoop(ctx context.Context) {
-	t := time.NewTimer(5 * time.Second)
+	t := time.NewTimer(statusLoopInterval)
 	if !t.Stop() {
 		<-t.C
 	}
 
 	for {
 		log.G(ctx).Info("statusLoop")
-		t.Reset(5 * time.Second)
+		t.Reset(statusLoopInterval)
 		select {
 		case <-ctx.Done():
 			return
@@ -2347,18 +2608,22 @@ func (p *Provider) statusLoop(ctx context.Context) {
 
 		p.podIPs = []string{}
 
-		podsVPN, err := p.clientSet.CoreV1().Pods("").List(ctx, metav1.ListOptions{})
+		clusterPods, err := p.clientSet.CoreV1().Pods("").List(ctx, metav1.ListOptions{})
 		if err != nil {
 			log.G(ctx).Error(err)
 		}
 
-		log.G(ctx).Debug("Pod lists with pod-vpn enabled has len ", len(podsVPN.Items))
+		log.G(ctx).Debug("Pod lists with pod-vpn enabled has len ", len(clusterPods.Items))
 
-		for _, podVPN := range podsVPN.Items {
+		for _, podVPN := range clusterPods.Items {
 			if ip, ok := podVPN.Annotations["interlink.eu/pod-ip"]; ok {
 				p.podIPs = append(p.podIPs, ip)
 			}
 		}
+
+		// The same list holds the shadow pods, so following a replaced one costs no
+		// extra API call. A failed list comes back empty, which moves no address.
+		shadowPods := indexShadowPods(clusterPods.Items)
 
 		token := ""
 		if p.config.VKTokenFile != "" {
@@ -2391,9 +2656,10 @@ func (p *Provider) statusLoop(ctx context.Context) {
 				if err != nil {
 					log.G(ctx).Error(err)
 				}
+				p.refreshShadowPodIP(ctx, pod, shadowPods)
 				// Use a fresh snapshot of the canonical pod (updated by checkPodsStatus
-				// under podsMu.Lock) rather than the pre-snapshot deep copy, so the
-				// notifier sees the latest status.
+				// and refreshShadowPodIP under podsMu.Lock) rather than the pre-snapshot
+				// deep copy, so the notifier sees the latest status.
 				p.podsMu.RLock()
 				canonical, exists := p.pods[string(pod.UID)]
 				var notifyPod *v1.Pod

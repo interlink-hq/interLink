@@ -401,6 +401,7 @@ func TestRemoteExecutionHandleProjectedSourceConfigMap(t *testing.T) {
 		configMapData map[string]string
 		sourceItems   []v1.KeyToPath
 		overrideCaCrt string
+		optional      bool
 		expectedData  map[string]string
 		expectErr     bool
 	}{
@@ -483,6 +484,35 @@ func TestRemoteExecutionHandleProjectedSourceConfigMap(t *testing.T) {
 			expectedData:  nil,
 			expectErr:     true,
 		},
+		{
+			name:          "missing key in items of optional configmap is skipped",
+			configMapName: testConfigMapName,
+			configMapData: map[string]string{
+				testConfigKey1: testConfigValue1,
+			},
+			sourceItems: []v1.KeyToPath{
+				{Key: testConfigKey1, Path: testConfigKey1},
+				{Key: "missing-key", Path: "some-path"},
+			},
+			optional: true,
+			expectedData: map[string]string{
+				testConfigKey1: testConfigValue1,
+			},
+		},
+		{
+			name:          "missing configmap returns error",
+			configMapName: testConfigMapName,
+			configMapData: nil,
+			expectedData:  nil,
+			expectErr:     true,
+		},
+		{
+			name:          "missing optional configmap projects no keys",
+			configMapName: testConfigMapName,
+			configMapData: nil,
+			optional:      true,
+			expectedData:  map[string]string{},
+		},
 	}
 
 	for _, tt := range tests {
@@ -508,10 +538,12 @@ func TestRemoteExecutionHandleProjectedSourceConfigMap(t *testing.T) {
 				},
 			}
 
+			optional := tt.optional
 			source := v1.VolumeProjection{
 				ConfigMap: &v1.ConfigMapProjection{
 					LocalObjectReference: v1.LocalObjectReference{Name: tt.configMapName},
 					Items:                tt.sourceItems,
+					Optional:             &optional,
 				},
 			}
 
@@ -563,6 +595,8 @@ func TestRemoteExecutionHandleProjectedSourceDownwardAPIFieldRef(t *testing.T) {
 				{Path: "sa-name", FieldRef: &v1.ObjectFieldSelector{FieldPath: "spec.serviceAccountName"}},
 				{Path: "pod-ip", FieldRef: &v1.ObjectFieldSelector{FieldPath: "status.podIP"}},
 				{Path: "host-ip", FieldRef: &v1.ObjectFieldSelector{FieldPath: "status.hostIP"}},
+				{Path: "tier", FieldRef: &v1.ObjectFieldSelector{FieldPath: "metadata.labels['tier']"}},
+				{Path: "annotation", FieldRef: &v1.ObjectFieldSelector{FieldPath: "metadata.annotations['my.annotation/key']"}},
 			},
 		},
 	}
@@ -580,6 +614,8 @@ func TestRemoteExecutionHandleProjectedSourceDownwardAPIFieldRef(t *testing.T) {
 	assert.Equal(t, "svc-account", projectedVolume.Data["sa-name"])
 	assert.Equal(t, "10.42.0.15", projectedVolume.Data["pod-ip"])
 	assert.Equal(t, "172.18.0.20", projectedVolume.Data["host-ip"])
+	assert.Equal(t, "backend", projectedVolume.Data["tier"])
+	assert.Equal(t, testAnnotationValue, projectedVolume.Data["annotation"])
 }
 
 func TestRemoteExecutionHandleVolumesDownwardAPI(t *testing.T) {
@@ -679,6 +715,64 @@ func TestRemoteExecutionHandleVolumesDownwardAPIDisabledProjectedVolumes(t *test
 	assert.Nil(t, pod.Spec.Volumes[0].Projected)
 }
 
+func TestRemoteExecutionHandleVolumesOptionalMissing(t *testing.T) {
+	const (
+		missingConfigMap = "missing-config"
+		missingSecret    = "missing-secret"
+	)
+	ctx := context.Background()
+	namespace := testNamespace
+	optional := true
+	pod := &v1.Pod{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      testPodName,
+			Namespace: namespace,
+		},
+		Spec: v1.PodSpec{
+			Volumes: []v1.Volume{
+				{
+					Name: "config",
+					VolumeSource: v1.VolumeSource{
+						ConfigMap: &v1.ConfigMapVolumeSource{
+							LocalObjectReference: v1.LocalObjectReference{Name: missingConfigMap},
+							Optional:             &optional,
+						},
+					},
+				},
+				{
+					Name: "secret",
+					VolumeSource: v1.VolumeSource{
+						Secret: &v1.SecretVolumeSource{
+							SecretName: missingSecret,
+							Optional:   &optional,
+						},
+					},
+				},
+			},
+		},
+	}
+
+	fakeClient := fake.NewSimpleClientset(pod.DeepCopy())
+	p := &Provider{
+		clientSet: fakeClient,
+		notifier:  func(*v1.Pod) {},
+	}
+	req := &types.PodCreateRequests{}
+
+	// Without the optional handling this waits five minutes for the objects to appear.
+	err := remoteExecutionHandleVolumes(ctx, p, pod, req)
+	require.NoError(t, err)
+	assert.Equal(t, v1.PodPending, pod.Status.Phase)
+	require.Len(t, req.ConfigMaps, 1)
+	assert.Equal(t, missingConfigMap, req.ConfigMaps[0].Name)
+	assert.Equal(t, namespace, req.ConfigMaps[0].Namespace)
+	assert.Empty(t, req.ConfigMaps[0].Data)
+	require.Len(t, req.Secrets, 1)
+	assert.Equal(t, missingSecret, req.Secrets[0].Name)
+	assert.Equal(t, namespace, req.Secrets[0].Namespace)
+	assert.Empty(t, req.Secrets[0].Data)
+}
+
 func TestResolveEnvFromRefs(t *testing.T) {
 	ctx := context.Background()
 	namespace := testNamespace
@@ -736,6 +830,85 @@ func TestResolveEnvFromRefs(t *testing.T) {
 	assert.Contains(t, container.Env, v1.EnvVar{Name: testLogLevelEnv, Value: "info"})
 	assert.Contains(t, container.Env, v1.EnvVar{Name: "DATABASE", Value: "postgresql"})
 	assert.Contains(t, container.Env, v1.EnvVar{Name: "AWS_ACCESS_KEY_ID", Value: "AKIA"})
+}
+
+func TestResolveEnvRefsFieldRef(t *testing.T) {
+	const (
+		podUID   = "uid-env"
+		appLabel = "frontend"
+		team     = "hpc"
+		nodeName = "vk-node"
+		account  = "runner"
+		podIP    = "10.42.0.16"
+		hostIP   = "172.18.0.21"
+	)
+	pod := &v1.Pod{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:        testPodName,
+			Namespace:   testNamespace,
+			UID:         podUID,
+			Labels:      map[string]string{testAppName: appLabel},
+			Annotations: map[string]string{"team": team},
+		},
+		Spec: v1.PodSpec{
+			NodeName:           nodeName,
+			ServiceAccountName: account,
+		},
+		Status: v1.PodStatus{
+			PodIP:  podIP,
+			HostIP: hostIP,
+		},
+	}
+
+	fieldRef := func(name, fieldPath string) v1.EnvVar {
+		return v1.EnvVar{
+			Name:      name,
+			ValueFrom: &v1.EnvVarSource{FieldRef: &v1.ObjectFieldSelector{FieldPath: fieldPath}},
+		}
+	}
+	container := &v1.Container{
+		Name: deleteTestContainer,
+		Env: []v1.EnvVar{
+			fieldRef("POD_NAME", testFieldPathMetadataName),
+			fieldRef("POD_NAMESPACE", "metadata.namespace"),
+			fieldRef("POD_UID", "metadata.uid"),
+			fieldRef("APP", "metadata.labels['app']"),
+			fieldRef("TEAM", "metadata.annotations['team']"),
+			fieldRef("MISSING_ANNOTATION", "metadata.annotations['absent']"),
+			fieldRef("NODE_NAME", "spec.nodeName"),
+			fieldRef("SERVICE_ACCOUNT", "spec.serviceAccountName"),
+			fieldRef("POD_IP", "status.podIP"),
+			fieldRef("POD_IPS", "status.podIPs"),
+			fieldRef("HOST_IP", "status.hostIP"),
+			fieldRef("HOST_IPS", "status.hostIPs"),
+			fieldRef("UNSUPPORTED", "spec.unsupported"),
+		},
+	}
+
+	resolveEnvRefs(context.Background(), &Provider{}, pod, container)
+
+	expected := map[string]string{
+		"POD_NAME":           testPodName,
+		"POD_NAMESPACE":      testNamespace,
+		"POD_UID":            podUID,
+		"APP":                appLabel,
+		"TEAM":               team,
+		"MISSING_ANNOTATION": "",
+		"NODE_NAME":          nodeName,
+		"SERVICE_ACCOUNT":    account,
+		"POD_IP":             podIP,
+		"POD_IPS":            podIP,
+		"HOST_IP":            hostIP,
+		"HOST_IPS":           hostIP,
+	}
+	for _, env := range container.Env {
+		if env.Name == "UNSUPPORTED" {
+			assert.NotNil(t, env.ValueFrom, "an unsupported field path is left unresolved")
+			continue
+		}
+		assert.Nil(t, env.ValueFrom, env.Name)
+		assert.Equal(t, expected[env.Name], env.Value, env.Name)
+	}
 }
 
 func TestResolveEnvFromRefsOptionalMissingSecret(t *testing.T) {

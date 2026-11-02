@@ -47,7 +47,7 @@ func (h *InterLinkHandler) Ping(w http.ResponseWriter, r *http.Request) {
 
 	log.G(h.Ctx).Info("InterLink: forwarding GetStatus call to sidecar")
 	req.Header.Set("Content-Type", "application/json")
-	log.G(h.Ctx).Debug(req)
+	ForwardAccessToken(r, req)
 
 	_, err = ReqWithError(ctx, req, w, start, span, true, false, sessionContext, h.ClientHTTP)
 	if err != nil {

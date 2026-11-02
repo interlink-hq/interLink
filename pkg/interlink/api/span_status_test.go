@@ -380,7 +380,7 @@ func TestSuccessfulNon200PluginStatusIsNotAFailure(t *testing.T) {
 			h.DeleteHandler(w, httptest.NewRequest(http.MethodDelete, "/delete", mustJSON(t, testPod())))
 
 			assert.Equal(t, status, w.Code, "the client must get the status the plugin returned")
-			assert.NotContains(t, w.Body.String(), "call exit status")
+			assert.NotContains(t, w.Body.String(), "returned status")
 
 			span := exportedSpan(t, exporter, "DeleteAPI")
 			assert.Equal(t, codes.Ok, span.Status.Code)
@@ -404,6 +404,32 @@ func TestErrorPluginStatusIsStillAFailure(t *testing.T) {
 	code, ok := spanAttrInt(span, "exit.code")
 	require.True(t, ok)
 	assert.Equal(t, int64(http.StatusInternalServerError), code)
+}
+
+// A failing plugin's response body is returned to the caller and logged, but
+// must stay out of every exported span: it can carry anything the plugin echoed.
+func TestErrorPluginBodyStaysOutOfSpans(t *testing.T) {
+	const pluginBody = "plugin-body-must-not-reach-traces"
+	exporter := newSpanRecorder(t)
+	server, _, client := newUnixTestServer(t, http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.WriteHeader(http.StatusUnprocessableEntity)
+		writeTestResponse(t, w, pluginBody)
+	}))
+	t.Cleanup(server.Close)
+	h := &InterLinkHandler{Ctx: context.Background(), SidecarEndpoint: testUnixEndpoint, ClientHTTP: client}
+
+	h.DeleteHandler(httptest.NewRecorder(), httptest.NewRequest(http.MethodDelete, "/delete", mustJSON(t, testPod())))
+
+	spans := exporter.GetSpans()
+	require.NotEmpty(t, spans)
+	for _, span := range spans {
+		assert.NotContains(t, span.Status.Description, pluginBody, "span %s status", span.Name)
+		for _, event := range span.Events {
+			for _, attr := range event.Attributes {
+				assert.NotContains(t, attr.Value.Emit(), pluginBody, "span %s event %s", span.Name, event.Name)
+			}
+		}
+	}
 }
 
 // The VK posts the pod to forget as JSON, while the cache is keyed by pod UID.

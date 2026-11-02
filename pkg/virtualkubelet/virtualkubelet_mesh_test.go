@@ -312,7 +312,7 @@ func TestCleanupShadowResources(t *testing.T) {
 		client := newClient()
 		p := &Provider{clientSet: client, config: Config{Network: Network{IngressTLS: true}}}
 
-		p.cleanupShadowResources(t.Context(), name, ns)
+		p.cleanupShadowResources(t.Context(), shadowResourceIdentity{Name: name, Namespace: ns})
 
 		_, err := client.AppsV1().Deployments(ns).Get(t.Context(), name, metav1.GetOptions{})
 		assert.True(t, apierrors.IsNotFound(err), "deployment should be deleted")
@@ -330,7 +330,7 @@ func TestCleanupShadowResources(t *testing.T) {
 		client := newClient()
 		p := &Provider{clientSet: client, config: Config{Network: Network{IngressTLS: false}}}
 
-		p.cleanupShadowResources(t.Context(), name, ns)
+		p.cleanupShadowResources(t.Context(), shadowResourceIdentity{Name: name, Namespace: ns})
 
 		// Core resources are still removed regardless of TLS...
 		_, err := client.AppsV1().Deployments(ns).Get(t.Context(), name, metav1.GetOptions{})

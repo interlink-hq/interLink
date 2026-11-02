@@ -131,6 +131,9 @@ func (h *InterLinkHandler) CreateHandler(w http.ResponseWriter, r *http.Request)
 
 		log.G(h.Ctx).Infof("Sending POST to JobScriptBuilder at %s with session: %+v", pod.JobScriptBuilderURL, sessionContext)
 
+		// No ForwardAccessToken here, deliberately: JobScriptBuilderURL comes
+		// from the pod spec, so it can point anywhere, including outside the
+		// deployment. The caller's token must not leave the trust boundary.
 		bodyBytesResp, err := ReqWithError(ctx, req, w, start, span, false, true, sessionContext, http.DefaultClient)
 		if err != nil {
 			// ReqWithError has already marked the span as failed.
@@ -198,6 +201,7 @@ func (h *InterLinkHandler) CreateHandler(w http.ResponseWriter, r *http.Request)
 
 	log.G(h.Ctx).Info("InterLink: forwarding Create call to sidecar")
 
+	ForwardAccessToken(r, req)
 	_, err = ReqWithError(ctx, req, w, start, span, true, false, sessionContext, h.ClientHTTP)
 	if err != nil {
 		// ReqWithError has already marked the span as failed.

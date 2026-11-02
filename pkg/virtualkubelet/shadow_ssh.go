@@ -103,6 +103,25 @@ func NormalizeShadowConfig(config *Config) error {
 		return fmt.Errorf("unknown Network.SSH.ForwardMode %q: expected %q or %q", s.ForwardMode, SSHForwardModePortForward, SSHForwardModeExec)
 	}
 
+	s.ForwardTarget = strings.ToLower(strings.TrimSpace(s.ForwardTarget))
+	switch s.ForwardTarget {
+	case "":
+		s.ForwardTarget = SSHForwardTargetLogin
+		log.L.Infof("Network.SSH.ForwardTarget defaults to %q; %q keeps the workload off the network, see the SSH tunnel guide", SSHForwardTargetLogin, SSHForwardTargetNode)
+	case SSHForwardTargetLogin, SSHForwardTargetNode:
+	default:
+		return fmt.Errorf("unknown Network.SSH.ForwardTarget %q: expected %q or %q", s.ForwardTarget, SSHForwardTargetLogin, SSHForwardTargetNode)
+	}
+
+	s.NodeHostKeys = strings.ToLower(strings.TrimSpace(s.NodeHostKeys))
+	switch s.NodeHostKeys {
+	case "":
+		s.NodeHostKeys = SSHNodeHostKeysVerify
+	case SSHNodeHostKeysVerify, SSHNodeHostKeysAcceptNew:
+	default:
+		return fmt.Errorf("unknown Network.SSH.NodeHostKeys %q: expected %q or %q", s.NodeHostKeys, SSHNodeHostKeysVerify, SSHNodeHostKeysAcceptNew)
+	}
+
 	s.Auth = strings.ToLower(strings.TrimSpace(s.Auth))
 	switch s.Auth {
 	case "":
@@ -129,7 +148,22 @@ func NormalizeShadowConfig(config *Config) error {
 		return fmt.Errorf("unknown Network.SSH.Auth %q: expected %q or %q", s.Auth, SSHAuthPublicKey, SSHAuthKerberos)
 	}
 
+	if usesNodeHops(*s) {
+		switch {
+		case s.NodeHostKeys == SSHNodeHostKeysAcceptNew:
+			log.L.Warningf("compute node host keys are not verified (NodeHostKeys: %s)", SSHNodeHostKeysAcceptNew)
+		case s.KnownHostsConfigMap == "":
+			log.L.Warningf("node host keys come only from the login node's system files, read over a login connection that is itself accept-new: pin the login host key in KnownHostsConfigMap")
+		}
+	}
+
 	return nil
+}
+
+// usesNodeHops reports whether the shadow opens ssh sessions on compute nodes,
+// which is what NodeHostKeys governs.
+func usesNodeHops(s SSHTunnel) bool {
+	return s.ForwardTarget == SSHForwardTargetNode
 }
 
 // sshNodeWaitSeconds converts the configured wait into whole seconds for the shell

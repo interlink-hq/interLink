@@ -2,10 +2,13 @@ package virtualkubelet
 
 import (
 	"context"
+	"os"
+	"path/filepath"
 	"testing"
 
 	types "github.com/interlink-hq/interlink/pkg/interlink"
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 	v1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/api/resource"
 )
@@ -463,4 +466,35 @@ func TestUpdateNodeTaints_NilLeavesExistingTaintsUnchangedAndUnknownEffectDefaul
 			Effect: v1.TaintEffectNoSchedule,
 		},
 	}, provider.node.Spec.Taints)
+}
+
+// A virtual node must advertise ephemeral storage, or a pod whose sidecar requests some
+// (Katib's metrics collector: 500Mi) is never scheduled on it.
+func TestGetResources_EphemeralStorage(t *testing.T) {
+	config := Config{Resources: Resources{CPU: "10", Memory: "10Gi", Pods: "10"}}
+	got := GetResources(config)[v1.ResourceEphemeralStorage]
+	assert.Equal(t, defaultEphemeralStorage, got.String())
+
+	config.Resources.EphemeralStorage = "50Gi"
+	got = GetResources(config)[v1.ResourceEphemeralStorage]
+	assert.Equal(t, "50Gi", got.String())
+}
+
+func TestLoadConfig_EphemeralStorage(t *testing.T) {
+	load := func(resources string) (Config, error) {
+		path := filepath.Join(t.TempDir(), "config.yaml")
+		require.NoError(t, os.WriteFile(path, []byte("Resources:\n"+resources), 0o600))
+		return LoadConfig(t.Context(), path)
+	}
+
+	_, err := load("  EphemeralStorage: 50GB\n")
+	assert.ErrorContains(t, err, "invalid ephemeral storage value 50GB")
+
+	config, err := load("  EphemeralStorage: 50Gi\n")
+	require.NoError(t, err)
+	assert.Equal(t, "50Gi", config.Resources.EphemeralStorage)
+
+	config, err = load("  CPU: \"10\"\n")
+	require.NoError(t, err)
+	assert.Empty(t, config.Resources.EphemeralStorage)
 }

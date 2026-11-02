@@ -29,6 +29,7 @@ import (
 	"go.opentelemetry.io/otel/propagation"
 	trace "go.opentelemetry.io/otel/trace"
 	v1 "k8s.io/api/core/v1"
+	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/api/resource"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 )
@@ -231,6 +232,12 @@ func injectTraceContext(ctx context.Context, req *http.Request) *http.Request {
 	return req
 }
 
+// APIIdleConnTimeout is how long the virtual kubelet keeps an idle connection to the interLink
+// API. The API server closes a connection idle for its ReadTimeout (30 s, cmd/interlink): a
+// request sent on a connection it is closing fails with EOF, and a POST such as the ping is not
+// retried, so the node went NotReady until the next ping. Keep it below the server's.
+const APIIdleConnTimeout = 20 * time.Second
+
 // createTLSHTTPClient creates an HTTP client with TLS/mTLS configuration
 func createTLSHTTPClient(ctx context.Context, tlsConfig TLSConfig) (*http.Client, error) {
 	if !tlsConfig.Enabled {
@@ -241,6 +248,7 @@ func createTLSHTTPClient(ctx context.Context, tlsConfig TLSConfig) (*http.Client
 		TLSClientConfig: &tls.Config{
 			MinVersion: tls.VersionTLS12,
 		},
+		IdleConnTimeout: APIIdleConnTimeout,
 	}
 
 	// Load CA certificate if provided
@@ -843,9 +851,15 @@ func remoteExecutionHandleProjectedSource(
 				// With InterLink, the Kubernetes internal network is not accessible so this default ca.crt is probably useless.
 				log.G(ctx).Warning("using default Kubernetes API kube-root-ca.crt (no override found), but the default one might not be compatible with the subject: ", p.config.KubernetesAPIAddr)
 			}
+			optional := source.ConfigMap.Optional != nil && *source.ConfigMap.Optional
 			// Fetch the ConfigMap once, then iterate over items (or all keys if no items are specified).
 			cfgmap, err := p.clientSet.CoreV1().ConfigMaps(pod.Namespace).Get(ctx, source.ConfigMap.Name, metav1.GetOptions{})
 			if err != nil {
+				if optional && apierrors.IsNotFound(err) {
+					// Like the kubelet, a missing optional ConfigMap projects no keys.
+					log.G(ctx).Infof("optional ConfigMap %s of pod %s not found, projecting no keys from it", source.ConfigMap.Name, pod.Name)
+					return nil
+				}
 				return fmt.Errorf("error during retrieval of ConfigMap %s error: %w", source.ConfigMap.Name, err)
 			}
 			if len(source.ConfigMap.Items) == 0 {
@@ -857,7 +871,7 @@ func remoteExecutionHandleProjectedSource(
 				for _, item := range source.ConfigMap.Items {
 					if value, ok := cfgmap.Data[item.Key]; ok {
 						projectedVolume.Data[item.Path] = value
-					} else {
+					} else if !optional {
 						return fmt.Errorf("error during retrieval of key %s of (existing) ConfigMap %s", item.Key, source.ConfigMap.Name)
 					}
 				}
@@ -905,7 +919,19 @@ func formatDownwardAPIMetadataMap(data map[string]string) string {
 	return b.String()
 }
 
+// downwardAPISubscriptRE matches the metadata.labels['<KEY>'] and
+// metadata.annotations['<KEY>'] field paths, which select a single label or annotation.
+var downwardAPISubscriptRE = regexp.MustCompile(`^metadata\.(labels|annotations)\[['"]?(.+?)['"]?\]$`)
+
 func resolveDownwardAPIFieldPath(pod *v1.Pod, fieldPath string) (string, bool) {
+	if matches := downwardAPISubscriptRE.FindStringSubmatch(fieldPath); matches != nil {
+		// Like the kubelet, a missing label or annotation resolves to an empty value.
+		if matches[1] == "labels" {
+			return pod.Labels[matches[2]], true
+		}
+		return pod.Annotations[matches[2]], true
+	}
+
 	switch fieldPath {
 	case "metadata.name":
 		return pod.Name, true
@@ -921,9 +947,11 @@ func resolveDownwardAPIFieldPath(pod *v1.Pod, fieldPath string) (string, bool) {
 		return pod.Spec.NodeName, true
 	case "spec.serviceAccountName":
 		return pod.Spec.ServiceAccountName, true
-	case "status.podIP":
+	// The virtual kubelet reports a single pod and host IP (see PodPhase), so the
+	// IP lists hold just that one.
+	case "status.podIP", "status.podIPs":
 		return pod.Status.PodIP, true
-	case "status.hostIP":
+	case "status.hostIP", "status.hostIPs":
 		return pod.Status.HostIP, true
 	default:
 		return "", false
@@ -971,13 +999,21 @@ func remoteExecutionHandleVolumes(ctx context.Context, p *Provider, pod *v1.Pod,
 				switch {
 				case volume.ConfigMap != nil:
 					cfgmap, err := p.clientSet.CoreV1().ConfigMaps(pod.Namespace).Get(ctx, volume.ConfigMap.Name, metav1.GetOptions{})
-					if err != nil {
+					switch {
+					case err == nil:
+						req.ConfigMaps = append(req.ConfigMaps, *cfgmap)
+					case volume.ConfigMap.Optional != nil && *volume.ConfigMap.Optional && apierrors.IsNotFound(err):
+						// Like the kubelet, mount an empty volume for a missing optional ConfigMap
+						// instead of waiting for it. The plugin still gets an object to mount by name.
+						log.G(ctx).Infof("optional ConfigMap %s of pod %s not found, mounting an empty volume", volume.ConfigMap.Name, pod.Name)
+						req.ConfigMaps = append(req.ConfigMaps, v1.ConfigMap{
+							ObjectMeta: metav1.ObjectMeta{Name: volume.ConfigMap.Name, Namespace: pod.Namespace},
+						})
+					default:
 						err = failedMount(ctx, &failedAndWait, volume.ConfigMap.Name, pod, p, err)
 						if err != nil {
 							return err
 						}
-					} else {
-						req.ConfigMaps = append(req.ConfigMaps, *cfgmap)
 					}
 
 				case volume.Projected != nil:
@@ -1047,13 +1083,21 @@ func remoteExecutionHandleVolumes(ctx context.Context, p *Provider, pod *v1.Pod,
 
 				case volume.Secret != nil:
 					scrt, err := p.clientSet.CoreV1().Secrets(pod.Namespace).Get(ctx, volume.Secret.SecretName, metav1.GetOptions{})
-					if err != nil {
+					switch {
+					case err == nil:
+						req.Secrets = append(req.Secrets, *scrt)
+					case volume.Secret.Optional != nil && *volume.Secret.Optional && apierrors.IsNotFound(err):
+						// Like the kubelet, mount an empty volume for a missing optional Secret
+						// instead of waiting for it. The plugin still gets an object to mount by name.
+						log.G(ctx).Infof("optional Secret %s of pod %s not found, mounting an empty volume", volume.Secret.SecretName, pod.Name)
+						req.Secrets = append(req.Secrets, v1.Secret{
+							ObjectMeta: metav1.ObjectMeta{Name: volume.Secret.SecretName, Namespace: pod.Namespace},
+						})
+					default:
 						err = failedMount(ctx, &failedAndWait, volume.Secret.SecretName, pod, p, err)
 						if err != nil {
 							return err
 						}
-					} else {
-						req.Secrets = append(req.Secrets, *scrt)
 					}
 
 				case volume.EmptyDir != nil:
@@ -1097,41 +1141,21 @@ func resolveEnvRefs(
 	pod *v1.Pod,
 	container *v1.Container,
 ) {
-	var annotationFieldRefRE = regexp.MustCompile(`^metadata\.annotations\[['"]?(.+?)['"]?\]$`)
-
 	for i, env := range container.Env {
 		if env.ValueFrom == nil {
 			continue
 		}
 
 		if fr := env.ValueFrom.FieldRef; fr != nil {
-
-			var resolved string
-			switch fr.FieldPath {
-			case "status.podIP":
-				resolved = pod.Status.PodIP
-			case "metadata.name":
-				resolved = pod.Name
-			case "metadata.namespace":
-				resolved = pod.Namespace
-			case "metadata.uid":
-				resolved = string(pod.UID)
-
-			default:
-				if matches := annotationFieldRefRE.FindStringSubmatch(fr.FieldPath); len(matches) == 2 {
-					annKey := matches[1]
-					val, ok := pod.Annotations[annKey]
-					if !ok {
-						continue
-					}
-					resolved = val
-				}
+			resolved, ok := resolveDownwardAPIFieldPath(pod, fr.FieldPath)
+			if !ok {
+				log.G(ctx).Warningf("in pod %s unsupported FieldPath %s for env var %q in InterLink, skipping", pod.Name, fr.FieldPath, env.Name)
+				continue
 			}
 
 			container.Env[i].Value = resolved
 			container.Env[i].ValueFrom = nil
 			continue
-
 		}
 
 		if sk := env.ValueFrom.SecretKeyRef; sk != nil {
@@ -1298,6 +1322,7 @@ func RemoteExecution(ctx context.Context, config Config, p *Provider, pod *v1.Po
 	podToOffload := pod.DeepCopy()
 	podToOffload.Spec.Containers = getOffloadContainers(pod)
 	podToOffload.Spec.InitContainers = getOffloadInitContainers(pod)
+	podToOffload.Spec.Volumes = dropKeptOnlyVolumes(pod, podToOffload)
 
 	if len(podToOffload.Spec.Containers) > 0 {
 		var offloadNames []string
@@ -1418,6 +1443,7 @@ func handleInitContainersUpdate(ctx context.Context, podRemoteStatus types.PodSt
 
 		if !foundCt {
 			podRefInCluster.Status.InitContainerStatuses = append(podRefInCluster.Status.InitContainerStatuses, containerRemoteStatus)
+			index = len(podRefInCluster.Status.InitContainerStatuses) - 1
 		} else {
 			podRefInCluster.Status.InitContainerStatuses[index] = containerRemoteStatus
 		}
@@ -1579,7 +1605,7 @@ func checkPodsStatus(ctx context.Context, p *Provider, pod *v1.Pod, token string
 		if podRemoteStatus.PodUID == string(podRefInCluster.UID) {
 			// The plugin reports the remote compute node only once the job is actually
 			// running, so this stays a no-op for as long as the job sits in the queue.
-			p.publishShadowNodeName(ctx, podRefInCluster, podRemoteStatus.NodeName)
+			p.publishShadowNode(ctx, podRefInCluster, podRemoteStatus.NodeName, podRemoteStatus.SocketDir)
 
 			// check if the pod is already in a terminal state (Failed or Succeeded)
 			if currentPhase, terminal := p.podTerminalPhase(podRemoteStatus.PodUID); terminal {

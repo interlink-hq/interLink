@@ -352,7 +352,7 @@ func createHTTPTransport(ctx context.Context, interLinkConfig commonIL.Config, v
 	transport := &http.Transport{
 		MaxConnsPerHost:       10000,
 		MaxIdleConnsPerHost:   1000,
-		IdleConnTimeout:       120 * time.Second,
+		IdleConnTimeout:       commonIL.APIIdleConnTimeout,
 		ResponseHeaderTimeout: 120 * time.Second,
 		DialContext: func(ctx context.Context, network, addr string) (net.Conn, error) {
 			if strings.HasPrefix(addr, "unix:") {
