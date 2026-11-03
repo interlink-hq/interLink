@@ -16,6 +16,7 @@ InterLink supports several categories of annotations:
 - **[Mesh Networking](#mesh-networking)**: Control bidirectional mesh networking for offloaded pods
 - **[Wstunnel Integration](#wstunnel-integration)**: Control websocket tunneling for exposed ports
 - **[SSH Shadow](#ssh-shadow)**: Unix socket ports and namespace placement for shadow pods
+- **[SSH Reverse Tunnel](#ssh-reverse-tunnel)**: Let an offloaded pod reach endpoints inside the cluster over the SSH shadow
 - **[Job Management](#job-management)**: Handle remote job execution and tracking
 - **[System Annotations](#system-annotations)**: Internal annotations used by interLink components
 
@@ -305,6 +306,90 @@ metadata:
 - Pod creation fails when the namespace name is so long that the shadow's name and namespace together cannot fit in 63 characters; use a shorter namespace or drop the annotation
 
 **Default:** Not set (shadow in `<namespace>-shadow`)
+
+---
+
+## SSH Reverse Tunnel
+
+With the [SSH shadow](./14-ssh-tunnel-configuration.mdx) and
+`Network.SSH.Reverse.Enabled: true`, these annotations let an offloaded pod open
+connections to endpoints inside the cluster. How it works, what the site has to allow
+and the limits are in
+[Pod to cluster: the reverse tunnel](./14-ssh-tunnel-configuration.mdx#pod-to-cluster-the-reverse-tunnel).
+
+### `interlink.eu/reverse-forwards`
+
+Lists the cluster endpoints the pod may connect to.
+
+**Usage:**
+```yaml
+apiVersion: v1
+kind: Pod
+metadata:
+  name: trainer
+  annotations:
+    interlink.eu/reverse-forwards: "minio.user.svc.cluster.local:9000 6443:kubernetes.default.svc.cluster.local:443"
+spec:
+  containers:
+  - name: trainer
+    image: docker://python:3.12
+```
+
+**Format:**
+- **Endpoint**: `host:port` - the job connects to the same port
+- **Remapped**: `listen-port:host:port` - the job connects to `listen-port`; needed when `port` is below 1024
+- **Several**: space-separated
+
+**Behavior:**
+- The virtual kubelet adds the names to the container's `/etc/hosts` and waits for the tunnel before the workload starts
+- A Service FQDN also resolves as `name.namespace.svc` and `name.namespace`, and as `name` in the pod's own namespace
+- An entry that does not parse, or a listen port below 1024, is refused when the pod is created
+- Needs `Network.SSH.Reverse.Enabled: true` and no `interlink.eu/pod-vpn` on the pod; otherwise the pod is refused rather than run without its tunnel
+- Needs a plugin that gives the job a socket directory (`SocketDirRoot` in the Slurm plugin); otherwise the job fails at start
+
+**Default:** Not set (no connections back into the cluster)
+
+---
+
+### `interlink.eu/reverse-socks-port`
+
+Adds a SOCKS5 proxy for endpoints not listed in `interlink.eu/reverse-forwards`.
+
+:::warning
+The proxy listens on `127.0.0.1` of the compute node, where every user of that node
+can use it to reach any endpoint the shadow reaches in the cluster. The virtual
+kubelet refuses it unless `Network.SSH.Reverse.AllowSocks` is true. A site that agreed
+to fixed endpoints and no proxy has not agreed to this: ask before turning it on.
+:::
+
+**Usage:**
+```yaml
+metadata:
+  annotations:
+    interlink.eu/reverse-socks-port: "1080"
+```
+
+**Behavior:**
+- Any cluster address, resolved inside the cluster at connect time, for programs told to use the proxy (`ALL_PROXY=socks5h://127.0.0.1:1080`)
+- Pod creation is refused unless the virtual kubelet sets `Network.SSH.Reverse.AllowSocks: true`; when it does, the pod gets a `ReverseSocksProxy` warning event
+- A plain listener on `127.0.0.1`, with no owner check: every user of the compute node can use it
+- Two pods on one compute node cannot use the same port; the job fails at start when another user already listens on it, and the shadow's tunnel fails when another pod of the same account does
+- Must be above 1023 and not clash with a forward's listen port
+
+**Default:** Not set (no proxy)
+
+---
+
+### `interlink.eu/reverse-bind`
+
+The `127.x.y.z` address of the owner-only relay: the forwards listen there, inside the job.
+
+**Behavior:**
+- Derived from the pod UID when unset, which makes two pods on one node unlikely to share it, though not impossible: if they do and forward the same listen port, the second job fails at start, and setting this annotation on one of them resolves it
+- Must be in `127.0.0.0/8` and not `127.0.0.1`
+- The job fails at start if something else already listens on that address and a forward's port
+
+**Default:** Derived from the pod UID
 
 ---
 
