@@ -61,6 +61,7 @@ import (
 	"k8s.io/apimachinery/pkg/fields"
 	"k8s.io/client-go/kubernetes/scheme"
 	lease "k8s.io/client-go/kubernetes/typed/coordination/v1"
+	typedcorev1 "k8s.io/client-go/kubernetes/typed/core/v1"
 	"k8s.io/client-go/tools/cache"
 	"k8s.io/client-go/tools/clientcmd"
 	"k8s.io/client-go/tools/record"
@@ -541,7 +542,10 @@ func main() {
 	}()
 
 	eb := record.NewBroadcaster()
+	eb.StartRecordingToSink(&typedcorev1.EventSinkImpl{Interface: localClient.CoreV1().Events("")})
+	defer eb.Shutdown()
 	EventRecorder := eb.NewRecorder(scheme.Scheme, v1.EventSource{Component: path.Join(cfg.NodeName, "pod-controller")})
+	nodeProvider.SetEventRecorder(EventRecorder)
 
 	podInformerFactory, scmInformerFactory, stopper := setupInformers(ctx, localClient, cfg.NodeName)
 	defer close(stopper)
