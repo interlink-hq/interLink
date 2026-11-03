@@ -2,6 +2,7 @@ package virtualkubelet
 
 import (
 	"bytes"
+	"errors"
 	"os/exec"
 	"strings"
 	"testing"
@@ -11,10 +12,15 @@ import (
 	"github.com/stretchr/testify/require"
 	appsv1 "k8s.io/api/apps/v1"
 	v1 "k8s.io/api/core/v1"
+	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/runtime/serializer"
+	"k8s.io/apimachinery/pkg/types"
+	"k8s.io/apimachinery/pkg/util/validation/field"
 	"k8s.io/client-go/kubernetes/fake"
 	"k8s.io/client-go/kubernetes/scheme"
+	k8stesting "k8s.io/client-go/testing"
 )
 
 const (
@@ -835,5 +841,130 @@ func TestReplicateCredentialsRefusesToClobber(t *testing.T) {
 
 		// a second offloaded pod in the same namespace must not trip the guard
 		assert.NoError(t, p.replicateShadowCredentials(t.Context(), identity))
+	})
+}
+
+// TestReplicateCredentialsAfterTypeChange covers a source Secret recreated with
+// another type, as kubernetes.io/ssh-auth: the API server refuses that change on
+// update, so the copy must be created again rather than updated.
+func TestReplicateCredentialsAfterTypeChange(t *testing.T) {
+	const source = "interlink"
+	const target = "alice"
+	secrets := v1.SchemeGroupVersion.WithResource("secrets")
+
+	credential := &v1.Secret{
+		ObjectMeta: metav1.ObjectMeta{Name: testSSHKeySecret, Namespace: source},
+		Type:       v1.SecretTypeSSHAuth,
+		Data:       map[string][]byte{v1.SSHAuthPrivateKey: []byte("new-key")},
+	}
+	copyOf := func(secretType v1.SecretType, key, uid string) *v1.Secret {
+		meta := replicatedMeta(testSSHKeySecret, target, source)
+		meta.UID = types.UID(uid)
+		meta.ResourceVersion = uid
+		return &v1.Secret{ObjectMeta: meta, Type: secretType, Data: map[string][]byte{v1.SSHAuthPrivateKey: []byte(key)}}
+	}
+	unmarked := copyOf(v1.SecretTypeSSHAuth, "their-key", "unmarked")
+	unmarked.Annotations = nil
+	stale := func(stored runtime.Object, uid *types.UID, rv *string) bool {
+		meta := stored.(*v1.Secret).ObjectMeta
+		return (uid != nil && meta.UID != *uid) || (rv != nil && *rv != "" && meta.ResourceVersion != *rv)
+	}
+	newProvider := func(client *fake.Clientset) *Provider {
+		// the fake clientset accepts any update; refuse a stale resourceVersion with 409
+		// and a type change as the API server does
+		client.PrependReactor("update", "secrets", func(action k8stesting.Action) (bool, runtime.Object, error) {
+			updated := action.(k8stesting.UpdateAction).GetObject().(*v1.Secret)
+			stored, err := client.Tracker().Get(secrets, updated.Namespace, updated.Name)
+			if err != nil {
+				return false, nil, nil
+			}
+			if stale(stored, nil, &updated.ResourceVersion) {
+				return true, nil, apierrors.NewConflict(secrets.GroupResource(), updated.Name, errors.New("object has been modified"))
+			}
+			if stored.(*v1.Secret).Type != updated.Type {
+				return true, nil, apierrors.NewInvalid(v1.SchemeGroupVersion.WithKind("Secret").GroupKind(), updated.Name,
+					field.ErrorList{field.Invalid(field.NewPath("type"), updated.Type, "field is immutable")})
+			}
+			return false, nil, nil
+		})
+		// the fake tracker ignores delete preconditions; refuse stale ones with 409 as the API server does
+		client.PrependReactor("delete", "secrets", func(action k8stesting.Action) (bool, runtime.Object, error) {
+			deleted := action.(k8stesting.DeleteAction)
+			pre := action.(interface{ GetDeleteOptions() metav1.DeleteOptions }).GetDeleteOptions().Preconditions
+			if pre == nil {
+				return false, nil, nil
+			}
+			stored, err := client.Tracker().Get(secrets, deleted.GetNamespace(), deleted.GetName())
+			if err == nil && stale(stored, pre.UID, pre.ResourceVersion) {
+				return true, nil, apierrors.NewConflict(secrets.GroupResource(), deleted.GetName(), errors.New("precondition failed"))
+			}
+			return false, nil, nil
+		})
+		config := normalized(t, sshConfig())
+		config.Network.SSH.KeySecretKey = v1.SSHAuthPrivateKey
+		return &Provider{clientSet: client, config: config}
+	}
+	assertCopied := func(t *testing.T, client *fake.Clientset) {
+		copied, err := client.CoreV1().Secrets(target).Get(t.Context(), testSSHKeySecret, metav1.GetOptions{})
+		require.NoError(t, err)
+		assert.Equal(t, v1.SecretTypeSSHAuth, copied.Type)
+		assert.Equal(t, []byte("new-key"), copied.Data[v1.SSHAuthPrivateKey])
+		assert.Equal(t, source, copied.Annotations[shadowReplicatedFromAnnotation])
+	}
+	identity := shadowResourceIdentity{Name: testShadowName, Namespace: target}
+
+	t.Run("a copy of the old type is created again", func(t *testing.T) {
+		client := fake.NewSimpleClientset(credential, copyOf(v1.SecretTypeOpaque, "old-key", "old"))
+		p := newProvider(client)
+
+		require.NoError(t, p.replicateShadowCredentials(t.Context(), identity))
+		assertCopied(t, client)
+	})
+
+	// Another writer replaced the copy between the read and the delete: the delete
+	// still names the old UID, so it gets 409 and their copy stays.
+	t.Run("a copy another writer replaced in the meantime is kept and updated", func(t *testing.T) {
+		client := fake.NewSimpleClientset(credential, copyOf(v1.SecretTypeOpaque, "old-key", "old"))
+		p := newProvider(client)
+		client.PrependReactor("delete", "secrets", func(_ k8stesting.Action) (bool, runtime.Object, error) {
+			return false, nil, client.Tracker().Update(secrets, copyOf(v1.SecretTypeSSHAuth, "new-key", "theirs"), target)
+		})
+
+		require.NoError(t, p.replicateShadowCredentials(t.Context(), identity))
+		assertCopied(t, client)
+		kept, err := client.CoreV1().Secrets(target).Get(t.Context(), testSSHKeySecret, metav1.GetOptions{})
+		require.NoError(t, err)
+		assert.Equal(t, types.UID("theirs"), kept.UID, "the other writer's copy must not be deleted")
+	})
+
+	assertUntouched := func(t *testing.T, client *fake.Clientset, err error) {
+		require.ErrorContains(t, err, "refusing to overwrite")
+		kept, getErr := client.CoreV1().Secrets(target).Get(t.Context(), testSSHKeySecret, metav1.GetOptions{})
+		require.NoError(t, getErr)
+		assert.Equal(t, unmarked, kept)
+	}
+
+	// An unmarked Secret with other data replaced the copy between the read and the
+	// delete: the delete gets 409 and the Secret is checked again, then refused.
+	t.Run("an unmarked Secret that replaced the copy before the delete is not overwritten", func(t *testing.T) {
+		client := fake.NewSimpleClientset(credential, copyOf(v1.SecretTypeOpaque, "old-key", "old"))
+		p := newProvider(client)
+		client.PrependReactor("delete", "secrets", func(_ k8stesting.Action) (bool, runtime.Object, error) {
+			return false, nil, client.Tracker().Update(secrets, unmarked.DeepCopy(), target)
+		})
+
+		assertUntouched(t, client, p.replicateShadowCredentials(t.Context(), identity))
+	})
+
+	// An unmarked Secret appeared between the delete and the create: the create gets
+	// AlreadyExists and the Secret is checked again, then refused.
+	t.Run("an unmarked Secret created after the delete is not overwritten", func(t *testing.T) {
+		client := fake.NewSimpleClientset(credential, copyOf(v1.SecretTypeOpaque, "old-key", "old"))
+		p := newProvider(client)
+		client.PrependReactor("create", "secrets", func(_ k8stesting.Action) (bool, runtime.Object, error) {
+			return false, nil, client.Tracker().Add(unmarked.DeepCopy())
+		})
+
+		assertUntouched(t, client, p.replicateShadowCredentials(t.Context(), identity))
 	})
 }
