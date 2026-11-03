@@ -16,6 +16,7 @@ const (
 	testPodName          = "test-pod"
 	testDefaultNamespace = "default"
 	testContainerName    = "test-container"
+	testInterlinkAddress = "http://0.0.0.0"
 	testSidecarURL       = "http://localhost"
 	testDataRootFolder   = "/tmp/interlink"
 )
