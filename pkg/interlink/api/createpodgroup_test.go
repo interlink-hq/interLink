@@ -13,6 +13,7 @@ import (
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+	"go.opentelemetry.io/otel/codes"
 	v1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	k8stypes "k8s.io/apimachinery/pkg/types"
@@ -194,6 +195,69 @@ func TestCreatePodGroupHandler_RelaysSidecarErrors(t *testing.T) {
 			assert.Len(t, calls, 1)
 		})
 	}
+}
+
+// The group call records its outcome on the span as the other handlers do, and the
+// caller's identity only with detailed tracing.
+func TestCreatePodGroupHandler_Span(t *testing.T) {
+	const okAnswer = `[{"PodUID":"uid-launcher-0","PodJID":"42"},{"PodUID":"uid-worker-0","PodJID":"42"},{"PodUID":"uid-worker-1","PodJID":"42"}]`
+	withCaller := func(r *http.Request) *http.Request {
+		r.Header.Set("X-Forwarded-Email", "someone@example.org")
+		return r
+	}
+
+	t.Run("ok when the sidecar takes the group", func(t *testing.T) {
+		exporter := newSpanRecorder(t)
+		handler, _ := newPodGroupSidecar(t, http.StatusOK, okAnswer)
+
+		handler.CreatePodGroupHandler(httptest.NewRecorder(), withCaller(podGroupRequest(t, nil)))
+
+		span := exportedSpan(t, exporter, "CreatePodGroupAPI")
+		assert.Equal(t, codes.Ok, span.Status.Code)
+		_, ok := spanAttrString(span, "X-Forwarded-Email")
+		assert.False(t, ok, "the caller email must not be on the span unless tracing is detailed")
+	})
+
+	t.Run("error when the sidecar refuses it", func(t *testing.T) {
+		exporter := newSpanRecorder(t)
+		handler, _ := newPodGroupSidecar(t, http.StatusServiceUnavailable, "busy")
+
+		handler.CreatePodGroupHandler(httptest.NewRecorder(), podGroupRequest(t, nil))
+
+		span := exportedSpan(t, exporter, "CreatePodGroupAPI")
+		assert.Equal(t, codes.Error, span.Status.Code)
+		code, ok := spanAttrInt(span, "exit.code")
+		assert.True(t, ok)
+		assert.Equal(t, int64(http.StatusServiceUnavailable), code)
+	})
+
+	t.Run("error when the request has no pods", func(t *testing.T) {
+		exporter := newSpanRecorder(t)
+		handler, calls := newPodGroupSidecar(t, http.StatusOK, okAnswer)
+		body, err := json.Marshal(types.PodGroupCreateRequests{GroupUID: testGroupUID})
+		require.NoError(t, err)
+
+		handler.CreatePodGroupHandler(httptest.NewRecorder(), httptest.NewRequest(http.MethodPost, testCreatePodGroupPath, bytes.NewReader(body)))
+
+		span := exportedSpan(t, exporter, "CreatePodGroupAPI")
+		assert.Equal(t, codes.Error, span.Status.Code)
+		code, ok := spanAttrInt(span, "exit.code")
+		assert.True(t, ok)
+		assert.Equal(t, int64(http.StatusBadRequest), code)
+		assert.Empty(t, calls)
+	})
+
+	t.Run("the caller is recorded with detailed tracing", func(t *testing.T) {
+		exporter := newSpanRecorder(t)
+		handler, _ := newPodGroupSidecar(t, http.StatusOK, okAnswer)
+		handler.Config.Tracing.Detailed = true
+
+		handler.CreatePodGroupHandler(httptest.NewRecorder(), withCaller(podGroupRequest(t, nil)))
+
+		email, ok := spanAttrString(exportedSpan(t, exporter, "CreatePodGroupAPI"), "X-Forwarded-Email")
+		require.True(t, ok)
+		assert.Equal(t, "someone@example.org", email)
+	})
 }
 
 func TestCreatePodGroupHandler_RefusesBadRequests(t *testing.T) {
