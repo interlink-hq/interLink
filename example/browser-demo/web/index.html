@@ -1,0 +1,22 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>interLink browser worker demo</title>
+  <script src="app.js" defer></script>
+</head>
+<body>
+  <h1>interLink browser worker demo</h1>
+  <p>Volunteer this tab to count words in public demo text. Text chunks are processed
+    locally in a Web Worker and word counts are sent back. No container code runs.
+    Only join a gateway and organizer you trust. Keep this tab open while participating.</p>
+  <p>Limits: 256 words per task, 10-second lease, 2-minute job deadline.
+    Idle connections end after 5 minutes. Stop or close this tab to withdraw.</p>
+  <button id="join">I consent — join as a worker</button>
+  <button id="stop" disabled>Stop participating</button>
+  <p role="status" id="state">Not participating</p>
+  <p id="progress">Chunks processed: 0</p>
+  <pre id="output"></pre>
+</body>
+</html>

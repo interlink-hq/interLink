@@ -1,0 +1,18 @@
+apiVersion: v1
+kind: Pod
+metadata:
+  name: browser-text-demo
+  annotations:
+    browser-demo.interlink.eu/public: "true"
+    browser-demo.interlink.eu/public-text: |
+      Hello browsers! Hello interLink!
+      Public text goes to browsers. Browsers count words.
+spec:
+  # Replace with the name of your interLink virtual node.
+  nodeName: virtual-node
+  restartPolicy: Never
+  automountServiceAccountToken: false
+  containers:
+    - name: words
+      # A placeholder only: this demo never pulls or executes an image.
+      image: browser-demo:ignored
