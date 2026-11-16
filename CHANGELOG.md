@@ -5,6 +5,48 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.6.3] - 2026-11-16
+
+### Added
+- **SSH Shadow Networking**: Added SSH port-forward shadows for air-gapped HPC, optional forwarding through the compute node's SSH server, reverse tunnels, and access from offloaded pods to cluster endpoints (#550, #577, #578, #580)
+- **Init Containers on the Cluster**: Support running init containers on the Kubernetes cluster before submitting the offloaded pod (#583)
+- **Virtual Node Capacity**: Virtual nodes now advertise ephemeral storage (#585)
+- **Server Version API**: Exposed the interLink server version through the API (#552)
+
+### Changed
+- **Shadow Networking Stability**: Stabilized shadow pod networking lifecycle, added optional TLS ingress, and reduced wstunnel memory use (#538, #542)
+- **Remote Pod Deletion**: Retry failed remote deletion requests before removing pods from the Virtual Kubelet cache (#556)
+- **Endpoint Error Reporting**: Include the failing endpoint in non-OK response errors (#582)
+- **Tracing Outcomes**: Record span status and exit codes so call outcomes are observable in traces (#575)
+
+### Fixed
+- **Shadow Pod Lifecycle**: Prevent stale pod IPs and preserve shadows when pods are recreated with the same name; avoid unreachable exposed ports during wstunnel termination (#563, #571, #584)
+- **Kubernetes Field Resolution**: Resolve all supported Downward API environment field references and resource field references as the kubelet does (#594, #605)
+- **Projected Secrets and ConfigMaps**: Honor optional volume sources, recreate replicated Secrets when their source type changes, and request the projected service account token audience (#590, #598, #603)
+- **Virtual Kubelet Connections**: Drop idle API connections before the interLink API server closes them (#596)
+
+### Documentation
+- Added SSH tunnel configuration and reverse tunnel guides, including node targets, socket ports, and host key checks (#551, #578, #581)
+- Added guides for running vLLM and LiteLLM on offloaded GPUs (#561)
+- Updated local Minikube setup documentation (#537)
+
+## [0.6.2] - 2026-07-10
+
+### Added
+- **Per-Pod Mesh Opt-Out**: Added the `interlink.eu/mesh-network: disabled` annotation to disable mesh networking for individual pods (#491, #522)
+- **Downward API Volumes**: Added Downward API `fieldRef` support for pod metadata files (#530)
+- **Profiling**: Added pprof profiling support to interLink, Virtual Kubelet, and ssh-tunnel components (#534)
+- **Dynamic Node Resources**: Update node resource capacity and taints from plugin ping responses (#516)
+- **End-to-End Tests**: Added a K3s-based GitHub Actions end-to-end test suite (#514)
+
+### Changed
+- **Status Update Synchronization**: Consolidated status update loops and added locking to protect pod state (#490)
+
+### Fixed
+- **Projected Volumes**: Correctly handle projected ConfigMap sources without `items` and prevent empty projected volumes (#524, #531)
+- **Log Forwarding**: Validate log forwarding input and fix localhost URL handling (#515)
+- **HTTP Unix Sockets**: Allow `http+unix` URLs in the SSRF check (#521)
+
 ## [0.6.1] - 2026-04-09
 
 ### Added
