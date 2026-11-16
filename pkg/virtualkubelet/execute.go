@@ -999,6 +999,9 @@ func remoteExecutionHandleVolumes(ctx context.Context, p *Provider, pod *v1.Pod,
 	// Sometime the get secret or configmap can fail because it didn't have time to initialize, thus this
 	// is not a true failure. We use this flag to wait.
 	var failedAndWait bool
+	// waited records that a volume was not ready at least once, so the pod may have been
+	// deleted while the last lookup was in flight.
+	var waited bool
 
 	log.G(ctx).Debug("Looking at volumes")
 	for _, volume := range pod.Spec.Volumes {
@@ -1123,10 +1126,8 @@ func remoteExecutionHandleVolumes(ctx context.Context, p *Provider, pod *v1.Pod,
 					// A pod deleted while it waits for its volumes is dropped from p.pods. Stop
 					// waiting then: submitting it once the volume shows up would leave a remote
 					// job that nothing deletes.
-					p.podsMu.RLock()
-					_, tracked := p.pods[string(pod.UID)]
-					p.podsMu.RUnlock()
-					if !tracked {
+					waited = true
+					if p.deletionRequested(string(pod.UID)) {
 						return errPodDeletedBeforeCreation
 					}
 					continue
@@ -1151,7 +1152,26 @@ func remoteExecutionHandleVolumes(ctx context.Context, p *Provider, pod *v1.Pod,
 			return errors.New("unable to retrieve ConfigMaps or Secrets after 5m. Check logs")
 		}
 	}
+	if waited && p.deletionRequested(string(pod.UID)) {
+		return errPodDeletedBeforeCreation
+	}
 	return nil
+}
+
+// deletionRequested reports whether pod was dropped from p.pods or has a remote
+// deletion pending, including one the plugin has not confirmed yet.
+func (p *Provider) deletionRequested(uid string) bool {
+	p.podsMu.RLock()
+	_, tracked := p.pods[uid]
+	p.podsMu.RUnlock()
+	if !tracked {
+		return true
+	}
+
+	p.pendingDeletesMu.Lock()
+	defer p.pendingDeletesMu.Unlock()
+	_, pending := p.pendingDeletes[uid]
+	return pending
 }
 
 func resolveEnvRefs(

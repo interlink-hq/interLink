@@ -1122,4 +1122,23 @@ func TestRemoteExecutionHandleVolumesWaitingForConfigMap(t *testing.T) {
 			t.Fatal("still waiting for the volumes of a deleted pod")
 		}
 	})
+
+	t.Run("stops when a failed remote deletion leaves the pod tracked", func(t *testing.T) {
+		pod := newPod()
+		p := newProvider(pod)
+		req := &types.PodCreateRequests{}
+
+		done := make(chan error, 1)
+		go func() { done <- remoteExecutionHandleVolumes(t.Context(), p, pod.DeepCopy(), req) }()
+		time.Sleep(50 * time.Millisecond)
+		p.markDeletePending(pod)
+
+		select {
+		case err := <-done:
+			assert.ErrorIs(t, err, errPodDeletedBeforeCreation)
+			assert.Empty(t, req.ConfigMaps)
+		case <-time.After(2 * time.Second):
+			t.Fatal("still waiting for the volumes of a pod whose deletion is pending")
+		}
+	})
 }
