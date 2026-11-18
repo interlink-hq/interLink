@@ -217,6 +217,10 @@ type Provider struct {
 	// keptInitWaits holds, per pod UID, the cancel function of a pending wait for the
 	// pod's kept init containers (see stopKeptInitWait).
 	keptInitWaits sync.Map
+	// keptLogs holds, per pod UID, the end of the logs of the containers the pod keeps
+	// on the cluster (map[string][]byte by container name), saved when its kept init
+	// containers ended and again before its shadow is removed.
+	keptLogs sync.Map
 	// shadowLocks serialise applying a shadow's manifests and cleaning them up, per
 	// shadow name (see lockShadow).
 	shadowLocks      [64]sync.Mutex
@@ -2374,6 +2378,7 @@ func (p *Provider) deletePodRemote(ctx context.Context, pod *v1.Pod) error {
 	p.podsMu.Lock()
 	delete(p.pods, key)
 	p.podsMu.Unlock()
+	p.keptLogs.Delete(key)
 
 	now := metav1.Now()
 	pod.Status.Reason = "VKProviderPodDeleted"
@@ -2758,6 +2763,9 @@ func (p *Provider) GetLogs(ctx context.Context, namespace, podName, containerNam
 	pod, err := p.clientSet.CoreV1().Pods(namespace).Get(ctx, podName, metav1.GetOptions{})
 	if err != nil {
 		return nil, err
+	}
+	if isKeptContainer(pod, containerName) {
+		return p.keptContainerLogs(ctx, pod, containerName, opts)
 	}
 
 	logsRequest := types.LogStruct{
