@@ -468,6 +468,14 @@ spec:
           protocol: {{.Protocol}}
         {{- end }}
         {{- end }}
+        {{- if .ReadinessPort }}
+        # Ready once the forward listens, after ssh connected: the virtual pod is ready
+        # only while its shadow is
+        readinessProbe:
+          tcpSocket:
+            port: {{.ReadinessPort}}
+          periodSeconds: 2
+        {{- end }}
         volumeMounts:
         - name: shadow-node
           mountPath: /interlink/node

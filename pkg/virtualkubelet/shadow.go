@@ -425,6 +425,93 @@ func (p *Provider) publishShadowNode(ctx context.Context, pod *v1.Pod, nodeName,
 
 	p.shadowNodeNames.Store(string(pod.UID), published)
 	log.G(ctx).Infof("Published compute node %q, socket directory %q for shadow %s/%s", nodeName, socketDir, identity.Namespace, identity.Name)
+	p.touchShadowPods(ctx, identity, nodeName)
+}
+
+// touchShadowPods annotates the shadow's pods with the published node. The kubelet
+// refreshes a ConfigMap volume on its next sync of the pod, up to a minute later
+// (71 s measured); a change to the pod makes it sync, and the shadow, which waits
+// for the node in that volume, sees it within a second.
+func (p *Provider) touchShadowPods(ctx context.Context, identity shadowResourceIdentity, nodeName string) {
+	pods, err := p.clientSet.CoreV1().Pods(identity.Namespace).List(ctx, metav1.ListOptions{
+		LabelSelector: shadowComponentLabel + "=" + identity.Name,
+	})
+	if err != nil {
+		log.G(ctx).Warningf("Failed to list the pods of shadow %s/%s: %v", identity.Namespace, identity.Name, err)
+		return
+	}
+	var annotate struct {
+		Metadata struct {
+			Annotations map[string]string `json:"annotations"`
+		} `json:"metadata"`
+	}
+	annotate.Metadata.Annotations = map[string]string{shadowNodeAnnotation: nodeName}
+	patch, err := json.Marshal(annotate)
+	if err != nil {
+		return
+	}
+	for i := range pods.Items {
+		shadow := &pods.Items[i]
+		if shadow.DeletionTimestamp != nil || !isShadowPodOf(shadow, identity.OwnerUID) {
+			continue
+		}
+		_, err := p.clientSet.CoreV1().Pods(identity.Namespace).Patch(ctx, shadow.Name, k8stypes.MergePatchType, patch, metav1.PatchOptions{})
+		if err != nil {
+			log.G(ctx).Warningf("Failed to annotate shadow pod %s/%s with its node: %v", identity.Namespace, shadow.Name, err)
+		}
+	}
+}
+
+// servedThroughShadow reports whether the pod's ports are reached through its shadow:
+// its Services then send traffic to the shadow, which forwards it to the remote job.
+func (p *Provider) servedThroughShadow(pod *v1.Pod) bool {
+	return p.shouldCreateShadow(pod) && (hasExposedPorts(pod) || hasExtraPortsAnnotation(pod))
+}
+
+// shadowServing reports whether the shadow of a pod served through it can take the
+// pod's traffic; true for any other pod.
+func (p *Provider) shadowServing(ctx context.Context, pod *v1.Pod) bool {
+	if !p.servedThroughShadow(pod) {
+		return true
+	}
+	identity, err := computeShadowResourceIdentity(pod)
+	if err != nil {
+		return false
+	}
+	shadow, err := p.currentShadowPod(ctx, identity)
+	if err != nil {
+		log.G(ctx).Warningf("Failed to read the shadow of %s/%s: %v", pod.Namespace, pod.Name, err)
+		return false
+	}
+	return shadow != nil && isServingShadowPod(shadow)
+}
+
+// setReadyFromShadow makes a running pod ready only while its shadow serves: the
+// tunnel comes up after the remote containers run, and until then a client of the
+// pod's Services finds nothing behind them.
+func setReadyFromShadow(pod *v1.Pod, serving bool) {
+	condition := v1.PodCondition{Type: v1.PodReady, Status: v1.ConditionTrue}
+	if !serving {
+		condition.Status = v1.ConditionFalse
+		condition.Reason = "ShadowNotReady"
+		condition.Message = "waiting for the shadow's tunnel to the remote job"
+		for i := range pod.Status.ContainerStatuses {
+			pod.Status.ContainerStatuses[i].Ready = false
+		}
+	}
+	for i := range pod.Status.Conditions {
+		if pod.Status.Conditions[i].Type == v1.PodReady {
+			if pod.Status.Conditions[i].Status != condition.Status {
+				condition.LastTransitionTime = metav1.Now()
+			} else {
+				condition.LastTransitionTime = pod.Status.Conditions[i].LastTransitionTime
+			}
+			pod.Status.Conditions[i] = condition
+			return
+		}
+	}
+	condition.LastTransitionTime = metav1.Now()
+	pod.Status.Conditions = append(pod.Status.Conditions, condition)
 }
 
 // releaseShadowOfEndedPod removes the shadow of a pod whose remote job ended.

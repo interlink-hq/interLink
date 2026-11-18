@@ -1644,6 +1644,8 @@ func checkPodsStatus(ctx context.Context, p *Provider, pod *v1.Pod, token string
 			// The plugin reports the remote compute node only once the job is actually
 			// running, so this stays a no-op for as long as the job sits in the queue.
 			p.publishShadowNode(ctx, podRefInCluster, podRemoteStatus.NodeName, podRemoteStatus.SocketDir)
+			// Read before taking the lock below: it lists the shadow's pods
+			shadowServing := p.shadowServing(ctx, podRefInCluster)
 
 			// check if the pod is already in a terminal state (Failed or Succeeded)
 			if currentPhase, terminal := p.podTerminalPhase(podRemoteStatus.PodUID); terminal {
@@ -1733,6 +1735,9 @@ func checkPodsStatus(ctx context.Context, p *Provider, pod *v1.Pod, token string
 					podRefInCluster.Status.Phase = v1.PodRunning
 					podRefInCluster.Status.Conditions = []v1.PodCondition{{Type: v1.PodReady, Status: v1.ConditionTrue}}
 					podRefInCluster.Status.Reason = "Running"
+				}
+				if podRunning {
+					setReadyFromShadow(podRefInCluster, shadowServing)
 				}
 			}
 
