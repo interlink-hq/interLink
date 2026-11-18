@@ -34,6 +34,16 @@ SLURM plugin of course.
 Please refer to either the plugin repository or the
 [cookbook](../cookbook/1-edge.mdx) for more information.
 
+#### Clusters reachable only through FirecREST
+
+Some HPC centers allow no SSH for automated access and expose Slurm only
+through the FirecREST v2 REST API. There, the SLURM plugin runs unchanged next
+to the [FirecREST bridge](https://github.com/matbun/interlink-firecrest-plugin):
+the bridge answers the plugin's `sbatch`, `squeue`, `scancel` and `sinfo` calls
+through FirecREST, copies the job directory to the same path on the cluster and
+pulls the job's logs and status files back. Its README covers the configuration
+and a deployment with one `helm install` of the interLink chart.
+
 ### Create UNICORE jobs to run on HPC centers
 
 [UNICORE](https://www.unicore.eu/) (Uniform Interface to Computing Resources)
