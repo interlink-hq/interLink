@@ -73,8 +73,27 @@ const (
 	intelFPGA                  = "intel.com/fpga"
 	virtualNodeNoScheduleTaint = "virtual-node.interlink/no-schedule"
 	DefaultProtocol            = "TCP"
-	DefaultWstunnelCommand     = "curl  -L -f -k https://github.com/erebe/wstunnel/releases/download/v10.4.4/wstunnel_10.4.4_linux_amd64.tar.gz -o wstunnel.tar.gz && tar -xzvf wstunnel.tar.gz && chmod +x wstunnel && ./wstunnel client --http-upgrade-path-prefix %s %s ws://%s:80 &"
-	DefaultWstunnelCommandTLS  = "curl  -L -f -k https://github.com/erebe/wstunnel/releases/download/v10.4.4/wstunnel_10.4.4_linux_amd64.tar.gz -o wstunnel.tar.gz && tar -xzvf wstunnel.tar.gz && chmod +x wstunnel && ./wstunnel client --http-upgrade-path-prefix %s %s wss://%s:443 &"
+	DefaultWstunnelCommand     = wstunnelClientSetup + `"$WSTUNNEL_DIR/wstunnel" client --http-upgrade-path-prefix %s %s ws://%s:80 &`
+	DefaultWstunnelCommandTLS  = wstunnelClientSetup + `"$WSTUNNEL_DIR/wstunnel" client --http-upgrade-path-prefix %s %s wss://%s:443 &`
+)
+
+const (
+	// WstunnelVersion is the wstunnel release the default client commands and the full mesh script use.
+	WstunnelVersion = "v10.4.4"
+	// DefaultWSTunnelExecutableURL is the linux-amd64 wstunnel binary for WstunnelVersion.
+	DefaultWSTunnelExecutableURL = "https://github.com/interlink-hq/interlink-artifacts/raw/main/wstunnel/" + WstunnelVersion + "/linux-amd64/wstunnel"
+
+	// wstunnelClientSetup keeps one wstunnel binary per version in the user cache directory, so a node
+	// downloads it once instead of for every pod, and pods never unpack it into their working directory.
+	// The binary is downloaded to a temporary name and renamed, so pods starting at the same time don't
+	// run a half written file.
+	wstunnelClientSetup = `WSTUNNEL_DIR="${XDG_CACHE_HOME:-${HOME:-/tmp}/.cache}/interlink/wstunnel-` + WstunnelVersion + `"; ` +
+		`if [ ! -x "$WSTUNNEL_DIR/wstunnel" ]; then ` +
+		`mkdir -p "$WSTUNNEL_DIR" && ` +
+		`curl -L -f -k ` + DefaultWSTunnelExecutableURL + ` -o "$WSTUNNEL_DIR/wstunnel.$$" && ` +
+		`chmod +x "$WSTUNNEL_DIR/wstunnel.$$" && ` +
+		`mv -f "$WSTUNNEL_DIR/wstunnel.$$" "$WSTUNNEL_DIR/wstunnel"; ` +
+		`fi; `
 )
 
 // Pacing of the pending-deletion reconciliation sweep.
