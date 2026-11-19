@@ -42,13 +42,13 @@ func TestDefaultWstunnelCommandCachesBinary(t *testing.T) {
 			logDir := t.TempDir()
 			cacheDir := t.TempDir()
 			workDir := t.TempDir()
-			require.NoError(t, os.WriteFile(filepath.Join(binDir, "curl"), []byte(fakeCurl), 0o755))
+			require.NoError(t, os.WriteFile(filepath.Join(binDir, "curl"), []byte(fakeCurl), 0o755)) // #nosec G306 -- the fake curl has to be executable
 
 			cmdline := fmt.Sprintf(tc.command, "secret", "-R tcp://0.0.0.0:8080:localhost:8080", "endpoint.example.com")
 			require.NotContains(t, cmdline, "%!")
 
 			run := func() {
-				cmd := exec.Command("sh", "-c", cmdline+" wait")
+				cmd := exec.Command("sh", "-c", cmdline+" wait") // #nosec G204 -- runs the default command built from constants
 				cmd.Dir = workDir
 				cmd.Env = append(os.Environ(),
 					"PATH="+binDir+":"+os.Getenv("PATH"),
