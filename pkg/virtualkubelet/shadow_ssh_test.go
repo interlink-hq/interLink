@@ -225,6 +225,7 @@ func renderSSHShadow(t *testing.T, config Config, ports []PortMapping) (string, 
 		Name:               "shadow-nb-user",
 		Namespace:          "user",
 		ExposedPorts:       ports,
+		ReadinessPort:      firstTCPPort(ports),
 		NodeConfigMap:      "shadow-nb-user-node",
 		NodeNameKey:        shadowNodeNameKey,
 		SocketDirKey:       shadowSocketDirKey,
@@ -445,6 +446,19 @@ func TestSSHShadowTemplateNodeTarget(t *testing.T) {
 		assert.Contains(t, script, `-L "0.0.0.0:8888:$sd/fwd-8888.sock"`)
 		assert.NotContains(t, manifest, "socat")
 		assert.NotContains(t, script, "-W ")
+	})
+
+	t.Run("is ready once the forward listens", func(t *testing.T) {
+		_, deployment := renderSSHShadow(t, node, socketAndTCPPorts())
+		var probe *v1.Probe
+		for _, c := range deployment.Spec.Template.Spec.Containers {
+			if c.Name == "ssh-forward" {
+				probe = c.ReadinessProbe
+			}
+		}
+		require.NotNil(t, probe, "without a probe the shadow is ready before ssh connects")
+		require.NotNil(t, probe.TCPSocket)
+		assert.Equal(t, int32(8888), probe.TCPSocket.Port.IntVal)
 	})
 
 	t.Run("waits for the socket directory only when a port needs it", func(t *testing.T) {

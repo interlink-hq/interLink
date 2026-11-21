@@ -108,6 +108,7 @@ const (
 	annShadowSocketPorts            = "interlink.eu/shadow-socket-ports"             // comma-separated exposed TCP ports served on unix sockets
 	shadowOwnerUIDLabel             = "interlink.eu/shadow-owner-uid"
 	shadowOwnerPodAnnotation        = "interlink.eu/shadow-owner-pod" // namespace/name of the pod in shadowOwnerUIDLabel
+	shadowNodeAnnotation            = "interlink.eu/shadow-node"      // the published compute node, set on the shadow's pods
 )
 
 type ShadowTemplateData struct {
@@ -115,6 +116,7 @@ type ShadowTemplateData struct {
 	Namespace            string
 	RandomPassword       string
 	ExposedPorts         []PortMapping
+	ReadinessPort        int32 // first forwarded TCP port, probed for the shadow's readiness
 	WildcardDNS          string
 	WGPrivateKey         string
 	ClientPublicKey      string
@@ -1084,6 +1086,7 @@ func (p *Provider) createShadowPod(ctx context.Context, originalPod *v1.Pod) (*v
 		Namespace:            identity.Namespace,
 		RandomPassword:       pathPrefix,
 		ExposedPorts:         exposedPorts,
+		ReadinessPort:        firstTCPPort(exposedPorts),
 		WildcardDNS:          p.config.Network.WildcardDNS,
 		LocalContainers:      localContainers,
 		LocalInitContainers:  localInitContainers,
@@ -1932,6 +1935,17 @@ func (p *Provider) checkSocketPortsRequest(pod *v1.Pod) error {
 		}
 	}
 	return nil
+}
+
+// firstTCPPort is the port the shadow's readiness probe checks, 0 when it forwards
+// no TCP port.
+func firstTCPPort(ports []PortMapping) int32 {
+	for _, port := range ports {
+		if port.Protocol != "UDP" {
+			return port.Port
+		}
+	}
+	return 0
 }
 
 // shadowPortMappings returns the ports the shadow forwards, with the ones listed
