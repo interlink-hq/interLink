@@ -226,7 +226,7 @@ type Provider struct {
 	onNodeChangeCallback func(*v1.Node)
 	clientSet            kubernetes.Interface
 	clientHTTPTransport  *http.Transport
-	podIPs               []string
+	podIPs               podIPTracker
 	// shadowNodeNames caches, per pod UID, the last compute node and socket
 	// directory published to that pod's shadow, so the status loop only writes on
 	// change.
@@ -267,6 +267,17 @@ func incrementIP(ip net.IP) {
 			break
 		}
 	}
+}
+
+// podIPsInUse returns the interlink.eu/pod-ip annotation of the given pods.
+func podIPsInUse(pods []v1.Pod) []string {
+	var ips []string
+	for i := range pods {
+		if ip, ok := pods[i].Annotations["interlink.eu/pod-ip"]; ok {
+			ips = append(ips, ip)
+		}
+	}
+	return ips
 }
 
 func findFirstFreeIP(ipList, usedIPs []string, minIP, maxIP int) string {
@@ -2143,6 +2154,7 @@ func (p *Provider) handleRemoteExecutionFailure(ctx context.Context, pod *v1.Pod
 // It returns the assigned IP.  When earlyReturn is true the caller should return nil
 // immediately (mirroring the original behaviour when listing pods fails).
 func (p *Provider) setupVPNPodIP(ctx context.Context, pod *v1.Pod) (ip string, earlyReturn bool, err error) {
+	ipSnapshot := p.podIPs.begin()
 	podsVPN, listErr := p.clientSet.CoreV1().Pods("").List(ctx, metav1.ListOptions{})
 	if listErr != nil {
 		log.G(ctx).Warning("Get all pods attached to the VPN")
@@ -2151,11 +2163,7 @@ func (p *Provider) setupVPNPodIP(ctx context.Context, pod *v1.Pod) (ip string, e
 
 	log.G(ctx).Debug("Pod lists with pod-vpn enabled has len ", len(podsVPN.Items))
 
-	for _, podVPN := range podsVPN.Items {
-		if vpnIP, ok := podVPN.Annotations["interlink.eu/pod-ip"]; ok {
-			p.podIPs = append(p.podIPs, vpnIP)
-		}
-	}
+	p.podIPs.refresh(ipSnapshot, podIPsInUse(podsVPN.Items))
 
 	podCIDR := p.node.Spec.PodCIDR
 	if podCIDR == "" {
@@ -2186,13 +2194,14 @@ func (p *Provider) setupVPNPodIP(ctx context.Context, pod *v1.Pod) (ip string, e
 		maxIP = 250
 	}
 
-	freeIP := findFirstFreeIP(ipList, p.podIPs, minIP, maxIP)
+	freeIP := p.podIPs.allocate(func(used []string) string {
+		return findFirstFreeIP(ipList, used, minIP, maxIP)
+	})
 	if freeIP == "" {
 		return "", false, fmt.Errorf("no free IP found")
 	}
 
 	log.G(ctx).Info("First free IP: ", freeIP)
-	p.podIPs = append(p.podIPs, freeIP)
 	pod.Annotations["interlink.eu/pod-ip"] = freeIP
 	return freeIP, false, nil
 }
@@ -2675,20 +2684,17 @@ func (p *Provider) statusLoop(ctx context.Context) {
 		case <-t.C:
 		}
 
-		p.podIPs = []string{}
-
+		// Rebuild the set of used IPs from the cluster. On a listing error keep the
+		// previous set, otherwise addresses in use would be reported as free.
+		ipSnapshot := p.podIPs.begin()
 		clusterPods, err := p.clientSet.CoreV1().Pods("").List(ctx, metav1.ListOptions{})
 		if err != nil {
 			log.G(ctx).Error(err)
+		} else {
+			p.podIPs.refresh(ipSnapshot, podIPsInUse(clusterPods.Items))
 		}
 
 		log.G(ctx).Debug("Pod lists with pod-vpn enabled has len ", len(clusterPods.Items))
-
-		for _, podVPN := range clusterPods.Items {
-			if ip, ok := podVPN.Annotations["interlink.eu/pod-ip"]; ok {
-				p.podIPs = append(p.podIPs, ip)
-			}
-		}
 
 		// The same list holds the shadow pods, so following a replaced one costs no
 		// extra API call. A failed list comes back empty, which moves no address.
