@@ -2,6 +2,7 @@ package virtualkubelet
 
 import (
 	"context"
+	"encoding/json"
 	"io"
 	"net"
 	"net/http"
@@ -666,6 +667,67 @@ func TestRemoteExecutionHandleProjectedSourceSecret(t *testing.T) {
 
 			require.NoError(t, err)
 			assert.Equal(t, tt.expectedData, projectedVolume.Data)
+		})
+	}
+}
+
+func TestRemoteExecutionHandleProjectedSourceSecretBinary(t *testing.T) {
+	const testSecretName = "binary-secret"
+	ctx := context.Background()
+	const (
+		textKey   = "text"
+		binKey    = "bin"
+		textValue = "plain"
+	)
+	binary := []byte{0xff, 0xfe, 0x00, 0x80, 'a'}
+
+	pod := &v1.Pod{ObjectMeta: metav1.ObjectMeta{Name: testPodName, Namespace: testNamespace}}
+	fakeClient := fake.NewSimpleClientset(&v1.Secret{
+		ObjectMeta: metav1.ObjectMeta{Name: testSecretName, Namespace: testNamespace},
+		Data: map[string][]byte{
+			textKey: []byte(textValue),
+			binKey:  binary,
+		},
+	})
+	p := &Provider{clientSet: fakeClient}
+
+	tests := []struct {
+		name         string
+		items        []v1.KeyToPath
+		expectedData map[string]string
+		expectedBin  map[string][]byte
+	}{
+		{
+			name:         "all keys",
+			expectedData: map[string]string{textKey: textValue},
+			expectedBin:  map[string][]byte{binKey: binary},
+		},
+		{
+			name:         "mapped keys",
+			items:        []v1.KeyToPath{{Key: textKey, Path: "t/text"}, {Key: binKey, Path: "b/bin"}},
+			expectedData: map[string]string{"t/text": textValue},
+			expectedBin:  map[string][]byte{"b/bin": binary},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			source := v1.VolumeProjection{
+				Secret: &v1.SecretProjection{
+					LocalObjectReference: v1.LocalObjectReference{Name: testSecretName},
+					Items:                tt.items,
+				},
+			}
+			projectedVolume := &v1.ConfigMap{Data: make(map[string]string)}
+			require.NoError(t, remoteExecutionHandleProjectedSource(ctx, p, pod, source, projectedVolume))
+
+			// The volume travels to the plugin as JSON, so check the values survive a round trip.
+			raw, err := json.Marshal(projectedVolume)
+			require.NoError(t, err)
+			var decoded v1.ConfigMap
+			require.NoError(t, json.Unmarshal(raw, &decoded))
+			assert.Equal(t, tt.expectedData, decoded.Data)
+			assert.Equal(t, tt.expectedBin, decoded.BinaryData)
 		})
 	}
 }

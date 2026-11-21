@@ -18,6 +18,7 @@ import (
 	"strconv"
 	"strings"
 	"time"
+	"unicode/utf8"
 
 	types "github.com/interlink-hq/interlink/pkg/interlink"
 	authenticationv1 "k8s.io/api/authentication/v1"
@@ -730,6 +731,22 @@ func addKubernetesServicesEnvVars(ctx context.Context, config Config, pod *v1.Po
 		pod.Name, " k8s addr ", config.KubernetesAPIAddr, " k8s port ", config.KubernetesAPIPort)
 }
 
+// setProjectedSecretValue stores a Secret value in the projected volume under path. The volume is sent to
+// the plugin as JSON, which would replace invalid UTF-8 bytes in a string, so values that are not valid
+// UTF-8 go to BinaryData (base64 encoded on the wire) and the others stay in Data.
+func setProjectedSecretValue(projectedVolume *v1.ConfigMap, path string, value []byte) {
+	if utf8.Valid(value) {
+		delete(projectedVolume.BinaryData, path)
+		projectedVolume.Data[path] = string(value)
+		return
+	}
+	delete(projectedVolume.Data, path)
+	if projectedVolume.BinaryData == nil {
+		projectedVolume.BinaryData = make(map[string][]byte)
+	}
+	projectedVolume.BinaryData[path] = value
+}
+
 // Handle projected sources and fills the projectedVolume object.
 func remoteExecutionHandleProjectedSource(
 	ctx context.Context, p *Provider, pod *v1.Pod, source v1.VolumeProjection, projectedVolume *v1.ConfigMap,
@@ -863,12 +880,12 @@ func remoteExecutionHandleProjectedSource(
 		if len(source.Secret.Items) == 0 {
 			// No items specified: project all keys from the Secret, using key name as path.
 			for key, value := range secret.Data {
-				projectedVolume.Data[key] = string(value)
+				setProjectedSecretValue(projectedVolume, key, value)
 			}
 		} else {
 			for _, item := range source.Secret.Items {
 				if value, ok := secret.Data[item.Key]; ok {
-					projectedVolume.Data[item.Path] = string(value)
+					setProjectedSecretValue(projectedVolume, item.Path, value)
 				} else if !optional {
 					return fmt.Errorf("error during retrieval of key %s of (existing) Secret %s", item.Key, source.Secret.Name)
 				}
