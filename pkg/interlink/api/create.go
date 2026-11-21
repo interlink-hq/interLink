@@ -148,8 +148,7 @@ func (h *InterLinkHandler) CreateHandler(w http.ResponseWriter, r *http.Request)
 		log.G(h.Ctx).Infof("Updated JobScript successfully (len=%d)", len(data.JobScript))
 
 	case h.Config.JobScriptTemplate != "":
-
-		tmp, err := template.ParseFiles(h.Config.JobScriptTemplate)
+		data.JobScript, err = renderJobScript(h.Config.JobScriptTemplate, data)
 		if err != nil {
 			statusCode = http.StatusInternalServerError
 			log.G(h.Ctx).Error(err)
@@ -157,18 +156,6 @@ func (h *InterLinkHandler) CreateHandler(w http.ResponseWriter, r *http.Request)
 			types.SetSpanError(span, statusCode, err)
 			return
 		}
-
-		var tpl bytes.Buffer
-		err = tmp.Execute(&tpl, data)
-		if err != nil {
-			statusCode = http.StatusInternalServerError
-			log.G(h.Ctx).Error(err)
-			w.WriteHeader(statusCode)
-			types.SetSpanError(span, statusCode, err)
-			return
-		}
-
-		data.JobScript = tpl.String()
 	}
 
 	// updated to handle single data
@@ -212,4 +199,18 @@ func (h *InterLinkHandler) CreateHandler(w http.ResponseWriter, r *http.Request)
 	// The return code was already recorded by ReqWithError, so only the outcome
 	// is set here.
 	types.SetSpanOK(span, 0)
+}
+
+// renderJobScript fills the job script template at path with the data of one pod.
+func renderJobScript(path string, data types.RetrievedPodData) (string, error) {
+	tmp, err := template.ParseFiles(path)
+	if err != nil {
+		return "", err
+	}
+
+	var tpl bytes.Buffer
+	if err := tmp.Execute(&tpl, data); err != nil {
+		return "", err
+	}
+	return tpl.String(), nil
 }
