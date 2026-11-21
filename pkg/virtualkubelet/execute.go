@@ -19,6 +19,7 @@ import (
 	"strconv"
 	"strings"
 	"time"
+	"unicode/utf8"
 
 	types "github.com/interlink-hq/interlink/pkg/interlink"
 	authenticationv1 "k8s.io/api/authentication/v1"
@@ -779,6 +780,22 @@ func addKubernetesServicesEnvVars(ctx context.Context, config Config, pod *v1.Po
 		pod.Name, " k8s addr ", config.KubernetesAPIAddr, " k8s port ", config.KubernetesAPIPort)
 }
 
+// setProjectedSecretValue stores a Secret value in the projected volume under path. The volume is sent to
+// the plugin as JSON, which would replace invalid UTF-8 bytes in a string, so values that are not valid
+// UTF-8 go to BinaryData (base64 encoded on the wire) and the others stay in Data.
+func setProjectedSecretValue(projectedVolume *v1.ConfigMap, path string, value []byte) {
+	if utf8.Valid(value) {
+		delete(projectedVolume.BinaryData, path)
+		projectedVolume.Data[path] = string(value)
+		return
+	}
+	delete(projectedVolume.Data, path)
+	if projectedVolume.BinaryData == nil {
+		projectedVolume.BinaryData = make(map[string][]byte)
+	}
+	projectedVolume.BinaryData[path] = value
+}
+
 // Handle projected sources and fills the projectedVolume object.
 func remoteExecutionHandleProjectedSource(
 	ctx context.Context, p *Provider, pod *v1.Pod, source v1.VolumeProjection, projectedVolume *v1.ConfigMap,
@@ -887,6 +904,43 @@ func remoteExecutionHandleProjectedSource(
 					} else if !optional {
 						return fmt.Errorf("error during retrieval of key %s of (existing) ConfigMap %s", item.Key, source.ConfigMap.Name)
 					}
+				}
+			}
+		}
+
+	case source.Secret != nil:
+		/* Case
+		   - secret:
+		       items:
+		         - key: password
+		           path: db/password
+		       name: db-credentials
+		   Or without items (project all keys):
+		   - secret:
+		       name: db-credentials
+		*/
+		optional := source.Secret.Optional != nil && *source.Secret.Optional
+		// Fetch the Secret once, then iterate over items (or all keys if no items are specified).
+		secret, err := p.clientSet.CoreV1().Secrets(pod.Namespace).Get(ctx, source.Secret.Name, metav1.GetOptions{})
+		if err != nil {
+			if optional && apierrors.IsNotFound(err) {
+				// Like the kubelet, a missing optional Secret projects no keys.
+				log.G(ctx).Infof("optional Secret %s of pod %s not found, projecting no keys from it", source.Secret.Name, pod.Name)
+				return nil
+			}
+			return fmt.Errorf("error during retrieval of Secret %s error: %w", source.Secret.Name, err)
+		}
+		if len(source.Secret.Items) == 0 {
+			// No items specified: project all keys from the Secret, using key name as path.
+			for key, value := range secret.Data {
+				setProjectedSecretValue(projectedVolume, key, value)
+			}
+		} else {
+			for _, item := range source.Secret.Items {
+				if value, ok := secret.Data[item.Key]; ok {
+					setProjectedSecretValue(projectedVolume, item.Path, value)
+				} else if !optional {
+					return fmt.Errorf("error during retrieval of key %s of (existing) Secret %s", item.Key, source.Secret.Name)
 				}
 			}
 		}
