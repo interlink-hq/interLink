@@ -498,3 +498,38 @@ func TestLoadConfig_EphemeralStorage(t *testing.T) {
 	require.NoError(t, err)
 	assert.Empty(t, config.Resources.EphemeralStorage)
 }
+
+func TestUpdateNodeResources_NonPositiveCPUAndMemoryAreIgnored(t *testing.T) {
+	config := Config{
+		Resources: Resources{
+			CPU:    "10",
+			Memory: testMemoryQuantity,
+			Pods:   "100",
+		},
+	}
+	provider, err := NewProviderConfig(config, "test-node", "v1.0", "linux", "10.0.0.1", 10250, nil)
+	assert.NoError(t, err)
+
+	originalCPU := provider.node.Status.Capacity[v1.ResourceCPU].DeepCopy()
+	originalMemory := provider.node.Status.Capacity[v1.ResourceMemory].DeepCopy()
+
+	for _, tc := range []struct{ cpu, memory string }{
+		{cpu: "0", memory: "0Mi"},
+		{cpu: "-1", memory: "-1Gi"},
+	} {
+		t.Run(tc.cpu+"/"+tc.memory, func(t *testing.T) {
+			provider.updateNodeResources(context.Background(), &types.ResourcesResponse{CPU: tc.cpu, Memory: tc.memory})
+
+			for _, list := range []v1.ResourceList{provider.node.Status.Capacity, provider.node.Status.Allocatable} {
+				cpu, memory := list[v1.ResourceCPU], list[v1.ResourceMemory]
+				assert.Equal(t, 0, originalCPU.Cmp(cpu), "cpu changed to %s", cpu.String())
+				assert.Equal(t, 0, originalMemory.Cmp(memory), "memory changed to %s", memory.String())
+			}
+		})
+	}
+
+	// A positive value still replaces the configured one.
+	provider.updateNodeResources(context.Background(), &types.ResourcesResponse{CPU: "4"})
+	cpu := provider.node.Status.Capacity[v1.ResourceCPU]
+	assert.Equal(t, int64(4), cpu.Value())
+}
