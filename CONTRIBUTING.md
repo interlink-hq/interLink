@@ -27,7 +27,7 @@ you submit the pull request). We have a 3 steps process for contributions.
 
 ### Sign Your Commits
 
-[Instructions](https://contribute.cncf.io/maintainers/github/templates/required/contributing/#sign-your-commits)
+[Instructions](https://docs.github.com/en/authentication/managing-commit-signature-verification/signing-commits)
 
 ### DCO
 
@@ -63,6 +63,52 @@ repository, you can amend your commit with the sign-off by running
    contribution entails.
 2. **Run E2E tests with success**. You can follow the steps described
    [here](https://interlink-hq.github.io/interLink/docs/Developers)
+3. **Keep the pull request small and focused**, as described in
+   [Pull Request Size and Scope](#pull-request-size-and-scope).
+
+### Pull Request Size and Scope
+
+Small pull requests are reviewed faster, reviewed more carefully and are easier
+to revert. Please follow these limits; if a change cannot respect them, explain
+why in the pull request description.
+
+| Aspect                | Guideline                                                  |
+| --------------------- | ---------------------------------------------------------- |
+| Changed lines         | Stay below **500** (added + deleted), tests included       |
+| Files touched         | Ideally at most **15**                                     |
+| Logical changes       | **One** per pull request                                   |
+| Commits               | Each one builds, passes tests and is signed off and signed |
+| Review turnaround aim | A reviewer should be able to finish in about 30 minutes    |
+
+When counting changed lines, ignore generated files (for example OpenAPI
+specifications and `go.sum`), vendored or lock files, and pure file moves or
+renames with no content change. Check your count with `git diff --stat` against
+the target branch.
+
+To keep within these limits:
+
+- **Separate refactoring from behavior changes.** A pull request either moves or
+  restructures code without changing what it does, or changes behavior, not
+  both. Say which one it is in the description.
+- **Separate mechanical changes from logic.** Renames, formatting and file moves
+  go in their own pull request, so reviewers can skim them.
+- **Add code together with its tests.** Do not postpone tests to a follow-up
+  pull request.
+- **Introduce, then migrate, then remove.** For a replacement of an existing
+  mechanism, add the new code first (unused, but tested), then switch callers
+  over in one or more pull requests, and finally delete the old code.
+- **Keep every step shippable.** After each pull request merges, `main` must
+  build, pass the tests and keep working for users.
+- **Split large work into a stack of pull requests.** Open an issue that lists
+  the planned steps, and reference it from every pull request. State in the
+  description which pull request it depends on, and open the next one only
+  when the previous one is approved or merged, so that reviewers are not asked
+  to look at the same lines twice.
+- **Do not mix in unrelated fixes.** Open a separate pull request (or issue) for
+  anything you notice along the way.
+
+A pull request description must say _what_ changed, _why_, and _how it was
+tested_, following the pull request template.
 
 ### Code Review Process
 

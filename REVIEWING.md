@@ -60,7 +60,7 @@ that we build trust:
 
 ## Process
 
-[Instructions](https://contribute.cncf.io/maintainers/github/templates/recommended/reviewing/#process)
+[Instructions](https://docs.github.com/en/pull-requests/collaborating-with-pull-requests/reviewing-changes-in-pull-requests/reviewing-proposed-changes-in-a-pull-request)
 
 ⚠️ **TBD**
 
@@ -69,6 +69,10 @@ that we build trust:
 Below are a set of common questions that apply to all pull requests:
 
 - [ ] Is this PR targeting the correct branch?
+- [ ] Is the PR small enough to review (below ~500 changed lines) and focused on
+      one logical change? If not, ask the author to split it, see
+      [Pull Request Size and Scope](CONTRIBUTING.md#pull-request-size-and-scope).
+- [ ] Does the PR keep refactoring separate from behavior changes?
 - [ ] Does the commit message provide an adequate description of the change?
 - [ ] Does the affected code have corresponding tests?
 - [ ] Are the changes documented, not just with inline documentation, but also
@@ -84,5 +88,5 @@ Reviewers are encouraged to read the following articles for help with common
 reviewer tasks:
 
 - [The Art of Closing: How to closing an unfinished or rejected pull request](https://blog.jessfraz.com/post/the-art-of-closing/)
-- [Kindness and Code Reviews: Improving the Way We Give Feedback](https://product.voxmedia.com/2018/8/21/17549400/kindness-and-code-reviews-improving-the-way-we-give-feedback)
+- [Kindness and Code Reviews: Improving the Way We Give Feedback](https://web.archive.org/web/2023/https://product.voxmedia.com/2018/8/21/17549400/kindness-and-code-reviews-improving-the-way-we-give-feedback)
 - [Code Review Guidelines for Humans: Examples of good and back feedback](https://phauer.com/2018/code-review-guidelines/#code-reviews-guidelines-for-the-reviewer)
