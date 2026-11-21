@@ -825,27 +825,8 @@ func (p *Provider) updateNodeResources(ctx context.Context, resources *types.Res
 	capacity := p.node.Status.Capacity
 	allocatable := p.node.Status.Allocatable
 
-	if resources.CPU != "" {
-		q, err := resource.ParseQuantity(resources.CPU)
-		if err != nil {
-			log.G(ctx).Warnf("Invalid CPU value %q in ping response: %v", resources.CPU, err)
-		} else {
-			capacity[v1.ResourceCPU] = q
-			allocatable[v1.ResourceCPU] = q
-			log.G(ctx).Infof("Updated node CPU capacity to %s", resources.CPU)
-		}
-	}
-
-	if resources.Memory != "" {
-		q, err := resource.ParseQuantity(resources.Memory)
-		if err != nil {
-			log.G(ctx).Warnf("Invalid memory value %q in ping response: %v", resources.Memory, err)
-		} else {
-			capacity[v1.ResourceMemory] = q
-			allocatable[v1.ResourceMemory] = q
-			log.G(ctx).Infof("Updated node memory capacity to %s", resources.Memory)
-		}
-	}
+	p.updateComputeResource(ctx, v1.ResourceCPU, "CPU", resources.CPU)
+	p.updateComputeResource(ctx, v1.ResourceMemory, "memory", resources.Memory)
 
 	if resources.Pods != "" {
 		q, err := resource.ParseQuantity(resources.Pods)
@@ -879,6 +860,29 @@ func (p *Provider) updateNodeResources(ctx context.Context, resources *types.Res
 		capacity[rName] = q
 		allocatable[rName] = q
 		log.G(ctx).Infof("Updated node accelerator %s capacity to %s", acc.ResourceType, acc.Available)
+	}
+}
+
+// updateComputeResource sets the node capacity of a CPU or memory resource
+// from a ping response. An empty value means the plugin doesn't know it. Zero
+// or negative values are ignored too, since advertising them would leave the
+// node with no room for any pod.
+func (p *Provider) updateComputeResource(ctx context.Context, name v1.ResourceName, desc, value string) {
+	if value == "" {
+		return
+	}
+
+	q, err := resource.ParseQuantity(value)
+	switch {
+	case err != nil:
+		log.G(ctx).Warnf("Invalid %s value %q in ping response: %v", desc, value, err)
+	case q.Sign() <= 0:
+		current := p.node.Status.Capacity[name]
+		log.G(ctx).Warnf("Ignoring %s value %q in ping response: must be positive, keeping the current capacity of %s. A plugin that can't tell its capacity should leave the field out", desc, value, current.String())
+	default:
+		p.node.Status.Capacity[name] = q
+		p.node.Status.Allocatable[name] = q
+		log.G(ctx).Infof("Updated node %s capacity to %s", desc, value)
 	}
 }
 
