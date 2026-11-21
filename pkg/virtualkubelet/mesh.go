@@ -206,7 +206,7 @@ func (p *Provider) generateFullMeshScript(ctx context.Context, td *ShadowTemplat
 	// Set default URLs if not configured
 	WSTunnelExecutableURL := p.config.Network.WSTunnelExecutableURL
 	if WSTunnelExecutableURL == "" {
-		WSTunnelExecutableURL = "https://github.com/interlink-hq/interlink-artifacts/raw/main/wstunnel/v10.4.4/linux-amd64/wstunnel"
+		WSTunnelExecutableURL = DefaultWSTunnelExecutableURL
 	}
 
 	wireguardGoURL := p.config.Network.WireguardGoURL
