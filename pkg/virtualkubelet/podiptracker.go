@@ -15,7 +15,8 @@ import "sync"
 // while the list was in flight is kept, so it cannot be handed out twice.
 type podIPTracker struct {
 	mu       sync.Mutex
-	seq      uint64
+	seq      uint64 // orders both list starts and allocations
+	applied  uint64 // latest applied list snapshot
 	observed map[string]struct{}
 	reserved map[string]uint64 // IP -> value of seq when it was reserved
 }
@@ -26,14 +27,21 @@ func (t *podIPTracker) begin() uint64 {
 	t.mu.Lock()
 	defer t.mu.Unlock()
 
+	t.seq++
 	return t.seq
 }
 
 // refresh replaces the observed addresses and releases the reservations made up to
-// snapshot. Reservations made after it are kept.
+// snapshot. Reservations made after it are kept. Superseded list results are ignored.
 func (t *podIPTracker) refresh(snapshot uint64, observed []string) {
 	t.mu.Lock()
 	defer t.mu.Unlock()
+
+	if snapshot <= t.applied {
+		return
+	}
+	t.applied = snapshot
+
 
 	t.observed = make(map[string]struct{}, len(observed))
 	for _, ip := range observed {
