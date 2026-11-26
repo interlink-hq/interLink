@@ -535,6 +535,13 @@ func (p *Provider) releaseShadowOfEndedPod(ctx context.Context, pod *v1.Pod) {
 		return
 	}
 	log.G(ctx).Infof("Pod %s/%s is %s: removing its shadow", pod.Namespace, pod.Name, pod.Status.Phase)
+	// Their logs go with the shadow: keep the last ones, sidecars and kept containers
+	// included, which were still running when the init containers' logs were saved.
+	if kept := append(getLocalInitContainers(pod), getLocalContainers(pod)...); len(kept) > 0 {
+		if shadow, err := p.currentShadowPod(ctx, identity); err == nil && shadow != nil {
+			p.saveKeptLogs(ctx, string(pod.UID), shadow, kept)
+		}
+	}
 	p.cleanupShadowResources(ctx, identity)
 	p.forgetShadowNodeName(pod)
 }

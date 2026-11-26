@@ -1,13 +1,16 @@
 package virtualkubelet
 
 import (
+	"bytes"
 	"context"
 	"errors"
 	"fmt"
+	"io"
 	"reflect"
 	"time"
 
 	"github.com/containerd/containerd/log"
+	"github.com/virtual-kubelet/virtual-kubelet/node/api"
 	v1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 )
@@ -25,6 +28,10 @@ const shadowComponentLabel = "app.kubernetes.io/component"
 
 // keptInitPollInterval is how often the shadow is checked while its init containers run.
 var keptInitPollInterval = 2 * time.Second
+
+// keptLogLines bounds what is kept of the log of each container the pod keeps on the
+// cluster once its shadow is gone.
+const keptLogLines = 2000
 
 // errPodGoneWhileInitializing tells the caller the pod was deleted before its
 // cluster-side init containers finished, so there is nothing left to submit.
@@ -304,10 +311,13 @@ func (p *Provider) waitForKeptInitContainers(ctx context.Context, pod *v1.Pod) e
 				}
 			}
 			if state.failed != nil && pod.Spec.RestartPolicy == v1.RestartPolicyNever {
+				p.saveKeptLogs(ctx, uid, shadow, kept)
 				p.failPodOnKeptInit(ctx, uid, state.failed)
 				return fmt.Errorf("init container %s kept on the cluster failed", state.failed.Name)
 			}
 			if state.done {
+				// Before the claim: taking the wait over cancels ctx.
+				p.saveKeptLogs(ctx, uid, shadow, kept)
 				if !p.stopKeptInitWait(uid) {
 					return errPodGoneWhileInitializing
 				}
@@ -325,4 +335,80 @@ func (p *Provider) waitForKeptInitContainers(ctx context.Context, pod *v1.Pod) e
 		case <-time.After(keptInitPollInterval):
 		}
 	}
+}
+
+// saveKeptLogs keeps the end of the log of each container the pod keeps on the
+// cluster, read from the shadow: the shadow is removed when the pod ends, and with it
+// the logs. A container whose log cannot be read keeps what was saved before.
+func (p *Provider) saveKeptLogs(ctx context.Context, uid string, shadow *v1.Pod, kept []v1.Container) {
+	tail := int64(keptLogLines)
+	saved := make(map[string][]byte, len(kept))
+	if previous, ok := p.keptLogs.Load(uid); ok {
+		for name, raw := range previous.(map[string][]byte) {
+			saved[name] = raw
+		}
+	}
+	for _, c := range kept {
+		raw, err := p.clientSet.CoreV1().Pods(shadow.Namespace).GetLogs(shadow.Name, &v1.PodLogOptions{
+			Container: c.Name, TailLines: &tail,
+		}).DoRaw(ctx)
+		if err != nil {
+			log.G(ctx).Warningf("Failed to read the log of container %s in %s/%s: %v", c.Name, shadow.Namespace, shadow.Name, err)
+			continue
+		}
+		saved[c.Name] = raw
+	}
+	p.podsMu.RLock()
+	if _, tracked := p.pods[uid]; tracked {
+		p.keptLogs.Store(uid, saved)
+	}
+	p.podsMu.RUnlock()
+}
+
+// isKeptContainer reports whether the named container of the pod runs on the cluster.
+func isKeptContainer(pod *v1.Pod, name string) bool {
+	return parseDisableOffloadContainers(pod)[name] || parseDisableOffloadInitContainers(pod)[name]
+}
+
+// keptContainerLogs serves the log of a container the pod keeps on the cluster: from the
+// shadow that runs it while there is one, else what was saved before the shadow went.
+func (p *Provider) keptContainerLogs(ctx context.Context, pod *v1.Pod, name string, opts api.ContainerLogOpts) (io.ReadCloser, error) {
+	identity, err := computeShadowResourceIdentity(pod)
+	if err != nil {
+		return nil, err
+	}
+	shadow, err := p.currentShadowPod(ctx, identity)
+	if err == nil && shadow != nil {
+		return p.clientSet.CoreV1().Pods(shadow.Namespace).GetLogs(shadow.Name, shadowLogOptions(name, opts)).Stream(ctx)
+	}
+	if saved, ok := p.keptLogs.Load(string(pod.UID)); ok {
+		if raw, ok := saved.(map[string][]byte)[name]; ok {
+			return io.NopCloser(bytes.NewReader(raw)), nil
+		}
+	}
+	if err != nil {
+		return nil, err
+	}
+	return nil, fmt.Errorf("container %s of pod %s/%s ran on the cluster, in a shadow that no longer exists", name, pod.Namespace, pod.Name)
+}
+
+func shadowLogOptions(container string, opts api.ContainerLogOpts) *v1.PodLogOptions {
+	o := &v1.PodLogOptions{Container: container, Follow: opts.Follow, Previous: opts.Previous, Timestamps: opts.Timestamps}
+	if opts.Tail > 0 {
+		tail := int64(opts.Tail)
+		o.TailLines = &tail
+	}
+	if opts.LimitBytes > 0 {
+		limit := int64(opts.LimitBytes)
+		o.LimitBytes = &limit
+	}
+	if opts.SinceSeconds > 0 {
+		since := int64(opts.SinceSeconds)
+		o.SinceSeconds = &since
+	}
+	if !opts.SinceTime.IsZero() {
+		since := metav1.NewTime(opts.SinceTime)
+		o.SinceTime = &since
+	}
+	return o
 }
