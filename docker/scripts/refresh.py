@@ -109,7 +109,6 @@ if __name__ == '__main__':
                 auth = HTTPBasicAuth(iam_client_id, iam_client_secret)
 
                 r = requests.post(iam_server, data=request_data, auth=auth)
-                print(r.text)
                 try:
                     response = json.loads(r.text)
                 except:
