@@ -38,6 +38,20 @@ func main() {
 		panic(err)
 	}
 
+	// CREATE POD GROUP
+	createPodGroupOp, err := reflector.NewOperationContext(http.MethodPost, "/createPodGroup")
+	if err != nil {
+		panic(err)
+	}
+
+	createPodGroupOp.AddReqStructure(new(interlink.PodGroupCreateRequests))
+	createPodGroupOp.AddRespStructure(new([]interlink.CreateStruct), func(cu *openapi.ContentUnit) { cu.HTTPStatus = http.StatusOK })
+
+	err = reflector.AddOperation(createPodGroupOp)
+	if err != nil {
+		panic(err)
+	}
+
 	// DELETE
 	deleteOp, err := reflector.NewOperationContext(http.MethodPost, "/delete")
 	if err != nil {

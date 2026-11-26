@@ -44,6 +44,48 @@
         }
       }
     },
+    "/createPodGroup": {
+      "post": {
+        "summary": "Create Pod Group",
+        "operationId": "create_pod_group_createPodGroup_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/RetrievedPodGroupData"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "items": {
+                    "$ref": "#/components/schemas/CreateStruct"
+                  },
+                  "type": "array",
+                  "title": "Response Create Pod Group Createpodgroup Post"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/delete": {
       "post": {
         "summary": "Delete Pod",
@@ -983,6 +1025,27 @@
           "name"
         ],
         "title": "PodVolume"
+      },
+      "RetrievedPodGroupData": {
+        "properties": {
+          "groupUID": {
+            "type": "string",
+            "title": "Group Uid"
+          },
+          "pods": {
+            "items": {
+              "$ref": "#/components/schemas/Pod"
+            },
+            "type": "array",
+            "title": "Pods"
+          }
+        },
+        "type": "object",
+        "required": [
+          "groupUID",
+          "pods"
+        ],
+        "title": "RetrievedPodGroupData"
       },
       "Secret": {
         "properties": {
