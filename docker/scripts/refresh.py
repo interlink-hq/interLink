@@ -18,8 +18,8 @@ if __name__ == '__main__':
     """
     try:
         verbose = os.environ.get("VERBOSE")
+        logging.basicConfig(level=logging.DEBUG if verbose == "True" else logging.INFO)
         if "True" == verbose:
-            logging.basicConfig(level=logging.DEBUG)
             logger.info("Verbose mode: setting log to debug.")
         
         iam_grant_type = os.environ.get("IAM_GRANT_TYPE")
@@ -43,7 +43,6 @@ if __name__ == '__main__':
         except:
             logger.info("No cache for refresh token, starting from ENV value")
     
-        logger.info("Current refresh token: %s", iam_refresh_token)
         token = None
 
         if iam_grant_type == "client_credentials": 
@@ -60,27 +59,20 @@ if __name__ == '__main__':
                 auth = HTTPBasicAuth(iam_client_id, iam_client_secret)
                 headers = {'Content-Type': 'application/x-www-form-urlencoded'}
                 r = requests.post(iam_server, data=request_data, auth=auth, headers=headers)
-                logger.debug("Raw response text: %s", r.text)
                 try:
                     response = json.loads(r.text)
                 except:
                     try:
                         response = dict(parse.parse_qsl(r.text)) 
-                        logger.debug("Response text parsed: %s", response)
                     except:
                         exit(1)
                         
-
-                logger.debug("iam_client_id %s iam_client_secret %s response %s", iam_client_id, iam_client_secret, response)
-
                 token = response['access_token']
                 try:
                     refresh_token = response['refresh_token']
                 except:
                     refresh_token = iam_refresh_token
 
-
-                logger.info("Token retrieved")
 
                 ## TODO: collect new refresh token and store it somewhere
                 with open(output_file+"-refresh", "w") as text_file:
@@ -89,11 +81,11 @@ if __name__ == '__main__':
                 with open(output_file, "w") as text_file:
                     text_file.write(token)
 
+                logger.info("Access token retrieved and saved: [REDACTED]")
                 logger.info(f"Refresh token written in {output_file+'-refresh'}")
 
             except Exception as e:
                 logger.warning("ERROR oidc get token: {}".format(e), exc_info=True)
-                logger.warning("Response if available: %s", response)
             
         elif iam_grant_type == "authorization_code":
 
@@ -114,20 +106,15 @@ if __name__ == '__main__':
                 except:
                     try:
                         response = dict(parse.parse_qsl(r.text)) 
-                        logger.debug(response)
                     except:
                         exit(1)
                         
-                logger.debug("iam_client_id %s iam_client_secret %s response %s", iam_client_id, iam_client_secret, response)
-
                 token = response['access_token']
                 try:
                     refresh_token = response['refresh_token']
                 except:
                     refresh_token = iam_refresh_token
 
-
-                logger.info("Token retrieved")
 
                 ## TODO: collect new refresh token and store it somewhere
                 with open(output_file+"-refresh", "w") as text_file:
@@ -137,11 +124,11 @@ if __name__ == '__main__':
                 with open(output_file, "w") as text_file:
                     text_file.write(token)
 
+                logger.info("Access token retrieved and saved: [REDACTED]")
                 logger.info(f"Refresh token written in {output_file+'-refresh'}")
 
             except Exception as e:
                 logger.warning("ERROR oidc get token: {}".format(e), exc_info=True)
-                logger.warning("Response if available: %s", response)
         else:
             logger.error(f"Invalid grant type {iam_grant_type}", exc_info=True)
             exit(1)
