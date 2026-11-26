@@ -358,7 +358,11 @@ func (p *Provider) saveKeptLogs(ctx context.Context, uid string, shadow *v1.Pod,
 		}
 		saved[c.Name] = raw
 	}
-	p.keptLogs.Store(uid, saved)
+	p.podsMu.RLock()
+	if _, tracked := p.pods[uid]; tracked {
+		p.keptLogs.Store(uid, saved)
+	}
+	p.podsMu.RUnlock()
 }
 
 // isKeptContainer reports whether the named container of the pod runs on the cluster.
