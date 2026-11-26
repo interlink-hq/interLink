@@ -10,15 +10,15 @@ import "sync"
 //     from the cluster. Each refresh replaces the whole set.
 //   - reserved: addresses handed out by allocate that the cluster may not report yet.
 //
-// A reservation is released by refresh only when it was made before the pod list was
-// taken (see begin): such a pod, if it exists, is part of that list. A reservation made
-// while the list was in flight is kept, so it cannot be handed out twice.
+// Refresh releases a reservation once its address is observed. Otherwise it remains
+// reserved until its owner is explicitly retired.
 type podIPTracker struct {
-	mu       sync.Mutex
-	seq      uint64 // orders both list starts and allocations
-	applied  uint64 // latest applied list snapshot
-	observed map[string]struct{}
-	reserved map[string]uint64 // IP -> value of seq when it was reserved
+	mu             sync.Mutex
+	latestSnapshot uint64
+	applied        uint64
+	observed       map[string]struct{}
+	reserved       map[string]string // IP -> pod UID
+	byOwner        map[string]string // pod UID -> IP
 }
 
 // begin must be called right before listing the pods from the cluster. The returned
@@ -27,30 +27,30 @@ func (t *podIPTracker) begin() uint64 {
 	t.mu.Lock()
 	defer t.mu.Unlock()
 
-	t.seq++
-	return t.seq
+	t.latestSnapshot++
+	return t.latestSnapshot
 }
 
-// refresh replaces the observed addresses and releases the reservations made up to
-// snapshot. Reservations made after it are kept. Superseded list results are ignored.
+// refresh replaces the observed addresses and releases reservations whose addresses
+// are now visible in the cluster. Superseded list results are ignored.
 func (t *podIPTracker) refresh(snapshot uint64, observed []string) {
 	t.mu.Lock()
 	defer t.mu.Unlock()
 
-	if snapshot <= t.applied {
+	if snapshot < t.latestSnapshot || snapshot <= t.applied {
 		return
 	}
 	t.applied = snapshot
-
 
 	t.observed = make(map[string]struct{}, len(observed))
 	for _, ip := range observed {
 		t.observed[ip] = struct{}{}
 	}
 
-	for ip, seq := range t.reserved {
-		if seq <= snapshot {
+	for ip, owner := range t.reserved {
+		if _, ok := t.observed[ip]; ok {
 			delete(t.reserved, ip)
+			delete(t.byOwner, owner)
 		}
 	}
 }
@@ -58,9 +58,13 @@ func (t *podIPTracker) refresh(snapshot uint64, observed []string) {
 // allocate picks a free IP and reserves it in a single critical section, so that
 // concurrent callers are never given the same address. pick receives the addresses that
 // are in use and returns the chosen IP, or an empty string if none is available.
-func (t *podIPTracker) allocate(pick func(used []string) string) string {
+func (t *podIPTracker) allocate(owner string, pick func(used []string) string) string {
 	t.mu.Lock()
 	defer t.mu.Unlock()
+
+	if ip, ok := t.byOwner[owner]; owner != "" && ok {
+		return ip
+	}
 
 	used := make([]string, 0, len(t.observed)+len(t.reserved))
 	for ip := range t.observed {
@@ -78,9 +82,26 @@ func (t *podIPTracker) allocate(pick func(used []string) string) string {
 	}
 
 	if t.reserved == nil {
-		t.reserved = make(map[string]uint64)
+		t.reserved = make(map[string]string)
 	}
-	t.seq++
-	t.reserved[ip] = t.seq
+	t.reserved[ip] = owner
+	if owner != "" {
+		if t.byOwner == nil {
+			t.byOwner = make(map[string]string)
+		}
+		t.byOwner[owner] = ip
+	}
 	return ip
+}
+
+// retire releases any address reserved for owner. Observed addresses remain in use
+// until a later refresh confirms they have disappeared from the cluster.
+func (t *podIPTracker) retire(owner string) {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+
+	if ip, ok := t.byOwner[owner]; ok {
+		delete(t.reserved, ip)
+		delete(t.byOwner, owner)
+	}
 }

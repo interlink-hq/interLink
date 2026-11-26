@@ -2194,7 +2194,7 @@ func (p *Provider) setupVPNPodIP(ctx context.Context, pod *v1.Pod) (ip string, e
 		maxIP = 250
 	}
 
-	freeIP := p.podIPs.allocate(func(used []string) string {
+	freeIP := p.podIPs.allocate(string(pod.UID), func(used []string) string {
 		return findFirstFreeIP(ipList, used, minIP, maxIP)
 	})
 	if freeIP == "" {
@@ -2289,6 +2289,7 @@ func (p *Provider) CreatePod(ctx context.Context, pod *v1.Pod) error {
 	}
 
 	if err := p.setPodInitialStatus(ctx, pod, podIP); err != nil {
+		p.podIPs.retire(string(pod.UID))
 		return err
 	}
 
@@ -2403,6 +2404,7 @@ func (p *Provider) deletePodRemote(ctx context.Context, pod *v1.Pod) error {
 	if err != nil {
 		return err
 	}
+	p.podIPs.retire(key)
 
 	p.podsMu.Lock()
 	delete(p.pods, key)

@@ -26,15 +26,16 @@ func TestPodIPTracker_AllocateSkipsObservedAndReserved(t *testing.T) {
 	var tracker podIPTracker
 	tracker.refresh(tracker.begin(), []string{testIP2})
 
-	assert.Equal(t, testIP3, tracker.allocate(pickFromPool))
-	assert.Equal(t, testIP4, tracker.allocate(pickFromPool))
+	assert.Equal(t, testIP3, tracker.allocate("pod-1", pickFromPool))
+	assert.Equal(t, testIP3, tracker.allocate("pod-1", pickFromPool))
+	assert.Equal(t, testIP4, tracker.allocate("pod-2", pickFromPool))
 }
 
 func TestPodIPTracker_AllocateWithoutFreeIPReservesNothing(t *testing.T) {
 	var tracker podIPTracker
 
-	assert.Empty(t, tracker.allocate(func([]string) string { return "" }))
-	assert.Equal(t, testIP2, tracker.allocate(pickFromPool))
+	assert.Empty(t, tracker.allocate("pod-1", func([]string) string { return "" }))
+	assert.Equal(t, testIP2, tracker.allocate("pod-1", pickFromPool))
 }
 
 func TestPodIPTracker_RefreshKeepsReservationMadeDuringTheListing(t *testing.T) {
@@ -42,28 +43,32 @@ func TestPodIPTracker_RefreshKeepsReservationMadeDuringTheListing(t *testing.T) 
 
 	snapshot := tracker.begin()
 	// CreatePod reserves an address while the cluster pods are being listed.
-	reserved := tracker.allocate(pickFromPool)
+	reserved := tracker.allocate("pod-1", pickFromPool)
 	tracker.refresh(snapshot, nil)
 
-	assert.NotEqual(t, reserved, tracker.allocate(pickFromPool))
+	assert.NotEqual(t, reserved, tracker.allocate("pod-2", pickFromPool))
 }
 
-func TestPodIPTracker_RefreshReleasesReservationMadeBeforeTheListing(t *testing.T) {
+func TestPodIPTracker_RefreshKeepsUnobservedReservationUntilRetired(t *testing.T) {
 	var tracker podIPTracker
 
-	reserved := tracker.allocate(pickFromPool)
+	reserved := tracker.allocate("pod-1", pickFromPool)
 	tracker.refresh(tracker.begin(), nil)
 
-	assert.Equal(t, reserved, tracker.allocate(pickFromPool))
+	assert.NotEqual(t, reserved, tracker.allocate("pod-2", pickFromPool))
+	tracker.retire("pod-1")
+	assert.Equal(t, reserved, tracker.allocate("pod-3", pickFromPool))
 }
 
 func TestPodIPTracker_ObservedAddressStaysInUseAfterItsReservationIsReleased(t *testing.T) {
 	var tracker podIPTracker
 
-	reserved := tracker.allocate(pickFromPool)
+	reserved := tracker.allocate("pod-1", pickFromPool)
 	tracker.refresh(tracker.begin(), []string{reserved})
+	assert.NotEqual(t, reserved, tracker.allocate("pod-2", pickFromPool))
 
-	assert.NotEqual(t, reserved, tracker.allocate(pickFromPool))
+	tracker.refresh(tracker.begin(), nil)
+	assert.Equal(t, reserved, tracker.allocate("pod-3", pickFromPool))
 }
 
 func TestPodIPTracker_RefreshReplacesObservedAddresses(t *testing.T) {
@@ -71,7 +76,18 @@ func TestPodIPTracker_RefreshReplacesObservedAddresses(t *testing.T) {
 	tracker.refresh(tracker.begin(), []string{testIP2, testIP3})
 	tracker.refresh(tracker.begin(), []string{testIP3})
 
-	assert.Equal(t, testIP2, tracker.allocate(pickFromPool))
+	assert.Equal(t, testIP2, tracker.allocate("pod-1", pickFromPool))
+}
+
+func TestPodIPTracker_RefreshRejectsSupersededSnapshot(t *testing.T) {
+	var tracker podIPTracker
+
+	olderSnapshot := tracker.begin()
+	newerSnapshot := tracker.begin()
+	tracker.refresh(newerSnapshot, []string{testIP3})
+	tracker.refresh(olderSnapshot, []string{testIP2})
+
+	assert.Equal(t, testIP2, tracker.allocate("pod-1", pickFromPool))
 }
 
 func TestPodIPTracker_ConcurrentAllocationsAreUnique(t *testing.T) {
@@ -88,17 +104,17 @@ func TestPodIPTracker_ConcurrentAllocationsAreUnique(t *testing.T) {
 		mu      sync.Mutex
 		got     = make(map[string]int)
 	)
-	for range workers {
+	for i := range workers {
 		wg.Add(1)
-		go func() {
+		go func(i int) {
 			defer wg.Done()
-			ip := tracker.allocate(func(used []string) string {
+			ip := tracker.allocate(fmt.Sprintf("pod-%d", i), func(used []string) string {
 				return findFirstFreeIP(pool, used, 2, 250)
 			})
 			mu.Lock()
 			got[ip]++
 			mu.Unlock()
-		}()
+		}(i)
 	}
 	wg.Wait()
 
