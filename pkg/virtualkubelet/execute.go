@@ -1501,6 +1501,13 @@ func RemoteExecution(ctx context.Context, config Config, p *Provider, pod *v1.Po
 			}
 		}
 
+		for i := range podToOffload.Spec.InitContainers {
+			expandContainerCommandAndArgs(&podToOffload.Spec.InitContainers[i])
+		}
+		for i := range podToOffload.Spec.Containers {
+			expandContainerCommandAndArgs(&podToOffload.Spec.Containers[i])
+		}
+
 		// For debugging purpose only.
 		for _, container := range podToOffload.Spec.InitContainers {
 			for _, envVar := range container.Env {
