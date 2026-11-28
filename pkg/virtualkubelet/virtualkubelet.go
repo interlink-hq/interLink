@@ -228,7 +228,6 @@ type Provider struct {
 	onNodeChangeCallback func(*v1.Node)
 	clientSet            kubernetes.Interface
 	clientHTTPTransport  *http.Transport
-	podIPs               []string
 	// shadowNodeNames caches, per pod UID, the last compute node and socket
 	// directory published to that pod's shadow, so the status loop only writes on
 	// change.
@@ -2165,11 +2164,22 @@ func (p *Provider) setupVPNPodIP(ctx context.Context, pod *v1.Pod) (ip string, e
 
 	log.G(ctx).Debug("Pod lists with pod-vpn enabled has len ", len(podsVPN.Items))
 
+	// The address given to a VPN pod is only kept in the annotation of the pod this
+	// node tracks, it isn't written back to the API server, so the pods of this node
+	// are checked too or a later pod could get an address that's already in use.
+	var usedIPs []string
 	for _, podVPN := range podsVPN.Items {
 		if vpnIP, ok := podVPN.Annotations["interlink.eu/pod-ip"]; ok {
-			p.podIPs = append(p.podIPs, vpnIP)
+			usedIPs = append(usedIPs, vpnIP)
 		}
 	}
+	p.podsMu.RLock()
+	for _, tracked := range p.pods {
+		if vpnIP, ok := tracked.Annotations["interlink.eu/pod-ip"]; ok {
+			usedIPs = append(usedIPs, vpnIP)
+		}
+	}
+	p.podsMu.RUnlock()
 
 	podCIDR := p.node.Spec.PodCIDR
 	if podCIDR == "" {
@@ -2200,13 +2210,12 @@ func (p *Provider) setupVPNPodIP(ctx context.Context, pod *v1.Pod) (ip string, e
 		maxIP = 250
 	}
 
-	freeIP := findFirstFreeIP(ipList, p.podIPs, minIP, maxIP)
+	freeIP := findFirstFreeIP(ipList, usedIPs, minIP, maxIP)
 	if freeIP == "" {
 		return "", false, fmt.Errorf("no free IP found")
 	}
 
 	log.G(ctx).Info("First free IP: ", freeIP)
-	p.podIPs = append(p.podIPs, freeIP)
 	pod.Annotations["interlink.eu/pod-ip"] = freeIP
 	return freeIP, false, nil
 }
@@ -2689,19 +2698,9 @@ func (p *Provider) statusLoop(ctx context.Context) {
 		case <-t.C:
 		}
 
-		p.podIPs = []string{}
-
 		clusterPods, err := p.clientSet.CoreV1().Pods("").List(ctx, metav1.ListOptions{})
 		if err != nil {
 			log.G(ctx).Error(err)
-		}
-
-		log.G(ctx).Debug("Pod lists with pod-vpn enabled has len ", len(clusterPods.Items))
-
-		for _, podVPN := range clusterPods.Items {
-			if ip, ok := podVPN.Annotations["interlink.eu/pod-ip"]; ok {
-				p.podIPs = append(p.podIPs, ip)
-			}
 		}
 
 		// The same list holds the shadow pods, so following a replaced one costs no
