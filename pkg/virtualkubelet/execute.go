@@ -710,12 +710,23 @@ func LogRetrieval(
 
 	types.SetDurationSpan(startHTTPCall, spanHTTP, types.WithHTTPReturnCode(resp.StatusCode))
 	if !types.IsSuccessStatus(resp.StatusCode) {
-		err = errors.New(sessionContextMessage + "Unexpected error occured while getting logs. Status code: " + strconv.Itoa(resp.StatusCode) + ". Check InterLink's logs for further informations")
+		// The virtual-kubelet library only closes the logs when there is no error, so the
+		// body is closed here, after keeping the start of it for the error message.
+		defer resp.Body.Close()
+		message, readErr := io.ReadAll(io.LimitReader(resp.Body, maxLogErrorBodyBytes))
+		if readErr != nil {
+			message = append(message, []byte(" (reading the response failed: "+readErr.Error()+")")...)
+		}
+		errWithContext := fmt.Errorf(sessionContextMessage+"error getting logs (HTTP %d): %s", resp.StatusCode, strings.TrimSpace(string(message)))
+		log.G(ctx).Error(errWithContext)
+		return nil, errWithContext
 	}
 
-	// return io.NopCloser(bufio.NewReader(resp.Body)), err
-	return resp.Body, err
+	return resp.Body, nil
 }
+
+// maxLogErrorBodyBytes bounds how much of a failed /getLogs response ends up in the error.
+const maxLogErrorBodyBytes = 4096
 
 // Adds to pod environment variables related to services. For now, it only concerns Kubernetes API variables, example below:
 /*
